@@ -56,3 +56,15 @@ def test_rename_collision_raises(tmp_path):
     b = _book(tmp_path)
     with pytest.raises(FileExistsError):
         files.rename(b, b.source_files[0].path, "02.mp3")  # 02.mp3 already exists
+
+
+def test_rename_empty_name_raises(tmp_path):
+    b = _book(tmp_path)
+    with pytest.raises(ValueError):
+        files.rename(b, b.source_files[0].path, "   ")
+
+
+def test_rename_with_separator_raises(tmp_path):
+    b = _book(tmp_path)
+    with pytest.raises(ValueError):
+        files.rename(b, b.source_files[0].path, "sub/dir.mp3")

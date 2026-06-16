@@ -209,6 +209,7 @@ class AppController:
         self.ctx.books.upsert(book)
 
     def exclude_file(self, book: BookUnit, path: Path) -> None:
+        """Remove a file from the book's source list (does not delete it from disk)."""
         file_ops.exclude(book, path)
         book.touch()
         self.ctx.books.upsert(book)
@@ -217,7 +218,7 @@ class AppController:
         """Rename a file on disk; returns the new path, or None on collision/error."""
         try:
             new = file_ops.rename(book, path, new_name)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             logger.warning(f"rename failed for {path}: {e}")
             return None
         book.touch()

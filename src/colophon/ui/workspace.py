@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from nicegui import ui
 
 from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
+from colophon.core.models import BookUnit
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +151,7 @@ def render_workspace(controller: AppController) -> None:
                 ui.separator().classes("q-my-sm")
                 ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
 
-                def _rename_dialog(sf_path, b=book) -> None:
+                def _rename_dialog(sf_path: Path, b: BookUnit = book) -> None:
                     with ui.dialog() as dialog, ui.card():
                         ui.label("Rename file").classes("text-subtitle1")
                         name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
@@ -191,7 +193,10 @@ def render_workspace(controller: AppController) -> None:
                             with ui.item_section():
                                 ui.item_label(f"{n}. {ch.title}")
                             with ui.item_section().props("side"):
-                                ui.item_label(f"{ch.start_ms // 60000}:{(ch.start_ms // 1000) % 60:02d}").props("caption")
+                                _t = ch.start_ms // 1000
+                                ui.item_label(
+                                    f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
+                                ).props("caption")
 
     # --- book list ---
     def refresh_list() -> None:

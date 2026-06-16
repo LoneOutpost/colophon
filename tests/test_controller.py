@@ -540,3 +540,14 @@ def test_rename_file_success_and_collision(tmp_path):
     collide = ctrl.rename_file(book, book.source_files[1].path, "00 - Intro.mp3")
     assert collide is None
     ctx.close()
+
+
+def test_rename_file_bad_name_returns_none(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    ctrl = AppController(ctx)
+    before = [sf.path.name for sf in book.source_files]
+    # all-whitespace name is caught (ValueError) -> None, no crash, list unchanged
+    assert ctrl.rename_file(book, book.source_files[0].path, "  ") is None
+    assert [sf.path.name for sf in ctx.books.get(book.id).source_files] == before
+    ctx.close()

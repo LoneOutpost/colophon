@@ -28,6 +28,8 @@ def rename(book: BookUnit, path: Path, new_name: str) -> Path:
     """Rename `path` to `new_name` within its directory and update source_files.
 
     Raises FileExistsError if the target already exists (never overwrites)."""
+    if not new_name.strip():
+        raise ValueError("filename must not be empty")
     target = path.with_name(new_name)
     if target.exists():
         raise FileExistsError(f"{target} already exists")
