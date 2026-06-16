@@ -52,6 +52,34 @@ def test_new_config_fields_round_trip(tmp_path):
     assert load_config(path) == cfg
 
 
+def test_ensure_config_file_creates_when_absent(tmp_path):
+    from colophon.adapters.config import ensure_config_file
+
+    path = tmp_path / "config.toml"
+    created = ensure_config_file(path)
+    assert created is True
+    assert path.exists()
+
+
+def test_ensure_config_file_noop_when_present(tmp_path):
+    from colophon.adapters.config import ensure_config_file
+
+    path = tmp_path / "config.toml"
+    path.write_text("scan_paths = []\n")
+    created = ensure_config_file(path)
+    assert created is False
+    assert path.read_text() == "scan_paths = []\n"  # untouched
+
+
+def test_generated_config_loads_to_defaults(tmp_path):
+    from colophon.adapters.config import ensure_config_file
+
+    path = tmp_path / "config.toml"
+    ensure_config_file(path)
+    # the generated file's active keys must round-trip to the same defaults
+    assert load_config(path) == Config()
+
+
 def test_hardcover_token_defaults_none(tmp_path):
     assert load_config(tmp_path / "c.toml").hardcover_api_token is None
 
