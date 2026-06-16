@@ -1,0 +1,129 @@
+from pathlib import Path
+
+from colophon.adapters.sidecar import SidecarMetadata
+from colophon.core.models import BookUnit, EmbeddedTags
+from colophon.core.reconcile import reconcile
+
+
+def _unit() -> BookUnit:
+    return BookUnit.new(source_folder=Path("/ingest/The Way of Kings"))
+
+
+def test_embedded_tags_take_precedence_over_filename():
+    book = _unit()
+    embedded = EmbeddedTags(title="Embedded Title", artist="Brandon Sanderson")
+    filename_fields = {"title": "Filename Title", "author": "Someone Else"}
+    reconcile(book, embedded=embedded, dir_title="Folder Title", filename_fields=filename_fields)
+    assert book.title == "Embedded Title"
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["title"] == "tag"
+    assert book.provenance["authors"] == "tag"
+
+
+def test_directory_fills_title_when_tags_absent():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title="Folder Title", filename_fields={})
+    assert book.title == "Folder Title"
+    assert book.provenance["title"] == "directory"
+
+
+def test_filename_is_last_resort():
+    book = _unit()
+    reconcile(
+        book,
+        embedded=EmbeddedTags(),
+        dir_title=None,
+        filename_fields={"author": "Andy Weir", "year": "2021"},
+    )
+    assert book.authors == ["Andy Weir"]
+    assert book.publish_year == 2021
+    assert book.provenance["authors"] == "filename"
+    assert book.provenance["publish_year"] == "filename"
+
+
+def test_filename_decimal_sequence_is_preserved():
+    book = _unit()
+    reconcile(
+        book,
+        embedded=EmbeddedTags(),
+        dir_title=None,
+        filename_fields={"series": "Stormlight", "sequence": "1.5"},
+    )
+    assert book.series[0].name == "Stormlight"
+    assert book.series[0].sequence == 1.5
+    assert book.provenance["series"] == "filename"
+
+
+def test_series_from_embedded_builds_series_ref():
+    book = _unit()
+    reconcile(
+        book,
+        embedded=EmbeddedTags(series="Stormlight Archive", sequence=1.0),
+        dir_title=None,
+        filename_fields={},
+    )
+    assert book.series[0].name == "Stormlight Archive"
+    assert book.series[0].sequence == 1.0
+    assert book.provenance["series"] == "tag"
+
+
+def test_sidecar_fills_gaps_below_embedded():
+    book = _unit()
+    embedded = EmbeddedTags(title="Embedded Title", artist="Douglas Adams")  # no series/year/narrator
+    sidecar = SidecarMetadata(
+        title="Sidecar Title", authors=["Someone Else"], narrators=["Douglas Adams"],
+        series_name="Dirk Gently", series_sequence=1.0, publish_year=2010,
+        description="desc", asin="B0041G6CSI",
+    )
+    reconcile(book, embedded=embedded, sidecar=sidecar, dir_title="Folder", filename_fields={})
+    # embedded wins where present:
+    assert book.title == "Embedded Title" and book.provenance["title"] == "tag"
+    assert book.authors == ["Douglas Adams"] and book.provenance["authors"] == "tag"
+    # sidecar fills the gaps embedded lacked:
+    assert book.narrators == ["Douglas Adams"] and book.provenance["narrators"] == "sidecar"
+    assert book.series[0].name == "Dirk Gently" and book.series[0].sequence == 1.0
+    assert book.provenance["series"] == "sidecar"
+    assert book.publish_year == 2010 and book.provenance["publish_year"] == "sidecar"
+    assert book.asin == "B0041G6CSI" and book.provenance["asin"] == "sidecar"
+    assert book.description == "desc" and book.provenance["description"] == "sidecar"
+
+
+def test_sidecar_title_used_when_no_embedded_title():
+    book = _unit()
+    reconcile(
+        book,
+        embedded=EmbeddedTags(),
+        sidecar=SidecarMetadata(title="Sidecar Title", authors=["A"]),
+        dir_title="Folder Title",
+        filename_fields={},
+    )
+    assert book.title == "Sidecar Title"
+    assert book.provenance["title"] == "sidecar"  # sidecar outranks directory
+
+
+def test_reconcile_without_sidecar_still_works():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(title="T", artist="A"), sidecar=None, dir_title=None, filename_fields={})
+    assert book.title == "T" and book.authors == ["A"]
+
+
+def test_comma_joined_embedded_artist_splits_into_authors():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(artist="Terry Jones, Douglas Adams"),
+              sidecar=None, dir_title=None, filename_fields={})
+    assert book.authors == ["Terry Jones", "Douglas Adams"]
+    assert book.provenance["authors"] == "tag"
+
+
+def test_comma_joined_embedded_narrator_splits():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(narrator="Stephen Fry, Martin Freeman"),
+              sidecar=None, dir_title=None, filename_fields={})
+    assert book.narrators == ["Stephen Fry", "Martin Freeman"]
+
+
+def test_single_embedded_author_stays_single():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(artist="Douglas Adams"),
+              sidecar=None, dir_title=None, filename_fields={})
+    assert book.authors == ["Douglas Adams"]

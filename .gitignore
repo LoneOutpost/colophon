@@ -1,0 +1,23 @@
+# Brainstorming visual-companion artifacts
+.superpowers/
+
+# Local session/memory state
+.remember/
+.claude/
+
+# Working/task docs and internal planning (kept local, not published)
+tasks/
+docs/
+colophon-requirements.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+
+# Local config / secrets
+config.ini
+.env
