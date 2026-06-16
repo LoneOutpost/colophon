@@ -20,7 +20,10 @@ def main() -> None:
         logger.info(f"wrote a default config file at {default_config_path()}")
     ctx = AppContext.create(load_config())
     create_app(AppController(ctx))
-    ui.run(title="Colophon", reload=False, show=False, port=8080)
+    run_kwargs: dict[str, object] = {}
+    if ctx.config.root_path:
+        run_kwargs["root_path"] = ctx.config.root_path
+    ui.run(title="Colophon", reload=False, show=False, port=ctx.config.port, **run_kwargs)
 
 
 if __name__ in {"__main__", "__mp_main__"}:
