@@ -432,6 +432,7 @@ def test_apply_match_sets_fields_with_provider_provenance(tmp_path):
     assert persisted.publish_year == 2007
     assert persisted.asin == "B002V1A0WE"
     assert persisted.provenance["title"] == "audnexus"
+    assert persisted.provenance["authors"] == "audnexus"  # list field stored under model key
     # sidecar written to source folder
     import json
     raw = json.loads((book.source_folder / "metadata.json").read_text())

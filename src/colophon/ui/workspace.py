@@ -73,7 +73,7 @@ def render_workspace(controller: AppController) -> None:
             ui.separator().classes("q-my-sm")
 
             # editable fields, each prefilled with its value + provenance badge
-            inputs: dict[str, object] = {}
+            inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, str] = {}
             for field in EDITABLE_FIELDS:
                 value = get_field(book, field) or ""
