@@ -40,6 +40,8 @@ table below lists every setting.
 | `filename_template` | `%author% - %title%` | no | Pattern for extracting metadata from filenames when embedded tags are missing. |
 | `review_threshold` | `75.0` | no | Confidence (0 to 100) at or above which a book is marked ready automatically. |
 | `transcode_bitrate` | `64k` | no | AAC bitrate used when transcoding MP3 sources into M4B. |
+| `port` | `8080` | no | Port the web interface listens on. |
+| `root_path` | empty | no | URL base path when served behind a reverse proxy, for example `/colophon`. Empty serves at the root path. |
 | `db_path` | standard data dir | no | SQLite database location. Changing it requires a restart. |
 | `worker_pool_size` | unset | no | Reserved for future concurrent encoding. Not used yet. |
 | `audiobookshelf_url` | unset | no | AudiobookShelf base URL. With the token and library id, used to trigger a rescan after organizing. |
