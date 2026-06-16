@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import logging
+
 from nicegui import ui
 
-from colophon.adapters.config import load_config
+from colophon.adapters.config import default_config_path, ensure_config_file, load_config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
 from colophon.ui import create_app
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
+    created = ensure_config_file()
+    if created:
+        logger.info(f"wrote a default config file at {default_config_path()}")
     ctx = AppContext.create(load_config())
     create_app(AppController(ctx))
     ui.run(title="Colophon", reload=False, show=False, port=8080)
