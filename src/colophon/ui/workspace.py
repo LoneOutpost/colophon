@@ -1,7 +1,11 @@
-"""Workspace page: three-pane browse + act surface (navigator, list, detail).
+"""Workspace page: an application shell with a navigation drawer, a book list,
+and a detail pane.
 
-UI follows the project polish rules: real icons (no emoji), a loading state on
-every async action, no dead controls, and a consistent 2/4 spacing scale.
+Built from Quasar/NiceGUI structural components (header, drawer, cards, lists)
+rather than bare containers, so it reads as an application: elevated header,
+bordered drawer, carded panels with separators and list items. Follows the
+project polish rules: real icons (no emoji), a loading state on every async
+action, no dead controls, and a consistent spacing scale.
 """
 
 from __future__ import annotations
@@ -14,6 +18,9 @@ from nicegui import ui
 from colophon.controller import AppController
 
 logger = logging.getLogger(__name__)
+
+# Height of the carded content area below the app header.
+_CONTENT_HEIGHT = "calc(100vh - 96px)"
 
 
 def _confidence_color(value: float) -> str:
@@ -46,18 +53,30 @@ def render_workspace(controller: AppController) -> None:
             books += [b for s in a.series for b in s.books] + a.standalone
         return books
 
+    # --- detail pane ---
     def show_detail(book_id: str) -> None:
         detail_container.clear()
         book = controller.get_book(book_id)
-        if book is None:
-            return
         with detail_container:
-            ui.label(book.title or "(untitled)").classes("text-xl")
-            ui.label(f"Confidence {book.confidence:.0f} · {book.state.value}").classes(
-                "text-sm opacity-70"
-            )
-            for field, source in book.provenance.items():
-                ui.label(f"{field}: {source}").classes("text-xs opacity-70")
+            if book is None:
+                with ui.column().classes("w-full items-center q-pa-lg"):
+                    ui.icon("menu_book").classes("text-h3 text-grey-5")
+                    ui.label("Select a book to see its details").classes("text-grey-6")
+                return
+            ui.label(book.title or "(untitled)").classes("text-h6")
+            with ui.row().classes("items-center q-gutter-xs"):
+                ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
+                ui.label(book.state.value).classes("text-caption text-grey-7")
+            ui.separator().classes("q-my-sm")
+            if book.provenance:
+                ui.label("Provenance").classes("text-subtitle2")
+                with ui.list().props("dense").classes("w-full"):
+                    for field, source in book.provenance.items():
+                        with ui.item():
+                            with ui.item_section():
+                                ui.item_label(field)
+                            with ui.item_section().props("side"):
+                                ui.item_label(source).props("caption")
             ui.button(
                 "Mark ready",
                 icon="check",
@@ -66,47 +85,66 @@ def render_workspace(controller: AppController) -> None:
                     ui.notify("Marked ready"),
                     refresh_list(),
                 ),
-            )
+            ).classes("q-mt-md")
 
+    # --- book list ---
     def refresh_list() -> None:
         list_container.clear()
+        books = _books_for_scope()
         with list_container:
-            books = _books_for_scope()
             if not books:
-                ui.label("No books in this view").classes("text-sm opacity-60")
-            for book in books:
-                with ui.row().classes("items-center w-full gap-2"):
-                    ui.checkbox(
-                        value=book.id in selected_ids,
-                        on_change=lambda e, bid=book.id: _toggle(bid, e.value),
-                    )
-                    ui.badge(f"{book.confidence:.0f}").props(
-                        f"color={_confidence_color(book.confidence)}"
-                    )
-                    ui.label(book.title or "(untitled)").classes("cursor-pointer").on(
-                        "click", lambda bid=book.id: show_detail(bid)
-                    )
+                ui.label("No books in this view").classes("text-grey-6 q-pa-md")
+                return
+            with ui.list().props("separator").classes("w-full"):
+                for book in books:
+                    with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):
+                        with ui.item_section().props("avatar"):
+                            ui.checkbox(
+                                value=book.id in selected_ids,
+                                on_change=lambda e, bid=book.id: _toggle(bid, e.value),
+                            )
+                        with ui.item_section():
+                            ui.item_label(book.title or "(untitled)")
+                            ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
+                        with ui.item_section().props("side"):
+                            ui.badge(f"{book.confidence:.0f}").props(
+                                f"color={_confidence_color(book.confidence)}"
+                            )
+
+    # --- navigator ---
+    def _nav_item(label: str, icon: str, active: bool, on_click, color: str | None = None) -> None:
+        with ui.item(on_click=on_click).props("clickable" + (" active" if active else "")):
+            with ui.item_section().props("avatar"):
+                ui.icon(icon, color=color) if color else ui.icon(icon)
+            with ui.item_section():
+                ui.item_label(label)
 
     def refresh_nav() -> None:
         nav_container.clear()
         tree = controller.library_tree()
+        kind, key = scope["kind"], scope["key"]
         with nav_container:
-            ui.button("All books", icon="library_books", on_click=lambda: _set_scope("all", None)).props(
-                "flat align=left"
-            ).classes("w-full")
-            if tree.needs_id:
-                ui.button(
-                    f"Needs identification ({len(tree.needs_id)})",
-                    icon="help_outline",
-                    on_click=lambda: _set_scope("needs_id", None),
-                ).props("flat align=left color=negative").classes("w-full")
-            for author in tree.authors:
-                ui.button(
-                    author.name, icon="person", on_click=lambda name=author.name: _set_scope("author", name)
-                ).props("flat align=left").classes("w-full")
+            with ui.list().classes("w-full"):
+                _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
+                if tree.needs_id:
+                    _nav_item(
+                        f"Needs identification ({len(tree.needs_id)})",
+                        "help_outline",
+                        kind == "needs_id",
+                        lambda: _set_scope("needs_id", None),
+                        color="negative",
+                    )
+                for author in tree.authors:
+                    _nav_item(
+                        author.name,
+                        "person",
+                        kind == "author" and key == author.name,
+                        lambda name=author.name: _set_scope("author", name),
+                    )
 
     def _set_scope(kind: str, key) -> None:
         scope["kind"], scope["key"] = kind, key
+        refresh_nav()
         refresh_list()
 
     def _toggle(book_id: str, on: bool) -> None:
@@ -119,14 +157,7 @@ def render_workspace(controller: AppController) -> None:
         refresh_nav()
         refresh_list()
 
-    # toolbar with per-button loading state (button captured by closure)
-    with ui.row().classes("w-full items-center gap-2"):
-        scan_btn = ui.button("Scan ingest", icon="search")
-        identify_btn = ui.button("Identify pending", icon="travel_explore")
-        process_btn = ui.button("Encode + organize", icon="play_arrow")
-        ui.space()
-        ui.button("Settings", icon="settings", on_click=lambda: ui.navigate.to("/settings")).props("flat")
-
+    # --- async actions ---
     async def _run(button, action, done_msg: str) -> None:
         button.props("loading=true")
         try:
@@ -157,18 +188,39 @@ def render_workspace(controller: AppController) -> None:
         if await controller.trigger_abs_scan():
             ui.notify("Triggered AudiobookShelf rescan")
 
+    # --- application shell ---
+    with ui.header(elevated=True).classes("items-center q-px-md"):
+        ui.icon("auto_stories").classes("text-h5")
+        ui.label("Colophon").classes("text-h6 q-ml-sm")
+        ui.space()
+        scan_btn = ui.button("Scan", icon="search").props("flat color=white")
+        identify_btn = ui.button("Identify", icon="travel_explore").props("flat color=white")
+        process_btn = ui.button("Encode + organize", icon="play_arrow").props("flat color=white")
+        ui.button(icon="settings", on_click=lambda: ui.navigate.to("/settings")).props(
+            "flat round color=white"
+        ).tooltip("Settings")
+
     scan_btn.on_click(lambda: _run(scan_btn, _scan, "Scan complete"))
     identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
     process_btn.on_click(lambda: _run(process_btn, _process, "Processing complete"))
 
-    # three panes (containers are created inside their column slots)
-    with ui.row().classes("w-full no-wrap gap-4"):
-        with ui.column().classes("w-1/5"):
-            ui.label("Library").classes("text-sm opacity-70")
-            nav_container = ui.column().classes("w-full gap-1")
-        with ui.column().classes("w-2/5"):
-            list_container = ui.column().classes("w-full gap-1")
-        with ui.column().classes("w-2/5"):
-            detail_container = ui.column().classes("w-full gap-2")
+    with ui.left_drawer(bordered=True).props("width=260").classes("bg-grey-2"):
+        ui.label("Library").classes("text-subtitle2 text-grey-8 q-pa-sm")
+        nav_container = ui.column().classes("w-full")
+
+    with ui.row().classes("w-full no-wrap q-gutter-md q-pa-md items-stretch").style(
+        f"height: {_CONTENT_HEIGHT}"
+    ):
+        with ui.card().classes("col-5 column").style("height: 100%"):
+            ui.label("Books").classes("text-subtitle1")
+            ui.separator()
+            with ui.scroll_area().classes("col"):
+                list_container = ui.column().classes("w-full")
+        with ui.card().classes("col column").style("height: 100%"):
+            ui.label("Details").classes("text-subtitle1")
+            ui.separator()
+            with ui.scroll_area().classes("col"):
+                detail_container = ui.column().classes("w-full")
 
     _refresh_all()
+    show_detail("")  # initial empty-state in the detail pane
