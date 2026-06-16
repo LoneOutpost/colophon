@@ -14,16 +14,18 @@ logger = logging.getLogger(__name__)
 
 def render_dashboard(controller: AppController) -> None:
     stats = controller.dashboard_stats()
-    ui.label("Colophon").classes("text-2xl font-bold")
-    with ui.row():
-        for key in ("total", "needs_review", "ready", "organized"):
-            with ui.card():
-                ui.label(str(stats.get(key, 0))).classes("text-3xl")
-                ui.label(key.replace("_", " "))
+    container = ui.column().classes("w-full max-w-3xl gap-4")
+    with container:
+        ui.label("Colophon").classes("text-2xl font-bold")
+        with ui.row():
+            for key in ("total", "needs_review", "ready", "organized"):
+                with ui.card():
+                    ui.label(str(stats.get(key, 0))).classes("text-3xl")
+                    ui.label(key.replace("_", " "))
 
-    progress_label = ui.label("")
-    progress_bar = ui.linear_progress(value=0, show_value=False)
-    progress_bar.visible = False
+        progress_label = ui.label("")
+        progress_bar = ui.linear_progress(value=0, show_value=False).classes("w-full")
+        progress_bar.visible = False
 
     # Broad `except Exception` at these UI event boundaries is intentional: any
     # failure must surface to the user and be logged rather than crash the handler.
@@ -69,9 +71,10 @@ def render_dashboard(controller: AppController) -> None:
             ui.notify("Triggered AudiobookShelf rescan")
         ui.notify(f"Processed {total} books; {organized} organized")
 
-    with ui.row():
-        ui.button("Scan ingest", on_click=do_scan)
-        ui.button("Identify pending", on_click=do_identify)
-        ui.button("Encode + organize ready", on_click=do_process)
-    ui.link("Triage queue", "/triage")
-    ui.link("Settings", "/settings")
+    with container:
+        with ui.row():
+            ui.button("Scan ingest", on_click=do_scan)
+            ui.button("Identify pending", on_click=do_identify)
+            ui.button("Encode + organize ready", on_click=do_process)
+        ui.link("Triage queue", "/triage")
+        ui.link("Settings", "/settings")
