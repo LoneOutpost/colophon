@@ -16,6 +16,7 @@ import logging
 from nicegui import ui
 
 from colophon.controller import AppController
+from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 
 logger = logging.getLogger(__name__)
@@ -144,18 +145,53 @@ def render_workspace(controller: AppController) -> None:
                     on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
                 ).props("flat")
 
-            # read-only file list (inspect)
             if book.source_files:
                 ui.separator().classes("q-my-sm")
                 ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
-                with ui.list().props("dense").classes("w-full"):
-                    for sf in book.source_files:
-                        mins = sf.duration_seconds / 60
+
+                def _rename_dialog(sf_path, b=book) -> None:
+                    with ui.dialog() as dialog, ui.card():
+                        ui.label("Rename file").classes("text-subtitle1")
+                        name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
+
+                        def _do_rename() -> None:
+                            if controller.rename_file(b, sf_path, name_input.value.strip()):
+                                ui.notify("Renamed")
+                            else:
+                                ui.notify("Rename failed (name in use?)", type="negative")
+                            dialog.close()
+                            show_detail(b.id)
+
+                        with ui.row():
+                            ui.button("Rename", on_click=_do_rename)
+                            ui.button("Cancel", on_click=dialog.close).props("flat")
+                    dialog.open()
+
+                with ui.list().props("dense bordered").classes("w-full"):
+                    for idx, sf in enumerate(book.source_files):
                         with ui.item():
                             with ui.item_section():
                                 ui.item_label(sf.path.name)
+                                ui.item_label(f"{sf.duration_seconds / 60:.0f} min").props("caption")
                             with ui.item_section().props("side"):
-                                ui.item_label(f"{mins:.0f} min").props("caption")
+                                with ui.row().classes("q-gutter-xs no-wrap"):
+                                    ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props("flat dense round").set_enabled(idx > 0)
+                                    ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props("flat dense round").set_enabled(idx < len(book.source_files) - 1)
+                                    ui.button(icon="edit", on_click=lambda p=sf.path: _rename_dialog(p)).props("flat dense round")
+                                    ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props("flat dense round color=negative")
+
+                # chapter preview (read-only) reflecting current file order
+                chapters = file_boundary_chapters(
+                    [(sf.path.name, sf.duration_seconds) for sf in book.source_files]
+                )
+                ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2 q-mt-sm")
+                with ui.list().props("dense").classes("w-full"):
+                    for n, ch in enumerate(chapters, start=1):
+                        with ui.item():
+                            with ui.item_section():
+                                ui.item_label(f"{n}. {ch.title}")
+                            with ui.item_section().props("side"):
+                                ui.item_label(f"{ch.start_ms // 60000}:{(ch.start_ms // 1000) % 60:02d}").props("caption")
 
     # --- book list ---
     def refresh_list() -> None:

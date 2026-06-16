@@ -15,6 +15,7 @@ from colophon.core.confidence import score_identification
 from colophon.core.models import BookState, BookUnit, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
+from colophon.services import files as file_ops
 from colophon.services.editing import (
     apply_fields,
     remap_field,
@@ -26,7 +27,6 @@ from colophon.services.editing import (
 from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
-from colophon.services import files as file_ops
 from colophon.services.encode import encode_book
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
