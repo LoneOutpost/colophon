@@ -26,6 +26,7 @@ from colophon.services.editing import (
 from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
+from colophon.services import files as file_ops
 from colophon.services.encode import encode_book
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
@@ -192,6 +193,36 @@ class AppController:
         )
         self._sync_sidecar(book)
         return batch
+
+    def move_file(self, book: BookUnit, path: Path, delta: int) -> None:
+        """Move a file up (delta=-1) or down (delta=+1) in the book's order."""
+        paths = [sf.path for sf in book.source_files]
+        if path not in paths:
+            return
+        i = paths.index(path)
+        j = max(0, min(len(paths) - 1, i + delta))
+        if i == j:
+            return
+        paths[i], paths[j] = paths[j], paths[i]
+        file_ops.reorder(book, paths)
+        book.touch()
+        self.ctx.books.upsert(book)
+
+    def exclude_file(self, book: BookUnit, path: Path) -> None:
+        file_ops.exclude(book, path)
+        book.touch()
+        self.ctx.books.upsert(book)
+
+    def rename_file(self, book: BookUnit, path: Path, new_name: str) -> Path | None:
+        """Rename a file on disk; returns the new path, or None on collision/error."""
+        try:
+            new = file_ops.rename(book, path, new_name)
+        except OSError as e:
+            logger.warning(f"rename failed for {path}: {e}")
+            return None
+        book.touch()
+        self.ctx.books.upsert(book)
+        return new
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)

@@ -493,3 +493,50 @@ def test_save_fields_is_undoable(tmp_path):
     ctrl.undo(batch)
     assert ctx.books.get(book.id).title == "Original"
     ctx.close()
+
+
+def _book_with_files(ctx, tmp_path, names):
+    from colophon.core.models import SourceFile
+
+    folder = tmp_path / "ingest" / "bk"
+    folder.mkdir(parents=True)
+    book = BookUnit.new(source_folder=folder)
+    sfs = []
+    for n in names:
+        p = folder / n
+        p.write_bytes(b"x")
+        sfs.append(SourceFile(path=p, size=1, duration_seconds=60.0, ext="mp3"))
+    book.source_files = sfs
+    ctx.books.upsert(book)
+    return book
+
+
+def test_move_file_reorders_and_persists(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3", "03.mp3"])
+    target = book.source_files[2].path  # 03.mp3
+    AppController(ctx).move_file(book, target, -1)  # move up one
+    persisted = ctx.books.get(book.id)
+    assert [sf.path.name for sf in persisted.source_files] == ["01.mp3", "03.mp3", "02.mp3"]
+    ctx.close()
+
+
+def test_exclude_file_persists(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    AppController(ctx).exclude_file(book, book.source_files[0].path)
+    assert [sf.path.name for sf in ctx.books.get(book.id).source_files] == ["02.mp3"]
+    ctx.close()
+
+
+def test_rename_file_success_and_collision(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    ctrl = AppController(ctx)
+    new = ctrl.rename_file(book, book.source_files[0].path, "00 - Intro.mp3")
+    assert new is not None and new.name == "00 - Intro.mp3"
+    assert ctx.books.get(book.id).source_files[0].path.name == "00 - Intro.mp3"
+    # collision returns None and does not change anything
+    collide = ctrl.rename_file(book, book.source_files[1].path, "00 - Intro.mp3")
+    assert collide is None
+    ctx.close()
