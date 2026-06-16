@@ -1,9 +1,7 @@
-from pathlib import Path
-
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
-from colophon.core.models import BookState, BookUnit, SeriesRef
+from colophon.core.models import BookUnit, SeriesRef
 
 
 def _ctx(tmp_path) -> AppContext:
