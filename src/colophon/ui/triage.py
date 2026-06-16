@@ -68,7 +68,7 @@ def render_triage(controller: AppController) -> None:
 
             ui.button("Compare matches", on_click=compare_matches)
 
-    with ui.row():
+    with ui.row().classes("w-full no-wrap gap-4"):
         with ui.column().classes("w-1/2"):
             for group in controller.triage_groups():
                 with ui.expansion(f"{group.label} ({len(group.books)})", value=True):
