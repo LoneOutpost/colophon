@@ -36,6 +36,41 @@ def test_library_tree_groups_authors_series_and_needs_id(tmp_path):
     ctx.close()
 
 
+def test_library_tree_author_with_series_and_standalone_and_series_only(tmp_path):
+    ctx = _ctx(tmp_path)
+    # An author who has both a series book and a standalone book.
+    series_book = _book(tmp_path, "Elantris Saga", author="Brandon Sanderson", series="Elantris", seq=1.0)
+    standalone = _book(tmp_path, "Warbreaker", author="Brandon Sanderson")
+    # A book with a series but NO author -> keyed under the series name as its own author node.
+    series_only = _book(tmp_path, "Mistborn One", series="Mistborn", seq=1.0)
+    created = [series_book, standalone, series_only]
+    for x in created:
+        ctx.books.upsert(x)
+
+    tree = AppController(ctx).library_tree()
+
+    # Mixed author: has its series book under the right series, and its standalone.
+    author = next(n for n in tree.authors if n.name == "Brandon Sanderson")
+    elantris = next(s for s in author.series if s.name == "Elantris")
+    assert [bk.id for bk in elantris.books] == [series_book.id]
+    assert [bk.id for bk in author.standalone] == [standalone.id]
+
+    # Series-without-author book appears under an author node named after the series.
+    series_author = next(n for n in tree.authors if n.name == "Mistborn")
+    mistborn = next(s for s in series_author.series if s.name == "Mistborn")
+    assert [bk.id for bk in mistborn.books] == [series_only.id]
+
+    # No book appears twice across the whole tree.
+    all_ids: list[str] = [bk.id for bk in tree.needs_id]
+    for node in tree.authors:
+        for s in node.series:
+            all_ids.extend(bk.id for bk in s.books)
+        all_ids.extend(bk.id for bk in node.standalone)
+    assert len(all_ids) == len(set(all_ids))
+    assert len(all_ids) == len(created)
+    ctx.close()
+
+
 def test_library_tree_empty(tmp_path):
     ctx = _ctx(tmp_path)
     tree = AppController(ctx).library_tree()
@@ -57,9 +92,9 @@ def test_list_directory_separates_dirs_audio_and_other(tmp_path):
     assert by_name["Legion.mp3"].is_audio is True and by_name["Legion.mp3"].is_dir is False
     assert by_name["Warbreaker.m4b"].is_audio is True
     assert by_name["readme.txt"].is_audio is False and by_name["readme.txt"].is_dir is False
-    # dirs first, then files, each alphabetical
+    # dirs first, then files, each case-insensitive alphabetical
     names = [e.name for e in listing.entries]
-    assert names == ["Mistborn", "Legion.mp3", "Warbreaker.m4b", "readme.txt"]
+    assert names == ["Mistborn", "Legion.mp3", "readme.txt", "Warbreaker.m4b"]
 
 
 def test_list_directory_missing_path_is_empty(tmp_path):

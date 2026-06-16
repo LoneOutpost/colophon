@@ -155,9 +155,12 @@ class AppController:
         Returns an empty listing if the path is absent or not a directory."""
         if not path.is_dir():
             return DirectoryListing(path=path, entries=[])
-        children = list(path.iterdir())
-        dirs = sorted((c for c in children if c.is_dir()), key=lambda c: c.name)
-        files = sorted((c for c in children if c.is_file()), key=lambda c: c.name)
+        try:
+            children = list(path.iterdir())
+        except OSError:
+            return DirectoryListing(path=path, entries=[])
+        dirs = sorted((c for c in children if c.is_dir()), key=lambda c: c.name.casefold())
+        files = sorted((c for c in children if c.is_file()), key=lambda c: c.name.casefold())
         entries = [DirEntry(path=c, name=c.name, is_dir=True, is_audio=False) for c in dirs]
         entries += [
             DirEntry(path=c, name=c.name, is_dir=False, is_audio=is_audio_file(c)) for c in files

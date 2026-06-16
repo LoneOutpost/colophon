@@ -153,6 +153,7 @@ def render_workspace(controller: AppController) -> None:
             return
         for book in books:
             await asyncio.to_thread(controller.process_one, book, confirm_delete=False)
+        selected_ids.clear()
         if await controller.trigger_abs_scan():
             ui.notify("Triggered AudiobookShelf rescan")
 
