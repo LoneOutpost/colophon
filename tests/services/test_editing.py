@@ -159,7 +159,7 @@ def test_apply_fields_sets_values_with_source_provenance(tmp_path):
     assert b.title == "Dune"
     assert b.authors == ["Frank Herbert"]
     assert b.provenance["title"] == "audnexus"
-    assert b.provenance["author"] == "audnexus"
+    assert b.provenance["authors"] == "audnexus"
     changes = hist.list_batch(batch)
     assert {c.field for c in changes} == {"title", "author"}
     assert books.get(b.id).title == "Dune"

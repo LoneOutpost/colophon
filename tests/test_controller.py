@@ -464,3 +464,31 @@ def test_apply_match_partial_result_only_sets_present_fields(tmp_path):
     assert len(changes) == 1
     assert changes[0].field == "title"
     ctx.close()
+
+
+def test_save_fields_applies_updates_with_manual_provenance(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Old"
+    ctx.books.upsert(book)
+    AppController(ctx).save_fields(book, {"title": "New", "author": "Frank Herbert"})
+    persisted = ctx.books.get(book.id)
+    assert persisted.title == "New"
+    assert persisted.authors == ["Frank Herbert"]
+    assert persisted.provenance["title"] == "manual"
+    assert persisted.provenance["authors"] == "manual"
+    ctx.close()
+
+
+def test_save_fields_is_undoable(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "y")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Original"
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    batch = ctrl.save_fields(book, {"title": "Changed"})
+    ctrl.undo(batch)
+    assert ctx.books.get(book.id).title == "Original"
+    ctx.close()

@@ -12,7 +12,7 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
-from colophon.core.models import BookState, BookUnit, _Base
+from colophon.core.models import BookState, BookUnit, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services.editing import (
@@ -181,6 +181,15 @@ class AppController:
 
     def edit_field(self, book: BookUnit, field: str, value: str | None) -> str:
         batch = set_field_value(self.ctx.books, self.ctx.history, book, field, value)
+        self._sync_sidecar(book)
+        return batch
+
+    def save_fields(self, book: BookUnit, updates: dict[str, str | None]) -> str:
+        """Apply manual metadata edits to `book` in one batch and re-sync its
+        sidecar. Returns the batch id (undoable via undo)."""
+        batch = apply_fields(
+            self.ctx.books, self.ctx.history, book, updates, provenance=Provenance.MANUAL.value
+        )
         self._sync_sidecar(book)
         return batch
 
