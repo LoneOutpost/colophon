@@ -204,13 +204,17 @@ def render_workspace(controller: AppController) -> None:
     identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
     process_btn.on_click(lambda: _run(process_btn, _process, "Processing complete"))
 
-    with ui.left_drawer(bordered=True).props("width=260").classes("bg-grey-2"):
-        ui.label("Library").classes("text-subtitle2 text-grey-8 q-pa-sm")
-        nav_container = ui.column().classes("w-full")
-
+    # The navigator is an in-content card rather than ui.left_drawer: the drawer
+    # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)
+    # which fails over remote/high-latency connections. A card avoids that.
     with ui.row().classes("w-full no-wrap q-gutter-md q-pa-md items-stretch").style(
         f"height: {_CONTENT_HEIGHT}"
     ):
+        with ui.card().classes("column").style("width: 260px; height: 100%"):
+            ui.label("Library").classes("text-subtitle1")
+            ui.separator()
+            with ui.scroll_area().classes("col"):
+                nav_container = ui.column().classes("w-full")
         with ui.card().classes("col-5 column").style("height: 100%"):
             ui.label("Books").classes("text-subtitle1")
             ui.separator()
