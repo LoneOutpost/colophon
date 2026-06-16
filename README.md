@@ -27,26 +27,30 @@ dashboard (`/`), triage (`/triage`), and settings (`/settings`).
 
 ## Configuration
 
-Open the settings page and fill in the values below, or edit the TOML file
-directly. It lives in your XDG config directory, for example
-`~/.config/colophon/config.toml`.
+On first run Colophon writes a commented `config.toml` with default values to
+your XDG config directory, for example `~/.config/colophon/config.toml`. Edit it
+and restart, or change values from the Settings page in the web interface. The
+table below lists every setting.
 
-* Scan paths: folders to ingest, one per line. Each folder that directly
-  contains audio files is treated as one book.
-* Library root: where organized M4B files are written.
-* LazyLibrarian config.ini path: Colophon reads the audiobook folder and file
-  patterns from this file so its output matches your LazyLibrarian layout.
-* Filename template: a pattern such as `%author% - %title%` used to parse
-  filenames when tags are missing.
-* Review threshold: the confidence score (0 to 100) at or above which a book is
-  marked ready automatically. Default is 75.
-* Transcode bitrate: AAC bitrate for MP3-to-M4B transcoding. Default is 64k.
-* AudiobookShelf URL, token, and library id: used to trigger a library rescan
-  after books are organized.
-* LazyLibrarian URL and API key: used for read-only status lookups.
-* Hardcover API token: enables the Hardcover metadata source.
+| Setting | Default | Required | Purpose |
+|---|---|---|---|
+| `scan_paths` | empty list | yes, to scan | Folders to ingest. Each folder that directly contains audio files is one book. |
+| `library_root` | unset | yes, to organize | Destination root for organized M4B files. |
+| `lazylibrarian_config_ini` | unset | no | Path to LazyLibrarian's config.ini. Its audiobook folder and file patterns are read so output matches your LazyLibrarian layout. |
+| `filename_template` | `%author% - %title%` | no | Pattern for extracting metadata from filenames when embedded tags are missing. |
+| `review_threshold` | `75.0` | no | Confidence (0 to 100) at or above which a book is marked ready automatically. |
+| `transcode_bitrate` | `64k` | no | AAC bitrate used when transcoding MP3 sources into M4B. |
+| `db_path` | standard data dir | no | SQLite database location. Changing it requires a restart. |
+| `worker_pool_size` | unset | no | Reserved for future concurrent encoding. Not used yet. |
+| `audiobookshelf_url` | unset | no | AudiobookShelf base URL. With the token and library id, used to trigger a rescan after organizing. |
+| `audiobookshelf_token` | unset | no | AudiobookShelf API token. |
+| `audiobookshelf_library_id` | unset | no | AudiobookShelf library to rescan. |
+| `lazylibrarian_url` | unset | no | LazyLibrarian base URL for read-only status lookups. |
+| `lazylibrarian_api_key` | unset | no | LazyLibrarian API key. |
+| `hardcover_api_token` | unset | no | Enables the Hardcover metadata source when set. |
 
-Changing the database path requires a restart.
+Credentials are stored in this file. Keep it outside any shared or version
+controlled location.
 
 ## How it works
 
