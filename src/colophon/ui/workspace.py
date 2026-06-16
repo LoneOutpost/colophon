@@ -16,6 +16,7 @@ import logging
 from nicegui import ui
 
 from colophon.controller import AppController
+from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 
 logger = logging.getLogger(__name__)
 
@@ -63,29 +64,98 @@ def render_workspace(controller: AppController) -> None:
                     ui.icon("menu_book").classes("text-h3 text-grey-5")
                     ui.label("Select a book to see its details").classes("text-grey-6")
                 return
-            ui.label(book.title or "(untitled)").classes("text-h6")
-            with ui.row().classes("items-center q-gutter-xs"):
+
+            with ui.row().classes("items-center w-full"):
+                ui.label(book.title or "(untitled)").classes("text-h6")
+                ui.space()
                 ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
-                ui.label(book.state.value).classes("text-caption text-grey-7")
+                ui.label(book.state.value).classes("text-caption text-grey-7 q-ml-sm")
             ui.separator().classes("q-my-sm")
-            if book.provenance:
-                ui.label("Provenance").classes("text-subtitle2")
+
+            # editable fields, each prefilled with its value + provenance badge
+            inputs: dict[str, object] = {}
+            originals: dict[str, str] = {}
+            for field in EDITABLE_FIELDS:
+                value = get_field(book, field) or ""
+                originals[field] = value
+                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                    if field == "description":
+                        inp = ui.textarea(field, value=value).classes("col")
+                    else:
+                        inp = ui.input(field, value=value).classes("col")
+                    inputs[field] = inp
+                    source = field_provenance(book, field)
+                    if source:
+                        ui.badge(source).props("color=grey-6 outline").classes("self-center")
+
+            def _save(b=book) -> None:
+                changed = {
+                    f: (inputs[f].value or None)
+                    for f in EDITABLE_FIELDS
+                    if (inputs[f].value or "") != originals[f]
+                }
+                if not changed:
+                    ui.notify("No changes")
+                    return
+                controller.save_fields(b, changed)
+                ui.notify("Saved")
+                refresh_list()
+                show_detail(b.id)
+
+            async def _compare(b=book) -> None:
+                with ui.dialog() as dialog, ui.card().classes("w-96"):
+                    ui.label(f"Matches for {b.title or '(untitled)'}").classes("text-subtitle1")
+                    body = ui.column().classes("w-full")
+                    with body:
+                        ui.spinner()
+                    try:
+                        matches = await controller.get_matches(b)
+                    except Exception:
+                        logger.exception("get_matches failed")
+                        matches = []
+                    body.clear()
+                    with body:
+                        if not matches:
+                            ui.label("No matches found").classes("text-grey-6")
+                        for m in matches[:10]:
+                            authors = ", ".join(m.authors) or "unknown"
+                            year = f" ({m.publish_year})" if m.publish_year else ""
+                            with ui.item(
+                                on_click=lambda result=m: (
+                                    controller.apply_match(b, result),
+                                    dialog.close(),
+                                    ui.notify(f"Applied {result.provider}"),
+                                    refresh_list(),
+                                    show_detail(b.id),
+                                )
+                            ).props("clickable"):
+                                with ui.item_section():
+                                    ui.item_label(m.title or "?")
+                                    ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
+                    ui.button("Close", on_click=dialog.close).props("flat")
+                dialog.open()
+
+            with ui.row().classes("q-gutter-sm q-mt-sm"):
+                ui.button("Save", icon="save", on_click=_save)
+                ui.button("Compare matches", icon="search", on_click=_compare).props("outline")
+                ui.button(
+                    "Mark ready",
+                    icon="check",
+                    on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
+                ).props("flat")
+
+            # read-only file list (inspect)
+            if book.source_files:
+                ui.separator().classes("q-my-sm")
+                ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
                 with ui.list().props("dense").classes("w-full"):
-                    for field, source in book.provenance.items():
+                    for sf in book.source_files:
+                        mins = sf.duration_seconds / 60
                         with ui.item():
                             with ui.item_section():
-                                ui.item_label(field)
+                                ui.item_label(sf.path.name)
                             with ui.item_section().props("side"):
-                                ui.item_label(source).props("caption")
-            ui.button(
-                "Mark ready",
-                icon="check",
-                on_click=lambda b=book: (
-                    controller.mark_ready(b),
-                    ui.notify("Marked ready"),
-                    refresh_list(),
-                ),
-            ).classes("q-mt-md")
+                                ui.item_label(f"{mins:.0f} min").props("caption")
 
     # --- book list ---
     def refresh_list() -> None:
