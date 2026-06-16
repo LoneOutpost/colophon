@@ -41,6 +41,8 @@ def render_settings(controller: AppController) -> None:
     template = ui.input("Filename template", value=cfg.filename_template)
     threshold = ui.number("Review threshold", value=cfg.review_threshold, min=0, max=100)
     bitrate = ui.input("Transcode bitrate", value=cfg.transcode_bitrate)
+    port = ui.number("Port", value=cfg.port, min=1, max=65535)
+    root_path = ui.input("Root path (reverse-proxy base, e.g. /colophon)", value=cfg.root_path)
 
     ui.label("AudiobookShelf").classes("text-lg mt-4")
     abs_url = ui.input("ABS URL", value=cfg.audiobookshelf_url or "")
@@ -65,6 +67,8 @@ def render_settings(controller: AppController) -> None:
                 review_threshold=float(threshold.value),
                 transcode_bitrate=bitrate.value or "64k",
                 worker_pool_size=cfg.worker_pool_size,
+                port=int(port.value),
+                root_path=root_path.value.strip(),
                 audiobookshelf_url=_opt_str(abs_url.value),
                 audiobookshelf_token=_opt_str(abs_token.value),
                 audiobookshelf_library_id=_opt_str(abs_lib.value),
