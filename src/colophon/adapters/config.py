@@ -16,6 +16,8 @@ class Config(BaseModel):
     review_threshold: float = 75.0
     transcode_bitrate: str = "64k"
     worker_pool_size: int | None = None  # None => default to cpu_count - 1
+    port: int = 8080
+    root_path: str = ""  # URL base path behind a reverse proxy; "" serves at "/"
     db_path: Path | None = None             # None => default user-data location
     filename_template: str = "%author% - %title%"
     library_root: Path | None = None        # destination root for organized M4Bs
@@ -82,6 +84,13 @@ transcode_bitrate = "64k"
 
 # Reserved for future concurrent encoding. Not used yet.
 # worker_pool_size = 4
+
+# Port the web interface listens on.
+port = 8080
+
+# URL base path when served behind a reverse proxy, for example "/colophon".
+# Leave empty to serve at the root path "/".
+root_path = ""
 
 # AudiobookShelf integration. Used to trigger a library rescan after organizing.
 # audiobookshelf_url = "http://localhost:13378"

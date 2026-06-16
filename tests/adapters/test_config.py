@@ -100,6 +100,21 @@ def test_integration_fields_default_none(tmp_path):
     assert cfg.lazylibrarian_api_key is None
 
 
+def test_port_and_root_path_defaults(tmp_path):
+    cfg = load_config(tmp_path / "c.toml")
+    assert cfg.port == 8080
+    assert cfg.root_path == ""
+
+
+def test_port_and_root_path_round_trip(tmp_path):
+    path = tmp_path / "c.toml"
+    cfg = Config(port=9000, root_path="/colophon")
+    save_config(cfg, path)
+    restored = load_config(path)
+    assert restored.port == 9000
+    assert restored.root_path == "/colophon"
+
+
 def test_integration_fields_round_trip(tmp_path):
     path = tmp_path / "c.toml"
     cfg = Config(
