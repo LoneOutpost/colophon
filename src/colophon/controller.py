@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
@@ -147,6 +148,21 @@ class AppController:
                 )
             )
         return LibraryTree(needs_id=needs_id, authors=authors)
+
+    def list_directory(self, path: Path) -> DirectoryListing:
+        """List a directory's immediate children: subdirs first, then files.
+
+        Returns an empty listing if the path is absent or not a directory."""
+        if not path.is_dir():
+            return DirectoryListing(path=path, entries=[])
+        children = list(path.iterdir())
+        dirs = sorted((c for c in children if c.is_dir()), key=lambda c: c.name)
+        files = sorted((c for c in children if c.is_file()), key=lambda c: c.name)
+        entries = [DirEntry(path=c, name=c.name, is_dir=True, is_audio=False) for c in dirs]
+        entries += [
+            DirEntry(path=c, name=c.name, is_dir=False, is_audio=is_audio_file(c)) for c in files
+        ]
+        return DirectoryListing(path=path, entries=entries)
 
     # --- editing / undo ---
     def _sync_sidecar(self, book: BookUnit) -> None:

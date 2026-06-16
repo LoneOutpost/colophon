@@ -43,3 +43,27 @@ def test_library_tree_empty(tmp_path):
     tree = AppController(ctx).library_tree()
     assert tree.needs_id == [] and tree.authors == []
     ctx.close()
+
+
+def test_list_directory_separates_dirs_audio_and_other(tmp_path):
+    root = tmp_path / "Author"
+    (root / "Mistborn").mkdir(parents=True)
+    (root / "Legion.mp3").write_bytes(b"")
+    (root / "Warbreaker.m4b").write_bytes(b"")
+    (root / "readme.txt").write_bytes(b"")
+
+    listing = AppController(_ctx(tmp_path)).list_directory(root)
+    assert listing.path == root
+    by_name = {e.name: e for e in listing.entries}
+    assert by_name["Mistborn"].is_dir is True
+    assert by_name["Legion.mp3"].is_audio is True and by_name["Legion.mp3"].is_dir is False
+    assert by_name["Warbreaker.m4b"].is_audio is True
+    assert by_name["readme.txt"].is_audio is False and by_name["readme.txt"].is_dir is False
+    # dirs first, then files, each alphabetical
+    names = [e.name for e in listing.entries]
+    assert names == ["Mistborn", "Legion.mp3", "Warbreaker.m4b", "readme.txt"]
+
+
+def test_list_directory_missing_path_is_empty(tmp_path):
+    listing = AppController(_ctx(tmp_path)).list_directory(tmp_path / "nope")
+    assert listing.entries == []
