@@ -35,26 +35,44 @@ def render_settings(controller: AppController) -> None:
     cfg = controller.ctx.config
     ui.label("Settings").classes("text-2xl font-bold")
 
-    scan_paths = ui.textarea("Scan paths (one per line)", value=_paths_to_text(cfg.scan_paths))
-    library_root = ui.input("Library root", value=str(cfg.library_root or ""))
-    ll_ini = ui.input("LazyLibrarian config.ini path", value=str(cfg.lazylibrarian_config_ini or ""))
-    template = ui.input("Filename template", value=cfg.filename_template)
-    threshold = ui.number("Review threshold", value=cfg.review_threshold, min=0, max=100)
-    bitrate = ui.input("Transcode bitrate", value=cfg.transcode_bitrate)
-    port = ui.number("Port", value=cfg.port, min=1, max=65535)
-    root_path = ui.input("Root path (reverse-proxy base, e.g. /colophon)", value=cfg.root_path)
+    form = ui.column().classes("w-full max-w-2xl gap-2")
+    with form:
+        scan_paths = ui.textarea(
+            "Scan paths (one per line)", value=_paths_to_text(cfg.scan_paths)
+        ).classes("w-full")
+        library_root = ui.input("Library root", value=str(cfg.library_root or "")).classes("w-full")
+        ll_ini = ui.input(
+            "LazyLibrarian config.ini path", value=str(cfg.lazylibrarian_config_ini or "")
+        ).classes("w-full")
+        template = ui.input("Filename template", value=cfg.filename_template).classes("w-full")
+        threshold = ui.number(
+            "Review threshold", value=cfg.review_threshold, min=0, max=100
+        ).classes("w-full")
+        bitrate = ui.input("Transcode bitrate", value=cfg.transcode_bitrate).classes("w-full")
+        port = ui.number("Port", value=cfg.port, min=1, max=65535).classes("w-full")
+        root_path = ui.input(
+            "Root path (reverse-proxy base, e.g. /colophon)", value=cfg.root_path
+        ).classes("w-full")
 
-    ui.label("AudiobookShelf").classes("text-lg mt-4")
-    abs_url = ui.input("ABS URL", value=cfg.audiobookshelf_url or "")
-    abs_token = ui.input("ABS token", value=cfg.audiobookshelf_token or "", password=True)
-    abs_lib = ui.input("ABS library id", value=cfg.audiobookshelf_library_id or "")
+        ui.label("AudiobookShelf").classes("text-lg mt-4")
+        abs_url = ui.input("ABS URL", value=cfg.audiobookshelf_url or "").classes("w-full")
+        abs_token = ui.input(
+            "ABS token", value=cfg.audiobookshelf_token or "", password=True
+        ).classes("w-full")
+        abs_lib = ui.input(
+            "ABS library id", value=cfg.audiobookshelf_library_id or ""
+        ).classes("w-full")
 
-    ui.label("LazyLibrarian").classes("text-lg mt-4")
-    ll_url = ui.input("LL URL", value=cfg.lazylibrarian_url or "")
-    ll_key = ui.input("LL API key", value=cfg.lazylibrarian_api_key or "", password=True)
+        ui.label("LazyLibrarian").classes("text-lg mt-4")
+        ll_url = ui.input("LL URL", value=cfg.lazylibrarian_url or "").classes("w-full")
+        ll_key = ui.input(
+            "LL API key", value=cfg.lazylibrarian_api_key or "", password=True
+        ).classes("w-full")
 
-    ui.label("Hardcover").classes("text-lg mt-4")
-    hc_token = ui.input("Hardcover API token", value=cfg.hardcover_api_token or "", password=True)
+        ui.label("Hardcover").classes("text-lg mt-4")
+        hc_token = ui.input(
+            "Hardcover API token", value=cfg.hardcover_api_token or "", password=True
+        ).classes("w-full")
 
     def do_save() -> None:
         try:
