@@ -7,11 +7,13 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
 from colophon.core.models import BookState, BookUnit, _Base
+from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services.editing import (
     apply_fields,
@@ -101,6 +103,69 @@ class AppController:
 
     def get_book(self, book_id: str) -> BookUnit | None:
         return self.ctx.books.get(book_id)
+
+    # --- workspace navigator ---
+    def library_tree(self) -> LibraryTree:
+        """Group all books into Author -> Series/standalone, plus a needs-id list."""
+        books = self.ctx.books.list_all()
+        needs_id = sorted(
+            (b for b in books if not b.authors and not b.series),
+            key=lambda b: b.confidence,
+        )
+        identified = [b for b in books if b.authors or b.series]
+
+        by_author: dict[str, list[BookUnit]] = {}
+        for b in identified:
+            author = b.authors[0] if b.authors else b.series[0].name
+            by_author.setdefault(author, []).append(b)
+
+        authors: list[AuthorNode] = []
+        for author in sorted(by_author):
+            in_series: dict[str, list[BookUnit]] = {}
+            standalone: list[BookUnit] = []
+            for b in by_author[author]:
+                if b.series:
+                    in_series.setdefault(b.series[0].name, []).append(b)
+                else:
+                    standalone.append(b)
+            series_nodes = [
+                SeriesNode(
+                    name=name,
+                    books=sorted(
+                        items,
+                        key=lambda b: (
+                            b.series[0].sequence if b.series and b.series[0].sequence is not None else 0.0
+                        ),
+                    ),
+                )
+                for name, items in sorted(in_series.items())
+            ]
+            authors.append(
+                AuthorNode(
+                    name=author,
+                    series=series_nodes,
+                    standalone=sorted(standalone, key=lambda b: b.title or ""),
+                )
+            )
+        return LibraryTree(needs_id=needs_id, authors=authors)
+
+    def list_directory(self, path: Path) -> DirectoryListing:
+        """List a directory's immediate children: subdirs first, then files.
+
+        Returns an empty listing if the path is absent or not a directory."""
+        if not path.is_dir():
+            return DirectoryListing(path=path, entries=[])
+        try:
+            children = list(path.iterdir())
+        except OSError:
+            return DirectoryListing(path=path, entries=[])
+        dirs = sorted((c for c in children if c.is_dir()), key=lambda c: c.name.casefold())
+        files = sorted((c for c in children if c.is_file()), key=lambda c: c.name.casefold())
+        entries = [DirEntry(path=c, name=c.name, is_dir=True, is_audio=False) for c in dirs]
+        entries += [
+            DirEntry(path=c, name=c.name, is_dir=False, is_audio=is_audio_file(c)) for c in files
+        ]
+        return DirectoryListing(path=path, entries=entries)
 
     # --- editing / undo ---
     def _sync_sidecar(self, book: BookUnit) -> None:
