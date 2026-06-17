@@ -81,11 +81,11 @@ def render_workspace(controller: AppController) -> None:
             for field in EDITABLE_FIELDS:
                 value = get_field(book, field) or ""
                 originals[field] = value
-                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                     if field == "description":
-                        inp = ui.textarea(field, value=value).classes("col")
+                        inp = ui.textarea(field, value=value).props("dense").classes("col")
                     else:
-                        inp = ui.input(field, value=value).classes("col")
+                        inp = ui.input(field, value=value).props("dense").classes("col")
                     inputs[field] = inp
                     source = field_provenance(book, field)
                     if source:
@@ -206,7 +206,7 @@ def render_workspace(controller: AppController) -> None:
             if not books:
                 ui.label("No books in this view").classes("text-grey-6 q-pa-md")
                 return
-            with ui.list().props("separator").classes("w-full"):
+            with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
                     with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):
                         with ui.item_section().props("avatar"):
@@ -235,7 +235,7 @@ def render_workspace(controller: AppController) -> None:
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
         with nav_container:
-            with ui.list().classes("w-full"):
+            with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
                 if tree.needs_id:
                     _nav_item(
@@ -325,17 +325,17 @@ def render_workspace(controller: AppController) -> None:
             ui.label("Library").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
-                nav_container = ui.column().classes("w-full")
+                nav_container = ui.column().classes("w-full gap-0")
         with ui.card().classes("col-5 column").style("height: 100%"):
             ui.label("Books").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
-                list_container = ui.column().classes("w-full")
+                list_container = ui.column().classes("w-full gap-0")
         with ui.card().classes("col column").style("height: 100%"):
             ui.label("Details").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
-                detail_container = ui.column().classes("w-full")
+                detail_container = ui.column().classes("w-full gap-1")
 
     _refresh_all()
     show_detail("")  # initial empty-state in the detail pane
