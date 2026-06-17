@@ -38,6 +38,11 @@ def _confidence_color(value: float) -> str:
 def render_workspace(controller: AppController) -> None:
     selected_ids: set[str] = set()
     scope: dict[str, object] = {"kind": "all", "key": None}
+    foster_selected: set[Path] = set()
+    view: dict[str, object] = {"mode": "library", "cwd": None}
+
+    def _scan_roots() -> list[Path]:
+        return list(controller.ctx.config.scan_paths)
 
     def _selected_books() -> list:
         return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
@@ -222,6 +227,102 @@ def render_workspace(controller: AppController) -> None:
                                 f"color={_confidence_color(book.confidence)}"
                             )
 
+    # --- folder browser (Folders mode) ---
+    def _toggle_foster(path: Path, on: bool) -> None:
+        if on:
+            foster_selected.add(path)
+        else:
+            foster_selected.discard(path)
+
+    def _foster_selected_now() -> None:
+        paths = sorted(foster_selected)
+        if not paths:
+            ui.notify("No files selected")
+            return
+        results = controller.foster_files(paths)
+        ok = sum(1 for r in results if r.ok)
+        failed = len(results) - ok
+        foster_selected.clear()
+        msg = f"Fostered {ok} file(s)" + (f", {failed} failed" if failed else "")
+        ui.notify(msg, type="negative" if failed and not ok else "positive")
+        refresh_folders()
+        refresh_nav()
+        refresh_list()
+
+    def refresh_folders() -> None:
+        list_container.clear()
+        roots = _scan_roots()
+        cwd = view["cwd"]
+        if cwd is None and roots:
+            cwd = roots[0]
+            view["cwd"] = cwd
+        with list_container:
+            if not roots:
+                ui.label("No scan paths configured. Set them in Settings.").classes(
+                    "text-grey-6 q-pa-md"
+                )
+                return
+            cwd = Path(str(cwd))
+            root_strs = {str(r) for r in roots}
+            if len(roots) > 1:
+                ui.select(
+                    {str(r): (r.name or str(r)) for r in roots},
+                    value=str(cwd) if str(cwd) in root_strs else str(roots[0]),
+                    on_change=lambda e: (view.__setitem__("cwd", Path(e.value)), refresh_folders()),
+                ).props("dense outlined").classes("w-full q-mb-sm")
+
+            with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
+                ui.icon("folder_open").classes("text-grey-7")
+                ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
+                ui.button(
+                    "Foster selected",
+                    icon="subdirectory_arrow_right",
+                    on_click=_foster_selected_now,
+                ).props("dense color=primary")
+
+            listing = controller.list_directory(cwd)
+            with ui.list().props("dense bordered").classes("w-full"):
+                # "Up" entry, bounded at the scan roots (never navigate above a root)
+                if cwd not in {Path(str(r)) for r in roots}:
+                    with ui.item(
+                        on_click=lambda p=cwd.parent: (view.__setitem__("cwd", p), refresh_folders())
+                    ).props("clickable"):
+                        with ui.item_section().props("avatar"):
+                            ui.icon("arrow_upward")
+                        with ui.item_section():
+                            ui.item_label("..")
+                    ui.separator()
+                if not listing.entries:
+                    with ui.item():
+                        with ui.item_section():
+                            ui.item_label("(empty)").classes("text-grey-6")
+                for entry in listing.entries:
+                    if entry.is_dir:
+                        with ui.item(
+                            on_click=lambda p=entry.path: (view.__setitem__("cwd", p), refresh_folders())
+                        ).props("clickable"):
+                            with ui.item_section().props("avatar"):
+                                ui.icon("folder", color="amber-7")
+                            with ui.item_section():
+                                ui.item_label(entry.name)
+                    elif entry.is_audio:
+                        with ui.item():
+                            with ui.item_section().props("avatar"):
+                                ui.checkbox(
+                                    value=entry.path in foster_selected,
+                                    on_change=lambda e, p=entry.path: _toggle_foster(p, e.value),
+                                )
+                            with ui.item_section().props("avatar"):
+                                ui.icon("audiotrack", color="primary")
+                            with ui.item_section():
+                                ui.item_label(entry.name)
+                    else:
+                        with ui.item().props("disable"):
+                            with ui.item_section().props("avatar"):
+                                ui.icon("insert_drive_file", color="grey-5")
+                            with ui.item_section():
+                                ui.item_label(entry.name).classes("text-grey-5")
+
     # --- navigator ---
     def _nav_item(label: str, icon: str, active: bool, on_click, color: str | None = None) -> None:
         with ui.item(on_click=on_click).props("clickable" + (" active" if active else "")):
@@ -235,6 +336,16 @@ def render_workspace(controller: AppController) -> None:
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
         with nav_container:
+            ui.toggle(
+                {"library": "Library", "folders": "Folders"},
+                value=view["mode"],
+                on_change=lambda e: _set_mode(e.value),
+            ).props("dense no-caps").classes("w-full q-mb-sm")
+            if view["mode"] == "folders":
+                ui.label(
+                    "Browse scan folders and foster loose files into their own subfolders."
+                ).classes("text-caption text-grey-6")
+                return
             with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
                 if tree.needs_id:
@@ -253,10 +364,22 @@ def render_workspace(controller: AppController) -> None:
                         lambda name=author.name: _set_scope("author", name),
                     )
 
+    def _render_middle() -> None:
+        middle_title.text = "Folder contents" if view["mode"] == "folders" else "Books"
+        if view["mode"] == "folders":
+            refresh_folders()
+        else:
+            refresh_list()
+
+    def _set_mode(mode: str) -> None:
+        view["mode"] = mode
+        refresh_nav()
+        _render_middle()
+
     def _set_scope(kind: str, key) -> None:
         scope["kind"], scope["key"] = kind, key
         refresh_nav()
-        refresh_list()
+        _render_middle()
 
     def _toggle(book_id: str, on: bool) -> None:
         if on:
@@ -266,7 +389,7 @@ def render_workspace(controller: AppController) -> None:
 
     def _refresh_all() -> None:
         refresh_nav()
-        refresh_list()
+        _render_middle()
 
     # --- async actions ---
     async def _run(button, action, done_msg: str) -> None:
@@ -327,7 +450,7 @@ def render_workspace(controller: AppController) -> None:
             with ui.scroll_area().classes("col"):
                 nav_container = ui.column().classes("w-full gap-0")
         with ui.card().classes("col-5 column").style("height: 100%"):
-            ui.label("Books").classes("text-subtitle1")
+            middle_title = ui.label("Books").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
                 list_container = ui.column().classes("w-full gap-0")
