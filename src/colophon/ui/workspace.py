@@ -503,6 +503,9 @@ def render_workspace(controller: AppController) -> None:
         refresh_nav()
         _render_middle()
         refresh_status()
+        # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
+        if len(selected_ids) >= 2:
+            show_bulk()
 
     # --- async actions ---
     async def _run(button, action, done_msg: str) -> None:
