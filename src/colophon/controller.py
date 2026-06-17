@@ -250,6 +250,8 @@ class AppController:
 
         template = self.ctx.config.filename_template
         for parent in parents:
+            # scan_ingest walks the parent's full subtree (os.walk), so this both
+            # registers the new child book(s) and refreshes the parent's own book.
             scan_ingest(self.ctx.books, parent, template=template)
             if not self._has_direct_audio(parent):
                 self.ctx.books.delete(BookUnit.new(source_folder=parent).id)

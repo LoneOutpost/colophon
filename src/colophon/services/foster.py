@@ -32,7 +32,7 @@ def foster_one(path: Path) -> Path:
     not a file.
     """
     if not path.is_file():
-        raise FileNotFoundError(path)
+        raise FileNotFoundError(f"not a file: {path}")
     target_dir = path.parent / path.stem
     if target_dir.exists():
         raise FileExistsError(f"{target_dir} already exists")

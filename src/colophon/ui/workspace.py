@@ -234,12 +234,18 @@ def render_workspace(controller: AppController) -> None:
         else:
             foster_selected.discard(path)
 
-    def _foster_selected_now() -> None:
+    async def _foster_selected_now(button) -> None:
         paths = sorted(foster_selected)
         if not paths:
             ui.notify("No files selected")
             return
-        results = controller.foster_files(paths)
+        # foster_files does disk renames + a subtree rescan (slow over network
+        # mounts), so run it off the event loop and show a busy state.
+        button.props("loading=true")
+        try:
+            results = await asyncio.to_thread(controller.foster_files, paths)
+        finally:
+            button.props(remove="loading")
         ok = sum(1 for r in results if r.ok)
         failed = len(results) - ok
         foster_selected.clear()
@@ -274,15 +280,15 @@ def render_workspace(controller: AppController) -> None:
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
                 ui.icon("folder_open").classes("text-grey-7")
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
-                ui.button(
-                    "Foster selected",
-                    icon="subdirectory_arrow_right",
-                    on_click=_foster_selected_now,
+                foster_btn = ui.button(
+                    "Foster selected", icon="subdirectory_arrow_right"
                 ).props("dense color=primary")
+                foster_btn.on_click(lambda b=foster_btn: _foster_selected_now(b))
 
             listing = controller.list_directory(cwd)
             with ui.list().props("dense bordered").classes("w-full"):
-                # "Up" entry, bounded at the scan roots (never navigate above a root)
+                # "Up" entry: hidden once cwd is a configured scan root, so normal
+                # browsing stops at the root (nested roots are not specially handled).
                 if cwd not in {Path(str(r)) for r in roots}:
                     with ui.item(
                         on_click=lambda p=cwd.parent: (view.__setitem__("cwd", p), refresh_folders())
