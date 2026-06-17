@@ -13,6 +13,7 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
+from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookState, BookUnit, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
@@ -185,6 +186,64 @@ class AppController:
         )
         self._sync_sidecar(book)
         return batch
+
+    # --- filename parsing (interactive, FR-1.x) ---
+    def book_filename(self, book: BookUnit) -> str:
+        """The name used for template parsing: the first source file's filename,
+        falling back to the source folder's name when no files are recorded."""
+        if book.source_files:
+            return book.source_files[0].path.name
+        return book.source_folder.name
+
+    def preview_filename_parse(self, book: BookUnit, template: str) -> dict[str, str]:
+        """Parse `book`'s filename with `template`. Raises ValueError when the
+        template is malformed; returns {} when the filename does not match."""
+        pattern = compile_template(template)
+        return parse_filename(pattern, self.book_filename(book)) or {}
+
+    def apply_filename_parse(
+        self, books: list[BookUnit], template: str, fields: set[str]
+    ) -> int:
+        """Parse each book's filename with `template` and write the chosen `fields`
+        (the intersection of parsed, non-empty keys and `fields`) under "filename"
+        provenance. Each book's change is its own undoable batch. Returns the
+        number of books that received at least one field. Raises ValueError on a
+        malformed template (compiled once, before any writes)."""
+        pattern = compile_template(template)
+        changed = 0
+        for book in books:
+            parsed = parse_filename(pattern, self.book_filename(book)) or {}
+            updates = {k: v for k, v in parsed.items() if k in fields and v}
+            if not updates:
+                continue
+            # series must be set before sequence (set_field no-ops a sequence with
+            # no series name), so order the batch to apply series first.
+            ordered = dict(sorted(updates.items(), key=lambda kv: kv[0] != "series"))
+            apply_fields(
+                self.ctx.books, self.ctx.history, book, ordered,
+                provenance=Provenance.FILENAME.value,
+            )
+            self._sync_sidecar(book)
+            changed += 1
+        return changed
+
+    def save_filename_pattern(self, pattern: str) -> None:
+        """Add a validated `pattern` to the saved list (deduped) and persist.
+        Raises ValueError if the pattern does not compile."""
+        pat = pattern.strip()
+        if not pat:
+            return
+        compile_template(pat)  # validate; raises ValueError on bad placeholders
+        if pat in self.ctx.config.saved_filename_patterns:
+            return
+        self.ctx.config.saved_filename_patterns.append(pat)
+        save_config(self.ctx.config, self.ctx.config_path)
+
+    def remove_filename_pattern(self, pattern: str) -> None:
+        """Remove `pattern` from the saved list and persist (no-op if absent)."""
+        if pattern in self.ctx.config.saved_filename_patterns:
+            self.ctx.config.saved_filename_patterns.remove(pattern)
+            save_config(self.ctx.config, self.ctx.config_path)
 
     def move_file(self, book: BookUnit, path: Path, delta: int) -> None:
         """Move a file up (delta=-1) or down (delta=+1) in the book's order."""

@@ -20,6 +20,7 @@ class Config(BaseModel):
     root_path: str = ""  # URL base path behind a reverse proxy; "" serves at "/"
     db_path: Path | None = None             # None => default user-data location
     filename_template: str = "%author% - %title%"
+    saved_filename_patterns: list[str] = []  # reusable patterns offered in the parse-from-filename modal
     directory_scheme: str = ""  # e.g. "Author/Series/Title"; "" disables directory inference
     library_root: Path | None = None        # destination root for organized M4Bs
     audiobookshelf_url: str | None = None
