@@ -107,9 +107,12 @@ def write_embedded_tags(path: Path, tags: EmbeddedTags) -> None:
     """Write `tags` into the audio file at `path`, dispatched by extension.
 
     Uses the same ID3 frame / MP4 atom keys the read side reads, so a written
-    file reads back as the same EmbeddedTags. Only non-None fields are written;
-    other existing tags are left intact. Raises TagWriteError on an unsupported
-    format or a mutagen failure.
+    file reads back as the same EmbeddedTags. The managed fields mirror `tags`
+    exactly: a non-None value is set and a None value clears that field, so the
+    file's managed tags always equal `tags` (this makes writes idempotent and
+    lets a prior snapshot be restored faithfully on revert). Tags outside the
+    managed set are left intact. Raises TagWriteError on an unsupported format or
+    a mutagen failure.
     """
     ext = path.suffix.lower()
     try:
@@ -144,9 +147,9 @@ def _write_mp3(path: Path, tags: EmbeddedTags) -> None:
         id3 = ID3()
 
     def set_text(frame_cls, value: object) -> None:
+        id3.delall(frame_cls.__name__)  # clear first so a None value removes the frame
         if value is None:
             return
-        id3.delall(frame_cls.__name__)
         id3.add(frame_cls(encoding=3, text=str(value)))
 
     def set_txxx(desc: str, value: object) -> None:
@@ -160,8 +163,8 @@ def _write_mp3(path: Path, tags: EmbeddedTags) -> None:
     set_text(TPE1, tags.artist)
     set_text(TDRC, tags.year)
     set_text(TCON, tags.genre)
+    id3.delall("COMM")  # clear first so a None description removes the comment frame
     if tags.description is not None:
-        id3.delall("COMM")
         id3.add(COMM(encoding=3, lang="eng", desc="", text=str(tags.description)))
     set_txxx("narrator", tags.narrator)
     set_txxx("series", tags.series)
@@ -176,6 +179,7 @@ def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
     m = MP4(path)
 
     def set_atom(key: str, value: object) -> None:
+        m.pop(key, None)  # clear first so a None value removes the atom
         if value is None:
             return
         m[key] = [str(value)]

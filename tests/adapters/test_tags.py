@@ -121,3 +121,23 @@ def test_embed_cover_unsupported_format_raises(tmp_path: Path):
     path.write_bytes(b"")
     with pytest.raises(TagWriteError):
         embed_cover(path, _PNG_1X1, "image/png")
+
+
+def test_write_clears_managed_field_set_to_none_mp3(tmp_path: Path):
+    path = tmp_path / "ch.mp3"
+    path.write_bytes(b"")
+    write_embedded_tags(path, EmbeddedTags(title="Set", artist="A", series="S"))
+    assert read_embedded_tags(path).title == "Set"
+    # Re-write with title/artist/series None -> those managed fields are cleared.
+    write_embedded_tags(path, EmbeddedTags(title=None, artist=None, series=None))
+    cleared = read_embedded_tags(path)
+    assert cleared.title is None and cleared.artist is None and cleared.series is None
+
+
+def test_write_clears_managed_field_set_to_none_mp4(make_audio):
+    path = make_audio("ch.m4b", seconds=1)
+    write_embedded_tags(path, EmbeddedTags(title="Set", narrator="N"))
+    assert read_embedded_tags(path).title == "Set"
+    write_embedded_tags(path, EmbeddedTags(title=None, narrator=None))
+    cleared = read_embedded_tags(path)
+    assert cleared.title is None and cleared.narrator is None
