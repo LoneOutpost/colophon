@@ -45,3 +45,17 @@ async def test_failed_download_returns_none(tmp_path: Path):
     path = await ensure_cached_cover(book, dest_dir=tmp_path, client=_client(handler))
     assert path is None
     assert book.cover_path is None
+
+
+async def test_disk_write_failure_returns_none(tmp_path: Path):
+    # dest_dir's parent is a regular file, so mkdir raises OSError (NotADirectoryError).
+    (tmp_path / "blocker").write_bytes(b"x")
+    book = BookUnit.new(source_folder=tmp_path)
+    book.cover_url = "https://covers.example/x.png"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_PNG, headers={"content-type": "image/png"})
+
+    path = await ensure_cached_cover(book, dest_dir=tmp_path / "blocker" / "sub", client=_client(handler))
+    assert path is None
+    assert book.cover_path is None
