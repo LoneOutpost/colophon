@@ -98,6 +98,13 @@ def render_workspace(controller: AppController) -> None:
                 ui.space()
                 ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
                 ui.label(book.state.value).classes("text-caption text-grey-7 q-ml-sm")
+            if book.confidence_signals:
+                with ui.row().classes("items-center w-full q-gutter-xs"):
+                    for sig in book.confidence_signals:
+                        color = "positive" if sig.points >= 0 else "negative"
+                        ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
+                            f"color={color} outline"
+                        ).tooltip(sig.detail)
             ui.separator().classes("q-my-sm")
 
             # editable fields, each prefilled with its value + provenance badge

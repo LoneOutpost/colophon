@@ -10,11 +10,18 @@ def _norm(value: str | None) -> str:
 
 
 def ratio(a: str | None, b: str | None) -> float:
-    """Similarity in [0, 1]; 0 if either side is empty."""
+    """Similarity in [0, 1]; 0 if either side is empty.
+
+    Token-aware: the max of a character sequence ratio (robust to typos) and a
+    token Jaccard overlap (robust to word reordering and minor word changes).
+    """
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
         return 0.0
-    return SequenceMatcher(None, na, nb).ratio()
+    seq = SequenceMatcher(None, na, nb).ratio()
+    ta, tb = set(na.split()), set(nb.split())
+    token = len(ta & tb) / len(ta | tb) if (ta and tb) else 0.0
+    return max(seq, token)
 
 
 def _best_author_ratio(a_authors: list[str], b_authors: list[str]) -> float:

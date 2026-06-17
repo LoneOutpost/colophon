@@ -91,3 +91,23 @@ def test_embedded_core_awarded_when_no_external_results():
     assert outcome.confidence == 15.0
     assert any(s.name == "embedded_core" for s in outcome.signals)
     assert outcome.best is None
+
+
+def test_strong_two_source_agreement_reaches_review_threshold():
+    book = _book(title="Dune", authors=["Frank Herbert"])  # no ASIN
+    results = [
+        SourceResult(provider="openlibrary", title="Dune", authors=["Frank Herbert"]),
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),
+    ]
+    outcome = score_identification(book, results)
+    assert outcome.confidence >= 75  # 15 embedded + 60 cross-source (no ASIN needed)
+
+
+def test_perfect_cross_source_scores_full_sixty_points():
+    book = _book(title="Dune", authors=["Frank Herbert"])
+    results = [
+        SourceResult(provider="openlibrary", title="Dune", authors=["Frank Herbert"]),
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),
+    ]
+    sig = next(s for s in score_identification(book, results).signals if s.name == "cross_source_agreement")
+    assert sig.points == 60  # round(60 * 1.0) -> scaling formula

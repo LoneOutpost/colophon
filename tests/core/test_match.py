@@ -20,3 +20,8 @@ def test_title_author_score_combines_both():
     assert perfect == 1.0
     title_only = title_author_score("Dune", ["Frank Herbert"], "Dune", ["Someone Else"])
     assert 0.0 < title_only < 1.0
+
+
+def test_ratio_token_aware_handles_word_reordering():
+    # char-sequence ratio is low for reordered words; token overlap rescues it
+    assert ratio("Sanderson Brandon", "Brandon Sanderson") >= 0.9
