@@ -77,10 +77,16 @@ def render_workspace(controller: AppController) -> None:
             if node is None:
                 return []
             return [b for s in node.series for b in s.books] + node.standalone
-        books = list(tree.needs_id)
+        all_books = list(tree.needs_id)
         for a in tree.authors:
-            books += [b for s in a.series for b in s.books] + a.standalone
-        return books
+            all_books += [b for s in a.series for b in s.books] + a.standalone
+        if kind == "folder" and key:
+            folder = Path(str(key))
+            return [
+                b for b in all_books
+                if b.source_folder == folder or folder in b.source_folder.parents
+            ]
+        return all_books
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
@@ -568,6 +574,9 @@ def render_workspace(controller: AppController) -> None:
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
                 ui.icon("folder_open").classes("text-grey-7")
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
+                ui.button(icon="filter_alt", on_click=lambda c=cwd: _filter_library_to_folder(c)).props(
+                    "flat dense round"
+                ).tooltip("Show this folder's books in the Library view")
                 foster_btn = ui.button(
                     "Foster selected", icon="subdirectory_arrow_right"
                 ).props("dense color=primary")
@@ -645,6 +654,11 @@ def render_workspace(controller: AppController) -> None:
             ).props("dense").classes("q-mb-sm")
             with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
+                if kind == "folder":
+                    _nav_item(
+                        f"Folder: {Path(str(key)).name or key}",
+                        "filter_alt", True, lambda: None, color="primary",
+                    )
                 if tree.needs_id:
                     _nav_item(
                         f"Needs identification ({len(tree.needs_id)})",
@@ -686,6 +700,13 @@ def render_workspace(controller: AppController) -> None:
         scope["kind"], scope["key"] = kind, key
         refresh_nav()
         _render_middle()
+
+    def _filter_library_to_folder(folder: Path) -> None:
+        view["mode"] = "library"  # the filter shows in the Library (author) view
+        scope["kind"], scope["key"] = "folder", str(folder)
+        refresh_nav()
+        _render_middle()
+        ui.notify(f"Library filtered to {folder.name or folder}")
 
     def _after_select() -> None:
         n = len(selected_ids)
