@@ -6,7 +6,7 @@ from mutagen.id3 import ID3, TPE1
 
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
-from colophon.controller import AppController, TriageGroup
+from colophon.controller import AppController
 from colophon.core.models import BookState, BookUnit
 from colophon.core.sources import SourceResult
 
@@ -77,29 +77,6 @@ def test_dashboard_stats_counts_by_state(tmp_path):
     assert stats["ready"] == 1
     assert stats["needs_review"] == 1
     assert stats["total"] == 2
-    ctx.close()
-
-
-def test_triage_groups_pins_needs_id_and_groups_by_author(tmp_path):
-    ctx = _ctx(tmp_path)
-    # confident book with author
-    known = BookUnit.new(source_folder=tmp_path / "k")
-    known.title = "Words of Radiance"
-    known.authors = ["Brandon Sanderson"]
-    known.state = BookState.READY
-    # unidentified: no author
-    unknown = BookUnit.new(source_folder=tmp_path / "u")
-    unknown.title = "mystery"
-    unknown.state = BookState.NEEDS_REVIEW
-    ctx.books.upsert(known)
-    ctx.books.upsert(unknown)
-
-    groups = AppController(ctx).triage_groups()
-    assert isinstance(groups[0], TriageGroup)
-    assert groups[0].label == "Needs identification"
-    assert unknown.id in {b.id for b in groups[0].books}
-    author_group = next(g for g in groups if g.label == "Brandon Sanderson")
-    assert known.id in {b.id for b in author_group.books}
     ctx.close()
 
 
@@ -182,23 +159,6 @@ def test_process_ready_encode_failure_marks_failed(tmp_path, make_audio):
     assert len(results) == 1
     assert results[0].encoded is False
     assert results[0].detail is not None
-    ctx.close()
-
-
-def test_triage_groups_flat_returns_single_group(tmp_path):
-    ctx = _ctx(tmp_path)
-    low = BookUnit.new(source_folder=tmp_path / "low")
-    low.confidence = 0.2
-    high = BookUnit.new(source_folder=tmp_path / "high")
-    high.confidence = 0.9
-    ctx.books.upsert(high)
-    ctx.books.upsert(low)
-
-    groups = AppController(ctx).triage_groups(flat=True)
-    assert len(groups) == 1
-    assert groups[0].label == "All"
-    confidences = [b.confidence for b in groups[0].books]
-    assert confidences == sorted(confidences)
     ctx.close()
 
 
@@ -432,6 +392,7 @@ def test_apply_match_sets_fields_with_provider_provenance(tmp_path):
     assert persisted.publish_year == 2007
     assert persisted.asin == "B002V1A0WE"
     assert persisted.provenance["title"] == "audnexus"
+    assert persisted.provenance["authors"] == "audnexus"  # list field stored under model key
     # sidecar written to source folder
     import json
     raw = json.loads((book.source_folder / "metadata.json").read_text())
@@ -463,4 +424,145 @@ def test_apply_match_partial_result_only_sets_present_fields(tmp_path):
     changes = ctx.history.list_batch(batch)
     assert len(changes) == 1
     assert changes[0].field == "title"
+    ctx.close()
+
+
+def test_save_fields_applies_updates_with_manual_provenance(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Old"
+    ctx.books.upsert(book)
+    AppController(ctx).save_fields(book, {"title": "New", "author": "Frank Herbert"})
+    persisted = ctx.books.get(book.id)
+    assert persisted.title == "New"
+    assert persisted.authors == ["Frank Herbert"]
+    assert persisted.provenance["title"] == "manual"
+    assert persisted.provenance["authors"] == "manual"
+    ctx.close()
+
+
+def test_save_fields_is_undoable(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "y")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Original"
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    batch = ctrl.save_fields(book, {"title": "Changed"})
+    ctrl.undo(batch)
+    assert ctx.books.get(book.id).title == "Original"
+    ctx.close()
+
+
+def _book_with_files(ctx, tmp_path, names):
+    from colophon.core.models import SourceFile
+
+    folder = tmp_path / "ingest" / "bk"
+    folder.mkdir(parents=True)
+    book = BookUnit.new(source_folder=folder)
+    sfs = []
+    for n in names:
+        p = folder / n
+        p.write_bytes(b"x")
+        sfs.append(SourceFile(path=p, size=1, duration_seconds=60.0, ext="mp3"))
+    book.source_files = sfs
+    ctx.books.upsert(book)
+    return book
+
+
+def test_move_file_reorders_and_persists(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3", "03.mp3"])
+    target = book.source_files[2].path  # 03.mp3
+    AppController(ctx).move_file(book, target, -1)  # move up one
+    persisted = ctx.books.get(book.id)
+    assert [sf.path.name for sf in persisted.source_files] == ["01.mp3", "03.mp3", "02.mp3"]
+    ctx.close()
+
+
+def test_exclude_file_persists(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    AppController(ctx).exclude_file(book, book.source_files[0].path)
+    assert [sf.path.name for sf in ctx.books.get(book.id).source_files] == ["02.mp3"]
+    ctx.close()
+
+
+def test_rename_file_success_and_collision(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    ctrl = AppController(ctx)
+    new = ctrl.rename_file(book, book.source_files[0].path, "00 - Intro.mp3")
+    assert new is not None and new.name == "00 - Intro.mp3"
+    assert ctx.books.get(book.id).source_files[0].path.name == "00 - Intro.mp3"
+    # collision returns None and does not change anything
+    collide = ctrl.rename_file(book, book.source_files[1].path, "00 - Intro.mp3")
+    assert collide is None
+    ctx.close()
+
+
+def test_rename_file_bad_name_returns_none(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    ctrl = AppController(ctx)
+    before = [sf.path.name for sf in book.source_files]
+    # all-whitespace name is caught (ValueError) -> None, no crash, list unchanged
+    assert ctrl.rename_file(book, book.source_files[0].path, "  ") is None
+    assert [sf.path.name for sf in ctx.books.get(book.id).source_files] == before
+    ctx.close()
+
+
+def test_foster_files_creates_subdir_books_and_updates_parent(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Brandon Sanderson"
+    author.mkdir(parents=True)
+    (author / "Mistborn.mp3").write_bytes(b"")
+    (author / "Legion.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([author])  # one grouped book holding both loose files
+    grouped_id = BookUnit.new(source_folder=author).id
+    assert len(ctx.books.get(grouped_id).source_files) == 2
+
+    results = ctrl.foster_files([author / "Mistborn.mp3"])
+    assert len(results) == 1 and results[0].ok
+    assert results[0].destination == author / "Mistborn" / "Mistborn.mp3"
+
+    # The fostered file now scans as its own book...
+    fostered_id = BookUnit.new(source_folder=author / "Mistborn").id
+    assert ctx.books.get(fostered_id) is not None
+    # ...and the parent book retains only the remaining loose file.
+    parent_files = [sf.path.name for sf in ctx.books.get(grouped_id).source_files]
+    assert parent_files == ["Legion.mp3"]
+    ctx.close()
+
+
+def test_foster_files_prunes_parent_when_emptied(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Solo Author"
+    author.mkdir(parents=True)
+    (author / "OnlyBook.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([author])
+    grouped_id = BookUnit.new(source_folder=author).id
+    assert ctx.books.get(grouped_id) is not None
+
+    ctrl.foster_files([author / "OnlyBook.mp3"])
+    # Parent folder now has no direct audio -> its stale book is removed.
+    assert ctx.books.get(grouped_id) is None
+    assert ctx.books.get(BookUnit.new(source_folder=author / "OnlyBook").id) is not None
+    ctx.close()
+
+
+def test_foster_files_reports_per_file_failure(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Author"
+    author.mkdir(parents=True)
+    (author / "Book.mp3").write_bytes(b"")
+    (author / "Book").mkdir()  # collision: foster target already exists
+    ctrl = AppController(ctx)
+    results = ctrl.foster_files([author / "Book.mp3"])
+    assert len(results) == 1 and results[0].ok is False
+    assert results[0].error and results[0].destination is None
+    assert (author / "Book.mp3").exists()  # left in place
     ctx.close()

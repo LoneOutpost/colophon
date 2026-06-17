@@ -14,7 +14,6 @@ def test_create_app_registers_pages_without_running(tmp_path):
 
     routes = set(Client.page_routes.values())
     assert "/" in routes
-    assert "/triage" in routes
     assert "/settings" in routes
 
     import colophon.ui.workspace as ws

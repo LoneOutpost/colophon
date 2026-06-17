@@ -12,9 +12,10 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
-from colophon.core.models import BookState, BookUnit, _Base
+from colophon.core.models import BookState, BookUnit, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
+from colophon.services import files as file_ops
 from colophon.services.editing import (
     apply_fields,
     remap_field,
@@ -27,17 +28,13 @@ from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
 from colophon.services.encode import encode_book
+from colophon.services.foster import FosterResult, foster_one
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
 from colophon.services.organize import organize_book
 from colophon.services.undo import undo_batch
 
 logger = logging.getLogger(__name__)
-
-
-class TriageGroup(_Base):
-    label: str
-    books: list[BookUnit] = []  # noqa: RUF012 - pydantic field default, copied per instance
 
 
 class ProcessResult(_Base):
@@ -79,27 +76,6 @@ class AppController:
         for state in BookState:
             stats[state.value] = sum(1 for b in books if b.state == state)
         return stats
-
-    # --- triage ---
-    def triage_groups(self, *, flat: bool = False) -> list[TriageGroup]:
-        books = self.ctx.books.list_all()
-        if flat:
-            ordered = sorted(books, key=lambda b: b.confidence)
-            return [TriageGroup(label="All", books=ordered)]
-
-        needs_id = [b for b in books if not b.authors and not b.series]
-        identified = [b for b in books if b.authors or b.series]
-        groups: list[TriageGroup] = []
-        if needs_id:
-            groups.append(TriageGroup(label="Needs identification", books=sorted(needs_id, key=lambda b: b.confidence)))
-        by_author: dict[str, list[BookUnit]] = {}
-        for b in identified:
-            author = b.authors[0] if b.authors else (b.series[0].name if b.series else "Unknown")
-            by_author.setdefault(author, []).append(b)
-        for author in sorted(by_author):
-            books_for = sorted(by_author[author], key=lambda b: (b.series[0].sequence if b.series and b.series[0].sequence is not None else 0.0))
-            groups.append(TriageGroup(label=author, books=books_for))
-        return groups
 
     def get_book(self, book_id: str) -> BookUnit | None:
         return self.ctx.books.get(book_id)
@@ -183,6 +159,85 @@ class AppController:
         batch = set_field_value(self.ctx.books, self.ctx.history, book, field, value)
         self._sync_sidecar(book)
         return batch
+
+    def save_fields(self, book: BookUnit, updates: dict[str, str | None]) -> str:
+        """Apply manual metadata edits to `book` in one batch and re-sync its
+        sidecar. Returns the batch id (undoable via undo)."""
+        batch = apply_fields(
+            self.ctx.books, self.ctx.history, book, updates, provenance=Provenance.MANUAL.value
+        )
+        self._sync_sidecar(book)
+        return batch
+
+    def move_file(self, book: BookUnit, path: Path, delta: int) -> None:
+        """Move a file up (delta=-1) or down (delta=+1) in the book's order."""
+        paths = [sf.path for sf in book.source_files]
+        if path not in paths:
+            return
+        i = paths.index(path)
+        j = max(0, min(len(paths) - 1, i + delta))
+        if i == j:
+            return
+        paths[i], paths[j] = paths[j], paths[i]
+        file_ops.reorder(book, paths)
+        book.touch()
+        self.ctx.books.upsert(book)
+
+    def exclude_file(self, book: BookUnit, path: Path) -> None:
+        """Remove a file from the book's source list (does not delete it from disk)."""
+        file_ops.exclude(book, path)
+        book.touch()
+        self.ctx.books.upsert(book)
+
+    def rename_file(self, book: BookUnit, path: Path, new_name: str) -> Path | None:
+        """Rename a file on disk; returns the new path, or None on collision/error."""
+        try:
+            new = file_ops.rename(book, path, new_name)
+        except (OSError, ValueError) as e:
+            logger.warning(f"rename failed for {path}: {e}")
+            return None
+        book.touch()
+        self.ctx.books.upsert(book)
+        return new
+
+    def foster_files(self, paths: list[Path]) -> list[FosterResult]:
+        """Move each loose file into its own stem-named subdirectory, then
+        re-scan affected parents so the new single-file books register.
+
+        Re-scanning a parent updates its book to the remaining loose files (or,
+        if none remain, leaves a stale book that `scan_ingest` won't touch -- so
+        we prune any parent folder that no longer directly contains audio).
+        Returns one FosterResult per input path; a failure on one file does not
+        abort the batch.
+        """
+        results: list[FosterResult] = []
+        parents: set[Path] = set()
+        for path in paths:
+            try:
+                destination = foster_one(path)
+            except (OSError, ValueError) as e:
+                logger.warning(f"foster failed for {path}: {e}")
+                results.append(FosterResult(source=path, ok=False, error=str(e)))
+                continue
+            results.append(FosterResult(source=path, destination=destination, ok=True))
+            parents.add(path.parent)
+
+        template = self.ctx.config.filename_template
+        for parent in parents:
+            # scan_ingest walks the parent's full subtree (os.walk), so this both
+            # registers the new child book(s) and refreshes the parent's own book.
+            scan_ingest(self.ctx.books, parent, template=template)
+            if not self._has_direct_audio(parent):
+                self.ctx.books.delete(BookUnit.new(source_folder=parent).id)
+        return results
+
+    @staticmethod
+    def _has_direct_audio(folder: Path) -> bool:
+        """True if `folder` directly contains at least one audio file."""
+        try:
+            return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
+        except OSError:
+            return False
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
-from colophon.core.fields import get_field, set_field
+from colophon.core.fields import EDITABLE_TO_PROVENANCE, get_field, set_field
 from colophon.core.models import BookUnit, EditChange, Provenance
 
 
@@ -24,7 +24,9 @@ def _apply(
     set_field(book, field, value)
     actual = get_field(book, field)  # truth after set (a no-op set leaves this == old)
     if actual != old:
-        book.provenance[field] = provenance
+        # Provenance is keyed by the stored model attribute (e.g. "authors"), not the
+        # editable field key ("author"), to match reconcile.py and field_provenance().
+        book.provenance[EDITABLE_TO_PROVENANCE[field]] = provenance
     return EditChange(book_id=book.id, field=field, old_value=old, new_value=actual)
 
 

@@ -17,6 +17,28 @@ EDITABLE_FIELDS = [
 
 _SCALARS = {"title", "subtitle", "asin", "language", "publisher", "description"}
 
+# Editable-field key -> the key under which its provenance is stored on BookUnit.
+# (List/derived fields differ: "author" edits BookUnit.authors, stored as "authors".)
+EDITABLE_TO_PROVENANCE = {
+    "title": "title",
+    "subtitle": "subtitle",
+    "author": "authors",
+    "narrator": "narrators",
+    "series": "series",
+    "sequence": "series",
+    "year": "publish_year",
+    "asin": "asin",
+    "language": "language",
+    "publisher": "publisher",
+    "description": "description",
+}
+
+
+def field_provenance(book: BookUnit, field: str) -> str | None:
+    """The provenance source recorded for an editable field, or None if unset."""
+    _check(field)
+    return book.provenance.get(EDITABLE_TO_PROVENANCE[field])
+
 
 def _check(field: str) -> None:
     if field not in EDITABLE_FIELDS:

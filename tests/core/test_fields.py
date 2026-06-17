@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from colophon.core.fields import EDITABLE_FIELDS, get_field, set_field
+from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field, set_field
 from colophon.core.models import BookUnit
 
 
@@ -59,3 +59,16 @@ def test_year_coerces_int():
 def test_unknown_field_raises():
     with pytest.raises(ValueError, match="unknown editable field"):
         get_field(_book(), "bogus")
+
+
+def test_field_provenance_maps_editable_key_to_source():
+    b = _book()
+    b.authors = ["A"]
+    b.provenance = {"authors": "audnexus", "title": "tag"}
+    assert field_provenance(b, "author") == "audnexus"  # editable "author" -> stored "authors"
+    assert field_provenance(b, "title") == "tag"
+
+
+def test_field_provenance_none_when_unset():
+    b = _book()
+    assert field_provenance(b, "year") is None
