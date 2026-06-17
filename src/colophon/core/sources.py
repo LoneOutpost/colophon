@@ -11,6 +11,7 @@ class SourceQuery(_Base):
     title: str | None = None
     author: str | None = None
     asin: str | None = None
+    series: str | None = None
 
 
 class SourceResult(_Base):
