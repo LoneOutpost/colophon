@@ -531,27 +531,61 @@ def render_workspace(controller: AppController) -> None:
         else:
             foster_selected.discard(path)
 
-    async def _foster_selected_now(button) -> None:
+    def _foster_dialog() -> None:
         paths = sorted(foster_selected)
         if not paths:
             ui.notify("No files selected")
             return
-        # foster_files does disk renames + a subtree rescan (slow over network
-        # mounts), so run it off the event loop and show a busy state.
-        button.props("loading=true")
-        try:
-            results = await asyncio.to_thread(controller.foster_files, paths)
-        finally:
-            button.props(remove="loading")
-        ok = sum(1 for r in results if r.ok)
-        failed = len(results) - ok
-        foster_selected.clear()
-        msg = f"Fostered {ok} file(s)" + (f", {failed} failed" if failed else "")
-        ui.notify(msg, type="negative" if failed and not ok else "positive")
-        # Stay in Folders mode: redraw the directory browser (moved files now show
-        # as subfolders) and refresh the nav so the new books register in Library.
-        refresh_nav()
-        _render_middle()
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label(f"Foster {len(paths)} file(s)?").classes("text-subtitle1")
+            ui.label(
+                "Each selected file moves into a new subfolder named after the file, so it "
+                "scans as its own book. The affected folders are then rescanned."
+            ).classes("text-caption text-grey-6")
+            body = ui.column().classes("w-full")
+            with body, ui.scroll_area().classes("w-full").style("max-height: 35vh"):
+                with ui.list().props("dense").classes("w-full"):
+                    for p in paths:
+                        with ui.item():
+                            with ui.item_section():
+                                ui.item_label(p.name)
+                                ui.item_label(f"into {p.stem}/").props("caption")
+            actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
+            with actions:
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                confirm = ui.button("Foster", icon="subdirectory_arrow_right")
+
+            async def _commit() -> None:
+                # foster_files does disk renames + a subtree rescan (slow over network
+                # mounts), so run it off the event loop and show a busy state.
+                confirm.props("loading=true")
+                try:
+                    results = await asyncio.to_thread(controller.foster_files, paths)
+                finally:
+                    confirm.props(remove="loading")
+                ok = sum(1 for r in results if r.ok)
+                failures = [r for r in results if not r.ok]
+                foster_selected.clear()
+                body.clear()
+                with body:
+                    ui.label(f"Fostered {ok} of {len(results)} file(s).").classes("text-body2")
+                    if failures:
+                        ui.label("Failed:").classes("text-caption text-negative q-mt-xs")
+                        with ui.list().props("dense").classes("w-full"):
+                            for r in failures:
+                                with ui.item(), ui.item_section():
+                                    ui.item_label(r.source.name)
+                                    ui.item_label(r.error or "unknown error").props("caption")
+                actions.clear()
+                with actions:
+                    ui.button("Close", on_click=dialog.close).props("flat")
+                # Redraw the directory browser (moved files now show as subfolders) and
+                # the nav so the new books register in Library.
+                refresh_nav()
+                _render_middle()
+
+            confirm.on_click(_commit)
+        dialog.open()
 
     def refresh_folders() -> None:
         list_container.clear()
@@ -581,10 +615,9 @@ def render_workspace(controller: AppController) -> None:
                 ui.button(icon="filter_alt", on_click=lambda c=cwd: _filter_library_to_folder(c)).props(
                     "flat dense round"
                 ).tooltip("Show this folder's books in the Library view")
-                foster_btn = ui.button(
-                    "Foster selected", icon="subdirectory_arrow_right"
+                ui.button(
+                    "Foster selected", icon="subdirectory_arrow_right", on_click=_foster_dialog
                 ).props("dense color=primary")
-                foster_btn.on_click(lambda b=foster_btn: _foster_selected_now(b))
 
             listing = controller.list_directory(cwd)
             with ui.list().props("dense bordered").classes("w-full"):
