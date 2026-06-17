@@ -133,26 +133,82 @@ def render_workspace(controller: AppController) -> None:
                     except Exception:
                         logger.exception("get_matches failed")
                         matches = []
-                    body.clear()
-                    with body:
-                        if not matches:
-                            ui.label("No matches found").classes("text-grey-6")
-                        for m in matches[:10]:
-                            authors = ", ".join(m.authors) or "unknown"
-                            year = f" ({m.publish_year})" if m.publish_year else ""
-                            with ui.item(
-                                on_click=lambda result=m: (
-                                    controller.apply_match(b, result),
-                                    dialog.close(),
-                                    ui.notify(f"Applied {result.provider}"),
-                                    refresh_list(),
-                                    show_detail(b.id),
-                                )
-                            ).props("clickable"):
-                                with ui.item_section():
-                                    ui.item_label(m.title or "?")
-                                    ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
-                    ui.button("Close", on_click=dialog.close).props("flat")
+
+                    def _source_value(result, key: str) -> str | None:
+                        return {
+                            "title": result.title,
+                            "author": "; ".join(result.authors) or None,
+                            "narrator": "; ".join(result.narrators) or None,
+                            "series": result.series_name,
+                            "sequence": str(result.series_sequence) if result.series_sequence is not None else None,
+                            "year": str(result.publish_year) if result.publish_year is not None else None,
+                            "asin": result.asin,
+                            "description": result.description,
+                        }.get(key)
+
+                    field_labels = [
+                        ("title", "Title"), ("author", "Author"), ("narrator", "Narrator"),
+                        ("series", "Series"), ("sequence", "Sequence"), ("year", "Year"),
+                        ("asin", "ASIN"), ("description", "Description"),
+                    ]
+
+                    def show_candidates() -> None:
+                        body.clear()
+                        with body:
+                            if not matches:
+                                ui.label("No matches found").classes("text-grey-6")
+                            for m in matches[:10]:
+                                authors = ", ".join(m.authors) or "unknown"
+                                year = f" ({m.publish_year})" if m.publish_year else ""
+                                with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
+                                    with ui.item_section():
+                                        ui.item_label(m.title or "?")
+                                        ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
+
+                    def show_picker(result) -> None:
+                        body.clear()
+                        checks: dict[str, ui.checkbox] = {}
+                        with body:
+                            ui.button("Back to matches", icon="arrow_back", on_click=show_candidates).props(
+                                "flat dense no-caps"
+                            )
+                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
+                                with ui.list().props("dense").classes("w-full"):
+                                    for key, label in field_labels:
+                                        source = _source_value(result, key)
+                                        if not source:
+                                            continue
+                                        current = get_field(b, key)
+                                        with ui.item():
+                                            with ui.item_section().props("avatar"):
+                                                checks[key] = ui.checkbox(value=(source != (current or None)))
+                                            with ui.item_section():
+                                                ui.item_label(f"{label}: {source}")
+                                                ui.item_label(f"current: {current or '(none)'}").props("caption")
+                                    if result.cover_url:
+                                        with ui.item():
+                                            with ui.item_section().props("avatar"):
+                                                checks["cover"] = ui.checkbox(value=(result.cover_url != b.cover_url))
+                                            with ui.item_section():
+                                                ui.item_label("Cover art")
+                                                ui.item_label(result.cover_url).props("caption")
+
+                            def _apply(res=result) -> None:
+                                selected = {k for k, c in checks.items() if c.value}
+                                if not selected:
+                                    ui.notify("No fields selected")
+                                    return
+                                controller.apply_match_fields(b, res, selected)
+                                dialog.close()
+                                ui.notify(f"Applied {len(selected)} field(s) from {res.provider}")
+                                refresh_list()
+                                show_detail(b.id)
+
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                ui.button("Cancel", on_click=dialog.close).props("flat")
+                                ui.button("Apply selected", icon="done_all", on_click=_apply)
+
+                    show_candidates()
                 dialog.open()
 
             async def _tag_dialog(b=book) -> None:
