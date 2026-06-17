@@ -20,6 +20,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.models import BookUnit
+from colophon.core.normalize import normalize_description, normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,11 @@ def render_workspace(controller: AppController) -> None:
                     else:
                         inp = ui.input(field, value=value).props("dense").classes("col")
                     inputs[field] = inp
+                    normalizer = normalize_description if field == "description" else normalize_text
+                    ui.button(
+                        icon="auto_fix_high",
+                        on_click=lambda inp=inp, fn=normalizer: inp.set_value(fn(inp.value or "")),
+                    ).props("flat dense round").classes("self-center").tooltip("Normalize")
                     source = field_provenance(book, field)
                     if source:
                         ui.badge(source).props("color=grey-6 outline").classes("self-center")
