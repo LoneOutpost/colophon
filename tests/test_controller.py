@@ -566,3 +566,31 @@ def test_foster_files_reports_per_file_failure(tmp_path):
     assert results[0].error and results[0].destination is None
     assert (author / "Book.mp3").exists()  # left in place
     ctx.close()
+
+
+def test_tag_plan_and_write_tags_roundtrip(tmp_path):
+    from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
+    from colophon.core.models import EmbeddedTags, SourceFile
+
+    ctx = _ctx(tmp_path)
+    f = tmp_path / "ingest" / "01.mp3"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"")
+    write_embedded_tags(f, EmbeddedTags(title="Old"))
+    book = BookUnit.new(source_folder=f.parent)
+    book.title = "New Title"
+    book.authors = ["Author"]
+    book.source_files = [SourceFile(path=f, size=1, duration_seconds=60.0, ext="mp3")]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+
+    plan = ctrl.tag_plan(book)
+    assert "title" in plan.files[0].changed_fields
+
+    result = asyncio.run(ctrl.write_tags(book))
+    assert result.written == 1
+    assert read_embedded_tags(f).title == "New Title"
+
+    assert ctrl.undo_tag_batch() is True
+    assert read_embedded_tags(f).title == "Old"
+    ctx.close()

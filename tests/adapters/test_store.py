@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookState, BookUnit
+from colophon.adapters.repository.store import BookUnitRepo, OperationRepo, connect, migrate
+from colophon.core.models import BookState, BookUnit, OperationRecord
 
 
 def _table_names(conn):
@@ -148,10 +148,6 @@ def test_delete_removes_book(tmp_path: Path):
 def test_delete_missing_id_is_noop(tmp_path: Path):
     repo = _repo(tmp_path)
     repo.delete("does-not-exist")  # must not raise
-
-
-from colophon.adapters.repository.store import OperationRepo
-from colophon.core.models import OperationRecord
 
 
 def _op_repo(tmp_path: Path) -> OperationRepo:

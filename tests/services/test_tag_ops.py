@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from colophon.adapters.tags import write_embedded_tags
+from colophon.adapters.repository.store import OperationRepo, connect, migrate
+from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
 from colophon.core.models import BookUnit, EmbeddedTags, SeriesRef, SourceFile
-from colophon.services.tag_ops import plan_tag
+from colophon.services.tag_ops import commit_tag, plan_tag, revert_tag_batch
 
 
 def _book_with_file(path: Path) -> BookUnit:
@@ -33,11 +34,6 @@ def test_plan_surfaces_validation_warnings(tmp_path: Path):
     book.title = None
     plan = plan_tag(book)
     assert any("title" in w.lower() for w in plan.warnings)
-
-
-from colophon.adapters.repository.store import OperationRepo, connect, migrate
-from colophon.adapters.tags import read_embedded_tags
-from colophon.services.tag_ops import commit_tag, revert_tag_batch
 
 
 def _ops(tmp_path: Path) -> OperationRepo:

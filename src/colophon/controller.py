@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from colophon.core.models import BookState, BookUnit, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
+from colophon.services.cover import ensure_cached_cover
 from colophon.services.editing import (
     apply_fields,
     remap_field,
@@ -32,6 +34,13 @@ from colophon.services.foster import FosterResult, foster_one
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
 from colophon.services.organize import organize_book
+from colophon.services.tag_ops import (
+    TagCommitResult,
+    TagPlan,
+    commit_tag,
+    plan_tag,
+    revert_tag_batch,
+)
 from colophon.services.undo import undo_batch
 
 logger = logging.getLogger(__name__)
@@ -238,6 +247,28 @@ class AppController:
             return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
         except OSError:
             return False
+
+    def tag_plan(self, book: BookUnit) -> TagPlan:
+        """The dry-run preview of writing this book's metadata into its files."""
+        return plan_tag(book)
+
+    async def write_tags(self, book: BookUnit) -> TagCommitResult:
+        """Fetch+cache the cover (best effort), then write tags into the book's
+        files on a worker thread, logging each write for recovery."""
+        await ensure_cached_cover(book, dest_dir=book.source_folder)
+        self.ctx.books.upsert(book)
+        batch_id = uuid.uuid4().hex
+        return await asyncio.to_thread(
+            commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
+        )
+
+    def undo_tag_batch(self) -> bool:
+        """Revert the most recent tag batch. Returns False if there is none."""
+        batch_id = self.ctx.operations.latest_batch_id()
+        if batch_id is None:
+            return False
+        revert_tag_batch(self.ctx.operations, batch_id)
+        return True
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)
