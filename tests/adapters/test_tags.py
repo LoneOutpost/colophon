@@ -86,3 +86,36 @@ def test_write_unsupported_format_raises(tmp_path: Path):
     path.write_bytes(b"")
     with pytest.raises(TagWriteError):
         write_embedded_tags(path, EmbeddedTags(title="x"))
+
+
+_PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c6360000002000154a24f9f0000000049454e44ae426082"
+)
+
+
+def test_embed_cover_roundtrips_mp3(tmp_path: Path):
+    from mutagen.id3 import ID3
+    from colophon.adapters.tags import embed_cover
+    path = tmp_path / "ch01.mp3"
+    path.write_bytes(b"")
+    embed_cover(path, _PNG_1X1, "image/png")
+    apic = ID3(path).getall("APIC")
+    assert apic and apic[0].data == _PNG_1X1 and apic[0].mime == "image/png"
+
+
+def test_embed_cover_roundtrips_mp4(make_audio):
+    from mutagen.mp4 import MP4
+    from colophon.adapters.tags import embed_cover
+    path = make_audio("book.m4b", seconds=1)
+    embed_cover(path, _PNG_1X1, "image/png")
+    covr = MP4(path).get("covr")
+    assert covr and bytes(covr[0]) == _PNG_1X1
+
+
+def test_embed_cover_unsupported_format_raises(tmp_path: Path):
+    from colophon.adapters.tags import embed_cover
+    path = tmp_path / "song.ogg"
+    path.write_bytes(b"")
+    with pytest.raises(TagWriteError):
+        embed_cover(path, _PNG_1X1, "image/png")

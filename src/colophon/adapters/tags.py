@@ -193,3 +193,34 @@ def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
     set_freeform("sequence", tags.sequence)
     set_freeform("asin", tags.asin)
     m.save()
+
+
+def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
+    """Embed cover art into the audio file at `path`. mime is 'image/png' or
+    'image/jpeg'. Replaces any existing cover. Raises TagWriteError on an
+    unsupported format or a mutagen failure."""
+    ext = path.suffix.lower()
+    try:
+        if ext == ".mp3":
+            from mutagen.id3 import APIC, ID3, ID3NoHeaderError  # type: ignore[attr-defined]
+
+            try:
+                id3 = ID3(path)
+            except ID3NoHeaderError:
+                id3 = ID3()
+            id3.delall("APIC")
+            id3.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=image_bytes))
+            id3.save(path, v2_version=3)
+        elif ext in {".m4a", ".m4b", ".mp4", ".aac"}:
+            from mutagen.mp4 import MP4, MP4Cover
+
+            fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
+            m = MP4(path)
+            m["covr"] = [MP4Cover(image_bytes, imageformat=fmt)]
+            m.save()
+        else:
+            raise TagWriteError(f"unsupported audio format for cover: {ext}")
+    except TagWriteError:
+        raise
+    except Exception as e:
+        raise TagWriteError(f"embed cover into {path} failed: {e}") from e
