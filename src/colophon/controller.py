@@ -341,9 +341,9 @@ class AppController:
         results = [r for batch in gathered for r in batch]
         return score_identification(book, results).ranked
 
-    def apply_match(self, book: BookUnit, result: SourceResult) -> str:
-        """Apply a chosen source result's fields to `book` (undoable), stamping the
-        source as provenance, and re-sync the sidecar."""
+    @staticmethod
+    def _match_updates(result: SourceResult) -> dict[str, str | None]:
+        """Map a source result's present fields to editable-field updates."""
         updates: dict[str, str | None] = {}
         if result.title:
             updates["title"] = result.title
@@ -361,9 +361,25 @@ class AppController:
             updates["asin"] = result.asin
         if result.description:
             updates["description"] = result.description
+        return updates
+
+    def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
+        """Apply only the chosen fields from `result` (per-field selection), stamping
+        the source as provenance. The pseudo-field "cover" captures result.cover_url
+        onto the book (fetched/embedded later). Returns the undoable batch id."""
+        if "cover" in fields and result.cover_url:
+            book.cover_url = result.cover_url
+        updates = {k: v for k, v in self._match_updates(result).items() if k in fields}
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch
+
+    def apply_match(self, book: BookUnit, result: SourceResult) -> str:
+        """Apply all present fields from a chosen source result (and its cover)."""
+        fields = set(self._match_updates(result))
+        if result.cover_url:
+            fields.add("cover")
+        return self.apply_match_fields(book, result, fields)
 
     # --- encode + organize ---
     def ready_books(self) -> list[BookUnit]:

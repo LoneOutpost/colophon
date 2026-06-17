@@ -624,3 +624,38 @@ def test_process_one_embeds_tags_into_the_m4b(tmp_path, make_audio):
     tag_op = next(op for op in ops if op.op_type == "tag_write")
     assert tag_op.target == str(out)
     ctx.close()
+
+
+def test_apply_match_fields_applies_only_selected_and_captures_cover(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.title = "Old Title"
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", title="New Title", authors=["Brandon Sanderson"],
+        publish_year=2006, cover_url="https://covers.example/x.jpg",
+    )
+    AppController(ctx).apply_match_fields(book, result, {"title", "cover"})
+    got = ctx.books.get(book.id)
+    assert got.title == "New Title"
+    assert got.authors == []
+    assert got.publish_year is None
+    assert got.cover_url == "https://covers.example/x.jpg"
+    assert got.provenance.get("title") == "audnexus"
+    ctx.close()
+
+
+def test_apply_match_applies_all_present_fields_and_cover(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", title="T", authors=["A"], narrators=["N"],
+        series_name="S", series_sequence=1.0, publish_year=2006, asin="B00", cover_url="https://c/x.jpg",
+    )
+    AppController(ctx).apply_match(book, result)
+    got = ctx.books.get(book.id)
+    assert got.title == "T" and got.authors == ["A"] and got.narrators == ["N"]
+    assert got.series[0].name == "S" and got.publish_year == 2006 and got.asin == "B00"
+    assert got.cover_url == "https://c/x.jpg"
+    ctx.close()
