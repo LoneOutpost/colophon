@@ -197,6 +197,7 @@ def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
     set_atom("\xa9day", tags.year)
     set_atom("\xa9gen", tags.genre)
     set_atom("desc", tags.description)
+    m.pop("\xa9cmt", None)  # clear the legacy comment atom the reader falls back to, so desc is authoritative
     set_freeform("narrator", tags.narrator)
     set_freeform("series", tags.series)
     set_freeform("sequence", tags.sequence)

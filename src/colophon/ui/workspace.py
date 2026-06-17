@@ -196,7 +196,7 @@ def render_workspace(controller: AppController) -> None:
                                 icon="undo",
                                 on_click=lambda: (
                                     controller.undo_tag_batch(),
-                                    ui.notify("Reverted tag write"),
+                                    ui.notify("Reverted tag write (embedded cover kept)"),
                                     dialog.close(),
                                 ),
                             ).props("flat")

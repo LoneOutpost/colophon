@@ -141,3 +141,16 @@ def test_write_clears_managed_field_set_to_none_mp4(make_audio):
     write_embedded_tags(path, EmbeddedTags(title=None, narrator=None))
     cleared = read_embedded_tags(path)
     assert cleared.title is None and cleared.narrator is None
+
+
+def test_write_clears_legacy_cmt_description_atom_mp4(make_audio):
+    from mutagen.mp4 import MP4
+
+    path = make_audio("ch.m4b", seconds=1)
+    m = MP4(path)
+    m["\xa9cmt"] = ["legacy comment"]  # description sourced from the legacy atom
+    m.save()
+    assert read_embedded_tags(path).description == "legacy comment"
+    # A managed write with description=None must clear it (not leave \xa9cmt shadowing).
+    write_embedded_tags(path, EmbeddedTags(title="X"))
+    assert read_embedded_tags(path).description is None
