@@ -12,7 +12,13 @@ from colophon.adapters.audiobookshelf import AbsClient
 from colophon.adapters.config import Config, default_config_path
 from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
 from colophon.adapters.lazylibrarian_api import LazyLibrarianClient
-from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo, connect, migrate
+from colophon.adapters.repository.store import (
+    BookUnitRepo,
+    HistoryRepo,
+    OperationRepo,
+    connect,
+    migrate,
+)
 from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
 from colophon.adapters.sources.hardcover import HardcoverSource
@@ -30,6 +36,7 @@ class AppContext:
     conn: sqlite3.Connection
     books: BookUnitRepo
     history: HistoryRepo
+    operations: OperationRepo
     sources: list[MetadataSource]
     patterns: AudiobookPatterns
     abs_client: AbsClient | None
@@ -64,6 +71,7 @@ class AppContext:
             conn=conn,
             books=BookUnitRepo(conn),
             history=HistoryRepo(conn),
+            operations=OperationRepo(conn),
             sources=sources,
             patterns=patterns,
             abs_client=abs_client,
