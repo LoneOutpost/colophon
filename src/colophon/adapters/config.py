@@ -20,6 +20,7 @@ class Config(BaseModel):
     root_path: str = ""  # URL base path behind a reverse proxy; "" serves at "/"
     db_path: Path | None = None             # None => default user-data location
     filename_template: str = "%author% - %title%"
+    directory_scheme: str = ""  # e.g. "Author/Series/Title"; "" disables directory inference
     library_root: Path | None = None        # destination root for organized M4Bs
     audiobookshelf_url: str | None = None
     audiobookshelf_token: str | None = None
@@ -70,6 +71,10 @@ scan_paths = []
 
 # Template used to parse metadata from filenames when embedded tags are missing.
 filename_template = "%author% - %title%"
+
+# Infer author/series/title from the folder hierarchy when a book folder's depth
+# under a scan path matches this scheme. Empty disables it. Example:
+# directory_scheme = "Author/Series/Title"
 
 # Confidence score (0-100) at or above which a book is marked ready
 # automatically. Below it, the book is routed to review.

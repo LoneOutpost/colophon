@@ -133,31 +133,125 @@ def render_workspace(controller: AppController) -> None:
                     except Exception:
                         logger.exception("get_matches failed")
                         matches = []
-                    body.clear()
-                    with body:
-                        if not matches:
-                            ui.label("No matches found").classes("text-grey-6")
-                        for m in matches[:10]:
-                            authors = ", ".join(m.authors) or "unknown"
-                            year = f" ({m.publish_year})" if m.publish_year else ""
-                            with ui.item(
-                                on_click=lambda result=m: (
-                                    controller.apply_match(b, result),
+
+                    field_labels = {
+                        "title": "Title", "author": "Author", "narrator": "Narrator",
+                        "series": "Series", "sequence": "Sequence", "year": "Year",
+                        "asin": "ASIN", "description": "Description",
+                    }
+
+                    def show_candidates() -> None:
+                        body.clear()
+                        with body:
+                            if not matches:
+                                ui.label("No matches found").classes("text-grey-6")
+                            for m in matches[:10]:
+                                authors = ", ".join(m.authors) or "unknown"
+                                year = f" ({m.publish_year})" if m.publish_year else ""
+                                with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
+                                    with ui.item_section():
+                                        ui.item_label(m.title or "?")
+                                        ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
+
+                    def show_picker(result) -> None:
+                        body.clear()
+                        checks: dict[str, ui.checkbox] = {}
+                        with body:
+                            ui.button("Back to matches", icon="arrow_back", on_click=show_candidates).props(
+                                "flat dense no-caps"
+                            )
+                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
+                                with ui.list().props("dense").classes("w-full"):
+                                    for key, source in controller.match_field_values(result).items():
+                                        current = get_field(b, key)
+                                        with ui.item():
+                                            with ui.item_section().props("avatar"):
+                                                checks[key] = ui.checkbox(value=(source != (current or None)))
+                                            with ui.item_section():
+                                                ui.item_label(f"{field_labels.get(key, key)}: {source}")
+                                                ui.item_label(f"current: {current or '(none)'}").props("caption")
+                                    if result.cover_url:
+                                        with ui.item():
+                                            with ui.item_section().props("avatar"):
+                                                checks["cover"] = ui.checkbox(value=(result.cover_url != b.cover_url))
+                                            with ui.item_section():
+                                                ui.item_label("Cover art")
+                                                ui.item_label(result.cover_url).props("caption")
+
+                            def _apply(res=result) -> None:
+                                selected = {k for k, c in checks.items() if c.value}
+                                if not selected:
+                                    ui.notify("No fields selected")
+                                    return
+                                controller.apply_match_fields(b, res, selected)
+                                dialog.close()
+                                ui.notify(f"Applied {len(selected)} field(s) from {res.provider}")
+                                refresh_list()
+                                show_detail(b.id)
+
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                ui.button("Cancel", on_click=dialog.close).props("flat")
+                                ui.button("Apply selected", icon="done_all", on_click=_apply)
+
+                    show_candidates()
+                dialog.open()
+
+            async def _tag_dialog(b=book) -> None:
+                plan = controller.tag_plan(b)
+                with ui.dialog() as dialog, ui.card().classes("w-96"):
+                    ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")
+                    for warning in plan.warnings:
+                        with ui.row().classes("items-center no-wrap"):
+                            ui.icon("warning", color="warning")
+                            ui.label(warning).classes("text-caption text-warning")
+                    if plan.embed_cover:
+                        ui.label("Cover art will be embedded.").classes("text-caption text-grey-7")
+                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
+                        with ui.list().props("dense").classes("w-full"):
+                            for fp in plan.files:
+                                with ui.item():
+                                    with ui.item_section():
+                                        ui.item_label(fp.path.name)
+                                        ui.item_label(", ".join(fp.changed_fields) or "no changes").props(
+                                            "caption"
+                                        )
+                    actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
+                    with actions:
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                        commit_btn = ui.button("Write tags", icon="sell")
+
+                    async def _commit() -> None:
+                        commit_btn.props("loading=true")
+                        try:
+                            result = await controller.write_tags(b)
+                        finally:
+                            commit_btn.props(remove="loading")
+                        actions.clear()
+                        with actions:
+                            note = f"Wrote {result.written} file(s)" + (
+                                f", {result.failed} failed" if result.failed else ""
+                            )
+                            ui.label(note).classes("text-caption q-mr-auto self-center")
+                            ui.button(
+                                "Undo",
+                                icon="undo",
+                                on_click=lambda: (
+                                    controller.undo_tag_batch(),
+                                    ui.notify("Reverted tag write (embedded cover kept)"),
                                     dialog.close(),
-                                    ui.notify(f"Applied {result.provider}"),
-                                    refresh_list(),
-                                    show_detail(b.id),
-                                )
-                            ).props("clickable"):
-                                with ui.item_section():
-                                    ui.item_label(m.title or "?")
-                                    ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
-                    ui.button("Close", on_click=dialog.close).props("flat")
+                                ),
+                            ).props("flat")
+                            ui.button("Close", on_click=dialog.close).props("flat")
+                        refresh_list()
+                        refresh_status()
+
+                    commit_btn.on_click(_commit)
                 dialog.open()
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Save", icon="save", on_click=_save)
                 ui.button("Compare matches", icon="search", on_click=_compare).props("outline")
+                ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
                 ui.button(
                     "Mark ready",
                     icon="check",
@@ -262,8 +356,61 @@ def render_workspace(controller: AppController) -> None:
                 refresh_status()
                 show_bulk()
 
+            async def _bulk_tag_dialog() -> None:
+                plans = [(b, controller.tag_plan(b)) for b in books]
+                total_files = sum(len(p.files) for _, p in plans)
+                with ui.dialog() as dialog, ui.card().classes("w-96"):
+                    ui.label(f"Write tags to {len(books)} books ({total_files} files)").classes(
+                        "text-subtitle1"
+                    )
+                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
+                        with ui.list().props("dense").classes("w-full"):
+                            for b, plan in plans:
+                                with ui.item():
+                                    with ui.item_section():
+                                        ui.item_label(b.title or "(untitled)")
+                                        note = f"{len(plan.files)} file(s)" + (
+                                            f" · {len(plan.warnings)} warning(s)" if plan.warnings else ""
+                                        )
+                                        ui.item_label(note).props("caption")
+                    actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
+                    with actions:
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                        commit_btn = ui.button("Write tags", icon="sell")
+
+                    async def _commit() -> None:
+                        commit_btn.props("loading=true")
+                        try:
+                            results = await controller.write_tags_books(books)
+                        finally:
+                            commit_btn.props(remove="loading")
+                        wrote = sum(r.written for r in results)
+                        failed = sum(r.failed for r in results)
+                        actions.clear()
+                        with actions:
+                            note = f"Wrote {wrote} file(s) across {len(books)} books" + (
+                                f", {failed} failed" if failed else ""
+                            )
+                            ui.label(note).classes("text-caption q-mr-auto self-center")
+                            ui.button(
+                                "Undo",
+                                icon="undo",
+                                on_click=lambda: (
+                                    controller.undo_tag_batch(),
+                                    ui.notify("Reverted tag write (embedded covers kept)"),
+                                    dialog.close(),
+                                ),
+                            ).props("flat")
+                            ui.button("Close", on_click=dialog.close).props("flat")
+                        refresh_list()
+                        refresh_status()
+
+                    commit_btn.on_click(_commit)
+                dialog.open()
+
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
+                ui.button("Write tags", icon="sell", on_click=_bulk_tag_dialog).props("outline")
                 ui.button(
                     "Clear selection",
                     icon="clear",
@@ -276,6 +423,18 @@ def render_workspace(controller: AppController) -> None:
                 ).props("flat")
 
     # --- book list ---
+    def _select_all(book_ids: list[str]) -> None:
+        selected_ids.update(book_ids)
+        refresh_list()
+        refresh_status()
+        _after_select()
+
+    def _deselect_all() -> None:
+        selected_ids.clear()
+        refresh_list()
+        refresh_status()
+        _after_select()
+
     def refresh_list() -> None:
         list_container.clear()
         books = _books_for_scope()
@@ -283,6 +442,14 @@ def render_workspace(controller: AppController) -> None:
             if not books:
                 ui.label("No books in this view").classes("text-grey-6 q-pa-md")
                 return
+            ids = [b.id for b in books]
+            with ui.row().classes("items-center q-gutter-xs q-px-sm q-pb-xs"):
+                ui.button("Select all", icon="done_all", on_click=lambda: _select_all(ids)).props(
+                    "flat dense no-caps"
+                )
+                ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
+                    "flat dense no-caps"
+                ).set_enabled(bool(selected_ids))
             with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
                     with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):

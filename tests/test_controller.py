@@ -566,3 +566,96 @@ def test_foster_files_reports_per_file_failure(tmp_path):
     assert results[0].error and results[0].destination is None
     assert (author / "Book.mp3").exists()  # left in place
     ctx.close()
+
+
+def test_tag_plan_and_write_tags_roundtrip(tmp_path):
+    from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
+    from colophon.core.models import EmbeddedTags, SourceFile
+
+    ctx = _ctx(tmp_path)
+    f = tmp_path / "ingest" / "01.mp3"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"")
+    write_embedded_tags(f, EmbeddedTags(title="Old"))
+    book = BookUnit.new(source_folder=f.parent)
+    book.title = "New Title"
+    book.authors = ["Author"]
+    book.source_files = [SourceFile(path=f, size=1, duration_seconds=60.0, ext="mp3")]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+
+    plan = ctrl.tag_plan(book)
+    assert "title" in plan.files[0].changed_fields
+
+    result = asyncio.run(ctrl.write_tags(book))
+    assert result.written == 1
+    assert read_embedded_tags(f).title == "New Title"
+
+    assert ctrl.undo_tag_batch() is True
+    assert read_embedded_tags(f).title == "Old"
+    ctx.close()
+
+
+def test_process_one_embeds_tags_into_the_m4b(tmp_path, make_audio):
+    from colophon.adapters.tags import read_embedded_tags
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.publish_year = 1965
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    result = AppController(ctx).process_one(book)
+    assert result.organized is True
+    organized = ctx.books.get(book.id)
+    out = organized.output_path
+    assert out is not None and out.suffix == ".m4b"
+    tags = read_embedded_tags(out)
+    assert tags.title == "Dune" and tags.artist == "Frank Herbert" and tags.year == 1965
+    ops = ctx.operations.list_batch(ctx.operations.latest_batch_id())
+    types = {op.op_type for op in ops}
+    assert "tag_write" in types and "organize" in types
+    # the tag_write op targets the FINAL organized M4B, not the staging path
+    tag_op = next(op for op in ops if op.op_type == "tag_write")
+    assert tag_op.target == str(out)
+    ctx.close()
+
+
+def test_apply_match_fields_applies_only_selected_and_captures_cover(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.title = "Old Title"
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", title="New Title", authors=["Brandon Sanderson"],
+        publish_year=2006, cover_url="https://covers.example/x.jpg",
+    )
+    AppController(ctx).apply_match_fields(book, result, {"title", "cover"})
+    got = ctx.books.get(book.id)
+    assert got.title == "New Title"
+    assert got.authors == []
+    assert got.publish_year is None
+    assert got.cover_url == "https://covers.example/x.jpg"
+    assert got.provenance.get("title") == "audnexus"
+    ctx.close()
+
+
+def test_apply_match_applies_all_present_fields_and_cover(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", title="T", authors=["A"], narrators=["N"],
+        series_name="S", series_sequence=1.0, publish_year=2006, asin="B00", cover_url="https://c/x.jpg",
+    )
+    AppController(ctx).apply_match(book, result)
+    got = ctx.books.get(book.id)
+    assert got.title == "T" and got.authors == ["A"] and got.narrators == ["N"]
+    assert got.series[0].name == "S" and got.publish_year == 2006 and got.asin == "B00"
+    assert got.cover_url == "https://c/x.jpg"
+    ctx.close()

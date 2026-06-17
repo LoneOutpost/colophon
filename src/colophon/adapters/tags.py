@@ -9,14 +9,20 @@ from __future__ import annotations
 from pathlib import Path
 
 from colophon.core.coerce import to_float, year_or_none
+from colophon.core.errors import TagWriteError
 from colophon.core.models import EmbeddedTags
+
+# Extension dispatch, shared by the read and write paths so the two cannot drift
+# (round-trip parity depends on read and write routing a file to the same codec).
+_MP3_EXT = ".mp3"
+_MP4_EXTS = {".m4a", ".m4b", ".mp4", ".aac"}
 
 
 def read_embedded_tags(path: Path) -> EmbeddedTags:
     ext = path.suffix.lower()
-    if ext == ".mp3":
+    if ext == _MP3_EXT:
         return _read_mp3(path)
-    if ext in {".m4a", ".m4b", ".mp4", ".aac"}:
+    if ext in _MP4_EXTS:
         return _read_mp4(path)
     return EmbeddedTags()
 
@@ -95,3 +101,136 @@ def _read_mp4(path: Path) -> EmbeddedTags:
         description=_first(m.get("desc")) or _first(m.get("\xa9cmt")),
         asin=freeform("asin"),
     )
+
+
+def write_embedded_tags(path: Path, tags: EmbeddedTags) -> None:
+    """Write `tags` into the audio file at `path`, dispatched by extension.
+
+    Uses the same ID3 frame / MP4 atom keys the read side reads, so a written
+    file reads back as the same EmbeddedTags. The managed fields mirror `tags`
+    exactly: a non-None value is set and a None value clears that field, so the
+    file's managed tags always equal `tags` (this makes writes idempotent and
+    lets a prior snapshot be restored faithfully on revert). Tags outside the
+    managed set are left intact. Raises TagWriteError on an unsupported format or
+    a mutagen failure.
+    """
+    ext = path.suffix.lower()
+    try:
+        if ext == _MP3_EXT:
+            _write_mp3(path, tags)
+        elif ext in _MP4_EXTS:
+            _write_mp4(path, tags)
+        else:
+            raise TagWriteError(f"unsupported audio format for writing: {ext}")
+    except TagWriteError:
+        raise
+    except Exception as e:  # mutagen/OS failure -> typed domain error
+        raise TagWriteError(f"write tags to {path} failed: {e}") from e
+
+
+def _write_mp3(path: Path, tags: EmbeddedTags) -> None:
+    from mutagen.id3 import (  # type: ignore[attr-defined]
+        COMM,
+        ID3,
+        TALB,
+        TCON,
+        TDRC,
+        TIT2,
+        TPE1,
+        TXXX,
+        ID3NoHeaderError,
+    )
+
+    try:
+        id3 = ID3(path)
+    except ID3NoHeaderError:
+        id3 = ID3()
+
+    def set_text(frame_cls, value: object) -> None:
+        id3.delall(frame_cls.__name__)  # clear first so a None value removes the frame
+        if value is None:
+            return
+        id3.add(frame_cls(encoding=3, text=str(value)))
+
+    def set_txxx(desc: str, value: object) -> None:
+        id3.delall(f"TXXX:{desc}")
+        if value is None:
+            return
+        id3.add(TXXX(encoding=3, desc=desc, text=str(value)))
+
+    set_text(TIT2, tags.title)
+    set_text(TALB, tags.album)
+    set_text(TPE1, tags.artist)
+    set_text(TDRC, tags.year)
+    set_text(TCON, tags.genre)
+    id3.delall("COMM")  # clear first so a None description removes the comment frame
+    if tags.description is not None:
+        id3.add(COMM(encoding=3, lang="eng", desc="", text=str(tags.description)))
+    set_txxx("narrator", tags.narrator)
+    set_txxx("series", tags.series)
+    set_txxx("sequence", tags.sequence)
+    set_txxx("asin", tags.asin)
+    id3.save(path, v2_version=3)
+
+
+def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
+    from mutagen.mp4 import MP4, MP4FreeForm
+
+    m = MP4(path)
+
+    def set_atom(key: str, value: object) -> None:
+        m.pop(key, None)  # clear first so a None value removes the atom
+        if value is None:
+            return
+        m[key] = [str(value)]
+
+    def set_freeform(name: str, value: object) -> None:
+        key = f"----:com.apple.iTunes:{name}"
+        m.pop(key, None)
+        if value is None:
+            return
+        m[key] = [MP4FreeForm(str(value).encode("utf-8"))]
+
+    set_atom("\xa9nam", tags.title)
+    set_atom("\xa9alb", tags.album)
+    set_atom("\xa9ART", tags.artist)
+    set_atom("\xa9day", tags.year)
+    set_atom("\xa9gen", tags.genre)
+    set_atom("desc", tags.description)
+    m.pop("\xa9cmt", None)  # clear the legacy comment atom the reader falls back to, so desc is authoritative
+    set_freeform("narrator", tags.narrator)
+    set_freeform("series", tags.series)
+    set_freeform("sequence", tags.sequence)
+    set_freeform("asin", tags.asin)
+    m.save()
+
+
+def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
+    """Embed cover art into the audio file at `path`. mime is 'image/png' or
+    'image/jpeg'. Replaces any existing cover. Raises TagWriteError on an
+    unsupported format or a mutagen failure."""
+    ext = path.suffix.lower()
+    try:
+        if ext == _MP3_EXT:
+            from mutagen.id3 import APIC, ID3, ID3NoHeaderError  # type: ignore[attr-defined]
+
+            try:
+                id3 = ID3(path)
+            except ID3NoHeaderError:
+                id3 = ID3()
+            id3.delall("APIC")
+            id3.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=image_bytes))
+            id3.save(path, v2_version=3)
+        elif ext in _MP4_EXTS:
+            from mutagen.mp4 import MP4, MP4Cover
+
+            fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
+            m = MP4(path)
+            m["covr"] = [MP4Cover(image_bytes, imageformat=fmt)]
+            m.save()
+        else:
+            raise TagWriteError(f"unsupported audio format for cover: {ext}")
+    except TagWriteError:
+        raise
+    except Exception as e:
+        raise TagWriteError(f"embed cover into {path} failed: {e}") from e

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,10 +13,11 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
-from colophon.core.models import BookState, BookUnit, Provenance, _Base
+from colophon.core.models import BookState, BookUnit, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
+from colophon.services.cover import ensure_cached_cover
 from colophon.services.editing import (
     apply_fields,
     remap_field,
@@ -32,9 +34,19 @@ from colophon.services.foster import FosterResult, foster_one
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
 from colophon.services.organize import organize_book
+from colophon.services.tag_ops import (
+    TagCommitResult,
+    TagPlan,
+    commit_tag,
+    plan_tag,
+    revert_tag_batch,
+    tag_file,
+)
 from colophon.services.undo import undo_batch
 
 logger = logging.getLogger(__name__)
+
+_OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 
 
 class ProcessResult(_Base):
@@ -61,7 +73,12 @@ class AppController:
         roots = roots or self.ctx.config.scan_paths
         count = 0
         for root in roots:
-            count += len(scan_ingest(self.ctx.books, root, template=self.ctx.config.filename_template))
+            count += len(scan_ingest(
+                self.ctx.books,
+                root,
+                template=self.ctx.config.filename_template,
+                directory_scheme=self.ctx.config.directory_scheme,
+            ))
         return count
 
     async def identify_pending(self) -> None:
@@ -226,7 +243,16 @@ class AppController:
         for parent in parents:
             # scan_ingest walks the parent's full subtree (os.walk), so this both
             # registers the new child book(s) and refreshes the parent's own book.
-            scan_ingest(self.ctx.books, parent, template=template)
+            # Inference depth is measured from `parent` here (not the configured
+            # scan root), so a multi-segment directory_scheme generally won't match
+            # on a foster re-scan; a later full scan re-derives it. This only ever
+            # yields fewer inferences, never wrong ones (inference is weak evidence).
+            scan_ingest(
+                self.ctx.books,
+                parent,
+                template=template,
+                directory_scheme=self.ctx.config.directory_scheme,
+            )
             if not self._has_direct_audio(parent):
                 self.ctx.books.delete(BookUnit.new(source_folder=parent).id)
         return results
@@ -238,6 +264,39 @@ class AppController:
             return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
         except OSError:
             return False
+
+    def tag_plan(self, book: BookUnit) -> TagPlan:
+        """The dry-run preview of writing this book's metadata into its files."""
+        return plan_tag(book)
+
+    async def write_tags(self, book: BookUnit) -> TagCommitResult:
+        """Write tags into one book's files. See write_tags_books."""
+        (result,) = await self.write_tags_books([book])
+        return result
+
+    async def write_tags_books(self, books: list[BookUnit]) -> list[TagCommitResult]:
+        """Fetch+cache each book's cover (best effort), then write tags into its
+        files on a worker thread, logging every write for recovery. All books share
+        one batch id, so a single undo reverts the whole selection."""
+        batch_id = uuid.uuid4().hex
+        results: list[TagCommitResult] = []
+        for book in books:
+            await ensure_cached_cover(book, dest_dir=book.source_folder)
+            self.ctx.books.upsert(book)
+            results.append(
+                await asyncio.to_thread(
+                    commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
+                )
+            )
+        return results
+
+    def undo_tag_batch(self) -> bool:
+        """Revert the most recent tag batch. Returns False if there is none."""
+        batch_id = self.ctx.operations.latest_batch_id()
+        if batch_id is None:
+            return False
+        revert_tag_batch(self.ctx.operations, batch_id)
+        return True
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)
@@ -296,9 +355,11 @@ class AppController:
         results = [r for batch in gathered for r in batch]
         return score_identification(book, results).ranked
 
-    def apply_match(self, book: BookUnit, result: SourceResult) -> str:
-        """Apply a chosen source result's fields to `book` (undoable), stamping the
-        source as provenance, and re-sync the sidecar."""
+    @staticmethod
+    def match_field_values(result: SourceResult) -> dict[str, str | None]:
+        """Map a source result's present fields to editable-field updates. The
+        single source of truth for which fields a match offers (the UI picker and
+        apply both consume this), so the two cannot drift."""
         updates: dict[str, str | None] = {}
         if result.title:
             updates["title"] = result.title
@@ -316,9 +377,27 @@ class AppController:
             updates["asin"] = result.asin
         if result.description:
             updates["description"] = result.description
+        return updates
+
+    def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
+        """Apply only the chosen fields from `result` (per-field selection), stamping
+        the source as provenance. Returns the batch id of the editable-field changes
+        (undoable). The pseudo-field "cover" captures result.cover_url onto the book
+        (fetched/embedded later); that capture is persisted but is NOT part of the
+        undoable batch."""
+        if "cover" in fields and result.cover_url:
+            book.cover_url = result.cover_url
+        updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch
+
+    def apply_match(self, book: BookUnit, result: SourceResult) -> str:
+        """Apply all present fields from a chosen source result (and its cover)."""
+        fields = set(self.match_field_values(result))
+        if result.cover_url:
+            fields.add("cover")
+        return self.apply_match_fields(book, result, fields)
 
     # --- encode + organize ---
     def ready_books(self) -> list[BookUnit]:
@@ -340,15 +419,26 @@ class AppController:
             book.state = BookState.FAILED
             self.ctx.books.upsert(book)
             return ProcessResult(book_id=book.id, encoded=False, detail=enc.error)
+
         org = organize_book(self.ctx.books, book, enc.output_path, root=library_root, patterns=self.ctx.patterns)
-        if not org.moved:
+        if not org.moved or org.target_path is None:
             book.state = BookState.FAILED
             book.touch()
             self.ctx.books.upsert(book)
-        return ProcessResult(
-            book_id=book.id, encoded=True, organized=org.moved,
-            detail=("collision" if org.collision else org.error),
-        )
+            return ProcessResult(
+                book_id=book.id, encoded=True, organized=False,
+                detail=("collision" if org.collision else org.error),
+            )
+
+        # Embed tags into the M4B at its final location so the audit record's path
+        # is truthful and any later revert targets the real file (FR-5.3 / FR-8.4).
+        batch_id = uuid.uuid4().hex
+        self.ctx.operations.record(OperationRecord(
+            batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
+            target=str(org.target_path), before=str(enc.output_path), outcome="ok",
+        ))
+        tag_file(org.target_path, book, operations=self.ctx.operations, batch_id=batch_id)
+        return ProcessResult(book_id=book.id, encoded=True, organized=True)
 
     def process_ready(
         self,

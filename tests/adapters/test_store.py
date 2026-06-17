@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookState, BookUnit
+from colophon.adapters.repository.store import BookUnitRepo, OperationRepo, connect, migrate
+from colophon.core.models import BookState, BookUnit, OperationRecord
 
 
 def _table_names(conn):
@@ -18,7 +18,7 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     assert "book_units" in tables
     assert "schema_version" in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 2
+    assert version == 3
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -26,7 +26,7 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 2
+    assert version == 3
 
 
 def _repo(tmp_path: Path) -> BookUnitRepo:
@@ -148,3 +148,36 @@ def test_delete_removes_book(tmp_path: Path):
 def test_delete_missing_id_is_noop(tmp_path: Path):
     repo = _repo(tmp_path)
     repo.delete("does-not-exist")  # must not raise
+
+
+def _op_repo(tmp_path: Path) -> OperationRepo:
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    return OperationRepo(conn)
+
+
+def test_operations_table_exists(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    assert "operations" in _table_names(conn)
+
+
+def test_record_and_list_batch_roundtrips(tmp_path: Path):
+    repo = _op_repo(tmp_path)
+    repo.record(OperationRecord(
+        batch_id="b1", book_id="bk", op_type="tag_write", target="/x/01.mp3",
+        before='{"title": "old"}', after='{"title": "new"}', outcome="ok",
+    ))
+    ops = repo.list_batch("b1")
+    assert len(ops) == 1
+    assert ops[0].target == "/x/01.mp3" and ops[0].before == '{"title": "old"}'
+    assert ops[0].outcome == "ok"
+
+
+def test_latest_batch_id_and_mark_reverted(tmp_path: Path):
+    repo = _op_repo(tmp_path)
+    repo.record(OperationRecord(batch_id="b1", book_id="bk", op_type="tag_write", target="/x/01.mp3"))
+    repo.record(OperationRecord(batch_id="b2", book_id="bk", op_type="tag_write", target="/x/02.mp3"))
+    assert repo.latest_batch_id() == "b2"
+    repo.mark_reverted("b2")
+    assert repo.latest_batch_id() == "b1"

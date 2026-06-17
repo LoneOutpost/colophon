@@ -96,6 +96,7 @@ class BookUnit(_Base):
     asin: str | None = None
     language: str | None = None
     cover_path: Path | None = None
+    cover_url: str | None = None  # source-provided cover image URL, fetched into cover_path
     output_path: Path | None = None  # the produced M4B's final location once organized
 
     provenance: dict[str, str] = {}
@@ -129,6 +130,23 @@ class EditChange(_Base):
     field: str
     old_value: str | None = None
     new_value: str | None = None
+
+
+class OperationRecord(_Base):
+    """One logged file/tag operation, retained for audit and recovery.
+
+    `before`/`after` are JSON snapshots (e.g. EmbeddedTags) so a tag write can be
+    reverted by replaying `before`. `applied_at`/`reverted` are managed by the repo.
+    """
+
+    batch_id: str
+    book_id: str
+    op_type: str
+    target: str
+    before: str | None = None
+    after: str | None = None
+    outcome: str = "ok"
+    detail: str | None = None
 
 
 class EmbeddedTags(_Base):

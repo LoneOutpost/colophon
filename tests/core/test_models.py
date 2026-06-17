@@ -125,3 +125,11 @@ def test_book_unit_has_optional_output_path():
     bu.output_path = _P("/library/Author/Title/Title.m4b")
     restored = BookUnit.model_validate_json(bu.model_dump_json())
     assert restored.output_path == _P("/library/Author/Title/Title.m4b")
+
+
+def test_book_unit_carries_cover_url_and_roundtrips_json():
+    book = BookUnit.new(source_folder=Path("/x"))
+    assert book.cover_url is None
+    book.cover_url = "https://covers.example/abc-L.jpg"
+    restored = BookUnit.model_validate_json(book.model_dump_json())
+    assert restored.cover_url == "https://covers.example/abc-L.jpg"

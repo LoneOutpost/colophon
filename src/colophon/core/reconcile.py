@@ -31,9 +31,11 @@ def reconcile(
     sidecar: SidecarMetadata | None = None,
     dir_title: str | None,
     filename_fields: dict[str, str],
+    directory_fields: dict[str, str] | None = None,
 ) -> None:
     """Populate `book`'s candidate fields and provenance in place."""
     sc = sidecar  # alias for brevity
+    dirf = directory_fields or {}
 
     # title: embedded.title -> embedded.album -> sidecar -> directory -> filename
     if embedded.title:
@@ -57,6 +59,8 @@ def reconcile(
         book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
     elif sc and sc.authors:
         book.authors, book.provenance["authors"] = list(sc.authors), Provenance.SIDECAR.value
+    elif dirf.get("author"):
+        book.authors, book.provenance["authors"] = [dirf["author"]], Provenance.DIRECTORY.value
     elif filename_fields.get("author"):
         book.authors = [filename_fields["author"]]
         book.provenance["authors"] = Provenance.FILENAME.value
@@ -77,6 +81,9 @@ def reconcile(
     elif sc and sc.series_name:
         book.series = [SeriesRef(name=sc.series_name, sequence=sc.series_sequence)]
         book.provenance["series"] = Provenance.SIDECAR.value
+    elif dirf.get("series"):
+        book.series = [SeriesRef(name=dirf["series"], sequence=None)]
+        book.provenance["series"] = Provenance.DIRECTORY.value
     elif filename_fields.get("series"):
         book.series = [SeriesRef(name=filename_fields["series"], sequence=to_float(filename_fields.get("sequence")))]
         book.provenance["series"] = Provenance.FILENAME.value

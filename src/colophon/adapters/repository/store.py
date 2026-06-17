@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from colophon.core.models import BookState, BookUnit, EditChange
+from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -137,4 +137,47 @@ class HistoryRepo:
 
     def mark_reverted(self, batch_id: str) -> None:
         self.conn.execute("UPDATE edit_history SET reverted = 1 WHERE batch_id = ?", (batch_id,))
+        self.conn.commit()
+
+
+@dataclass
+class OperationRepo:
+    conn: sqlite3.Connection
+
+    def record(self, op: OperationRecord, commit: bool = True) -> None:
+        self.conn.execute(
+            "INSERT INTO operations "
+            "(batch_id, book_id, op_type, target, before, after, applied_at, outcome, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                op.batch_id, op.book_id, op.op_type, op.target, op.before, op.after,
+                datetime.now(UTC).isoformat(), op.outcome, op.detail,
+            ),
+        )
+        if commit:
+            self.conn.commit()
+
+    def list_batch(self, batch_id: str) -> list[OperationRecord]:
+        rows = self.conn.execute(
+            "SELECT batch_id, book_id, op_type, target, before, after, outcome, detail "
+            "FROM operations WHERE batch_id = ? ORDER BY id",
+            (batch_id,),
+        ).fetchall()
+        return [
+            OperationRecord(
+                batch_id=r["batch_id"], book_id=r["book_id"], op_type=r["op_type"],
+                target=r["target"], before=r["before"], after=r["after"],
+                outcome=r["outcome"], detail=r["detail"],
+            )
+            for r in rows
+        ]
+
+    def latest_batch_id(self) -> str | None:
+        row = self.conn.execute(
+            "SELECT batch_id FROM operations WHERE reverted = 0 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return row["batch_id"] if row else None
+
+    def mark_reverted(self, batch_id: str) -> None:
+        self.conn.execute("UPDATE operations SET reverted = 1 WHERE batch_id = ?", (batch_id,))
         self.conn.commit()
