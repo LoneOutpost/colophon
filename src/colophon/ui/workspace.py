@@ -59,7 +59,7 @@ def render_workspace(controller: AppController) -> None:
     selected_ids: set[str] = set()
     scope: dict[str, object] = {"kind": "all", "key": None}
     foster_selected: set[Path] = set()
-    view: dict[str, object] = {"mode": "library", "cwd": None}
+    view: dict[str, object] = {"mode": "library", "cwd": None, "multiselect": False}
 
     def _scan_roots() -> list[Path]:
         return list(controller.ctx.config.scan_paths)
@@ -456,21 +456,23 @@ def render_workspace(controller: AppController) -> None:
                 ui.label("No books in this view").classes("text-grey-6 q-pa-md")
                 return
             ids = [b.id for b in books]
-            with ui.row().classes("items-center q-gutter-xs q-px-sm q-pb-xs"):
-                ui.button("Select all", icon="done_all", on_click=lambda: _select_all(ids)).props(
-                    "flat dense no-caps"
-                )
-                ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
-                    "flat dense no-caps"
-                ).set_enabled(bool(selected_ids))
+            if view["multiselect"]:
+                with ui.row().classes("items-center q-gutter-xs q-px-sm q-pb-xs"):
+                    ui.button("Select all", icon="done_all", on_click=lambda: _select_all(ids)).props(
+                        "flat dense no-caps"
+                    )
+                    ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
+                        "flat dense no-caps"
+                    ).set_enabled(bool(selected_ids))
             with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
                     with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):
-                        with ui.item_section().props("avatar"):
-                            ui.checkbox(
-                                value=book.id in selected_ids,
-                                on_change=lambda e, bid=book.id: _toggle(bid, e.value),
-                            )
+                        if view["multiselect"]:
+                            with ui.item_section().props("avatar"):
+                                ui.checkbox(
+                                    value=book.id in selected_ids,
+                                    on_change=lambda e, bid=book.id: _toggle(bid, e.value),
+                                )
                         with ui.item_section():
                             ui.item_label(book.title or "(untitled)")
                             ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
@@ -605,6 +607,9 @@ def render_workspace(controller: AppController) -> None:
                     "Browse scan folders and foster loose files into their own subfolders."
                 ).classes("text-caption text-grey-6")
                 return
+            ui.switch(
+                "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
+            ).props("dense").classes("q-mb-sm")
             with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
                 if tree.needs_id:
@@ -634,6 +639,15 @@ def render_workspace(controller: AppController) -> None:
         view["mode"] = mode
         refresh_nav()
         _render_middle()
+
+    def _set_multiselect(on: bool) -> None:
+        view["multiselect"] = on
+        if not on:
+            selected_ids.clear()  # leaving multiselect drops the selection
+        refresh_nav()
+        refresh_list()
+        refresh_status()
+        _after_select()
 
     def _set_scope(kind: str, key) -> None:
         scope["kind"], scope["key"] = kind, key
