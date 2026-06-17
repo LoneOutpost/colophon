@@ -342,6 +342,7 @@ class AppController:
             title=book.title,
             author=book.authors[0] if book.authors else None,
             asin=book.asin,
+            series=book.series[0].name if book.series else None,
         )
 
         async def _safe(source: object) -> list[SourceResult]:

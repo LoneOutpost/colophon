@@ -36,6 +36,8 @@ class GoogleBooksSource:
         q = f"intitle:{query.title}"
         if query.author:
             q += f"+inauthor:{query.author}"
+        if query.series:
+            q += f"+{query.series}"  # additive free-text term to disambiguate within a series
         try:
             resp = await self._get(q)
         except httpx.HTTPError:
