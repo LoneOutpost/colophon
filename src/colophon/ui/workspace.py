@@ -23,8 +23,20 @@ from colophon.core.models import BookUnit
 
 logger = logging.getLogger(__name__)
 
-# Height of the carded content area below the app header.
-_CONTENT_HEIGHT = "calc(100vh - 96px)"
+# Height of the carded content area, leaving room for the app header and footer.
+_CONTENT_HEIGHT = "calc(100vh - 136px)"
+
+# Sentinel marking a bulk-edit field whose selected books hold differing values.
+_MIXED = object()
+
+# Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
+_STATUS_BADGES = [
+    ("detected", "Detected", "grey-6"),
+    ("needs_review", "Needs review", "warning"),
+    ("ready", "Ready", "positive"),
+    ("organized", "Organized", "info"),
+    ("failed", "Failed", "negative"),
+]
 
 
 def _confidence_color(value: float) -> str:
@@ -202,6 +214,66 @@ def render_workspace(controller: AppController) -> None:
                                 ui.item_label(
                                     f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
                                 ).props("caption")
+
+    # --- bulk editor (shown when 2+ books are selected) ---
+    def show_bulk() -> None:
+        detail_container.clear()
+        books = _selected_books()
+        with detail_container:
+            with ui.row().classes("items-center w-full"):
+                ui.icon("edit_note").classes("text-h6")
+                ui.label(f"Editing {len(books)} books").classes("text-h6 q-ml-xs")
+            ui.label("Blank fields are left unchanged.").classes("text-caption text-grey-6")
+            ui.separator().classes("q-my-sm")
+
+            inputs: dict[str, ui.input | ui.textarea] = {}
+            originals: dict[str, object] = {}
+            for field in EDITABLE_FIELDS:
+                values = {(get_field(b, field) or "") for b in books}
+                mixed = len(values) > 1
+                common = "" if mixed else next(iter(values), "")
+                originals[field] = _MIXED if mixed else common
+                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                    if field == "description":
+                        inp = ui.textarea(field, value=common).props("dense").classes("col")
+                    else:
+                        inp = ui.input(field, value=common).props("dense").classes("col")
+                    if mixed:
+                        inp.props('placeholder="(multiple values)"')
+                    inputs[field] = inp
+
+            def _apply_bulk() -> None:
+                changed: dict[str, str | None] = {}
+                for field, inp in inputs.items():
+                    current = inp.value or ""
+                    original = originals[field]
+                    if original is _MIXED:
+                        if current:  # only touch a mixed field if the user typed something
+                            changed[field] = current
+                    elif current != original:
+                        changed[field] = current or None
+                if not changed:
+                    ui.notify("No changes")
+                    return
+                for field, value in changed.items():
+                    controller.bulk_edit(books, field, value)
+                ui.notify(f"Updated {len(changed)} field(s) on {len(books)} books")
+                refresh_list()
+                refresh_status()
+                show_bulk()
+
+            with ui.row().classes("q-gutter-sm q-mt-sm"):
+                ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
+                ui.button(
+                    "Clear selection",
+                    icon="clear",
+                    on_click=lambda: (
+                        selected_ids.clear(),
+                        refresh_list(),
+                        refresh_status(),
+                        show_detail(""),
+                    ),
+                ).props("flat")
 
     # --- book list ---
     def refresh_list() -> None:
@@ -388,15 +460,49 @@ def render_workspace(controller: AppController) -> None:
         refresh_nav()
         _render_middle()
 
+    def _after_select() -> None:
+        n = len(selected_ids)
+        if n >= 2:
+            show_bulk()
+        elif n == 1:
+            show_detail(next(iter(selected_ids)))
+        else:
+            show_detail("")
+
     def _toggle(book_id: str, on: bool) -> None:
         if on:
             selected_ids.add(book_id)
         else:
             selected_ids.discard(book_id)
+        _after_select()
+        refresh_status()
+
+    def _undo() -> None:
+        if controller.undo_last():
+            ui.notify("Undid last change")
+        else:
+            ui.notify("Nothing to undo")
+        _refresh_all()
+
+    def refresh_status() -> None:
+        status_container.clear()
+        stats = controller.dashboard_stats()
+        with status_container:
+            ui.icon("library_books").classes("text-grey-7")
+            ui.label(f"{stats.get('total', 0)} books").classes("text-caption")
+            for state, label, color in _STATUS_BADGES:
+                count = stats.get(state, 0)
+                if count:
+                    ui.badge(f"{label} {count}").props(f"color={color}")
+            ui.space()
+            if selected_ids:
+                ui.label(f"{len(selected_ids)} selected").classes("text-caption text-grey-7")
+            ui.button("Undo", icon="undo", on_click=_undo).props("flat dense")
 
     def _refresh_all() -> None:
         refresh_nav()
         _render_middle()
+        refresh_status()
 
     # --- async actions ---
     async def _run(button, action, done_msg: str) -> None:
@@ -466,6 +572,9 @@ def render_workspace(controller: AppController) -> None:
             ui.separator()
             with ui.scroll_area().classes("col"):
                 detail_container = ui.column().classes("w-full gap-1")
+
+    with ui.footer().classes("bg-grey-2 text-grey-9 q-px-md q-py-xs"):
+        status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
     show_detail("")  # initial empty-state in the detail pane
