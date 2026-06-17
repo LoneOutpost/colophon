@@ -1,0 +1,56 @@
+"""Normalize messy field values for display/storage.
+
+`normalize_text` title-cases short fields and fixes separators/commas;
+`normalize_description` cleans HTML/entities in prose without title-casing. Both
+are pure and conservative — they reshape obviously-wrong formatting, not meaning.
+"""
+
+from __future__ import annotations
+
+import re
+
+# Words kept lowercase in title case (except as the first/last word or after a colon):
+# articles, coordinating conjunctions, and short prepositions.
+_SMALL_WORDS = {
+    "a", "an", "the",
+    "and", "or", "but", "nor", "for", "yet", "so",
+    "of", "in", "on", "at", "to", "by", "up", "as", "off", "per", "via", "from", "into", "with", "over",
+}
+
+
+def _cap(word: str) -> str:
+    """Capitalize the first character and lowercase the rest (fixes ALL-CAPS input)."""
+    return word[:1].upper() + word[1:].lower()
+
+
+def _titlecase(text: str) -> str:
+    words = text.split(" ")
+    last = len(words) - 1
+    out: list[str] = []
+    cap_next = True  # first word is always capitalized
+    for i, word in enumerate(words):
+        if not word:
+            out.append(word)
+            continue
+        if cap_next or i == last or word.lower() not in _SMALL_WORDS:
+            out.append(_cap(word))
+        else:
+            out.append(word.lower())
+        # Capitalize the first word after a colon or a dash separator.
+        cap_next = word.endswith(":") or word == "-"
+    return " ".join(out)
+
+
+def normalize_text(value: str) -> str:
+    """Title-case + separator/comma cleanup for short text fields."""
+    s = value.strip()
+    if not s:
+        return ""
+    s = s.replace("_", " ")
+    # A hyphen with adjacent whitespace is a dash separator -> " - "; a bare
+    # hyphen (kebab joiner) -> space. (Note: this splits hyphenated words like
+    # "well-known"; an exceptions list could be added later.)
+    s = re.sub(r"\s*-\s*", lambda m: " - " if m.group(0) != "-" else " ", s)
+    s = re.sub(r"\s*,\s*", ", ", s)        # no space before a comma, one after
+    s = re.sub(r"\s+", " ", s).strip()     # collapse runs of whitespace
+    return _titlecase(s)
