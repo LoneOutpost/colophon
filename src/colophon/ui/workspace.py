@@ -155,9 +155,62 @@ def render_workspace(controller: AppController) -> None:
                     ui.button("Close", on_click=dialog.close).props("flat")
                 dialog.open()
 
+            async def _tag_dialog(b=book) -> None:
+                plan = controller.tag_plan(b)
+                with ui.dialog() as dialog, ui.card().classes("w-96"):
+                    ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")
+                    for warning in plan.warnings:
+                        with ui.row().classes("items-center no-wrap"):
+                            ui.icon("warning", color="warning")
+                            ui.label(warning).classes("text-caption text-warning")
+                    if plan.embed_cover:
+                        ui.label("Cover art will be embedded.").classes("text-caption text-grey-7")
+                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
+                        with ui.list().props("dense").classes("w-full"):
+                            for fp in plan.files:
+                                with ui.item():
+                                    with ui.item_section():
+                                        ui.item_label(fp.path.name)
+                                        ui.item_label(", ".join(fp.changed_fields) or "no changes").props(
+                                            "caption"
+                                        )
+                    actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
+                    with actions:
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                        commit_btn = ui.button("Write tags", icon="sell")
+
+                    async def _commit() -> None:
+                        commit_btn.props("loading=true")
+                        try:
+                            result = await controller.write_tags(b)
+                        finally:
+                            commit_btn.props(remove="loading")
+                        actions.clear()
+                        with actions:
+                            note = f"Wrote {result.written} file(s)" + (
+                                f", {result.failed} failed" if result.failed else ""
+                            )
+                            ui.label(note).classes("text-caption q-mr-auto self-center")
+                            ui.button(
+                                "Undo",
+                                icon="undo",
+                                on_click=lambda: (
+                                    controller.undo_tag_batch(),
+                                    ui.notify("Reverted tag write"),
+                                    dialog.close(),
+                                ),
+                            ).props("flat")
+                            ui.button("Close", on_click=dialog.close).props("flat")
+                        refresh_list()
+                        refresh_status()
+
+                    commit_btn.on_click(_commit)
+                dialog.open()
+
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Save", icon="save", on_click=_save)
                 ui.button("Compare matches", icon="search", on_click=_compare).props("outline")
+                ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
                 ui.button(
                     "Mark ready",
                     icon="check",
