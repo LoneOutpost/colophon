@@ -251,9 +251,10 @@ def render_workspace(controller: AppController) -> None:
         foster_selected.clear()
         msg = f"Fostered {ok} file(s)" + (f", {failed} failed" if failed else "")
         ui.notify(msg, type="negative" if failed and not ok else "positive")
-        refresh_folders()
+        # Stay in Folders mode: redraw the directory browser (moved files now show
+        # as subfolders) and refresh the nav so the new books register in Library.
         refresh_nav()
-        refresh_list()
+        _render_middle()
 
     def refresh_folders() -> None:
         list_container.clear()
