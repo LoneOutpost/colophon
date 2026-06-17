@@ -6,7 +6,6 @@ from nicegui import ui
 
 from colophon.controller import AppController
 from colophon.ui.settings import render_settings
-from colophon.ui.triage import render_triage
 from colophon.ui.workspace import render_workspace
 
 
@@ -14,10 +13,6 @@ def create_app(controller: AppController) -> None:
     @ui.page("/")
     def index() -> None:
         render_workspace(controller)
-
-    @ui.page("/triage")
-    def triage() -> None:
-        render_triage(controller)
 
     @ui.page("/settings")
     def settings() -> None:

@@ -6,7 +6,7 @@ from mutagen.id3 import ID3, TPE1
 
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
-from colophon.controller import AppController, TriageGroup
+from colophon.controller import AppController
 from colophon.core.models import BookState, BookUnit
 from colophon.core.sources import SourceResult
 
@@ -77,29 +77,6 @@ def test_dashboard_stats_counts_by_state(tmp_path):
     assert stats["ready"] == 1
     assert stats["needs_review"] == 1
     assert stats["total"] == 2
-    ctx.close()
-
-
-def test_triage_groups_pins_needs_id_and_groups_by_author(tmp_path):
-    ctx = _ctx(tmp_path)
-    # confident book with author
-    known = BookUnit.new(source_folder=tmp_path / "k")
-    known.title = "Words of Radiance"
-    known.authors = ["Brandon Sanderson"]
-    known.state = BookState.READY
-    # unidentified: no author
-    unknown = BookUnit.new(source_folder=tmp_path / "u")
-    unknown.title = "mystery"
-    unknown.state = BookState.NEEDS_REVIEW
-    ctx.books.upsert(known)
-    ctx.books.upsert(unknown)
-
-    groups = AppController(ctx).triage_groups()
-    assert isinstance(groups[0], TriageGroup)
-    assert groups[0].label == "Needs identification"
-    assert unknown.id in {b.id for b in groups[0].books}
-    author_group = next(g for g in groups if g.label == "Brandon Sanderson")
-    assert known.id in {b.id for b in author_group.books}
     ctx.close()
 
 
@@ -182,23 +159,6 @@ def test_process_ready_encode_failure_marks_failed(tmp_path, make_audio):
     assert len(results) == 1
     assert results[0].encoded is False
     assert results[0].detail is not None
-    ctx.close()
-
-
-def test_triage_groups_flat_returns_single_group(tmp_path):
-    ctx = _ctx(tmp_path)
-    low = BookUnit.new(source_folder=tmp_path / "low")
-    low.confidence = 0.2
-    high = BookUnit.new(source_folder=tmp_path / "high")
-    high.confidence = 0.9
-    ctx.books.upsert(high)
-    ctx.books.upsert(low)
-
-    groups = AppController(ctx).triage_groups(flat=True)
-    assert len(groups) == 1
-    assert groups[0].label == "All"
-    confidences = [b.confidence for b in groups[0].books]
-    assert confidences == sorted(confidences)
     ctx.close()
 
 

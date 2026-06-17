@@ -37,11 +37,6 @@ from colophon.services.undo import undo_batch
 logger = logging.getLogger(__name__)
 
 
-class TriageGroup(_Base):
-    label: str
-    books: list[BookUnit] = []  # noqa: RUF012 - pydantic field default, copied per instance
-
-
 class ProcessResult(_Base):
     book_id: str
     encoded: bool = False
@@ -81,27 +76,6 @@ class AppController:
         for state in BookState:
             stats[state.value] = sum(1 for b in books if b.state == state)
         return stats
-
-    # --- triage ---
-    def triage_groups(self, *, flat: bool = False) -> list[TriageGroup]:
-        books = self.ctx.books.list_all()
-        if flat:
-            ordered = sorted(books, key=lambda b: b.confidence)
-            return [TriageGroup(label="All", books=ordered)]
-
-        needs_id = [b for b in books if not b.authors and not b.series]
-        identified = [b for b in books if b.authors or b.series]
-        groups: list[TriageGroup] = []
-        if needs_id:
-            groups.append(TriageGroup(label="Needs identification", books=sorted(needs_id, key=lambda b: b.confidence)))
-        by_author: dict[str, list[BookUnit]] = {}
-        for b in identified:
-            author = b.authors[0] if b.authors else (b.series[0].name if b.series else "Unknown")
-            by_author.setdefault(author, []).append(b)
-        for author in sorted(by_author):
-            books_for = sorted(by_author[author], key=lambda b: (b.series[0].sequence if b.series and b.series[0].sequence is not None else 0.0))
-            groups.append(TriageGroup(label=author, books=books_for))
-        return groups
 
     def get_book(self, book_id: str) -> BookUnit | None:
         return self.ctx.books.get(book_id)
