@@ -96,6 +96,7 @@ class BookUnit(_Base):
     asin: str | None = None
     language: str | None = None
     cover_path: Path | None = None
+    cover_url: str | None = None  # source-provided cover image URL, fetched into cover_path
     output_path: Path | None = None  # the produced M4B's final location once organized
 
     provenance: dict[str, str] = {}
