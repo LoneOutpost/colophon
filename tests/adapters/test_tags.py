@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import pytest
 from mutagen.id3 import COMM, ID3, TALB, TIT2, TPE1, TXXX
 
-from colophon.adapters.tags import read_embedded_tags
+from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
+from colophon.core.errors import TagWriteError
 from colophon.core.models import EmbeddedTags
 
 
@@ -54,3 +56,33 @@ def test_reads_tags_from_m4b(make_audio):
     tags = read_embedded_tags(path)
     assert tags.title == "Dune"
     assert tags.artist == "Frank Herbert"
+
+
+def test_write_then_read_roundtrips_mp3(tmp_path: Path):
+    path = tmp_path / "ch01.mp3"
+    path.write_bytes(b"")
+    tags = EmbeddedTags(
+        title="The Way of Kings", album="The Way of Kings", artist="Brandon Sanderson",
+        narrator="Michael Kramer; Kate Reading", series="Stormlight Archive", sequence=1.0,
+        year=2010, genre="Fantasy", description="A long book.", asin="B0041JKFJW",
+    )
+    write_embedded_tags(path, tags)
+    assert read_embedded_tags(path) == tags
+
+
+def test_write_then_read_roundtrips_mp4(make_audio):
+    path = make_audio("book.m4b", seconds=1)
+    tags = EmbeddedTags(
+        title="Mistborn", album="Mistborn", artist="Brandon Sanderson", narrator="Michael Kramer",
+        series="Mistborn", sequence=1.0, year=2006, genre="Fantasy",
+        description="Heist with magic.", asin="B002UZMUVK",
+    )
+    write_embedded_tags(path, tags)
+    assert read_embedded_tags(path) == tags
+
+
+def test_write_unsupported_format_raises(tmp_path: Path):
+    path = tmp_path / "song.ogg"
+    path.write_bytes(b"")
+    with pytest.raises(TagWriteError):
+        write_embedded_tags(path, EmbeddedTags(title="x"))
