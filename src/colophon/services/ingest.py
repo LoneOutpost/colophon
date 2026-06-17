@@ -9,18 +9,20 @@ from colophon.adapters.repository.store import BookUnitRepo
 from colophon.adapters.scan import group_book_units
 from colophon.adapters.sidecar import read_sidecar
 from colophon.adapters.tags import read_embedded_tags
+from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookUnit
 from colophon.core.reconcile import reconcile
 
 
-def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str) -> list[BookUnit]:
+def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> list[BookUnit]:
     """Scan `root`, build a BookUnit per folder, reconcile evidence, and persist.
 
     Embedded tags are read from the first audio file in each unit; the filename
     template is applied to that same file. Returns the persisted units.
     """
     pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
     results: list[BookUnit] = []
     for unit in group_book_units(root):
         book = BookUnit.new(source_folder=unit.folder)
@@ -31,12 +33,14 @@ def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str) -> list[BookUn
         filename_fields = parse_filename(pattern, first.name) or {}
 
         sidecar = read_sidecar(unit.folder)
+        directory_fields = infer_from_path(unit.folder, root, scheme)
         reconcile(
             book,
             embedded=embedded,
             sidecar=sidecar,
             dir_title=unit.folder.name,
             filename_fields=filename_fields,
+            directory_fields=directory_fields,
         )
         repo.upsert(book)
         results.append(book)

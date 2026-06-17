@@ -127,3 +127,25 @@ def test_single_embedded_author_stays_single():
     reconcile(book, embedded=EmbeddedTags(artist="Douglas Adams"),
               sidecar=None, dir_title=None, filename_fields={})
     assert book.authors == ["Douglas Adams"]
+
+
+def test_directory_fields_fill_author_and_series_below_sidecar():
+    book = BookUnit.new(source_folder=Path("/x"))
+    reconcile(
+        book, embedded=EmbeddedTags(title="T"), sidecar=None, dir_title="T",
+        filename_fields={}, directory_fields={"author": "Brandon Sanderson", "series": "Stormlight Archive"},
+    )
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["authors"] == "directory"
+    assert book.series[0].name == "Stormlight Archive"
+    assert book.provenance["series"] == "directory"
+
+
+def test_embedded_outranks_directory_fields():
+    book = BookUnit.new(source_folder=Path("/x"))
+    reconcile(
+        book, embedded=EmbeddedTags(artist="Tagged Author"), sidecar=None, dir_title=None,
+        filename_fields={}, directory_fields={"author": "Dir Author"},
+    )
+    assert book.authors == ["Tagged Author"]
+    assert book.provenance["authors"] == "tag"

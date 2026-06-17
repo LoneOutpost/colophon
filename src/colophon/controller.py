@@ -73,7 +73,12 @@ class AppController:
         roots = roots or self.ctx.config.scan_paths
         count = 0
         for root in roots:
-            count += len(scan_ingest(self.ctx.books, root, template=self.ctx.config.filename_template))
+            count += len(scan_ingest(
+                self.ctx.books,
+                root,
+                template=self.ctx.config.filename_template,
+                directory_scheme=self.ctx.config.directory_scheme,
+            ))
         return count
 
     async def identify_pending(self) -> None:
@@ -238,7 +243,12 @@ class AppController:
         for parent in parents:
             # scan_ingest walks the parent's full subtree (os.walk), so this both
             # registers the new child book(s) and refreshes the parent's own book.
-            scan_ingest(self.ctx.books, parent, template=template)
+            scan_ingest(
+                self.ctx.books,
+                parent,
+                template=template,
+                directory_scheme=self.ctx.config.directory_scheme,
+            )
             if not self._has_direct_audio(parent):
                 self.ctx.books.delete(BookUnit.new(source_folder=parent).id)
         return results

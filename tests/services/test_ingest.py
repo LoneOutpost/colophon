@@ -99,3 +99,18 @@ def test_scan_ingest_uses_sidecar_for_series(tmp_path):
     assert book.narrators == ["Douglas Adams"]
     assert book.publish_year == 1987
     assert book.provenance["series"] == "sidecar"
+
+
+def test_scan_infers_author_from_directory_scheme(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Brandon Sanderson" / "Warbreaker"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, ingest, template="%title%", directory_scheme="Author/Title")
+    assert len(units) == 1
+    book = units[0]
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["authors"] == "directory"
+    assert book.title == "Warbreaker"
