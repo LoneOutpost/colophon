@@ -12,12 +12,17 @@ from colophon.core.coerce import to_float, year_or_none
 from colophon.core.errors import TagWriteError
 from colophon.core.models import EmbeddedTags
 
+# Extension dispatch, shared by the read and write paths so the two cannot drift
+# (round-trip parity depends on read and write routing a file to the same codec).
+_MP3_EXT = ".mp3"
+_MP4_EXTS = {".m4a", ".m4b", ".mp4", ".aac"}
+
 
 def read_embedded_tags(path: Path) -> EmbeddedTags:
     ext = path.suffix.lower()
-    if ext == ".mp3":
+    if ext == _MP3_EXT:
         return _read_mp3(path)
-    if ext in {".m4a", ".m4b", ".mp4", ".aac"}:
+    if ext in _MP4_EXTS:
         return _read_mp4(path)
     return EmbeddedTags()
 
@@ -108,9 +113,9 @@ def write_embedded_tags(path: Path, tags: EmbeddedTags) -> None:
     """
     ext = path.suffix.lower()
     try:
-        if ext == ".mp3":
+        if ext == _MP3_EXT:
             _write_mp3(path, tags)
-        elif ext in {".m4a", ".m4b", ".mp4", ".aac"}:
+        elif ext in _MP4_EXTS:
             _write_mp4(path, tags)
         else:
             raise TagWriteError(f"unsupported audio format for writing: {ext}")
@@ -201,7 +206,7 @@ def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
     unsupported format or a mutagen failure."""
     ext = path.suffix.lower()
     try:
-        if ext == ".mp3":
+        if ext == _MP3_EXT:
             from mutagen.id3 import APIC, ID3, ID3NoHeaderError  # type: ignore[attr-defined]
 
             try:
@@ -211,7 +216,7 @@ def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
             id3.delall("APIC")
             id3.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=image_bytes))
             id3.save(path, v2_version=3)
-        elif ext in {".m4a", ".m4b", ".mp4", ".aac"}:
+        elif ext in _MP4_EXTS:
             from mutagen.mp4 import MP4, MP4Cover
 
             fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG

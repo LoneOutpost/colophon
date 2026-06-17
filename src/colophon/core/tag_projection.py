@@ -23,7 +23,7 @@ def project_tags(book: BookUnit) -> EmbeddedTags:
         series=first_series.name if first_series else None,
         sequence=first_series.sequence if first_series else None,
         year=book.publish_year,
-        genre=None,
+        genre=None,  # BookUnit has no genre field; genre is intentionally not projected
         description=book.description,
         asin=book.asin,
     )
