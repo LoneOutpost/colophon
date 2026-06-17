@@ -617,6 +617,10 @@ def test_process_one_embeds_tags_into_the_m4b(tmp_path, make_audio):
     assert out is not None and out.suffix == ".m4b"
     tags = read_embedded_tags(out)
     assert tags.title == "Dune" and tags.artist == "Frank Herbert" and tags.year == 1965
-    types = {op.op_type for op in ctx.operations.list_batch(ctx.operations.latest_batch_id())}
+    ops = ctx.operations.list_batch(ctx.operations.latest_batch_id())
+    types = {op.op_type for op in ops}
     assert "tag_write" in types and "organize" in types
+    # the tag_write op targets the FINAL organized M4B, not the staging path
+    tag_op = next(op for op in ops if op.op_type == "tag_write")
+    assert tag_op.target == str(out)
     ctx.close()

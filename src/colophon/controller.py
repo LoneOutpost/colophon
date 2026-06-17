@@ -46,6 +46,8 @@ from colophon.services.undo import undo_batch
 
 logger = logging.getLogger(__name__)
 
+_OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
+
 
 class ProcessResult(_Base):
     book_id: str
@@ -384,23 +386,25 @@ class AppController:
             self.ctx.books.upsert(book)
             return ProcessResult(book_id=book.id, encoded=False, detail=enc.error)
 
-        batch_id = uuid.uuid4().hex
-        tag_file(enc.output_path, book, operations=self.ctx.operations, batch_id=batch_id)
-
         org = organize_book(self.ctx.books, book, enc.output_path, root=library_root, patterns=self.ctx.patterns)
-        if not org.moved:
+        if not org.moved or org.target_path is None:
             book.state = BookState.FAILED
             book.touch()
             self.ctx.books.upsert(book)
-        elif org.target_path is not None:
-            self.ctx.operations.record(OperationRecord(
-                batch_id=batch_id, book_id=book.id, op_type="organize",
-                target=str(org.target_path), before=str(enc.output_path), outcome="ok",
-            ))
-        return ProcessResult(
-            book_id=book.id, encoded=True, organized=org.moved,
-            detail=("collision" if org.collision else org.error),
-        )
+            return ProcessResult(
+                book_id=book.id, encoded=True, organized=False,
+                detail=("collision" if org.collision else org.error),
+            )
+
+        # Embed tags into the M4B at its final location so the audit record's path
+        # is truthful and any later revert targets the real file (FR-5.3 / FR-8.4).
+        batch_id = uuid.uuid4().hex
+        self.ctx.operations.record(OperationRecord(
+            batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
+            target=str(org.target_path), before=str(enc.output_path), outcome="ok",
+        ))
+        tag_file(org.target_path, book, operations=self.ctx.operations, batch_id=batch_id)
+        return ProcessResult(book_id=book.id, encoded=True, organized=True)
 
     def process_ready(
         self,

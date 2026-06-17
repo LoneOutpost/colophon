@@ -117,8 +117,8 @@ def commit_tag(book: BookUnit, *, operations: OperationRepo, batch_id: str) -> T
 
 
 def tag_file(path: Path, book: BookUnit, *, operations: OperationRepo, batch_id: str) -> bool:
-    """Embed the book's projected tags (+ cached cover) into a single file — e.g.
-    the produced M4B — and log the write. Returns True on success."""
+    """Embed the book's projected tags (+ cached cover) into a single file (e.g.
+    the produced M4B) and log the write. Returns True on success."""
     return _tag_and_log(
         path, project_tags(book), _load_cover(book),
         operations=operations, book_id=book.id, batch_id=batch_id,
