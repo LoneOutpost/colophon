@@ -7,6 +7,7 @@ are pure and conservative — they reshape obviously-wrong formatting, not meani
 
 from __future__ import annotations
 
+import html
 import re
 
 # Words kept lowercase in title case (except as the first/last word or after a colon):
@@ -54,3 +55,17 @@ def normalize_text(value: str) -> str:
     s = re.sub(r"\s*,\s*", ", ", s)        # no space before a comma, one after
     s = re.sub(r"\s+", " ", s).strip()     # collapse runs of whitespace
     return _titlecase(s)
+
+
+def normalize_description(value: str) -> str:
+    """Clean common HTML/entity cruft from prose (not full HTML): line-break tags
+    become newlines, other tags are stripped, entities are decoded, comma spacing
+    is fixed, and excess blank lines collapse. Title-case is NOT applied."""
+    s = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", value)      # <br>, <br/> -> newline
+    s = re.sub(r"(?i)</?\s*(?:p|div)[^>]*>", "\n", s)     # <p>/</p>/<div>/</div> -> newline
+    s = re.sub(r"<[^>]+>", "", s)                          # strip any remaining tags
+    s = html.unescape(s).replace("\xa0", " ")              # decode entities; nbsp -> space
+    s = re.sub(r"[ \t]*,[ \t]*", ", ", s)                  # comma spacing (not across newlines)
+    s = re.sub(r"[ \t]+\n", "\n", s)                       # drop line-trailing spaces
+    s = re.sub(r"\n{3,}", "\n\n", s)                       # collapse blank-line runs
+    return s.strip()
