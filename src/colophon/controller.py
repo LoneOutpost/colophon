@@ -28,6 +28,7 @@ from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
 from colophon.services.encode import encode_book
+from colophon.services.foster import FosterResult, foster_one
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
 from colophon.services.organize import organize_book
@@ -224,6 +225,43 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
         return new
+
+    def foster_files(self, paths: list[Path]) -> list[FosterResult]:
+        """Move each loose file into its own stem-named subdirectory, then
+        re-scan affected parents so the new single-file books register.
+
+        Re-scanning a parent updates its book to the remaining loose files (or,
+        if none remain, leaves a stale book that `scan_ingest` won't touch -- so
+        we prune any parent folder that no longer directly contains audio).
+        Returns one FosterResult per input path; a failure on one file does not
+        abort the batch.
+        """
+        results: list[FosterResult] = []
+        parents: set[Path] = set()
+        for path in paths:
+            try:
+                destination = foster_one(path)
+            except (OSError, ValueError) as e:
+                logger.warning(f"foster failed for {path}: {e}")
+                results.append(FosterResult(source=path, ok=False, error=str(e)))
+                continue
+            results.append(FosterResult(source=path, destination=destination, ok=True))
+            parents.add(path.parent)
+
+        template = self.ctx.config.filename_template
+        for parent in parents:
+            scan_ingest(self.ctx.books, parent, template=template)
+            if not self._has_direct_audio(parent):
+                self.ctx.books.delete(BookUnit.new(source_folder=parent).id)
+        return results
+
+    @staticmethod
+    def _has_direct_audio(folder: Path) -> bool:
+        """True if `folder` directly contains at least one audio file."""
+        try:
+            return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
+        except OSError:
+            return False
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)

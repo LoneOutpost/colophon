@@ -551,3 +551,58 @@ def test_rename_file_bad_name_returns_none(tmp_path):
     assert ctrl.rename_file(book, book.source_files[0].path, "  ") is None
     assert [sf.path.name for sf in ctx.books.get(book.id).source_files] == before
     ctx.close()
+
+
+def test_foster_files_creates_subdir_books_and_updates_parent(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Brandon Sanderson"
+    author.mkdir(parents=True)
+    (author / "Mistborn.mp3").write_bytes(b"")
+    (author / "Legion.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([author])  # one grouped book holding both loose files
+    grouped_id = BookUnit.new(source_folder=author).id
+    assert len(ctx.books.get(grouped_id).source_files) == 2
+
+    results = ctrl.foster_files([author / "Mistborn.mp3"])
+    assert len(results) == 1 and results[0].ok
+    assert results[0].destination == author / "Mistborn" / "Mistborn.mp3"
+
+    # The fostered file now scans as its own book...
+    fostered_id = BookUnit.new(source_folder=author / "Mistborn").id
+    assert ctx.books.get(fostered_id) is not None
+    # ...and the parent book retains only the remaining loose file.
+    parent_files = [sf.path.name for sf in ctx.books.get(grouped_id).source_files]
+    assert parent_files == ["Legion.mp3"]
+    ctx.close()
+
+
+def test_foster_files_prunes_parent_when_emptied(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Solo Author"
+    author.mkdir(parents=True)
+    (author / "OnlyBook.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([author])
+    grouped_id = BookUnit.new(source_folder=author).id
+    assert ctx.books.get(grouped_id) is not None
+
+    ctrl.foster_files([author / "OnlyBook.mp3"])
+    # Parent folder now has no direct audio -> its stale book is removed.
+    assert ctx.books.get(grouped_id) is None
+    assert ctx.books.get(BookUnit.new(source_folder=author / "OnlyBook").id) is not None
+    ctx.close()
+
+
+def test_foster_files_reports_per_file_failure(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Author"
+    author.mkdir(parents=True)
+    (author / "Book.mp3").write_bytes(b"")
+    (author / "Book").mkdir()  # collision: foster target already exists
+    ctrl = AppController(ctx)
+    results = ctrl.foster_files([author / "Book.mp3"])
+    assert len(results) == 1 and results[0].ok is False
+    assert results[0].error and results[0].destination is None
+    assert (author / "Book.mp3").exists()  # left in place
+    ctx.close()
