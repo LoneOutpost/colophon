@@ -134,3 +134,17 @@ def test_list_by_state_filters(tmp_path: Path):
     repo.upsert(review)
     got = repo.list_by_state(BookState.READY)
     assert [b.id for b in got] == [ready.id]
+
+
+def test_delete_removes_book(tmp_path: Path):
+    repo = _repo(tmp_path)
+    bu = BookUnit.new(source_folder=Path("/ingest/Gone"))
+    repo.upsert(bu)
+    assert repo.get(bu.id) is not None
+    repo.delete(bu.id)
+    assert repo.get(bu.id) is None
+
+
+def test_delete_missing_id_is_noop(tmp_path: Path):
+    repo = _repo(tmp_path)
+    repo.delete("does-not-exist")  # must not raise

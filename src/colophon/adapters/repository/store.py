@@ -80,6 +80,12 @@ class BookUnitRepo:
             return None
         return BookUnit.model_validate_json(row["data"])
 
+    def delete(self, id: str, commit: bool = True) -> None:
+        """Remove a book unit. No-op if the id is absent."""
+        self.conn.execute("DELETE FROM book_units WHERE id = ?", (id,))
+        if commit:
+            self.conn.commit()
+
     def list_all(self) -> list[BookUnit]:
         rows = self.conn.execute("SELECT data FROM book_units").fetchall()
         return [BookUnit.model_validate_json(r["data"]) for r in rows]
