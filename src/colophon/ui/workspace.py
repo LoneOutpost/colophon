@@ -59,7 +59,9 @@ def render_workspace(controller: AppController) -> None:
     selected_ids: set[str] = set()
     scope: dict[str, object] = {"kind": "all", "key": None}
     foster_selected: set[Path] = set()
-    view: dict[str, object] = {"mode": "library", "cwd": None, "multiselect": False}
+    view: dict[str, object] = {
+        "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
+    }
 
     def _scan_roots() -> list[Path]:
         return list(controller.ctx.config.scan_paths)
@@ -86,6 +88,8 @@ def render_workspace(controller: AppController) -> None:
                 b for b in all_books
                 if b.source_folder == folder or folder in b.source_folder.parents
             ]
+        if kind == "series" and key:
+            return [b for b in all_books if b.series and b.series[0].name == key]
         return all_books
 
     # --- detail pane ---
@@ -652,6 +656,11 @@ def render_workspace(controller: AppController) -> None:
             ui.switch(
                 "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
             ).props("dense").classes("q-mb-sm")
+            ui.toggle(
+                {"author": "By author", "series": "By series"},
+                value=view["group_by"],
+                on_change=lambda e: _set_group_by(e.value),
+            ).props("dense no-caps").classes("w-full q-mb-sm")
             with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
                 if kind == "folder":
@@ -667,13 +676,23 @@ def render_workspace(controller: AppController) -> None:
                         lambda: _set_scope("needs_id", None),
                         color="negative",
                     )
-                for author in tree.authors:
-                    _nav_item(
-                        author.name,
-                        "person",
-                        kind == "author" and key == author.name,
-                        lambda name=author.name: _set_scope("author", name),
-                    )
+                if view["group_by"] == "series":
+                    series_names = sorted({s.name for a in tree.authors for s in a.series})
+                    for name in series_names:
+                        _nav_item(
+                            name,
+                            "collections_bookmark",
+                            kind == "series" and key == name,
+                            lambda n=name: _set_scope("series", n),
+                        )
+                else:
+                    for author in tree.authors:
+                        _nav_item(
+                            author.name,
+                            "person",
+                            kind == "author" and key == author.name,
+                            lambda name=author.name: _set_scope("author", name),
+                        )
 
     def _render_middle() -> None:
         middle_title.text = "Folder contents" if view["mode"] == "folders" else "Books"
@@ -684,6 +703,12 @@ def render_workspace(controller: AppController) -> None:
 
     def _set_mode(mode: str) -> None:
         view["mode"] = mode
+        refresh_nav()
+        _render_middle()
+
+    def _set_group_by(value: str) -> None:
+        view["group_by"] = value
+        scope["kind"], scope["key"] = "all", None  # reset scope when switching grouping
         refresh_nav()
         _render_middle()
 
