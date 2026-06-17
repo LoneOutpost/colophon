@@ -96,6 +96,7 @@ _PNG_1X1 = bytes.fromhex(
 
 def test_embed_cover_roundtrips_mp3(tmp_path: Path):
     from mutagen.id3 import ID3
+
     from colophon.adapters.tags import embed_cover
     path = tmp_path / "ch01.mp3"
     path.write_bytes(b"")
@@ -106,6 +107,7 @@ def test_embed_cover_roundtrips_mp3(tmp_path: Path):
 
 def test_embed_cover_roundtrips_mp4(make_audio):
     from mutagen.mp4 import MP4
+
     from colophon.adapters.tags import embed_cover
     path = make_audio("book.m4b", seconds=1)
     embed_cover(path, _PNG_1X1, "image/png")
