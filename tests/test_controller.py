@@ -594,3 +594,29 @@ def test_tag_plan_and_write_tags_roundtrip(tmp_path):
     assert ctrl.undo_tag_batch() is True
     assert read_embedded_tags(f).title == "Old"
     ctx.close()
+
+
+def test_process_one_embeds_tags_into_the_m4b(tmp_path, make_audio):
+    from colophon.adapters.tags import read_embedded_tags
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.publish_year = 1965
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    result = AppController(ctx).process_one(book)
+    assert result.organized is True
+    organized = ctx.books.get(book.id)
+    out = organized.output_path
+    assert out is not None and out.suffix == ".m4b"
+    tags = read_embedded_tags(out)
+    assert tags.title == "Dune" and tags.artist == "Frank Herbert" and tags.year == 1965
+    types = {op.op_type for op in ctx.operations.list_batch(ctx.operations.latest_batch_id())}
+    assert "tag_write" in types and "organize" in types
+    ctx.close()

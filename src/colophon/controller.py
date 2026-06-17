@@ -13,7 +13,7 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
-from colophon.core.models import BookState, BookUnit, Provenance, _Base
+from colophon.core.models import BookState, BookUnit, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
@@ -40,6 +40,7 @@ from colophon.services.tag_ops import (
     commit_tag,
     plan_tag,
     revert_tag_batch,
+    tag_file,
 )
 from colophon.services.undo import undo_batch
 
@@ -382,11 +383,20 @@ class AppController:
             book.state = BookState.FAILED
             self.ctx.books.upsert(book)
             return ProcessResult(book_id=book.id, encoded=False, detail=enc.error)
+
+        batch_id = uuid.uuid4().hex
+        tag_file(enc.output_path, book, operations=self.ctx.operations, batch_id=batch_id)
+
         org = organize_book(self.ctx.books, book, enc.output_path, root=library_root, patterns=self.ctx.patterns)
         if not org.moved:
             book.state = BookState.FAILED
             book.touch()
             self.ctx.books.upsert(book)
+        elif org.target_path is not None:
+            self.ctx.operations.record(OperationRecord(
+                batch_id=batch_id, book_id=book.id, op_type="organize",
+                target=str(org.target_path), before=str(enc.output_path), outcome="ok",
+            ))
         return ProcessResult(
             book_id=book.id, encoded=True, organized=org.moved,
             detail=("collision" if org.collision else org.error),
