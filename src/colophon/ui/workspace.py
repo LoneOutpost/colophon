@@ -134,23 +134,11 @@ def render_workspace(controller: AppController) -> None:
                         logger.exception("get_matches failed")
                         matches = []
 
-                    def _source_value(result, key: str) -> str | None:
-                        return {
-                            "title": result.title,
-                            "author": "; ".join(result.authors) or None,
-                            "narrator": "; ".join(result.narrators) or None,
-                            "series": result.series_name,
-                            "sequence": str(result.series_sequence) if result.series_sequence is not None else None,
-                            "year": str(result.publish_year) if result.publish_year is not None else None,
-                            "asin": result.asin,
-                            "description": result.description,
-                        }.get(key)
-
-                    field_labels = [
-                        ("title", "Title"), ("author", "Author"), ("narrator", "Narrator"),
-                        ("series", "Series"), ("sequence", "Sequence"), ("year", "Year"),
-                        ("asin", "ASIN"), ("description", "Description"),
-                    ]
+                    field_labels = {
+                        "title": "Title", "author": "Author", "narrator": "Narrator",
+                        "series": "Series", "sequence": "Sequence", "year": "Year",
+                        "asin": "ASIN", "description": "Description",
+                    }
 
                     def show_candidates() -> None:
                         body.clear()
@@ -174,16 +162,13 @@ def render_workspace(controller: AppController) -> None:
                             )
                             with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
                                 with ui.list().props("dense").classes("w-full"):
-                                    for key, label in field_labels:
-                                        source = _source_value(result, key)
-                                        if not source:
-                                            continue
+                                    for key, source in controller.match_field_values(result).items():
                                         current = get_field(b, key)
                                         with ui.item():
                                             with ui.item_section().props("avatar"):
                                                 checks[key] = ui.checkbox(value=(source != (current or None)))
                                             with ui.item_section():
-                                                ui.item_label(f"{label}: {source}")
+                                                ui.item_label(f"{field_labels.get(key, key)}: {source}")
                                                 ui.item_label(f"current: {current or '(none)'}").props("caption")
                                     if result.cover_url:
                                         with ui.item():

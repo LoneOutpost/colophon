@@ -342,8 +342,10 @@ class AppController:
         return score_identification(book, results).ranked
 
     @staticmethod
-    def _match_updates(result: SourceResult) -> dict[str, str | None]:
-        """Map a source result's present fields to editable-field updates."""
+    def match_field_values(result: SourceResult) -> dict[str, str | None]:
+        """Map a source result's present fields to editable-field updates. The
+        single source of truth for which fields a match offers (the UI picker and
+        apply both consume this), so the two cannot drift."""
         updates: dict[str, str | None] = {}
         if result.title:
             updates["title"] = result.title
@@ -365,18 +367,20 @@ class AppController:
 
     def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
         """Apply only the chosen fields from `result` (per-field selection), stamping
-        the source as provenance. The pseudo-field "cover" captures result.cover_url
-        onto the book (fetched/embedded later). Returns the undoable batch id."""
+        the source as provenance. Returns the batch id of the editable-field changes
+        (undoable). The pseudo-field "cover" captures result.cover_url onto the book
+        (fetched/embedded later); that capture is persisted but is NOT part of the
+        undoable batch."""
         if "cover" in fields and result.cover_url:
             book.cover_url = result.cover_url
-        updates = {k: v for k, v in self._match_updates(result).items() if k in fields}
+        updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch
 
     def apply_match(self, book: BookUnit, result: SourceResult) -> str:
         """Apply all present fields from a chosen source result (and its cover)."""
-        fields = set(self._match_updates(result))
+        fields = set(self.match_field_values(result))
         if result.cover_url:
             fields.add("cover")
         return self.apply_match_fields(book, result, fields)
