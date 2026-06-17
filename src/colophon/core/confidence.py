@@ -46,16 +46,28 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
         score += 60
         signals.append(ConfidenceSignal(name="asin_exact_match", points=60, detail=f"ASIN {book.asin}"))
 
-    # Cross-source agreement on title+author — counted by DISTINCT provider.
+    # Cross-source agreement on title+author — counted by DISTINCT provider, with
+    # points scaled by match quality so a near-perfect agreement scores higher than
+    # a borderline one. Tuned so a strong two-source agreement (15 embedded + ~60)
+    # reaches the default review threshold without needing an ASIN match.
     agreeing_providers = {
         r.provider for r in results if _result_score(book, r) >= _AGREEMENT_THRESHOLD
     }
-    if len(agreeing_providers) >= 2:
-        score += 35
-        signals.append(ConfidenceSignal(name="cross_source_agreement", points=35, detail=f"{len(agreeing_providers)} providers agree"))
-    elif len(agreeing_providers) == 1:
-        score += 15
-        signals.append(ConfidenceSignal(name="single_source_match", points=15, detail="1 provider agrees"))
+    if agreeing_providers:
+        quality = max(_result_score(book, r) for r in results if r.provider in agreeing_providers)
+        if len(agreeing_providers) >= 2:
+            pts = round(60 * quality)
+            score += pts
+            signals.append(ConfidenceSignal(
+                name="cross_source_agreement", points=pts,
+                detail=f"{len(agreeing_providers)} providers agree ({quality:.2f})",
+            ))
+        else:
+            pts = round(30 * quality)
+            score += pts
+            signals.append(ConfidenceSignal(
+                name="single_source_match", points=pts, detail=f"1 provider agrees ({quality:.2f})",
+            ))
 
     # Disagreement penalty — best match is poor.
     best_score = _result_score(book, best)

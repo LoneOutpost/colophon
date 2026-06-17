@@ -20,6 +20,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.models import BookUnit
+from colophon.core.normalize import normalize_description, normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,13 @@ _STATUS_BADGES = [
 ]
 
 
+def _fmt_duration(seconds: float) -> str:
+    """Format a file length as hours and minutes, e.g. '1h 2m' or '47m'."""
+    minutes = round(seconds / 60)
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h {mins}m" if hours else f"{mins}m"
+
+
 def _confidence_color(value: float) -> str:
     if value >= 75:
         return "positive"
@@ -51,7 +59,9 @@ def render_workspace(controller: AppController) -> None:
     selected_ids: set[str] = set()
     scope: dict[str, object] = {"kind": "all", "key": None}
     foster_selected: set[Path] = set()
-    view: dict[str, object] = {"mode": "library", "cwd": None}
+    view: dict[str, object] = {
+        "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
+    }
 
     def _scan_roots() -> list[Path]:
         return list(controller.ctx.config.scan_paths)
@@ -69,10 +79,18 @@ def render_workspace(controller: AppController) -> None:
             if node is None:
                 return []
             return [b for s in node.series for b in s.books] + node.standalone
-        books = list(tree.needs_id)
+        all_books = list(tree.needs_id)
         for a in tree.authors:
-            books += [b for s in a.series for b in s.books] + a.standalone
-        return books
+            all_books += [b for s in a.series for b in s.books] + a.standalone
+        if kind == "folder" and key:
+            folder = Path(str(key))
+            return [
+                b for b in all_books
+                if b.source_folder == folder or folder in b.source_folder.parents
+            ]
+        if kind == "series" and key:
+            return [b for b in all_books if b.series and b.series[0].name == key]
+        return all_books
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
@@ -90,6 +108,13 @@ def render_workspace(controller: AppController) -> None:
                 ui.space()
                 ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
                 ui.label(book.state.value).classes("text-caption text-grey-7 q-ml-sm")
+            if book.confidence_signals:
+                with ui.row().classes("items-center w-full q-gutter-xs"):
+                    for sig in book.confidence_signals:
+                        color = "positive" if sig.points >= 0 else "negative"
+                        ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
+                            f"color={color} outline"
+                        ).tooltip(sig.detail)
             ui.separator().classes("q-my-sm")
 
             # editable fields, each prefilled with its value + provenance badge
@@ -104,6 +129,11 @@ def render_workspace(controller: AppController) -> None:
                     else:
                         inp = ui.input(field, value=value).props("dense").classes("col")
                     inputs[field] = inp
+                    normalizer = normalize_description if field == "description" else normalize_text
+                    ui.button(
+                        icon="auto_fix_high",
+                        on_click=lambda inp=inp, fn=normalizer: inp.set_value(fn(inp.value or "")),
+                    ).props("flat dense round").classes("self-center").tooltip("Normalize")
                     source = field_provenance(book, field)
                     if source:
                         ui.badge(source).props("color=grey-6 outline").classes("self-center")
@@ -248,10 +278,36 @@ def render_workspace(controller: AppController) -> None:
                     commit_btn.on_click(_commit)
                 dialog.open()
 
+            def _remap_dialog(b=book) -> None:
+                with ui.dialog() as dialog, ui.card().classes("w-80"):
+                    ui.label("Remap a field").classes("text-subtitle1")
+                    ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
+                        "text-caption text-grey-6"
+                    )
+                    src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
+                    dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
+                    clear = ui.checkbox("Clear the source field after moving", value=True)
+
+                    def _apply() -> None:
+                        if src.value == dst.value:
+                            ui.notify("Pick two different fields")
+                            return
+                        controller.remap(b, src=src.value, dst=dst.value, clear_source=clear.value)
+                        dialog.close()
+                        ui.notify(f"Remapped {src.value} to {dst.value}")
+                        refresh_list()
+                        show_detail(b.id)
+
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                        ui.button("Remap", icon="swap_horiz", on_click=_apply)
+                dialog.open()
+
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Save", icon="save", on_click=_save)
                 ui.button("Compare matches", icon="search", on_click=_compare).props("outline")
                 ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
+                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat")
                 ui.button(
                     "Mark ready",
                     icon="check",
@@ -285,7 +341,7 @@ def render_workspace(controller: AppController) -> None:
                         with ui.item():
                             with ui.item_section():
                                 ui.item_label(sf.path.name)
-                                ui.item_label(f"{sf.duration_seconds / 60:.0f} min").props("caption")
+                                ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
                             with ui.item_section().props("side"):
                                 with ui.row().classes("q-gutter-xs no-wrap"):
                                     ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props("flat dense round").set_enabled(idx > 0)
@@ -443,21 +499,23 @@ def render_workspace(controller: AppController) -> None:
                 ui.label("No books in this view").classes("text-grey-6 q-pa-md")
                 return
             ids = [b.id for b in books]
-            with ui.row().classes("items-center q-gutter-xs q-px-sm q-pb-xs"):
-                ui.button("Select all", icon="done_all", on_click=lambda: _select_all(ids)).props(
-                    "flat dense no-caps"
-                )
-                ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
-                    "flat dense no-caps"
-                ).set_enabled(bool(selected_ids))
+            if view["multiselect"]:
+                with ui.row().classes("items-center q-gutter-xs q-px-sm q-pb-xs"):
+                    ui.button("Select all", icon="done_all", on_click=lambda: _select_all(ids)).props(
+                        "flat dense no-caps"
+                    )
+                    ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
+                        "flat dense no-caps"
+                    ).set_enabled(bool(selected_ids))
             with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
                     with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):
-                        with ui.item_section().props("avatar"):
-                            ui.checkbox(
-                                value=book.id in selected_ids,
-                                on_change=lambda e, bid=book.id: _toggle(bid, e.value),
-                            )
+                        if view["multiselect"]:
+                            with ui.item_section().props("avatar"):
+                                ui.checkbox(
+                                    value=book.id in selected_ids,
+                                    on_change=lambda e, bid=book.id: _toggle(bid, e.value),
+                                )
                         with ui.item_section():
                             ui.item_label(book.title or "(untitled)")
                             ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
@@ -520,6 +578,9 @@ def render_workspace(controller: AppController) -> None:
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
                 ui.icon("folder_open").classes("text-grey-7")
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
+                ui.button(icon="filter_alt", on_click=lambda c=cwd: _filter_library_to_folder(c)).props(
+                    "flat dense round"
+                ).tooltip("Show this folder's books in the Library view")
                 foster_btn = ui.button(
                     "Foster selected", icon="subdirectory_arrow_right"
                 ).props("dense color=primary")
@@ -592,8 +653,21 @@ def render_workspace(controller: AppController) -> None:
                     "Browse scan folders and foster loose files into their own subfolders."
                 ).classes("text-caption text-grey-6")
                 return
+            ui.switch(
+                "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
+            ).props("dense").classes("q-mb-sm")
+            ui.toggle(
+                {"author": "By author", "series": "By series"},
+                value=view["group_by"],
+                on_change=lambda e: _set_group_by(e.value),
+            ).props("dense no-caps").classes("w-full q-mb-sm")
             with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
+                if kind == "folder":
+                    _nav_item(
+                        f"Folder: {Path(str(key)).name or key}",
+                        "filter_alt", True, lambda: None, color="primary",
+                    )
                 if tree.needs_id:
                     _nav_item(
                         f"Needs identification ({len(tree.needs_id)})",
@@ -602,13 +676,23 @@ def render_workspace(controller: AppController) -> None:
                         lambda: _set_scope("needs_id", None),
                         color="negative",
                     )
-                for author in tree.authors:
-                    _nav_item(
-                        author.name,
-                        "person",
-                        kind == "author" and key == author.name,
-                        lambda name=author.name: _set_scope("author", name),
-                    )
+                if view["group_by"] == "series":
+                    series_names = sorted({s.name for a in tree.authors for s in a.series})
+                    for name in series_names:
+                        _nav_item(
+                            name,
+                            "collections_bookmark",
+                            kind == "series" and key == name,
+                            lambda n=name: _set_scope("series", n),
+                        )
+                else:
+                    for author in tree.authors:
+                        _nav_item(
+                            author.name,
+                            "person",
+                            kind == "author" and key == author.name,
+                            lambda name=author.name: _set_scope("author", name),
+                        )
 
     def _render_middle() -> None:
         middle_title.text = "Folder contents" if view["mode"] == "folders" else "Books"
@@ -622,10 +706,32 @@ def render_workspace(controller: AppController) -> None:
         refresh_nav()
         _render_middle()
 
+    def _set_group_by(value: str) -> None:
+        view["group_by"] = value
+        scope["kind"], scope["key"] = "all", None  # reset scope when switching grouping
+        refresh_nav()
+        _render_middle()
+
+    def _set_multiselect(on: bool) -> None:
+        view["multiselect"] = on
+        if not on:
+            selected_ids.clear()  # leaving multiselect drops the selection
+        refresh_nav()
+        refresh_list()
+        refresh_status()
+        _after_select()
+
     def _set_scope(kind: str, key) -> None:
         scope["kind"], scope["key"] = kind, key
         refresh_nav()
         _render_middle()
+
+    def _filter_library_to_folder(folder: Path) -> None:
+        view["mode"] = "library"  # the filter shows in the Library (author) view
+        scope["kind"], scope["key"] = "folder", str(folder)
+        refresh_nav()
+        _render_middle()
+        ui.notify(f"Library filtered to {folder.name or folder}")
 
     def _after_select() -> None:
         n = len(selected_ids)
