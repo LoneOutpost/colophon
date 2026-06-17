@@ -481,13 +481,13 @@ def render_workspace(controller: AppController) -> None:
     # --- book list ---
     def _select_all(book_ids: list[str]) -> None:
         selected_ids.update(book_ids)
-        refresh_list()
+        refresh_nav()  # multiselect checkboxes live in the navigator now
         refresh_status()
         _after_select()
 
     def _deselect_all() -> None:
         selected_ids.clear()
-        refresh_list()
+        refresh_nav()
         refresh_status()
         _after_select()
 
@@ -498,24 +498,11 @@ def render_workspace(controller: AppController) -> None:
             if not books:
                 ui.label("No books in this view").classes("text-grey-6 q-pa-md")
                 return
-            ids = [b.id for b in books]
-            if view["multiselect"]:
-                with ui.row().classes("items-center q-gutter-xs q-px-sm q-pb-xs"):
-                    ui.button("Select all", icon="done_all", on_click=lambda: _select_all(ids)).props(
-                        "flat dense no-caps"
-                    )
-                    ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
-                        "flat dense no-caps"
-                    ).set_enabled(bool(selected_ids))
+            # Selection is driven from the navigator (multiselect checkboxes on the
+            # author/series entries), so the book list is plain click-to-view here.
             with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
                     with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):
-                        if view["multiselect"]:
-                            with ui.item_section().props("avatar"):
-                                ui.checkbox(
-                                    value=book.id in selected_ids,
-                                    on_change=lambda e, bid=book.id: _toggle(bid, e.value),
-                                )
                         with ui.item_section():
                             ui.item_label(book.title or "(untitled)")
                             ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
@@ -531,27 +518,66 @@ def render_workspace(controller: AppController) -> None:
         else:
             foster_selected.discard(path)
 
-    async def _foster_selected_now(button) -> None:
+    def _foster_dialog() -> None:
         paths = sorted(foster_selected)
         if not paths:
             ui.notify("No files selected")
             return
-        # foster_files does disk renames + a subtree rescan (slow over network
-        # mounts), so run it off the event loop and show a busy state.
-        button.props("loading=true")
-        try:
-            results = await asyncio.to_thread(controller.foster_files, paths)
-        finally:
-            button.props(remove="loading")
-        ok = sum(1 for r in results if r.ok)
-        failed = len(results) - ok
-        foster_selected.clear()
-        msg = f"Fostered {ok} file(s)" + (f", {failed} failed" if failed else "")
-        ui.notify(msg, type="negative" if failed and not ok else "positive")
-        # Stay in Folders mode: redraw the directory browser (moved files now show
-        # as subfolders) and refresh the nav so the new books register in Library.
-        refresh_nav()
-        _render_middle()
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label(f"Foster {len(paths)} file(s)?").classes("text-subtitle1")
+            ui.label(
+                "Each selected file moves into a new subfolder named after the file, so it "
+                "scans as its own book. The affected folders are then rescanned."
+            ).classes("text-caption text-grey-6")
+            body = ui.column().classes("w-full")
+            with body, ui.scroll_area().classes("w-full").style("max-height: 35vh"):
+                with ui.list().props("dense").classes("w-full"):
+                    for p in paths:
+                        with ui.item():
+                            with ui.item_section():
+                                ui.item_label(p.name)
+                                ui.item_label(f"into {p.stem}/").props("caption")
+            actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
+            with actions:
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                confirm = ui.button("Foster", icon="subdirectory_arrow_right")
+
+            async def _commit() -> None:
+                # foster_files does disk renames + a subtree rescan (slow over network
+                # mounts), so run it off the event loop and show a busy state.
+                confirm.props("loading=true")
+                try:
+                    results = await asyncio.to_thread(controller.foster_files, paths)
+                finally:
+                    confirm.props(remove="loading")
+                ok = sum(1 for r in results if r.ok)
+                failures = [r for r in results if not r.ok]
+                foster_selected.clear()
+                body.clear()
+                with body:
+                    ui.label(f"Fostered {ok} of {len(results)} file(s).").classes("text-body2")
+                    if failures:
+                        ui.label("Failed:").classes("text-caption text-negative q-mt-xs")
+                        with ui.list().props("dense").classes("w-full"):
+                            for r in failures:
+                                with ui.item(), ui.item_section():
+                                    ui.item_label(r.source.name)
+                                    ui.item_label(r.error or "unknown error").props("caption")
+
+                def _close_and_refresh() -> None:
+                    # Refresh AFTER closing: _render_middle rebuilds the folder browser
+                    # (which hosts this dialog's trigger), so refreshing while the dialog
+                    # is open would tear it down before the result is read.
+                    dialog.close()
+                    refresh_nav()
+                    _render_middle()
+
+                actions.clear()
+                with actions:
+                    ui.button("Close", on_click=_close_and_refresh).props("flat")
+
+            confirm.on_click(_commit)
+        dialog.open()
 
     def refresh_folders() -> None:
         list_container.clear()
@@ -567,33 +593,32 @@ def render_workspace(controller: AppController) -> None:
                 )
                 return
             cwd = Path(str(cwd))
-            root_strs = {str(r) for r in roots}
             if len(roots) > 1:
+                # An "All scan paths" entry resets the Library view to all books.
+                options = {"__all__": "All scan paths"}
+                options.update({str(r): (r.name or str(r)) for r in roots})
+                browse_root = next(
+                    (str(r) for r in roots if cwd == r or r in cwd.parents), str(roots[0])
+                )
                 ui.select(
-                    {str(r): (r.name or str(r)) for r in roots},
-                    value=str(cwd) if str(cwd) in root_strs else str(roots[0]),
-                    on_change=lambda e: (view.__setitem__("cwd", Path(e.value)), refresh_folders()),
+                    options,
+                    value="__all__" if scope["kind"] == "all" else browse_root,
+                    on_change=lambda e: _select_root(e.value),
                 ).props("dense outlined").classes("w-full q-mb-sm")
 
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
                 ui.icon("folder_open").classes("text-grey-7")
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
-                ui.button(icon="filter_alt", on_click=lambda c=cwd: _filter_library_to_folder(c)).props(
-                    "flat dense round"
-                ).tooltip("Show this folder's books in the Library view")
-                foster_btn = ui.button(
-                    "Foster selected", icon="subdirectory_arrow_right"
+                ui.button(
+                    "Foster selected", icon="subdirectory_arrow_right", on_click=_foster_dialog
                 ).props("dense color=primary")
-                foster_btn.on_click(lambda b=foster_btn: _foster_selected_now(b))
 
             listing = controller.list_directory(cwd)
             with ui.list().props("dense bordered").classes("w-full"):
                 # "Up" entry: hidden once cwd is a configured scan root, so normal
                 # browsing stops at the root (nested roots are not specially handled).
                 if cwd not in {Path(str(r)) for r in roots}:
-                    with ui.item(
-                        on_click=lambda p=cwd.parent: (view.__setitem__("cwd", p), refresh_folders())
-                    ).props("clickable"):
+                    with ui.item(on_click=lambda p=cwd.parent: _browse_to(p)).props("clickable"):
                         with ui.item_section().props("avatar"):
                             ui.icon("arrow_upward")
                         with ui.item_section():
@@ -605,9 +630,7 @@ def render_workspace(controller: AppController) -> None:
                             ui.item_label("(empty)").classes("text-grey-6")
                 for entry in listing.entries:
                     if entry.is_dir:
-                        with ui.item(
-                            on_click=lambda p=entry.path: (view.__setitem__("cwd", p), refresh_folders())
-                        ).props("clickable"):
+                        with ui.item(on_click=lambda p=entry.path: _browse_to(p)).props("clickable"):
                             with ui.item_section().props("avatar"):
                                 ui.icon("folder", color="amber-7")
                             with ui.item_section():
@@ -631,8 +654,14 @@ def render_workspace(controller: AppController) -> None:
                                 ui.item_label(entry.name).classes("text-grey-5")
 
     # --- navigator ---
-    def _nav_item(label: str, icon: str, active: bool, on_click, color: str | None = None) -> None:
+    def _nav_item(
+        label: str, icon: str, active: bool, on_click, color: str | None = None, *, checkbox=None
+    ) -> None:
         with ui.item(on_click=on_click).props("clickable" + (" active" if active else "")):
+            if checkbox is not None:
+                checked, on_change = checkbox
+                with ui.item_section().props("avatar"):
+                    ui.checkbox(value=checked, on_change=on_change)
             with ui.item_section().props("avatar"):
                 ui.icon(icon, color=color) if color else ui.icon(icon)
             with ui.item_section():
@@ -661,13 +690,27 @@ def render_workspace(controller: AppController) -> None:
                 value=view["group_by"],
                 on_change=lambda e: _set_group_by(e.value),
             ).props("dense no-caps").classes("w-full q-mb-sm")
+            multiselect = bool(view["multiselect"])
+
+            def _node_checkbox(book_ids: list[str]):
+                # (checked, on_change) for a navigator entry when multiselect is on;
+                # None otherwise. Checked when all of the node's books are selected.
+                if not multiselect:
+                    return None
+                checked = bool(book_ids) and all(i in selected_ids for i in book_ids)
+                return (checked, lambda e, ids=book_ids: _toggle_node(ids, e.value))
+
+            if multiselect:
+                with ui.row().classes("items-center q-gutter-xs q-pb-xs"):
+                    ui.button(
+                        "Select all", icon="done_all",
+                        on_click=lambda: _select_all([b.id for b in _books_for_scope()]),
+                    ).props("flat dense no-caps")
+                    ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
+                        "flat dense no-caps"
+                    ).set_enabled(bool(selected_ids))
             with ui.list().props("dense").classes("w-full"):
                 _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
-                if kind == "folder":
-                    _nav_item(
-                        f"Folder: {Path(str(key)).name or key}",
-                        "filter_alt", True, lambda: None, color="primary",
-                    )
                 if tree.needs_id:
                     _nav_item(
                         f"Needs identification ({len(tree.needs_id)})",
@@ -675,23 +718,30 @@ def render_workspace(controller: AppController) -> None:
                         kind == "needs_id",
                         lambda: _set_scope("needs_id", None),
                         color="negative",
+                        checkbox=_node_checkbox([b.id for b in tree.needs_id]),
                     )
                 if view["group_by"] == "series":
                     series_names = sorted({s.name for a in tree.authors for s in a.series})
                     for name in series_names:
+                        sids = [b.id for a in tree.authors for s in a.series if s.name == name for b in s.books]
                         _nav_item(
                             name,
                             "collections_bookmark",
                             kind == "series" and key == name,
                             lambda n=name: _set_scope("series", n),
+                            checkbox=_node_checkbox(sids),
                         )
                 else:
                     for author in tree.authors:
+                        aids = [b.id for s in author.series for b in s.books] + [
+                            b.id for b in author.standalone
+                        ]
                         _nav_item(
                             author.name,
                             "person",
                             kind == "author" and key == author.name,
                             lambda name=author.name: _set_scope("author", name),
+                            checkbox=_node_checkbox(aids),
                         )
 
     def _render_middle() -> None:
@@ -726,12 +776,22 @@ def render_workspace(controller: AppController) -> None:
         refresh_nav()
         _render_middle()
 
-    def _filter_library_to_folder(folder: Path) -> None:
-        view["mode"] = "library"  # the filter shows in the Library (author) view
+    def _browse_to(folder: Path) -> None:
+        # Navigating the folder browser silently filters the Library view to this
+        # folder (visible when you switch to Library mode); no extra nav entry.
+        view["cwd"] = folder
         scope["kind"], scope["key"] = "folder", str(folder)
-        refresh_nav()
-        _render_middle()
-        ui.notify(f"Library filtered to {folder.name or folder}")
+        refresh_folders()
+
+    def _select_root(value: str) -> None:
+        if value == "__all__":
+            scope["kind"], scope["key"] = "all", None  # reset Library to all scan paths
+            roots = _scan_roots()
+            if roots:
+                view["cwd"] = roots[0]
+            refresh_folders()
+        else:
+            _browse_to(Path(value))
 
     def _after_select() -> None:
         n = len(selected_ids)
@@ -742,11 +802,13 @@ def render_workspace(controller: AppController) -> None:
         else:
             show_detail("")
 
-    def _toggle(book_id: str, on: bool) -> None:
+    def _toggle_node(book_ids: list[str], on: bool) -> None:
+        # Multiselect operates on navigator entries (authors/series): checking a
+        # node selects all of its books for bulk actions.
         if on:
-            selected_ids.add(book_id)
+            selected_ids.update(book_ids)
         else:
-            selected_ids.discard(book_id)
+            selected_ids.difference_update(book_ids)
         _after_select()
         refresh_status()
 
