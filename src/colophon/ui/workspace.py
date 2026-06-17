@@ -746,6 +746,18 @@ def render_workspace(controller: AppController) -> None:
 
     def _render_middle() -> None:
         middle_title.text = "Folder contents" if view["mode"] == "folders" else "Books"
+        # Show a folder-filter indicator in the Books header (Library mode only).
+        middle_filter.clear()
+        if view["mode"] != "folders" and scope["kind"] == "folder" and scope["key"]:
+            folder = Path(str(scope["key"]))
+            with middle_filter:
+                ui.icon("filter_alt", color="primary")
+                ui.label(f"Filtered to {folder.name or folder}").classes(
+                    "text-caption text-primary ellipsis"
+                ).tooltip(str(folder))
+                ui.button(icon="close", on_click=lambda: _set_scope("all", None)).props(
+                    "flat dense round size=sm color=primary"
+                ).tooltip("Clear folder filter")
         if view["mode"] == "folders":
             refresh_folders()
         else:
@@ -901,7 +913,9 @@ def render_workspace(controller: AppController) -> None:
             with ui.scroll_area().classes("col"):
                 nav_container = ui.column().classes("w-full gap-0")
         with ui.card().classes("col-5 column").style("height: 100%"):
-            middle_title = ui.label("Books").classes("text-subtitle1")
+            with ui.row().classes("items-center w-full no-wrap"):
+                middle_title = ui.label("Books").classes("text-subtitle1")
+                middle_filter = ui.row().classes("items-center q-gutter-xs q-ml-sm col no-wrap")
             ui.separator()
             with ui.scroll_area().classes("col"):
                 list_container = ui.column().classes("w-full gap-0")
