@@ -253,14 +253,25 @@ class AppController:
         return plan_tag(book)
 
     async def write_tags(self, book: BookUnit) -> TagCommitResult:
-        """Fetch+cache the cover (best effort), then write tags into the book's
-        files on a worker thread, logging each write for recovery."""
-        await ensure_cached_cover(book, dest_dir=book.source_folder)
-        self.ctx.books.upsert(book)
+        """Write tags into one book's files. See write_tags_books."""
+        (result,) = await self.write_tags_books([book])
+        return result
+
+    async def write_tags_books(self, books: list[BookUnit]) -> list[TagCommitResult]:
+        """Fetch+cache each book's cover (best effort), then write tags into its
+        files on a worker thread, logging every write for recovery. All books share
+        one batch id, so a single undo reverts the whole selection."""
         batch_id = uuid.uuid4().hex
-        return await asyncio.to_thread(
-            commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
-        )
+        results: list[TagCommitResult] = []
+        for book in books:
+            await ensure_cached_cover(book, dest_dir=book.source_folder)
+            self.ctx.books.upsert(book)
+            results.append(
+                await asyncio.to_thread(
+                    commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
+                )
+            )
+        return results
 
     def undo_tag_batch(self) -> bool:
         """Revert the most recent tag batch. Returns False if there is none."""
