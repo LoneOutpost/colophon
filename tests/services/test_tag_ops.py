@@ -3,7 +3,7 @@ from pathlib import Path
 from colophon.adapters.repository.store import OperationRepo, connect, migrate
 from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
 from colophon.core.models import BookUnit, EmbeddedTags, SeriesRef, SourceFile
-from colophon.services.tag_ops import commit_tag, plan_tag, revert_tag_batch
+from colophon.services.tag_ops import commit_tag, plan_tag, revert_tag_batch, tag_file
 
 
 def _book_with_file(path: Path) -> BookUnit:
@@ -85,3 +85,15 @@ def test_commit_embeds_cover_when_present(tmp_path: Path):
     commit_tag(book, operations=_ops(tmp_path), batch_id="b1")
     apic = ID3(f).getall("APIC")
     assert apic and apic[0].data == png
+
+
+def test_tag_file_writes_to_a_single_path_and_logs(tmp_path: Path):
+    out = tmp_path / "book.mp3"
+    out.write_bytes(b"")
+    book = _book_with_file(out)
+    ops = _ops(tmp_path)
+    ok = tag_file(out, book, operations=ops, batch_id="b1")
+    assert ok is True
+    assert read_embedded_tags(out).title == "Mistborn"
+    logged = ops.list_batch("b1")
+    assert len(logged) == 1 and logged[0].target == str(out) and logged[0].outcome == "ok"

@@ -73,6 +73,31 @@ def _load_cover(book: BookUnit) -> tuple[bytes, str] | None:
     return book.cover_path.read_bytes(), mime
 
 
+def _tag_and_log(
+    path: Path, target: EmbeddedTags, cover: tuple[bytes, str] | None,
+    *, operations: OperationRepo, book_id: str, batch_id: str,
+) -> bool:
+    """Write `target` tags (+ optional cover) into one file and log the op with
+    its prior tags. Returns True on success, False on a logged TagWriteError."""
+    before = read_embedded_tags(path)
+    try:
+        write_embedded_tags(path, target)
+        if cover is not None:
+            embed_cover(path, cover[0], cover[1])
+    except TagWriteError as e:
+        logger.warning(f"tag write failed for {path}: {e}")
+        operations.record(OperationRecord(
+            batch_id=batch_id, book_id=book_id, op_type=_OP_TAG_WRITE,
+            target=str(path), before=before.model_dump_json(), outcome="failed", detail=str(e),
+        ))
+        return False
+    operations.record(OperationRecord(
+        batch_id=batch_id, book_id=book_id, op_type=_OP_TAG_WRITE, target=str(path),
+        before=before.model_dump_json(), after=target.model_dump_json(), outcome="ok",
+    ))
+    return True
+
+
 def commit_tag(book: BookUnit, *, operations: OperationRepo, batch_id: str) -> TagCommitResult:
     """Write projected tags (+ cached cover) into each source file and log each write.
 
@@ -84,25 +109,20 @@ def commit_tag(book: BookUnit, *, operations: OperationRepo, batch_id: str) -> T
     cover = _load_cover(book)
     result = TagCommitResult(book_id=book.id)
     for sf in book.source_files:
-        before = read_embedded_tags(sf.path)
-        try:
-            write_embedded_tags(sf.path, target)
-            if cover is not None:
-                embed_cover(sf.path, cover[0], cover[1])
-        except TagWriteError as e:
-            logger.warning(f"tag write failed for {sf.path}: {e}")
-            operations.record(OperationRecord(
-                batch_id=batch_id, book_id=book.id, op_type=_OP_TAG_WRITE,
-                target=str(sf.path), before=before.model_dump_json(), outcome="failed", detail=str(e),
-            ))
+        if _tag_and_log(sf.path, target, cover, operations=operations, book_id=book.id, batch_id=batch_id):
+            result.written += 1
+        else:
             result.failed += 1
-            continue
-        operations.record(OperationRecord(
-            batch_id=batch_id, book_id=book.id, op_type=_OP_TAG_WRITE, target=str(sf.path),
-            before=before.model_dump_json(), after=target.model_dump_json(), outcome="ok",
-        ))
-        result.written += 1
     return result
+
+
+def tag_file(path: Path, book: BookUnit, *, operations: OperationRepo, batch_id: str) -> bool:
+    """Embed the book's projected tags (+ cached cover) into a single file — e.g.
+    the produced M4B — and log the write. Returns True on success."""
+    return _tag_and_log(
+        path, project_tags(book), _load_cover(book),
+        operations=operations, book_id=book.id, batch_id=batch_id,
+    )
 
 
 def revert_tag_batch(operations: OperationRepo, batch_id: str) -> int:
