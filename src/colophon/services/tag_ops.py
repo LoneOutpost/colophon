@@ -58,3 +58,67 @@ def plan_tag(book: BookUnit) -> TagPlan:
         book_id=book.id, title=book.title, target=target, files=files,
         warnings=validate_tags(target), embed_cover=has_cover,
     )
+
+
+class TagCommitResult(_Base):
+    book_id: str
+    written: int = 0
+    failed: int = 0
+
+
+def _load_cover(book: BookUnit) -> tuple[bytes, str] | None:
+    if book.cover_path is None or not book.cover_path.exists():
+        return None
+    mime = "image/png" if book.cover_path.suffix.lower() == ".png" else "image/jpeg"
+    return book.cover_path.read_bytes(), mime
+
+
+def commit_tag(book: BookUnit, *, operations: OperationRepo, batch_id: str) -> TagCommitResult:
+    """Write projected tags (+ cached cover) into each source file and log each write.
+
+    Each file's prior tags are captured into the log before writing so the batch
+    is revertible. A per-file TagWriteError is logged as a failed op and does not
+    abort the remaining files.
+    """
+    target = project_tags(book)
+    cover = _load_cover(book)
+    result = TagCommitResult(book_id=book.id)
+    for sf in book.source_files:
+        before = read_embedded_tags(sf.path)
+        try:
+            write_embedded_tags(sf.path, target)
+            if cover is not None:
+                embed_cover(sf.path, cover[0], cover[1])
+        except TagWriteError as e:
+            logger.warning(f"tag write failed for {sf.path}: {e}")
+            operations.record(OperationRecord(
+                batch_id=batch_id, book_id=book.id, op_type=_OP_TAG_WRITE,
+                target=str(sf.path), before=before.model_dump_json(), outcome="failed", detail=str(e),
+            ))
+            result.failed += 1
+            continue
+        operations.record(OperationRecord(
+            batch_id=batch_id, book_id=book.id, op_type=_OP_TAG_WRITE, target=str(sf.path),
+            before=before.model_dump_json(), after=target.model_dump_json(), outcome="ok",
+        ))
+        result.written += 1
+    return result
+
+
+def revert_tag_batch(operations: OperationRepo, batch_id: str) -> int:
+    """Restore the prior tags of every successful tag write in `batch_id`.
+
+    Restores text tags only (cover art is not reverted). Returns the count
+    restored and marks the batch reverted.
+    """
+    restored = 0
+    for op in operations.list_batch(batch_id):
+        if op.op_type != _OP_TAG_WRITE or op.outcome != "ok" or op.before is None:
+            continue
+        try:
+            write_embedded_tags(Path(op.target), EmbeddedTags.model_validate_json(op.before))
+            restored += 1
+        except TagWriteError as e:
+            logger.warning(f"revert failed for {op.target}: {e}")
+    operations.mark_reverted(batch_id)
+    return restored
