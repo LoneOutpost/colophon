@@ -39,6 +39,13 @@ _STATUS_BADGES = [
 ]
 
 
+def _fmt_duration(seconds: float) -> str:
+    """Format a file length as hours and minutes, e.g. '1h 2m' or '47m'."""
+    minutes = round(seconds / 60)
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h {mins}m" if hours else f"{mins}m"
+
+
 def _confidence_color(value: float) -> str:
     if value >= 75:
         return "positive"
@@ -285,7 +292,7 @@ def render_workspace(controller: AppController) -> None:
                         with ui.item():
                             with ui.item_section():
                                 ui.item_label(sf.path.name)
-                                ui.item_label(f"{sf.duration_seconds / 60:.0f} min").props("caption")
+                                ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
                             with ui.item_section().props("side"):
                                 with ui.row().classes("q-gutter-xs no-wrap"):
                                     ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props("flat dense round").set_enabled(idx > 0)

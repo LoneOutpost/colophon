@@ -26,3 +26,13 @@ def test_main_is_importable():
     import colophon.__main__ as m
 
     assert hasattr(m, "main")
+
+
+def test_fmt_duration_hours_and_minutes():
+    from colophon.ui.workspace import _fmt_duration
+
+    assert _fmt_duration(0) == "0m"
+    assert _fmt_duration(47 * 60) == "47m"
+    assert _fmt_duration(3725) == "1h 2m"   # 62.08 min -> 1h 2m
+    assert _fmt_duration(3600) == "1h 0m"
+    assert _fmt_duration(59 * 60 + 40) == "1h 0m"  # 59m40s rounds to 60 -> 1h 0m
