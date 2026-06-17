@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 def _query_for(book: BookUnit) -> SourceQuery:
     author = book.authors[0] if book.authors else None
-    return SourceQuery(title=book.title, author=author, asin=book.asin)
+    series = book.series[0].name if book.series else None
+    return SourceQuery(title=book.title, author=author, asin=book.asin, series=series)
 
 
 async def _safe_search(source: MetadataSource, query: SourceQuery) -> list[SourceResult]:

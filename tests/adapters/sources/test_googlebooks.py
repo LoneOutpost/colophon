@@ -57,3 +57,18 @@ async def test_no_items_returns_empty():
 async def test_http_error_returns_empty_not_raise():
     src = _source(lambda req: httpx.Response(503, text="rate limited"))
     assert await src.search(SourceQuery(title="Dune")) == []
+
+
+async def test_search_includes_series_as_additive_term():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["q"] = request.url.params["q"]
+        return httpx.Response(200, json=_BODY)
+
+    await _source(handler).search(
+        SourceQuery(title="The Final Empire", author="Brandon Sanderson", series="Mistborn")
+    )
+    assert "intitle:The Final Empire" in captured["q"]
+    assert "inauthor:Brandon Sanderson" in captured["q"]
+    assert "Mistborn" in captured["q"]  # series threaded in as a disambiguating term

@@ -92,3 +92,17 @@ async def test_series_only_identity_can_be_ready(tmp_path):
 
     out = await identify(repo, book, [src], threshold=0.0)
     assert out.state == BookState.READY
+
+
+def test_query_for_includes_series_name():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, SeriesRef
+    from colophon.services.identify import _query_for
+
+    book = BookUnit.new(source_folder=Path("/x"))
+    book.title = "The Final Empire"
+    book.authors = ["Brandon Sanderson"]
+    book.series = [SeriesRef(name="Mistborn", sequence=1.0)]
+    q = _query_for(book)
+    assert q.series == "Mistborn" and q.title == "The Final Empire" and q.author == "Brandon Sanderson"
