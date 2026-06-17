@@ -879,11 +879,57 @@ def render_workspace(controller: AppController) -> None:
         if not books:
             ui.notify("Nothing selected or ready")
             return
-        for book in books:
-            await asyncio.to_thread(controller.process_one, book, confirm_delete=False)
-        selected_ids.clear()
-        if await controller.trigger_abs_scan():
-            ui.notify("Triggered AudiobookShelf rescan")
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label(f"Encode + organize {len(books)} book(s)").classes("text-subtitle1")
+            statuses: dict[str, ui.item_label] = {}
+            with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
+                with ui.list().props("dense").classes("w-full"):
+                    for b in books:
+                        with ui.item(), ui.item_section():
+                            ui.item_label(b.title or "(untitled)")
+                            statuses[b.id] = ui.item_label("pending").props("caption")
+            summary = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
+
+            def _close() -> None:
+                # Refresh the underlying views only on close — _render_middle rebuilds
+                # the list panel, so refreshing while the dialog is open could disturb it.
+                dialog.close()
+                refresh_nav()
+                _render_middle()
+                refresh_status()
+
+            async def _run_batch(targets: list) -> list:
+                failed = []
+                for b in targets:
+                    statuses[b.id].set_text("working…")
+                    result = await asyncio.to_thread(controller.process_one, b, confirm_delete=False)
+                    if result.organized:
+                        statuses[b.id].set_text("organized")
+                    else:
+                        statuses[b.id].set_text(f"failed: {result.detail or 'see logs'}")
+                        failed.append(b)
+                return failed
+
+            async def _go(targets: list) -> None:
+                summary.clear()
+                with summary:
+                    ui.spinner(size="sm")
+                    ui.label(f"Processing {len(targets)}...").classes("text-caption")
+                failed = await _run_batch(targets)
+                selected_ids.clear()
+                await controller.trigger_abs_scan()  # best-effort library rescan
+                summary.clear()
+                with summary:
+                    note = f"{len(targets) - len(failed)} organized" + (
+                        f", {len(failed)} failed" if failed else ""
+                    )
+                    ui.label(note).classes("text-body2 q-mr-auto self-center")
+                    if failed:
+                        ui.button("Retry failed", icon="replay", on_click=lambda f=failed: _go(f))
+                    ui.button("Close", on_click=_close).props("flat")
+
+            dialog.open()
+            await _go(books)
 
     # --- application shell ---
     with ui.header(elevated=True).classes("items-center q-px-md"):
@@ -899,7 +945,7 @@ def render_workspace(controller: AppController) -> None:
 
     scan_btn.on_click(lambda: _run(scan_btn, _scan, "Scan complete"))
     identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
-    process_btn.on_click(lambda: _run(process_btn, _process, "Processing complete"))
+    process_btn.on_click(_process)  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)
