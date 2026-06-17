@@ -24,7 +24,8 @@ def infer_from_path(folder: Path, root: Path, scheme: list[str]) -> dict[str, st
     """Map `folder`'s path components (relative to `root`) to fields per `scheme`,
     only when the depth matches the scheme length. Returns author/series/title
     values found; empty dict if the scheme is empty, the depth mismatches, or the
-    folder is not under root."""
+    folder is not under root. (The "title" entry is informational — reconcile
+    sources the directory-level title from the folder name via `dir_title`.)"""
     if not scheme:
         return {}
     try:

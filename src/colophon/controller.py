@@ -243,6 +243,10 @@ class AppController:
         for parent in parents:
             # scan_ingest walks the parent's full subtree (os.walk), so this both
             # registers the new child book(s) and refreshes the parent's own book.
+            # Inference depth is measured from `parent` here (not the configured
+            # scan root), so a multi-segment directory_scheme generally won't match
+            # on a foster re-scan; a later full scan re-derives it. This only ever
+            # yields fewer inferences, never wrong ones (inference is weak evidence).
             scan_ingest(
                 self.ctx.books,
                 parent,
