@@ -362,6 +362,44 @@ def test_apply_filename_parse_skips_non_matching_books(tmp_path):
     ctx.close()
 
 
+def test_apply_filename_parse_drops_sequence_without_series(tmp_path):
+    # A pattern that yields sequence but not series, on a book with no series,
+    # is a no-op for sequence: it must not be counted or recorded.
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    ctrl = AppController(ctx)
+    n = ctrl.apply_filename_parse([book], "%title% #%sequence%", {"title", "sequence"})
+    assert n == 1  # title was written
+    got = ctx.books.get(book.id)
+    assert got.title == "Mistborn"
+    assert got.series == []  # no series, so sequence was dropped
+    # the recorded batch holds only the real (title) change
+    changes = ctx.history.list_batch(ctx.history.latest_batch_id())
+    assert {c.field for c in changes} == {"title"}
+    ctx.close()
+
+
+def test_apply_filename_parse_skips_book_when_only_noop_fields(tmp_path):
+    # Selecting only sequence (no series) on a series-less book changes nothing,
+    # so the book is not counted and no empty batch is recorded.
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    ctrl = AppController(ctx)
+    n = ctrl.apply_filename_parse([book], "%title% #%sequence%", {"sequence"})
+    assert n == 0
+    ctx.close()
+
+
+def test_filename_parse_updates_matches_apply(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    updates = AppController(ctx).filename_parse_updates(
+        book, "%title% #%sequence%", {"title", "sequence"}
+    )
+    assert updates == {"title": "Mistborn"}  # sequence dropped, no series
+    ctx.close()
+
+
 def test_apply_filename_parse_is_undoable(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")

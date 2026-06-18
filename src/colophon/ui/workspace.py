@@ -598,8 +598,7 @@ def render_workspace(controller: AppController) -> None:
         if not books:
             ui.notify("Select one or more books first")
             return
-        # Working copy of the saved-pattern list; persisted edits reflect here live.
-        state = {"pattern": controller.ctx.config.filename_template or "%author% - %title%"}
+        initial_pattern = controller.ctx.config.filename_template or "%author% - %title%"
         chosen: dict[str, bool] = {}
 
         with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
@@ -617,7 +616,7 @@ def render_workspace(controller: AppController) -> None:
                     "Matches and discards a segment"
                 )
 
-            pattern_input = ui.input("Pattern", value=state["pattern"]).props(
+            pattern_input = ui.input("Pattern", value=initial_pattern).props(
                 "dense clearable"
             ).classes("w-full q-mt-sm")
 
@@ -642,8 +641,7 @@ def render_workspace(controller: AppController) -> None:
                             ).tooltip("Remove this saved pattern")
 
             def _load_pattern(pat: str) -> None:
-                state["pattern"] = pat
-                pattern_input.set_value(pat)  # triggers _on_pattern_change
+                pattern_input.set_value(pat)  # triggers _on_pattern_change -> preview
 
             def _unsave(pat: str) -> None:
                 controller.remove_filename_pattern(pat)
@@ -699,18 +697,23 @@ def render_workspace(controller: AppController) -> None:
                                 parsed = controller.preview_filename_parse(b, pat)
                                 if parsed:
                                     matched += 1
+                                # What apply would actually write (shares the
+                                # controller's logic, so preview cannot mislead).
+                                effective = controller.filename_parse_updates(b, pat, set(present))
                                 with ui.item():
                                     with ui.item_section():
                                         ui.item_label(controller.book_filename(b)).classes("ellipsis")
-                                        if parsed:
-                                            shown = ", ".join(
-                                                f"{k}={v}" for k, v in parsed.items() if k in present
-                                            )
-                                            ui.item_label(shown or "(no fields)").props("caption")
-                                        else:
+                                        if not parsed:
                                             ui.item_label("no match").props("caption").classes(
                                                 "text-grey-6"
                                             )
+                                        elif effective:
+                                            shown = ", ".join(f"{k}={v}" for k, v in effective.items())
+                                            ui.item_label(shown).props("caption")
+                                        else:
+                                            ui.item_label("(no fields to write)").props(
+                                                "caption"
+                                            ).classes("text-grey-6")
                     ui.label(f"{matched} of {len(books)} filename(s) match").classes(
                         "text-caption text-grey-7"
                     )

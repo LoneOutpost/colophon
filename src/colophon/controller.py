@@ -201,26 +201,35 @@ class AppController:
         pattern = compile_template(template)
         return parse_filename(pattern, self.book_filename(book)) or {}
 
+    def filename_parse_updates(
+        self, book: BookUnit, template: str, fields: set[str]
+    ) -> dict[str, str]:
+        """The field updates applying `template` to `book` would actually make,
+        limited to `fields`: parsed, non-empty values, with `sequence` dropped
+        unless the book will have a series (set_field no-ops a sequence with no
+        series name). Ordered so series precedes sequence. The single source of
+        truth shared by the parse preview and apply, so they cannot drift."""
+        parsed = self.preview_filename_parse(book, template)
+        updates = {k: v for k, v in parsed.items() if k in fields and v}
+        if "sequence" in updates and "series" not in updates and not book.series:
+            del updates["sequence"]
+        return dict(sorted(updates.items(), key=lambda kv: kv[0] != "series"))
+
     def apply_filename_parse(
         self, books: list[BookUnit], template: str, fields: set[str]
     ) -> int:
         """Parse each book's filename with `template` and write the chosen `fields`
-        (the intersection of parsed, non-empty keys and `fields`) under "filename"
-        provenance. Each book's change is its own undoable batch. Returns the
-        number of books that received at least one field. Raises ValueError on a
-        malformed template (compiled once, before any writes)."""
-        pattern = compile_template(template)
+        under "filename" provenance. Each book's change is its own undoable batch.
+        Returns the number of books that received at least one real field change.
+        Raises ValueError on a malformed template (validated before any writes)."""
+        compile_template(template)  # validate up front; raises on bad placeholders
         changed = 0
         for book in books:
-            parsed = parse_filename(pattern, self.book_filename(book)) or {}
-            updates = {k: v for k, v in parsed.items() if k in fields and v}
+            updates = self.filename_parse_updates(book, template, fields)
             if not updates:
                 continue
-            # series must be set before sequence (set_field no-ops a sequence with
-            # no series name), so order the batch to apply series first.
-            ordered = dict(sorted(updates.items(), key=lambda kv: kv[0] != "series"))
             apply_fields(
-                self.ctx.books, self.ctx.history, book, ordered,
+                self.ctx.books, self.ctx.history, book, updates,
                 provenance=Provenance.FILENAME.value,
             )
             self._sync_sidecar(book)
