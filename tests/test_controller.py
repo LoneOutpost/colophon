@@ -842,3 +842,57 @@ def test_apply_match_applies_all_present_fields_and_cover(tmp_path):
     assert got.series[0].name == "S" and got.publish_year == 2006 and got.asin == "B00"
     assert got.cover_url == "https://c/x.jpg"
     ctx.close()
+
+
+def test_rd_configured_reflects_token(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", real_debrid_token="t"))
+    assert AppController(ctx).rd_configured() is True
+    ctx.close()
+
+    ctx2 = AppContext.create(Config(db_path=tmp_path / "db2.sqlite"))
+    assert AppController(ctx2).rd_configured() is False
+    ctx2.close()
+
+
+def test_rd_download_dir_defaults_under_data_dir(tmp_path):
+    from colophon.app_context import default_db_path
+
+    ctx = _ctx(tmp_path)
+    got = AppController(ctx)._rd_download_dir()
+    assert got == default_db_path().parent / "downloads"
+    ctx.close()
+
+
+async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
+    from colophon.adapters.realdebrid import RdTorrentInfo
+    from colophon.services.acquire import AcquiredFile, AcquireResult
+
+    ctx = _ctx(tmp_path)
+    ctx.config.real_debrid_token = "t"
+    ctx.config.real_debrid_download_dir = tmp_path / "dl"
+    ctrl = AppController(ctx)
+
+    class FakeClient:
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id=tid, filename="Mistborn", status="downloaded", links=["L1"])
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
+
+    async def fake_download(client, torrent, dest_root, *, progress=None):
+        folder = dest_root / "Mistborn"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "01.mp3").write_bytes(b"")
+        return AcquireResult(folder=folder, files=[AcquiredFile("01.mp3", folder / "01.mp3", True)])
+
+    monkeypatch.setattr("colophon.controller.download_torrent", fake_download)
+
+    result, book_ids = await ctrl.rd_download("a")
+    assert result.any_ok is True
+    assert len(book_ids) == 1
+    assert ctx.books.get(book_ids[0]) is not None
+    ctx.close()
