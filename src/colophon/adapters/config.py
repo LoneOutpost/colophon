@@ -29,6 +29,8 @@ class Config(BaseModel):
     lazylibrarian_url: str | None = None
     lazylibrarian_api_key: str | None = None
     hardcover_api_token: str | None = None
+    real_debrid_token: str | None = None
+    real_debrid_download_dir: Path | None = None  # None => <data dir>/downloads
 
 
 def default_config_path() -> Path:
@@ -109,6 +111,11 @@ root_path = ""
 
 # Hardcover metadata source. Set a token to enable it.
 # hardcover_api_token = "your-hardcover-token"
+
+# Real-Debrid acquisition. Set a private API token to enable the Acquire page.
+# real_debrid_token = "your-rd-private-token"
+# Folder downloaded files land in before ingest. Defaults to <data dir>/downloads.
+# real_debrid_download_dir = "/path/to/downloads"
 """
 
 

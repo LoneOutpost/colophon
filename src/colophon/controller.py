@@ -10,6 +10,7 @@ from pathlib import Path
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
+from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
@@ -18,6 +19,12 @@ from colophon.core.models import BookState, BookUnit, OperationRecord, Provenanc
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
+from colophon.services.acquire import (
+    AcquireCandidate,
+    AcquireResult,
+    download_torrent,
+    list_candidates,
+)
 from colophon.services.cover import ensure_cached_cover
 from colophon.services.editing import (
     apply_fields,
@@ -186,6 +193,60 @@ class AppController:
         )
         self._sync_sidecar(book)
         return batch
+
+    # --- Real-Debrid acquisition (issue #11) ---
+    def rd_configured(self) -> bool:
+        return bool(self.ctx.config.real_debrid_token)
+
+    def rd_client(self) -> RealDebridClient:
+        token = self.ctx.config.real_debrid_token
+        if not token:
+            raise ValueError("no Real-Debrid token configured")
+        return RealDebridClient(token)
+
+    def _rd_download_dir(self) -> Path:
+        return self.ctx.config.real_debrid_download_dir or (default_db_path().parent / "downloads")
+
+    async def rd_test_connection(self, token: str | None = None) -> RdUser:
+        """Verify the RD token by fetching the account. Tests `token` if given
+        (without persisting it), else the configured one. Lets the Settings page
+        validate a typed-but-unsaved token without mutating live config."""
+        token = token or self.ctx.config.real_debrid_token
+        if not token:
+            raise ValueError("no Real-Debrid token configured")
+        client = RealDebridClient(token)
+        try:
+            return await client.user()
+        finally:
+            await client.aclose()
+
+    async def rd_list_candidates(self) -> list[AcquireCandidate]:
+        client = self.rd_client()
+        try:
+            return await list_candidates(client)
+        finally:
+            await client.aclose()
+
+    async def rd_download(
+        self, torrent_id: str, *, progress: Callable[[int, int, str], None] | None = None,
+    ) -> tuple[AcquireResult, list[str]]:
+        """Download a torrent's audio/cover files, then ingest the folder. Returns
+        the download result and the ids of any newly registered books."""
+        client = self.rd_client()
+        try:
+            info = await client.torrent_info(torrent_id)
+            result = await download_torrent(client, info, self._rd_download_dir(), progress=progress)
+        finally:
+            await client.aclose()
+        book_ids: list[str] = []
+        if result.any_ok:
+            books = scan_ingest(
+                self.ctx.books, result.folder,
+                template=self.ctx.config.filename_template,
+                directory_scheme=self.ctx.config.directory_scheme,
+            )
+            book_ids = [b.id for b in books]
+        return result, book_ids
 
     # --- filename parsing (interactive, FR-1.x) ---
     def book_filename(self, book: BookUnit) -> str:
