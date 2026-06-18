@@ -840,8 +840,9 @@ def render_workspace(controller: AppController) -> None:
         list_container.clear()
         roots = _scan_roots()
         cwd = view["cwd"]
-        if cwd is None and roots:
-            cwd = roots[0]
+        multi = len(roots) > 1
+        if cwd is None and roots and not multi:
+            cwd = roots[0]  # a single scan path is browsed directly
             view["cwd"] = cwd
         with list_container:
             if not roots:
@@ -849,20 +850,32 @@ def render_workspace(controller: AppController) -> None:
                     "text-grey-6 q-pa-md"
                 )
                 return
-            cwd = Path(str(cwd))
-            if len(roots) > 1:
-                # An "All scan paths" entry resets the Library view to all books.
+            if multi:
+                # "All scan paths" is a neutral state (no combined view); the
+                # operator picks one scan path to browse its folders.
+                cwd_path = Path(str(cwd)) if cwd is not None else None
+                selected = (
+                    "__all__" if cwd_path is None
+                    else next(
+                        (str(r) for r in roots if cwd_path == r or r in cwd_path.parents),
+                        "__all__",
+                    )
+                )
                 options = {"__all__": "All scan paths"}
                 options.update({str(r): (r.name or str(r)) for r in roots})
-                browse_root = next(
-                    (str(r) for r in roots if cwd == r or r in cwd.parents), str(roots[0])
-                )
                 ui.select(
                     options,
-                    value=browse_root if folder_filter["path"] else "__all__",
+                    value=selected,
                     on_change=lambda e: _select_root(e.value),
                 ).props("dense outlined").classes("w-full q-mb-sm")
-
+            if cwd is None:
+                with ui.column().classes("w-full items-center q-pa-lg q-gutter-sm"):
+                    ui.icon("folder_open").classes("text-h4 text-grey-5")
+                    ui.label("Pick a scan path above to browse its folders.").classes(
+                        "text-grey-6 text-center"
+                    )
+                return
+            cwd = Path(str(cwd))
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
                 ui.icon("folder_open").classes("text-grey-7")
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
@@ -1100,11 +1113,9 @@ def render_workspace(controller: AppController) -> None:
 
     def _select_root(value: str) -> None:
         if value == "__all__":
-            folder_filter["path"] = None  # reset Library to all scan paths
+            folder_filter["path"] = None  # reset Library to all books
             scope["kind"], scope["key"] = "all", None
-            roots = _scan_roots()
-            if roots:
-                view["cwd"] = roots[0]
+            view["cwd"] = None  # no scan path selected: show the pick-a-path prompt
             refresh_folders()
         else:
             _browse_to(Path(value))
