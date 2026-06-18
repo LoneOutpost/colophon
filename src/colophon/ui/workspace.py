@@ -1215,6 +1215,10 @@ def render_workspace(controller: AppController) -> None:
         scan_btn = ui.button("Scan", icon="search").props("flat color=white")
         identify_btn = ui.button("Identify", icon="travel_explore").props("flat color=white")
         process_btn = ui.button("Encode + organize", icon="play_arrow").props("flat color=white")
+        if controller.rd_configured():
+            ui.button(
+                "Acquire", icon="cloud_download", on_click=lambda: ui.navigate.to("/acquire")
+            ).props("flat color=white")
         ui.button(icon="settings", on_click=lambda: ui.navigate.to("/settings")).props(
             "flat round color=white"
         ).tooltip("Settings")
