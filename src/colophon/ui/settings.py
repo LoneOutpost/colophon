@@ -74,6 +74,32 @@ def render_settings(controller: AppController) -> None:
             "Hardcover API token", value=cfg.hardcover_api_token or "", password=True
         ).classes("w-full")
 
+        ui.label("Real-Debrid").classes("text-lg mt-4")
+        rd_token = ui.input(
+            "Real-Debrid token", value=cfg.real_debrid_token or "", password=True
+        ).classes("w-full")
+        rd_dir = ui.input(
+            "Download directory (blank = default)",
+            value=str(cfg.real_debrid_download_dir or ""),
+        ).classes("w-full")
+        rd_status = ui.label("").classes("text-caption text-grey-7")
+
+        async def test_rd() -> None:
+            # Use the value currently typed in the field for the test.
+            controller.ctx.config.real_debrid_token = _opt_str(rd_token.value)
+            if not controller.rd_configured():
+                rd_status.set_text("Enter a token first")
+                return
+            rd_status.set_text("Testing...")
+            try:
+                user = await controller.rd_test_connection()
+                rd_status.set_text(f"Connected as {user.username}")
+            except Exception as e:  # surface any failure to the operator (BLE001 intentional)
+                logger.warning(f"RD test connection failed: {e}")
+                rd_status.set_text("Connection failed (check the token)")
+
+        ui.button("Test connection", icon="wifi_tethering", on_click=test_rd).props("flat")
+
     def do_save() -> None:
         try:
             new = Config(
@@ -93,6 +119,8 @@ def render_settings(controller: AppController) -> None:
                 lazylibrarian_url=_opt_str(ll_url.value),
                 lazylibrarian_api_key=_opt_str(ll_key.value),
                 hardcover_api_token=_opt_str(hc_token.value),
+                real_debrid_token=_opt_str(rd_token.value),
+                real_debrid_download_dir=_opt_path(rd_dir.value),
             )
             controller.save_settings(new)
             ui.notify("Settings saved")
