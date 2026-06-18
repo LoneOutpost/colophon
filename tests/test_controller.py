@@ -256,6 +256,189 @@ def test_edit_preserves_scanned_sidecar_field(tmp_path):
     ctx.close()
 
 
+def _book_named(ctx, tmp_path, filename):
+    from colophon.core.models import SourceFile
+
+    folder = tmp_path / "ingest" / "parse"
+    folder.mkdir(parents=True, exist_ok=True)
+    p = folder / filename
+    p.write_bytes(b"x")
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [SourceFile(path=p, size=1, duration_seconds=60.0, ext="mp3")]
+    ctx.books.upsert(book)
+    return book
+
+
+def test_book_filename_uses_first_source_file(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
+    assert AppController(ctx).book_filename(book) == "Brandon Sanderson - Mistborn.mp3"
+    ctx.close()
+
+
+def test_book_filename_falls_back_to_folder_name(tmp_path):
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "ingest" / "The Way of Kings"
+    folder.mkdir(parents=True)
+    book = BookUnit.new(source_folder=folder)
+    ctx.books.upsert(book)
+    assert AppController(ctx).book_filename(book) == "The Way of Kings"
+    ctx.close()
+
+
+def test_preview_filename_parse_returns_fields(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
+    parsed = AppController(ctx).preview_filename_parse(book, "%author% - %title%")
+    assert parsed == {"author": "Brandon Sanderson", "title": "Mistborn"}
+    ctx.close()
+
+
+def test_preview_filename_parse_returns_empty_on_no_match(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "nomatch.mp3")
+    parsed = AppController(ctx).preview_filename_parse(book, "%author% - %title%")
+    assert parsed == {}
+    ctx.close()
+
+
+def test_preview_filename_parse_raises_on_bad_template(tmp_path):
+    import pytest
+
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "x.mp3")
+    with pytest.raises(ValueError):
+        AppController(ctx).preview_filename_parse(book, "%bogus%")
+    ctx.close()
+
+
+def test_apply_filename_parse_writes_selected_fields(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
+    n = AppController(ctx).apply_filename_parse([book], "%author% - %title%", {"author", "title"})
+    assert n == 1
+    got = ctx.books.get(book.id)
+    assert got.title == "Mistborn"
+    assert got.authors == ["Brandon Sanderson"]
+    assert got.provenance["title"] == "filename"
+    assert got.provenance["authors"] == "filename"
+    ctx.close()
+
+
+def test_apply_filename_parse_honours_field_selection(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
+    AppController(ctx).apply_filename_parse([book], "%author% - %title%", {"title"})
+    got = ctx.books.get(book.id)
+    assert got.title == "Mistborn"
+    assert got.authors == []  # author parsed but not selected, so not written
+    ctx.close()
+
+
+def test_apply_filename_parse_sets_series_before_sequence(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    AppController(ctx).apply_filename_parse([book], "%series% #%sequence%", {"series", "sequence"})
+    got = ctx.books.get(book.id)
+    assert got.series and got.series[0].name == "Mistborn"
+    assert got.series[0].sequence == 1.0  # sequence applied because series was set first
+    ctx.close()
+
+
+def test_apply_filename_parse_skips_non_matching_books(tmp_path):
+    ctx = _ctx(tmp_path)
+    ok = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
+    from colophon.core.models import SourceFile
+    bad_folder = tmp_path / "ingest" / "bad"
+    bad_folder.mkdir(parents=True)
+    bp = bad_folder / "nomatch.mp3"
+    bp.write_bytes(b"x")
+    bad = BookUnit.new(source_folder=bad_folder)
+    bad.source_files = [SourceFile(path=bp, size=1, duration_seconds=60.0, ext="mp3")]
+    ctx.books.upsert(bad)
+    n = AppController(ctx).apply_filename_parse([ok, bad], "%author% - %title%", {"author", "title"})
+    assert n == 1  # only the matching book counted
+    assert ctx.books.get(bad.id).title is None
+    ctx.close()
+
+
+def test_apply_filename_parse_drops_sequence_without_series(tmp_path):
+    # A pattern that yields sequence but not series, on a book with no series,
+    # is a no-op for sequence: it must not be counted or recorded.
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    ctrl = AppController(ctx)
+    n = ctrl.apply_filename_parse([book], "%title% #%sequence%", {"title", "sequence"})
+    assert n == 1  # title was written
+    got = ctx.books.get(book.id)
+    assert got.title == "Mistborn"
+    assert got.series == []  # no series, so sequence was dropped
+    # the recorded batch holds only the real (title) change
+    changes = ctx.history.list_batch(ctx.history.latest_batch_id())
+    assert {c.field for c in changes} == {"title"}
+    ctx.close()
+
+
+def test_apply_filename_parse_skips_book_when_only_noop_fields(tmp_path):
+    # Selecting only sequence (no series) on a series-less book changes nothing,
+    # so the book is not counted and no empty batch is recorded.
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    ctrl = AppController(ctx)
+    n = ctrl.apply_filename_parse([book], "%title% #%sequence%", {"sequence"})
+    assert n == 0
+    ctx.close()
+
+
+def test_filename_parse_updates_matches_apply(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
+    updates = AppController(ctx).filename_parse_updates(
+        book, "%title% #%sequence%", {"title", "sequence"}
+    )
+    assert updates == {"title": "Mistborn"}  # sequence dropped, no series
+    ctx.close()
+
+
+def test_apply_filename_parse_is_undoable(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
+    ctrl = AppController(ctx)
+    ctrl.apply_filename_parse([book], "%author% - %title%", {"title"})
+    assert ctrl.undo_last() is True
+    assert ctx.books.get(book.id).title is None
+    ctx.close()
+
+
+def test_save_and_remove_filename_pattern_persist(tmp_path):
+    from colophon.adapters.config import load_config
+
+    cfg_path = tmp_path / "c.toml"
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"), config_path=cfg_path)
+    ctrl = AppController(ctx)
+    ctrl.save_filename_pattern("%author% - %title%")
+    ctrl.save_filename_pattern("%author% - %title%")  # dedup: no second copy
+    ctrl.save_filename_pattern("%series% #%sequence% - %title%")
+    assert load_config(cfg_path).saved_filename_patterns == [
+        "%author% - %title%",
+        "%series% #%sequence% - %title%",
+    ]
+    ctrl.remove_filename_pattern("%author% - %title%")
+    assert load_config(cfg_path).saved_filename_patterns == ["%series% #%sequence% - %title%"]
+    ctx.close()
+
+
+def test_save_filename_pattern_rejects_bad_template(tmp_path):
+    import pytest
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    with pytest.raises(ValueError):
+        ctrl.save_filename_pattern("%nope%")
+    assert ctx.config.saved_filename_patterns == []
+    ctx.close()
+
+
 class _FakeAbs:
     def __init__(self):
         self.scanned = []
