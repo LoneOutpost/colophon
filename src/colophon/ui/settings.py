@@ -85,14 +85,14 @@ def render_settings(controller: AppController) -> None:
         rd_status = ui.label("").classes("text-caption text-grey-7")
 
         async def test_rd() -> None:
-            # Use the value currently typed in the field for the test.
-            controller.ctx.config.real_debrid_token = _opt_str(rd_token.value)
-            if not controller.rd_configured():
+            # Test the value currently typed in the field, without persisting it.
+            token = _opt_str(rd_token.value)
+            if not token:
                 rd_status.set_text("Enter a token first")
                 return
             rd_status.set_text("Testing...")
             try:
-                user = await controller.rd_test_connection()
+                user = await controller.rd_test_connection(token)
                 rd_status.set_text(f"Connected as {user.username}")
             except Exception as e:  # surface any failure to the operator (BLE001 intentional)
                 logger.warning(f"RD test connection failed: {e}")

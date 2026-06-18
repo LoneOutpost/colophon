@@ -105,6 +105,19 @@ async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch)
     assert result.any_ok is True
 
 
+async def test_download_torrent_removes_empty_folder_on_total_failure(tmp_path, monkeypatch):
+    torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1"])
+    links = {"L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+
+    async def fake_stream(url, dest, *, progress=None, client=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    assert result.any_ok is False
+    assert not result.folder.exists()  # empty staging dir cleaned up
+
+
 def test_sanitize_name_strips_separators():
     assert sanitize_name("a/b:c?.mp3") == "a_b_c_.mp3"
     assert sanitize_name("   ...   ") == "download"

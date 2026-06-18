@@ -141,4 +141,11 @@ async def download_torrent(
         except Exception as e:  # isolate a single failed download (BLE001 intentional)
             logger.warning(f"download failed for {unr.filename}: {e}")
             result.files.append(AcquiredFile(filename=unr.filename, path=None, ok=False, error=str(e)))
+    if not result.any_ok:
+        # Nothing landed; drop the staging dir if it is empty (leave it if .part
+        # remnants remain, so a retry/cleanup can still find them).
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
     return result

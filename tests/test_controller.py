@@ -857,6 +857,31 @@ def test_rd_configured_reflects_token(tmp_path):
     ctx2.close()
 
 
+async def test_rd_test_connection_uses_passed_token_without_config(tmp_path, monkeypatch):
+    from colophon.adapters.realdebrid import RdUser
+
+    ctx = _ctx(tmp_path)  # no token configured
+    ctrl = AppController(ctx)
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, token, **kwargs):
+            captured["token"] = token
+
+        async def user(self):
+            return RdUser(id=1, username="demo")
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr("colophon.controller.RealDebridClient", FakeClient)
+    user = await ctrl.rd_test_connection("typed-token")
+    assert user.username == "demo"
+    assert captured["token"] == "typed-token"  # tested the passed token, not config
+    assert ctx.config.real_debrid_token is None  # config not mutated
+    ctx.close()
+
+
 def test_rd_download_dir_defaults_under_data_dir(tmp_path):
     from colophon.app_context import default_db_path
 

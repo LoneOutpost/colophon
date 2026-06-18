@@ -132,8 +132,12 @@ def render_acquire(controller: AppController) -> None:
         try:
             for tid in targets:
                 statuses[tid].set_text("downloading...")
+
+                def _on_progress(done: int, total: int, name: str, label=statuses[tid]) -> None:
+                    label.set_text(f"downloading {done}/{total}: {name}")
+
                 try:
-                    result, book_ids = await controller.rd_download(tid)
+                    result, book_ids = await controller.rd_download(tid, progress=_on_progress)
                     ok = sum(1 for f in result.files if f.ok)
                     if result.any_ok:
                         statuses[tid].set_text(

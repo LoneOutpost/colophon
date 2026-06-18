@@ -207,8 +207,14 @@ class AppController:
     def _rd_download_dir(self) -> Path:
         return self.ctx.config.real_debrid_download_dir or (default_db_path().parent / "downloads")
 
-    async def rd_test_connection(self) -> RdUser:
-        client = self.rd_client()
+    async def rd_test_connection(self, token: str | None = None) -> RdUser:
+        """Verify the RD token by fetching the account. Tests `token` if given
+        (without persisting it), else the configured one. Lets the Settings page
+        validate a typed-but-unsaved token without mutating live config."""
+        token = token or self.ctx.config.real_debrid_token
+        if not token:
+            raise ValueError("no Real-Debrid token configured")
+        client = RealDebridClient(token)
         try:
             return await client.user()
         finally:
