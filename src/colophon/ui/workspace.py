@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from nicegui import ui
@@ -19,6 +20,7 @@ from nicegui import ui
 from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
+from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookUnit
 from colophon.core.normalize import normalize_description, normalize_text
 
@@ -29,6 +31,17 @@ _CONTENT_HEIGHT = "calc(100vh - 136px)"
 
 # Sentinel marking a bulk-edit field whose selected books hold differing values.
 _MIXED = object()
+
+_PLACEHOLDER_RE = re.compile(r"%(\w+)%")
+
+
+def _placeholder_fields(template: str) -> list[str]:
+    """Placeholder names in `template`, in order, excluding %skip% and duplicates."""
+    seen: list[str] = []
+    for name in _PLACEHOLDER_RE.findall(template):
+        if name != "skip" and name not in seen:
+            seen.append(name)
+    return seen
 
 # Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
 _STATUS_BADGES = [
@@ -59,6 +72,7 @@ def render_workspace(controller: AppController) -> None:
     selected_ids: set[str] = set()
     scope: dict[str, object] = {"kind": "all", "key": None}
     foster_selected: set[Path] = set()
+    book_filter: dict[str, str] = {"text": ""}
     view: dict[str, object] = {
         "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
     }
@@ -91,6 +105,28 @@ def render_workspace(controller: AppController) -> None:
         if kind == "series" and key:
             return [b for b in all_books if b.series and b.series[0].name == key]
         return all_books
+
+    def _matches_filter(book, terms: list[str]) -> bool:
+        if not terms:
+            return True
+        hay = " ".join(
+            filter(None, [
+                book.title or "",
+                "; ".join(book.authors),
+                "; ".join(book.narrators),
+                "; ".join(s.name for s in book.series),
+                controller.book_filename(book),
+            ])
+        ).lower()
+        return all(term in hay for term in terms)
+
+    def _visible_books() -> list:
+        """Books in the current scope, narrowed by the free-text filter."""
+        terms = book_filter["text"].lower().split()
+        books = _books_for_scope()
+        if not terms:
+            return books
+        return [b for b in books if _matches_filter(b, terms)]
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
@@ -480,36 +516,242 @@ def render_workspace(controller: AppController) -> None:
 
     # --- book list ---
     def _select_all(book_ids: list[str]) -> None:
+        # Navigator "Select all": all books in the current scope (ignores filter).
         selected_ids.update(book_ids)
-        refresh_nav()  # multiselect checkboxes live in the navigator now
+        refresh_nav()
+        refresh_list()
         refresh_status()
+        _update_count()
         _after_select()
 
     def _deselect_all() -> None:
         selected_ids.clear()
         refresh_nav()
+        refresh_list()
         refresh_status()
+        _update_count()
+        _after_select()
+
+    def _select_visible() -> None:
+        # Books-header "Select all": additive over the filtered, visible books.
+        selected_ids.update(b.id for b in _visible_books())
+        refresh_nav()
+        refresh_list()
+        refresh_status()
+        _update_count()
+        _after_select()
+
+    def _deselect_visible() -> None:
+        # Books-header "Deselect all": subtractive over the filtered, visible books;
+        # selections outside the current filter are left untouched.
+        selected_ids.difference_update(b.id for b in _visible_books())
+        refresh_nav()
+        refresh_list()
+        refresh_status()
+        _update_count()
+        _after_select()
+
+    def _toggle_book(book_id: str, on: bool) -> None:
+        if on:
+            selected_ids.add(book_id)
+        else:
+            selected_ids.discard(book_id)
+        refresh_nav()  # keep navigator node checkboxes in sync
+        refresh_status()
+        _update_count()
         _after_select()
 
     def refresh_list() -> None:
         list_container.clear()
-        books = _books_for_scope()
+        books = _visible_books()
         with list_container:
             if not books:
-                ui.label("No books in this view").classes("text-grey-6 q-pa-md")
+                msg = (
+                    "No books match the filter" if book_filter["text"].strip()
+                    else "No books in this view"
+                )
+                ui.label(msg).classes("text-grey-6 q-pa-md")
                 return
-            # Selection is driven from the navigator (multiselect checkboxes on the
-            # author/series entries), so the book list is plain click-to-view here.
+            # Every book is always individually selectable. The leading checkbox
+            # toggles selection; clicking the title section opens the detail view.
             with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
-                    with ui.item(on_click=lambda bid=book.id: show_detail(bid)).props("clickable"):
-                        with ui.item_section():
+                    with ui.item():
+                        with ui.item_section().props("avatar"):
+                            ui.checkbox(
+                                value=book.id in selected_ids,
+                                on_change=lambda e, bid=book.id: _toggle_book(bid, e.value),
+                            ).props("dense")
+                        with ui.item_section().classes("cursor-pointer").on(
+                            "click", lambda bid=book.id: show_detail(bid)
+                        ):
                             ui.item_label(book.title or "(untitled)")
                             ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
                         with ui.item_section().props("side"):
                             ui.badge(f"{book.confidence:.0f}").props(
                                 f"color={_confidence_color(book.confidence)}"
                             )
+
+    # --- parse from filename ---
+    def _parse_dialog() -> None:
+        books = _selected_books()
+        if not books:
+            ui.notify("Select one or more books first")
+            return
+        # Working copy of the saved-pattern list; persisted edits reflect here live.
+        state = {"pattern": controller.ctx.config.filename_template or "%author% - %title%"}
+        chosen: dict[str, bool] = {}
+
+        with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
+            ui.label("Parse from filename").classes("text-h6")
+            ui.label(f"Applies to {len(books)} selected book(s).").classes(
+                "text-caption text-grey-7"
+            )
+
+            # Field key: the placeholders that can appear in a pattern.
+            with ui.row().classes("items-center q-gutter-xs q-mt-xs"):
+                ui.label("Fields:").classes("text-caption text-grey-7")
+                for name in sorted(VALID_FILENAME_FIELDS):
+                    ui.badge(f"%{name}%").props("color=grey-7 outline")
+                ui.badge("%skip%").props("color=grey-5 outline").tooltip(
+                    "Matches and discards a segment"
+                )
+
+            pattern_input = ui.input("Pattern", value=state["pattern"]).props(
+                "dense clearable"
+            ).classes("w-full q-mt-sm")
+
+            saved_row = ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mt-xs")
+            fields_row = ui.row().classes("items-center w-full q-gutter-sm q-mt-sm")
+            preview_box = ui.column().classes("w-full q-mt-sm")
+            apply_btn = ui.button("Apply to selection", icon="auto_fix_high")
+
+            def _render_saved() -> None:
+                saved_row.clear()
+                patterns = controller.ctx.config.saved_filename_patterns
+                with saved_row:
+                    if not patterns:
+                        ui.label("No saved patterns yet").classes("text-caption text-grey-6")
+                    for pat in patterns:
+                        with ui.button(on_click=lambda p=pat: _load_pattern(p)).props(
+                            "outline dense no-caps"
+                        ).classes("q-pr-none"):
+                            ui.label(pat).classes("text-caption")
+                            ui.icon("close").classes("q-ml-xs").on(
+                                "click.stop", lambda p=pat: _unsave(p)
+                            ).tooltip("Remove this saved pattern")
+
+            def _load_pattern(pat: str) -> None:
+                state["pattern"] = pat
+                pattern_input.set_value(pat)  # triggers _on_pattern_change
+
+            def _unsave(pat: str) -> None:
+                controller.remove_filename_pattern(pat)
+                _render_saved()
+                ui.notify("Removed saved pattern")
+
+            def _save_current() -> None:
+                pat = (pattern_input.value or "").strip()
+                if not pat:
+                    return
+                try:
+                    controller.save_filename_pattern(pat)
+                except ValueError as e:
+                    ui.notify(f"Invalid pattern: {e}", type="negative")
+                    return
+                _render_saved()
+                ui.notify("Saved pattern")
+
+            def _render_fields(present: list[str]) -> None:
+                fields_row.clear()
+                with fields_row:
+                    if not present:
+                        return
+                    ui.label("Write:").classes("text-caption text-grey-7 self-center")
+                    for name in present:
+                        chosen.setdefault(name, True)
+                        ui.checkbox(name, value=chosen[name]).props("dense").on_value_change(
+                            lambda e, n=name: chosen.__setitem__(n, e.value)
+                        )
+
+            def _render_preview() -> None:
+                preview_box.clear()
+                pat = (pattern_input.value or "").strip()
+                try:
+                    compile_template(pat)
+                except ValueError as e:
+                    apply_btn.set_enabled(False)
+                    with preview_box:
+                        ui.label(f"Invalid pattern: {e}").classes("text-caption text-negative")
+                    _render_fields([])
+                    return
+                # Fields the pattern can produce (in pattern order), intersected with valid ones.
+                present = [
+                    n for n in _placeholder_fields(pat) if n in VALID_FILENAME_FIELDS
+                ]
+                _render_fields(present)
+                apply_btn.set_enabled(bool(present))
+                matched = 0
+                with preview_box:
+                    with ui.scroll_area().classes("w-full").style("max-height: 32vh"):
+                        with ui.list().props("dense").classes("w-full"):
+                            for b in books:
+                                parsed = controller.preview_filename_parse(b, pat)
+                                if parsed:
+                                    matched += 1
+                                with ui.item():
+                                    with ui.item_section():
+                                        ui.item_label(controller.book_filename(b)).classes("ellipsis")
+                                        if parsed:
+                                            shown = ", ".join(
+                                                f"{k}={v}" for k, v in parsed.items() if k in present
+                                            )
+                                            ui.item_label(shown or "(no fields)").props("caption")
+                                        else:
+                                            ui.item_label("no match").props("caption").classes(
+                                                "text-grey-6"
+                                            )
+                    ui.label(f"{matched} of {len(books)} filename(s) match").classes(
+                        "text-caption text-grey-7"
+                    )
+
+            def _on_pattern_change() -> None:
+                _render_preview()
+
+            pattern_input.on_value_change(lambda _e: _on_pattern_change())
+
+            def _apply() -> None:
+                pat = (pattern_input.value or "").strip()
+                fields = {n for n, on in chosen.items() if on}
+                if not fields:
+                    ui.notify("Select at least one field to write")
+                    return
+                try:
+                    n = controller.apply_filename_parse(books, pat, fields)
+                except ValueError as e:
+                    ui.notify(f"Invalid pattern: {e}", type="negative")
+                    return
+                ui.notify(f"Parsed and wrote fields to {n} of {len(books)} book(s)")
+                _close()
+
+            def _close() -> None:
+                # Defer view refresh until close so rebuilding list_container can't
+                # tear down this dialog while it is still open.
+                dialog.close()
+                refresh_nav()
+                _render_middle()
+                refresh_status()
+                if selected_ids:
+                    _after_select()
+
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-md"):
+                ui.button("Save pattern", icon="bookmark_add", on_click=_save_current).props("flat")
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                apply_btn.on_click(_apply)
+
+            _render_saved()
+            _render_preview()
+        dialog.open()
 
     # --- folder browser (Folders mode) ---
     def _toggle_foster(path: Path, on: bool) -> None:
@@ -744,11 +986,20 @@ def render_workspace(controller: AppController) -> None:
                             checkbox=_node_checkbox(aids),
                         )
 
+    def _update_count() -> None:
+        n = len(selected_ids)
+        middle_count.text = f"{n} selected" if n else ""
+
+    def _set_filter(value: str | None) -> None:
+        book_filter["text"] = value or ""
+        refresh_list()
+
     def _render_middle() -> None:
-        middle_title.text = "Folder contents" if view["mode"] == "folders" else "Books"
+        is_folders = view["mode"] == "folders"
+        middle_title.text = "Folder contents" if is_folders else "Books"
         # Show a folder-filter indicator in the Books header (Library mode only).
         middle_filter.clear()
-        if view["mode"] != "folders" and scope["kind"] == "folder" and scope["key"]:
+        if not is_folders and scope["kind"] == "folder" and scope["key"]:
             folder = Path(str(scope["key"]))
             with middle_filter:
                 ui.icon("filter_alt", color="primary")
@@ -758,7 +1009,29 @@ def render_workspace(controller: AppController) -> None:
                 ui.button(icon="close", on_click=lambda: _set_scope("all", None)).props(
                     "flat dense round size=sm color=primary"
                 ).tooltip("Clear folder filter")
-        if view["mode"] == "folders":
+        # Books toolbar: free-text filter + selection controls (Library mode only).
+        middle_toolbar.clear()
+        if not is_folders:
+            with middle_toolbar:
+                search = ui.input(
+                    placeholder="Filter title, author, series, narrator, filename",
+                    value=book_filter["text"],
+                ).props("dense clearable debounce=300").classes("w-full")
+                search.on_value_change(lambda e: _set_filter(e.value))
+                with search.add_slot("prepend"):
+                    ui.icon("search")
+                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                    ui.button("Select all", icon="done_all", on_click=_select_visible) \
+                        .props("flat dense no-caps").tooltip("Select all books matching the filter")
+                    ui.button("Deselect all", icon="remove_done", on_click=_deselect_visible) \
+                        .props("flat dense no-caps").tooltip("Deselect the books matching the filter")
+                    ui.space()
+                    ui.button("Parse", icon="auto_fix_high", on_click=_parse_dialog) \
+                        .props("flat dense no-caps").tooltip(
+                            "Parse fields from the selected books' filenames"
+                        )
+        _update_count()
+        if is_folders:
             refresh_folders()
         else:
             refresh_list()
@@ -775,13 +1048,11 @@ def render_workspace(controller: AppController) -> None:
         _render_middle()
 
     def _set_multiselect(on: bool) -> None:
+        # The navigator's Multiselect switch only toggles author/series-node
+        # checkboxes; per-book selection in the Books pane is always available, so
+        # toggling it must not disturb the current selection.
         view["multiselect"] = on
-        if not on:
-            selected_ids.clear()  # leaving multiselect drops the selection
         refresh_nav()
-        refresh_list()
-        refresh_status()
-        _after_select()
 
     def _set_scope(kind: str, key) -> None:
         scope["kind"], scope["key"] = kind, key
@@ -821,8 +1092,10 @@ def render_workspace(controller: AppController) -> None:
             selected_ids.update(book_ids)
         else:
             selected_ids.difference_update(book_ids)
-        _after_select()
+        refresh_list()  # reflect the change in the Books pane checkboxes
         refresh_status()
+        _update_count()
+        _after_select()
 
     def _undo() -> None:
         if controller.undo_last():
@@ -961,8 +1234,11 @@ def render_workspace(controller: AppController) -> None:
         with ui.card().classes("col-5 column").style("height: 100%"):
             with ui.row().classes("items-center w-full no-wrap"):
                 middle_title = ui.label("Books").classes("text-subtitle1")
-                middle_filter = ui.row().classes("items-center q-gutter-xs q-ml-sm col no-wrap")
-            ui.separator()
+                middle_filter = ui.row().classes("items-center q-gutter-xs q-ml-sm no-wrap")
+                ui.space()
+                middle_count = ui.label("").classes("text-caption text-grey-7")
+            middle_toolbar = ui.column().classes("w-full gap-1 q-mt-xs")
+            ui.separator().classes("q-mt-xs")
             with ui.scroll_area().classes("col"):
                 list_container = ui.column().classes("w-full gap-0")
         with ui.card().classes("col column").style("height: 100%"):
