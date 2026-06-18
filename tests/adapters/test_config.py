@@ -126,3 +126,22 @@ def test_integration_fields_round_trip(tmp_path):
     )
     save_config(cfg, path)
     assert load_config(path) == cfg
+
+
+def test_real_debrid_fields_round_trip(tmp_path):
+    from colophon.adapters.config import Config, load_config, save_config
+
+    cfg = Config(real_debrid_token="rd_tok", real_debrid_download_dir=tmp_path / "dl")
+    path = tmp_path / "c.toml"
+    save_config(cfg, path)
+    loaded = load_config(path)
+    assert loaded.real_debrid_token == "rd_tok"
+    assert loaded.real_debrid_download_dir == tmp_path / "dl"
+
+
+def test_real_debrid_defaults_are_none():
+    from colophon.adapters.config import Config
+
+    cfg = Config()
+    assert cfg.real_debrid_token is None
+    assert cfg.real_debrid_download_dir is None
