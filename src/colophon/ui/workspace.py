@@ -73,7 +73,12 @@ def render_workspace(controller: AppController) -> None:
     apply_theme()
     dark = setup_dark_mode()
     selected_ids: set[str] = set()
+    # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
+    # orthogonal, persistent constraint set by browsing a folder. Both the Books
+    # list and the navigator (author/series list) respect the folder filter, and
+    # a scope selection refines within it.
     scope: dict[str, object] = {"kind": "all", "key": None}
+    folder_filter: dict[str, object] = {"path": None}
     foster_selected: set[Path] = set()
     book_filter: dict[str, str] = {"text": ""}
     view: dict[str, object] = {
@@ -86,28 +91,30 @@ def render_workspace(controller: AppController) -> None:
     def _selected_books() -> list:
         return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
 
+    def _in_folder(book) -> bool:
+        """True when `book` is within the active folder filter (or none is set)."""
+        path = folder_filter["path"]
+        if not path:
+            return True
+        folder = Path(str(path))
+        return book.source_folder == folder or folder in book.source_folder.parents
+
     def _books_for_scope() -> list:
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
         if kind == "needs_id":
-            return list(tree.needs_id)
-        if kind == "author":
+            books = list(tree.needs_id)
+        elif kind == "author":
             node = next((a for a in tree.authors if a.name == key), None)
-            if node is None:
-                return []
-            return [b for s in node.series for b in s.books] + node.standalone
-        all_books = list(tree.needs_id)
-        for a in tree.authors:
-            all_books += [b for s in a.series for b in s.books] + a.standalone
-        if kind == "folder" and key:
-            folder = Path(str(key))
-            return [
-                b for b in all_books
-                if b.source_folder == folder or folder in b.source_folder.parents
-            ]
-        if kind == "series" and key:
-            return [b for b in all_books if b.series and b.series[0].name == key]
-        return all_books
+            books = [b for s in node.series for b in s.books] + node.standalone if node else []
+        elif kind == "series" and key:
+            books = [b for a in tree.authors for s in a.series if s.name == key for b in s.books]
+        else:  # "all"
+            books = list(tree.needs_id)
+            for a in tree.authors:
+                books += [b for s in a.series for b in s.books] + a.standalone
+        # The folder filter applies on top of every scope selection.
+        return [b for b in books if _in_folder(b)]
 
     def _matches_filter(book, terms: list[str]) -> bool:
         if not terms:
@@ -852,7 +859,7 @@ def render_workspace(controller: AppController) -> None:
                 )
                 ui.select(
                     options,
-                    value="__all__" if scope["kind"] == "all" else browse_root,
+                    value=browse_root if folder_filter["path"] else "__all__",
                     on_change=lambda e: _select_root(e.value),
                 ).props("dense outlined").classes("w-full q-mb-sm")
 
@@ -959,33 +966,43 @@ def render_workspace(controller: AppController) -> None:
                     ui.button("Deselect all", icon="remove_done", on_click=_deselect_all).props(
                         "flat dense no-caps"
                     ).set_enabled(bool(selected_ids))
+            # Authors/series shown are limited to those with books in the active
+            # folder filter (when one is set), mirroring the filtered Books list.
+            needs_id = [b for b in tree.needs_id if _in_folder(b)]
             with ui.list().props("dense").classes("w-full"):
-                _nav_item("All books", "library_books", kind == "all", lambda: _set_scope("all", None))
-                if tree.needs_id:
+                all_label = "All books in folder" if folder_filter["path"] else "All books"
+                _nav_item(all_label, "library_books", kind == "all", lambda: _set_scope("all", None))
+                if needs_id:
                     _nav_item(
-                        f"Needs identification ({len(tree.needs_id)})",
+                        f"Needs identification ({len(needs_id)})",
                         "help_outline",
                         kind == "needs_id",
                         lambda: _set_scope("needs_id", None),
                         color="negative",
-                        checkbox=_node_checkbox([b.id for b in tree.needs_id]),
+                        checkbox=_node_checkbox([b.id for b in needs_id]),
                     )
                 if view["group_by"] == "series":
-                    series_names = sorted({s.name for a in tree.authors for s in a.series})
-                    for name in series_names:
-                        sids = [b.id for a in tree.authors for s in a.series if s.name == name for b in s.books]
+                    series_books: dict[str, list[str]] = {}
+                    for a in tree.authors:
+                        for s in a.series:
+                            ids = [b.id for b in s.books if _in_folder(b)]
+                            if ids:
+                                series_books.setdefault(s.name, []).extend(ids)
+                    for name in sorted(series_books):
                         _nav_item(
                             name,
                             "collections_bookmark",
                             kind == "series" and key == name,
                             lambda n=name: _set_scope("series", n),
-                            checkbox=_node_checkbox(sids),
+                            checkbox=_node_checkbox(series_books[name]),
                         )
                 else:
                     for author in tree.authors:
-                        aids = [b.id for s in author.series for b in s.books] + [
-                            b.id for b in author.standalone
-                        ]
+                        aids = [
+                            b.id for s in author.series for b in s.books if _in_folder(b)
+                        ] + [b.id for b in author.standalone if _in_folder(b)]
+                        if not aids:
+                            continue  # no books from this author in the current folder
                         _nav_item(
                             author.name,
                             "person",
@@ -1007,14 +1024,14 @@ def render_workspace(controller: AppController) -> None:
         middle_title.text = "Folder contents" if is_folders else "Books"
         # Show a folder-filter indicator in the Books header (Library mode only).
         middle_filter.clear()
-        if not is_folders and scope["kind"] == "folder" and scope["key"]:
-            folder = Path(str(scope["key"]))
+        if not is_folders and folder_filter["path"]:
+            folder = Path(str(folder_filter["path"]))
             with middle_filter:
                 ui.icon("filter_alt", color="primary")
                 ui.label(f"Filtered to {folder.name or folder}").classes(
                     "text-caption text-primary ellipsis"
                 ).tooltip(str(folder))
-                ui.button(icon="close", on_click=lambda: _set_scope("all", None)).props(
+                ui.button(icon="close", on_click=_clear_folder_filter).props(
                     "flat dense round size=sm color=primary"
                 ).tooltip("Clear folder filter")
         # Books toolbar: free-text filter + selection controls (Library mode only).
@@ -1067,16 +1084,24 @@ def render_workspace(controller: AppController) -> None:
         refresh_nav()
         _render_middle()
 
+    def _clear_folder_filter() -> None:
+        folder_filter["path"] = None
+        refresh_nav()  # author/series list returns to the full library
+        _render_middle()
+
     def _browse_to(folder: Path) -> None:
-        # Navigating the folder browser silently filters the Library view to this
-        # folder (visible when you switch to Library mode); no extra nav entry.
+        # Navigating the folder browser sets a folder filter that constrains both
+        # the Books list and the navigator once you switch to Library mode. The
+        # author/series selection resets so the whole folder is shown.
         view["cwd"] = folder
-        scope["kind"], scope["key"] = "folder", str(folder)
+        folder_filter["path"] = str(folder)
+        scope["kind"], scope["key"] = "all", None
         refresh_folders()
 
     def _select_root(value: str) -> None:
         if value == "__all__":
-            scope["kind"], scope["key"] = "all", None  # reset Library to all scan paths
+            folder_filter["path"] = None  # reset Library to all scan paths
+            scope["kind"], scope["key"] = "all", None
             roots = _scan_roots()
             if roots:
                 view["cwd"] = roots[0]
