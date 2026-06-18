@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from nicegui import ui
 
 from colophon.adapters.config import Config
 from colophon.controller import AppController
+from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
 
@@ -31,102 +34,145 @@ def _opt_str(value: str) -> str | None:
     return value or None
 
 
+@contextmanager
+def _section(title: str, subtitle: str | None = None) -> Iterator[None]:
+    """A titled settings card; fields added in the body stack inside it."""
+    with ui.card().classes("w-full q-pa-md"):
+        ui.label(title).classes("text-subtitle1 text-weight-medium")
+        if subtitle:
+            ui.label(subtitle).classes("text-caption text-grey q-mb-xs")
+        with ui.column().classes("w-full gap-3 q-mt-sm"):
+            yield
+
+
 def render_settings(controller: AppController) -> None:
+    apply_theme()
+    dark = setup_dark_mode()
     cfg = controller.ctx.config
-    ui.label("Settings").classes("text-2xl font-bold")
 
-    form = ui.column().classes("w-full max-w-2xl gap-2")
-    with form:
-        scan_paths = ui.textarea(
-            "Scan paths (one per line)", value=_paths_to_text(cfg.scan_paths)
-        ).classes("w-full")
-        library_root = ui.input("Library root", value=str(cfg.library_root or "")).classes("w-full")
-        ll_ini = ui.input(
-            "LazyLibrarian config.ini path", value=str(cfg.lazylibrarian_config_ini or "")
-        ).classes("w-full")
-        template = ui.input("Filename template", value=cfg.filename_template).classes("w-full")
-        threshold = ui.number(
-            "Review threshold", value=cfg.review_threshold, min=0, max=100
-        ).classes("w-full")
-        bitrate = ui.input("Transcode bitrate", value=cfg.transcode_bitrate).classes("w-full")
-        port = ui.number("Port", value=cfg.port, min=1, max=65535).classes("w-full")
-        root_path = ui.input(
-            "Root path (reverse-proxy base, e.g. /colophon)", value=cfg.root_path
-        ).classes("w-full")
+    with ui.header(elevated=True).classes("items-center q-px-md"):
+        ui.icon("auto_stories", color="primary").classes("text-h5")
+        ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
+        ui.label("Settings").classes("text-subtitle2 q-ml-md").style("opacity: .7")
+        ui.space()
+        ui.button(
+            "Back to Library", icon="arrow_back", on_click=lambda: ui.navigate.to("/")
+        ).props("flat")
+        dark_mode_button(dark)
 
-        ui.label("AudiobookShelf").classes("text-lg mt-4")
-        abs_url = ui.input("ABS URL", value=cfg.audiobookshelf_url or "").classes("w-full")
-        abs_token = ui.input(
-            "ABS token", value=cfg.audiobookshelf_token or "", password=True
-        ).classes("w-full")
-        abs_lib = ui.input(
-            "ABS library id", value=cfg.audiobookshelf_library_id or ""
-        ).classes("w-full")
+    field = "outlined dense"
+    with ui.column().classes("w-full items-center q-pa-md"):
+        with ui.column().classes("w-full gap-4").style("max-width: 760px"):
+            with _section("Library", "Where books are scanned from and organized to."):
+                scan_paths = ui.textarea(
+                    "Scan paths (one per line)", value=_paths_to_text(cfg.scan_paths)
+                ).props(field).classes("w-full")
+                library_root = ui.input(
+                    "Library root", value=str(cfg.library_root or "")
+                ).props(field).classes("w-full")
+                template = ui.input(
+                    "Filename template", value=cfg.filename_template
+                ).props(field).classes("w-full")
 
-        ui.label("LazyLibrarian").classes("text-lg mt-4")
-        ll_url = ui.input("LL URL", value=cfg.lazylibrarian_url or "").classes("w-full")
-        ll_key = ui.input(
-            "LL API key", value=cfg.lazylibrarian_api_key or "", password=True
-        ).classes("w-full")
+            with _section("Encoding & review"):
+                bitrate = ui.input(
+                    "Transcode bitrate", value=cfg.transcode_bitrate
+                ).props(field).classes("w-full")
+                threshold = ui.number(
+                    "Review threshold", value=cfg.review_threshold, min=0, max=100
+                ).props(field).classes("w-full")
 
-        ui.label("Hardcover").classes("text-lg mt-4")
-        hc_token = ui.input(
-            "Hardcover API token", value=cfg.hardcover_api_token or "", password=True
-        ).classes("w-full")
+            with _section("Server", "Changes take effect on the next restart."):
+                port = ui.number("Port", value=cfg.port, min=1, max=65535).props(field).classes(
+                    "w-full"
+                )
+                root_path = ui.input(
+                    "Root path (reverse-proxy base, e.g. /colophon)", value=cfg.root_path
+                ).props(field).classes("w-full")
 
-        ui.label("Real-Debrid").classes("text-lg mt-4")
-        rd_token = ui.input(
-            "Real-Debrid token", value=cfg.real_debrid_token or "", password=True
-        ).classes("w-full")
-        rd_dir = ui.input(
-            "Download directory (blank = default)",
-            value=str(cfg.real_debrid_download_dir or ""),
-        ).classes("w-full")
-        rd_status = ui.label("").classes("text-caption text-grey-7")
+            with _section("AudiobookShelf", "Trigger a library rescan after organizing."):
+                abs_url = ui.input("Server URL", value=cfg.audiobookshelf_url or "").props(
+                    field
+                ).classes("w-full")
+                abs_token = ui.input(
+                    "API token", value=cfg.audiobookshelf_token or "", password=True
+                ).props(field).classes("w-full")
+                abs_lib = ui.input(
+                    "Library id", value=cfg.audiobookshelf_library_id or ""
+                ).props(field).classes("w-full")
 
-        async def test_rd() -> None:
-            # Test the value currently typed in the field, without persisting it.
-            token = _opt_str(rd_token.value)
-            if not token:
-                rd_status.set_text("Enter a token first")
-                return
-            rd_status.set_text("Testing...")
-            try:
-                user = await controller.rd_test_connection(token)
-                rd_status.set_text(f"Connected as {user.username}")
-            except Exception as e:  # surface any failure to the operator (BLE001 intentional)
-                logger.warning(f"RD test connection failed: {e}")
-                rd_status.set_text("Connection failed (check the token)")
+            with _section("LazyLibrarian", "Read-only status lookups and path patterns."):
+                ll_ini = ui.input(
+                    "config.ini path", value=str(cfg.lazylibrarian_config_ini or "")
+                ).props(field).classes("w-full")
+                ll_url = ui.input("Server URL", value=cfg.lazylibrarian_url or "").props(
+                    field
+                ).classes("w-full")
+                ll_key = ui.input(
+                    "API key", value=cfg.lazylibrarian_api_key or "", password=True
+                ).props(field).classes("w-full")
 
-        ui.button("Test connection", icon="wifi_tethering", on_click=test_rd).props("flat")
+            with _section("Hardcover", "Metadata source; set a token to enable it."):
+                hc_token = ui.input(
+                    "API token", value=cfg.hardcover_api_token or "", password=True
+                ).props(field).classes("w-full")
 
-    def do_save() -> None:
-        try:
-            new = Config(
-                db_path=cfg.db_path,  # unchanged here; db path edits need a restart
-                scan_paths=_text_to_paths(scan_paths.value),
-                library_root=_opt_path(library_root.value),
-                lazylibrarian_config_ini=_opt_path(ll_ini.value),
-                filename_template=template.value or "%author% - %title%",
-                review_threshold=float(threshold.value),
-                transcode_bitrate=bitrate.value or "64k",
-                worker_pool_size=cfg.worker_pool_size,
-                port=int(port.value),
-                root_path=root_path.value.strip(),
-                audiobookshelf_url=_opt_str(abs_url.value),
-                audiobookshelf_token=_opt_str(abs_token.value),
-                audiobookshelf_library_id=_opt_str(abs_lib.value),
-                lazylibrarian_url=_opt_str(ll_url.value),
-                lazylibrarian_api_key=_opt_str(ll_key.value),
-                hardcover_api_token=_opt_str(hc_token.value),
-                real_debrid_token=_opt_str(rd_token.value),
-                real_debrid_download_dir=_opt_path(rd_dir.value),
-            )
-            controller.save_settings(new)
-            ui.notify("Settings saved")
-        except Exception:
-            logger.exception("saving settings failed")
-            ui.notify("Could not save settings (see logs)", type="negative")
+            with _section("Real-Debrid", "Browse and download audiobooks from your account."):
+                rd_token = ui.input(
+                    "API token", value=cfg.real_debrid_token or "", password=True
+                ).props(field).classes("w-full")
+                rd_dir = ui.input(
+                    "Download directory (blank = default)",
+                    value=str(cfg.real_debrid_download_dir or ""),
+                ).props(field).classes("w-full")
+                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                    rd_status = ui.label("").classes("text-caption text-grey")
 
-    ui.button("Save", on_click=do_save).classes("mt-4")
-    ui.link("Dashboard", "/")
+                    async def test_rd() -> None:
+                        # Test the typed value without persisting it.
+                        token = _opt_str(rd_token.value)
+                        if not token:
+                            rd_status.set_text("Enter a token first")
+                            return
+                        rd_status.set_text("Testing...")
+                        try:
+                            user = await controller.rd_test_connection(token)
+                            rd_status.set_text(f"Connected as {user.username}")
+                        except Exception as e:  # surface failure to the operator (BLE001 intentional)
+                            logger.warning(f"RD test connection failed: {e}")
+                            rd_status.set_text("Connection failed (check the token)")
+
+                    ui.button(
+                        "Test connection", icon="wifi_tethering", on_click=test_rd
+                    ).props("flat").classes("q-ml-auto")
+
+            def do_save() -> None:
+                try:
+                    new = Config(
+                        db_path=cfg.db_path,  # unchanged here; db path edits need a restart
+                        scan_paths=_text_to_paths(scan_paths.value),
+                        library_root=_opt_path(library_root.value),
+                        lazylibrarian_config_ini=_opt_path(ll_ini.value),
+                        filename_template=template.value or "%author% - %title%",
+                        review_threshold=float(threshold.value),
+                        transcode_bitrate=bitrate.value or "64k",
+                        worker_pool_size=cfg.worker_pool_size,
+                        port=int(port.value),
+                        root_path=root_path.value.strip(),
+                        audiobookshelf_url=_opt_str(abs_url.value),
+                        audiobookshelf_token=_opt_str(abs_token.value),
+                        audiobookshelf_library_id=_opt_str(abs_lib.value),
+                        lazylibrarian_url=_opt_str(ll_url.value),
+                        lazylibrarian_api_key=_opt_str(ll_key.value),
+                        hardcover_api_token=_opt_str(hc_token.value),
+                        real_debrid_token=_opt_str(rd_token.value),
+                        real_debrid_download_dir=_opt_path(rd_dir.value),
+                    )
+                    controller.save_settings(new)
+                    ui.notify("Settings saved")
+                except Exception:
+                    logger.exception("saving settings failed")
+                    ui.notify("Could not save settings (see logs)", type="negative")
+
+            with ui.row().classes("w-full justify-end q-mt-sm"):
+                ui.button("Save changes", icon="save", on_click=do_save).props("unelevated")

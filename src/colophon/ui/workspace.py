@@ -23,6 +23,7 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookUnit
 from colophon.core.normalize import normalize_description, normalize_text
+from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,8 @@ def _confidence_color(value: float) -> str:
 
 
 def render_workspace(controller: AppController) -> None:
+    apply_theme()
+    dark = setup_dark_mode()
     selected_ids: set[str] = set()
     scope: dict[str, object] = {"kind": "all", "key": None}
     foster_selected: set[Path] = set()
@@ -165,14 +168,16 @@ def render_workspace(controller: AppController) -> None:
                     else:
                         inp = ui.input(field, value=value).props("dense").classes("col")
                     inputs[field] = inp
+                    # Source chip sits left of the action; the normalize button is
+                    # always the right-most control in the row.
+                    source = field_provenance(book, field)
+                    if source:
+                        ui.badge(source).props("color=grey-6 outline").classes("self-center")
                     normalizer = normalize_description if field == "description" else normalize_text
                     ui.button(
                         icon="auto_fix_high",
                         on_click=lambda inp=inp, fn=normalizer: inp.set_value(fn(inp.value or "")),
                     ).props("flat dense round").classes("self-center").tooltip("Normalize")
-                    source = field_provenance(book, field)
-                    if source:
-                        ui.badge(source).props("color=grey-6 outline").classes("self-center")
 
             def _save(b=book) -> None:
                 changed = {
@@ -1209,18 +1214,19 @@ def render_workspace(controller: AppController) -> None:
 
     # --- application shell ---
     with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon("auto_stories").classes("text-h5")
-        ui.label("Colophon").classes("text-h6 q-ml-sm")
+        ui.icon("auto_stories", color="primary").classes("text-h5")
+        ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         ui.space()
-        scan_btn = ui.button("Scan", icon="search").props("flat color=white")
-        identify_btn = ui.button("Identify", icon="travel_explore").props("flat color=white")
-        process_btn = ui.button("Encode + organize", icon="play_arrow").props("flat color=white")
+        scan_btn = ui.button("Scan", icon="search").props("flat")
+        identify_btn = ui.button("Identify", icon="travel_explore").props("flat")
+        process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated")
         if controller.rd_configured():
             ui.button(
                 "Acquire", icon="cloud_download", on_click=lambda: ui.navigate.to("/acquire")
-            ).props("flat color=white")
+            ).props("flat")
+        dark_mode_button(dark)
         ui.button(icon="settings", on_click=lambda: ui.navigate.to("/settings")).props(
-            "flat round color=white"
+            "flat round"
         ).tooltip("Settings")
 
     scan_btn.on_click(lambda: _run(scan_btn, _scan, "Scan complete"))
@@ -1254,7 +1260,7 @@ def render_workspace(controller: AppController) -> None:
             with ui.scroll_area().classes("col"):
                 detail_container = ui.column().classes("w-full gap-1")
 
-    with ui.footer().classes("bg-grey-2 text-grey-9 q-px-md q-py-xs"):
+    with ui.footer().classes("q-px-md q-py-xs"):
         status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
