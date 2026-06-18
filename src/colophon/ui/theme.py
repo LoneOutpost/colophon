@@ -85,7 +85,23 @@ def setup_dark_mode() -> ui.dark_mode:
     elif pref == "light":
         dark.disable()
     else:
-        dark.value = None  # follow the operating system
+        # Follow the OS for the initial paint (Quasar 'auto'), then, once the
+        # client is connected, pin the value to the matching explicit boolean.
+        # This keeps the first render flash-free while ensuring later toggles are
+        # explicit -> explicit (a clean repaint) rather than flipping out of
+        # 'auto', which only restyles part of the page until the next navigation.
+        dark.value = None
+
+        async def _pin_to_system() -> None:
+            try:
+                is_dark = await ui.run_javascript(
+                    "window.matchMedia('(prefers-color-scheme: dark)').matches"
+                )
+            except Exception:  # JS unavailable/timed out: stay on 'auto' (BLE001 intentional)
+                return
+            dark.value = bool(is_dark)
+
+        ui.timer(0.1, _pin_to_system, once=True)
     return dark
 
 
