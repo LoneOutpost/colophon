@@ -51,6 +51,12 @@ body {
 /* Rounded inputs and list rows to match the card radius scale. */
 .q-field--outlined .q-field__control { border-radius: 8px; }
 .q-item { border-radius: 8px; }
+/* Keyboard-focused book row: a left accent rule + a faint accent tint. */
+.book-row-focused {
+  box-shadow: inset 3px 0 0 var(--q-primary);
+  background: rgba(79, 70, 229, .07);
+}
+.body--dark .book-row-focused { background: rgba(99, 102, 241, .16); }
 /* Calmer scrollbars. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, .4); border-radius: 8px; }
