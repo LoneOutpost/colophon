@@ -56,6 +56,14 @@ logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 
+# Display labels for the metadata sources shown in the match-search dialog.
+_SOURCE_LABELS = {
+    "audnexus": "Audnexus",
+    "openlibrary": "OpenLibrary",
+    "googlebooks": "Google Books",
+    "hardcover": "Hardcover",
+}
+
 
 class ProcessResult(_Base):
     book_id: str
@@ -483,6 +491,41 @@ class AppController:
 
         gathered = await asyncio.gather(*(_safe(s) for s in self.ctx.sources))
         results = [r for batch in gathered for r in batch]
+        return score_identification(book, results).ranked
+
+    def available_sources(self) -> list[tuple[str, str]]:
+        """The configured metadata sources as (name, display label), in priority
+        order, so the search dialog can list exactly the available services."""
+        return [(s.name, _SOURCE_LABELS.get(s.name, s.name.title())) for s in self.ctx.sources]
+
+    async def search_matches(
+        self,
+        book: BookUnit,
+        *,
+        title: str | None,
+        author: str | None,
+        series: str | None,
+        asin: str | None,
+        source_name: str,
+    ) -> list[SourceResult]:
+        """Query a single chosen source with the (user-edited) fields and return
+        the results ranked against `book`. An unknown source name or a source
+        error yields an empty list (logged)."""
+        source = next((s for s in self.ctx.sources if s.name == source_name), None)
+        if source is None:
+            logger.warning(f"search_matches: unknown source {source_name!r}")
+            return []
+        query = SourceQuery(
+            title=(title or "").strip() or None,
+            author=(author or "").strip() or None,
+            series=(series or "").strip() or None,
+            asin=(asin or "").strip() or None,
+        )
+        try:
+            results = await source.search(query)
+        except Exception as e:  # a source failing must not crash the search (BLE001 intentional)
+            logger.warning(f"source {source_name} failed in search_matches: {e}")
+            return []
         return score_identification(book, results).ranked
 
     @staticmethod
