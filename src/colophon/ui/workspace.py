@@ -220,36 +220,95 @@ def render_workspace(controller: AppController) -> None:
                 refresh_list()
                 show_detail(b.id)
 
-            async def _compare(b=book) -> None:
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label(f"Matches for {b.title or '(untitled)'}").classes("text-subtitle1")
-                    body = ui.column().classes("w-full")
-                    with body:
-                        ui.spinner()
-                    try:
-                        matches = await controller.get_matches(b)
-                    except Exception:
-                        logger.exception("get_matches failed")
-                        matches = []
+            def _compare(b=book) -> None:
+                field_labels = {
+                    "title": "Title", "author": "Author", "narrator": "Narrator",
+                    "series": "Series", "sequence": "Sequence", "year": "Year",
+                    "asin": "ASIN", "description": "Description",
+                }
+                services = controller.available_sources()  # [(name, label), ...]
+                service_label = dict(services)
+                state = {
+                    "title": get_field(b, "title") or "",
+                    "author": get_field(b, "author") or "",
+                    "series": get_field(b, "series") or "",
+                    "asin": get_field(b, "asin") or "",
+                    "service": services[0][0] if services else None,
+                }
+                matches: list = []
 
-                    field_labels = {
-                        "title": "Title", "author": "Author", "narrator": "Narrator",
-                        "series": "Series", "sequence": "Sequence", "year": "Year",
-                        "asin": "ASIN", "description": "Description",
-                    }
+                with ui.dialog() as dialog, ui.card().classes("w-96"):
+                    ui.label(f"Find matches for {b.title or '(untitled)'}").classes("text-subtitle1")
+                    body = ui.column().classes("w-full")
+
+                    def show_form() -> None:
+                        body.clear()
+                        with body:
+                            if not services:
+                                ui.label("No metadata sources configured.").classes("text-grey-6")
+                                ui.button("Close", on_click=dialog.close).props("flat")
+                                return
+                            title_in = ui.input("Title", value=state["title"]).props("dense").classes("w-full")
+                            author_in = ui.input("Author", value=state["author"]).props("dense").classes("w-full")
+                            series_in = ui.input("Series", value=state["series"]).props("dense").classes("w-full")
+                            asin_in = ui.input("ASIN", value=state["asin"]).props("dense").classes("w-full")
+                            ui.label("Search with").classes("text-caption text-grey-7 q-mt-sm")
+                            service_radio = ui.radio(dict(services), value=state["service"]).props("dense")
+
+                            async def _go() -> None:
+                                state.update(
+                                    title=title_in.value, author=author_in.value,
+                                    series=series_in.value, asin=asin_in.value,
+                                    service=service_radio.value,
+                                )
+                                await run_search()
+
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                ui.button("Cancel", on_click=dialog.close).props("flat")
+                                ui.button("Search", icon="search", on_click=_go)
+
+                    def show_searching() -> None:
+                        body.clear()
+                        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
+                            ui.spinner()
+                            ui.label(f"Searching {service_label.get(state['service'], '')}…")
+
+                    async def run_search() -> None:
+                        show_searching()
+                        try:
+                            results = await controller.search_matches(
+                                b, title=state["title"], author=state["author"],
+                                series=state["series"], asin=state["asin"],
+                                source_name=state["service"],
+                            )
+                        except Exception:
+                            logger.exception("search_matches failed")
+                            results = []
+                        matches.clear()
+                        matches.extend(results)
+                        show_candidates()
 
                     def show_candidates() -> None:
                         body.clear()
                         with body:
+                            with ui.row().classes("items-center w-full no-wrap"):
+                                ui.button(
+                                    "Back to search", icon="arrow_back", on_click=show_form
+                                ).props("flat dense no-caps")
+                                ui.space()
+                                ui.label(service_label.get(state["service"], "")).classes(
+                                    "text-caption text-grey-6"
+                                )
                             if not matches:
-                                ui.label("No matches found").classes("text-grey-6")
-                            for m in matches[:10]:
-                                authors = ", ".join(m.authors) or "unknown"
-                                year = f" ({m.publish_year})" if m.publish_year else ""
-                                with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
-                                    with ui.item_section():
-                                        ui.item_label(m.title or "?")
-                                        ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
+                                ui.label("No matches found").classes("text-grey-6 q-pa-sm")
+                            with ui.list().props("dense").classes("w-full"):
+                                for m in matches[:10]:
+                                    authors = ", ".join(m.authors) or "unknown"
+                                    year = f" ({m.publish_year})" if m.publish_year else ""
+                                    with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
+                                        with ui.item_section():
+                                            ui.item_label(m.title or "?")
+                                            ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
 
                     def show_picker(result) -> None:
                         body.clear()
@@ -291,7 +350,7 @@ def render_workspace(controller: AppController) -> None:
                                 ui.button("Cancel", on_click=dialog.close).props("flat")
                                 ui.button("Apply selected", icon="done_all", on_click=_apply)
 
-                    show_candidates()
+                    show_form()
                 dialog.open()
 
             async def _tag_dialog(b=book) -> None:

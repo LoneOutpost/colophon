@@ -589,6 +589,97 @@ def test_get_matches_empty_when_no_sources(tmp_path):
     book.title = "Dune"
     matches = asyncio.run(AppController(ctx).get_matches(book))
     assert matches == []
+
+
+def test_available_sources_lists_configured_with_labels(tmp_path):
+    ctx = _ctx(tmp_path)  # default: audnexus, openlibrary, googlebooks (no hardcover token)
+    labels = dict(AppController(ctx).available_sources())
+    assert labels["audnexus"] == "Audnexus"
+    assert labels["googlebooks"] == "Google Books"
+    assert "hardcover" not in labels  # not configured without a token
+    ctx.close()
+
+
+async def test_search_matches_queries_only_chosen_source(tmp_path):
+    audn = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune")])
+    other = _StubSource("openlibrary", [SourceResult(provider="openlibrary", title="WRONG")])
+    ctx = _ctx(tmp_path, sources=[audn, other])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    results = await AppController(ctx).search_matches(
+        book, title="Dune", author="Frank Herbert", series=None, asin=None, source_name="audnexus"
+    )
+    assert results and all(r.provider == "audnexus" for r in results)
+    ctx.close()
+
+
+async def test_search_matches_builds_query_from_edited_fields(tmp_path):
+    captured = {}
+
+    class RecSource:
+        name = "audnexus"
+
+        async def search(self, query):
+            captured["q"] = query
+            return []
+
+    ctx = _ctx(tmp_path, sources=[RecSource()])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Original"
+    await AppController(ctx).search_matches(
+        book, title="Edited", author="A", series="S", asin="B01", source_name="audnexus"
+    )
+    q = captured["q"]
+    assert (q.title, q.author, q.series, q.asin) == ("Edited", "A", "S", "B01")
+    ctx.close()
+
+
+async def test_search_matches_blank_fields_become_none(tmp_path):
+    captured = {}
+
+    class RecSource:
+        name = "audnexus"
+
+        async def search(self, query):
+            captured["q"] = query
+            return []
+
+    ctx = _ctx(tmp_path, sources=[RecSource()])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    await AppController(ctx).search_matches(
+        book, title="Dune", author="  ", series="", asin=None, source_name="audnexus"
+    )
+    q = captured["q"]
+    assert q.title == "Dune" and q.author is None and q.series is None and q.asin is None
+    ctx.close()
+
+
+async def test_search_matches_unknown_source_returns_empty(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    results = await AppController(ctx).search_matches(
+        book, title="Dune", author=None, series=None, asin=None, source_name="nope"
+    )
+    assert results == []
+    ctx.close()
+
+
+async def test_search_matches_source_error_returns_empty(tmp_path):
+    class BoomSource:
+        name = "audnexus"
+
+        async def search(self, query):
+            raise RuntimeError("boom")
+
+    ctx = _ctx(tmp_path, sources=[BoomSource()])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    results = await AppController(ctx).search_matches(
+        book, title="Dune", author=None, series=None, asin=None, source_name="audnexus"
+    )
+    assert results == []
+    ctx.close()
     ctx.close()
 
 
