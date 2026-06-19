@@ -44,6 +44,21 @@ def _placeholder_fields(template: str) -> list[str]:
             seen.append(name)
     return seen
 
+
+def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
+    """The next focused id when moving by `delta` (+1 down, -1 up) through `ids`.
+
+    From no focus (or a stale id no longer present), Down lands on the first row
+    and Up on the last. Movement clamps at the ends (no wrap). Returns None only
+    when there is nothing to focus."""
+    if not ids:
+        return None
+    if current is None or current not in ids:
+        return ids[0] if delta > 0 else ids[-1]
+    index = max(0, min(len(ids) - 1, ids.index(current) + delta))
+    return ids[index]
+
+
 # Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
 _STATUS_BADGES = [
     ("detected", "Detected", "grey-6"),
@@ -81,6 +96,11 @@ def render_workspace(controller: AppController) -> None:
     folder_filter: dict[str, object] = {"path": None}
     foster_selected: set[Path] = set()
     book_filter: dict[str, str] = {"text": ""}
+    # Keyboard navigation: the focused book row and the live row elements + a
+    # registry of widgets the shortcuts drive (the filter input).
+    focus: dict[str, str | None] = {"id": None}
+    row_elements: dict[str, ui.item] = {}
+    refs: dict[str, object] = {"filter": None}
     view: dict[str, object] = {
         "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
     }
@@ -353,7 +373,7 @@ def render_workspace(controller: AppController) -> None:
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Save", icon="save", on_click=_save)
-                ui.button("Compare matches", icon="search", on_click=_compare).props("outline")
+                ui.button("Retrieve matches", icon="search", on_click=_compare).props("outline")
                 ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
                 ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat")
                 ui.button(
@@ -575,6 +595,7 @@ def render_workspace(controller: AppController) -> None:
 
     def refresh_list() -> None:
         list_container.clear()
+        row_elements.clear()
         books = _visible_books()
         with list_container:
             if not books:
@@ -586,23 +607,91 @@ def render_workspace(controller: AppController) -> None:
                 return
             # Every book is always individually selectable. The leading checkbox
             # toggles selection; clicking the title section opens the detail view.
+            # Rows are keyboard-navigable; the focused row is tinted.
             with ui.list().props("separator dense").classes("w-full"):
                 for book in books:
-                    with ui.item():
+                    item = ui.item()
+                    row_elements[book.id] = item
+                    if book.id == focus["id"]:
+                        item.classes("book-row-focused")
+                    with item:
                         with ui.item_section().props("avatar"):
                             ui.checkbox(
                                 value=book.id in selected_ids,
                                 on_change=lambda e, bid=book.id: _toggle_book(bid, e.value),
                             ).props("dense")
                         with ui.item_section().classes("cursor-pointer").on(
-                            "click", lambda bid=book.id: show_detail(bid)
+                            "click", lambda bid=book.id: _set_focus(bid)
                         ):
                             ui.item_label(book.title or "(untitled)")
                             ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
                         with ui.item_section().props("side"):
-                            ui.badge(f"{book.confidence:.0f}").props(
-                                f"color={_confidence_color(book.confidence)}"
-                            )
+                            with ui.row().classes("items-center no-wrap q-gutter-xs"):
+                                total = sum(sf.duration_seconds for sf in book.source_files)
+                                if book.source_files:
+                                    ui.label(_fmt_duration(total)).classes(
+                                        "text-caption text-grey-6"
+                                    )
+                                ui.badge(f"{book.confidence:.0f}").props(
+                                    f"color={_confidence_color(book.confidence)}"
+                                )
+
+    # --- keyboard navigation ---
+    def _set_focus(book_id: str) -> None:
+        """Focus a book row: tint it, open it in Details, and scroll it into view."""
+        old = focus["id"]
+        focus["id"] = book_id
+        if old in row_elements:
+            row_elements[old].classes(remove="book-row-focused")
+        if book_id in row_elements:
+            row_elements[book_id].classes(add="book-row-focused")
+            ui.run_javascript(
+                f'getElement({row_elements[book_id].id}).$el.scrollIntoView({{block:"nearest"}})'
+            )
+        show_detail(book_id)
+
+    def _nav_focus(delta: int) -> None:
+        ids = [b.id for b in _visible_books()]
+        new = _move_focus(ids, focus["id"], delta)
+        if new is not None:
+            _set_focus(new)
+
+    def _toggle_focused() -> None:
+        book_id = focus["id"]
+        if not book_id:
+            return
+        if book_id in selected_ids:
+            selected_ids.discard(book_id)
+        else:
+            selected_ids.add(book_id)
+        refresh_list()  # re-render the checkbox (and re-apply the focus tint)
+        refresh_nav()   # keep navigator node checkboxes in sync
+        refresh_status()
+        _update_count()
+
+    def _on_key(e) -> None:
+        # Only drive the Books list in Library mode; NiceGUI's `ignore` list keeps
+        # these keys from firing while a text field/button is focused.
+        if view["mode"] != "library":
+            return
+        key, action, mods = e.key, e.action, e.modifiers
+        if mods.ctrl or mods.alt or mods.meta:
+            return
+        # "/" focuses the filter; act on keyup so the slash isn't typed into it.
+        if action.keyup and key.name == "/":
+            if refs["filter"] is not None:
+                refs["filter"].run_method("focus")
+            return
+        if not action.keydown:
+            return
+        if key.arrow_down or key.name == "j":
+            _nav_focus(1)
+        elif key.arrow_up or key.name == "k":
+            _nav_focus(-1)
+        elif key.space and not action.repeat:
+            _toggle_focused()
+        elif key.enter and not action.repeat and focus["id"]:
+            show_detail(focus["id"])
 
     # --- parse from filename ---
     def _parse_dialog() -> None:
@@ -1056,6 +1145,14 @@ def render_workspace(controller: AppController) -> None:
                     value=book_filter["text"],
                 ).props("dense clearable debounce=300").classes("w-full")
                 search.on_value_change(lambda e: _set_filter(e.value))
+                refs["filter"] = search  # so the "/" shortcut can focus it
+
+                def _clear_filter() -> None:
+                    search.set_value("")
+                    _set_filter("")
+                    search.run_method("blur")  # return keyboard control to the list
+
+                search.on("keydown.esc", _clear_filter)
                 with search.add_slot("prepend"):
                     ui.icon("search")
                 with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
@@ -1249,6 +1346,8 @@ def render_workspace(controller: AppController) -> None:
             await _go(books)
 
     # --- application shell ---
+    # Keyboard navigation for the Books list (ignored while typing in a field).
+    ui.keyboard(on_key=_on_key)
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
