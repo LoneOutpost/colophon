@@ -591,6 +591,43 @@ def test_get_matches_empty_when_no_sources(tmp_path):
     assert matches == []
 
 
+def test_known_authors_distinct_and_sorted(tmp_path):
+    ctx = _ctx(tmp_path)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.authors = ["Brandon Sanderson", "Co Author"]
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.authors = ["Brandon Sanderson"]
+    c = BookUnit.new(source_folder=tmp_path / "c")  # no authors
+    for x in (a, b, c):
+        ctx.books.upsert(x)
+    assert AppController(ctx).known_authors() == ["Brandon Sanderson", "Co Author"]
+    ctx.close()
+
+
+def test_known_series_distinct_and_sorted(tmp_path):
+    from colophon.core.models import SeriesRef
+
+    ctx = _ctx(tmp_path)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.series = [SeriesRef(name="Stormlight Archive")]
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.series = [SeriesRef(name="Mistborn")]
+    c = BookUnit.new(source_folder=tmp_path / "c")
+    c.series = [SeriesRef(name="Mistborn")]
+    for x in (a, b, c):
+        ctx.books.upsert(x)
+    assert AppController(ctx).known_series() == ["Mistborn", "Stormlight Archive"]
+    ctx.close()
+
+
+def test_known_authors_and_series_empty_library(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    assert ctrl.known_authors() == []
+    assert ctrl.known_series() == []
+    ctx.close()
+
+
 def test_available_sources_lists_configured_with_labels(tmp_path):
     ctx = _ctx(tmp_path)  # default: audnexus, openlibrary, googlebooks (no hardcover token)
     labels = dict(AppController(ctx).available_sources())
