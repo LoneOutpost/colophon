@@ -353,7 +353,7 @@ def render_workspace(controller: AppController) -> None:
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Save", icon="save", on_click=_save)
-                ui.button("Compare matches", icon="search", on_click=_compare).props("outline")
+                ui.button("Retrieve matches", icon="search", on_click=_compare).props("outline")
                 ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
                 ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat")
                 ui.button(
