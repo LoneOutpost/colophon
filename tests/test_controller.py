@@ -1252,3 +1252,72 @@ def test_known_genres_and_tags_distinct_sorted(tmp_path):
     assert ctrl.known_genres() == ["Epic", "Fantasy"]
     assert ctrl.known_tags() == ["gift", "to-relisten"]
     ctx.close()
+
+
+async def test_restructure_as_books_sets_author_title(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Shiloh Walker"
+    author.mkdir(parents=True)
+    (author / "Burning Up.mp3").write_bytes(b"")
+    (author / "the-darkest-part.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([author])
+    result = await ctrl.restructure_as_books(
+        [author / "Burning Up.mp3", author / "the-darkest-part.mp3"]
+    )
+    assert result.fostered == 2
+    b1 = ctx.books.get(BookUnit.new(source_folder=author / "Burning Up").id)
+    b2 = ctx.books.get(BookUnit.new(source_folder=author / "the-darkest-part").id)
+    assert b1.authors == ["Shiloh Walker"] and b1.title == "Burning Up"
+    assert b2.authors == ["Shiloh Walker"] and b2.title == "The Darkest Part"
+    assert set(result.book_ids) == {b1.id, b2.id}
+    ctx.close()
+
+
+async def test_restructure_as_books_author_override(tmp_path):
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "ingest" / "TE_Audiobooks_S"
+    folder.mkdir(parents=True)
+    (folder / "Book One.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    result = await ctrl.restructure_as_books(
+        [folder / "Book One.mp3"], author_override="Shiloh Walker"
+    )
+    b = ctx.books.get(BookUnit.new(source_folder=folder / "Book One").id)
+    assert b.authors == ["Shiloh Walker"]
+    assert b.title == "Book One"
+    assert result.fostered == 1
+    ctx.close()
+
+
+async def test_restructure_as_books_writes_tags(tmp_path):
+    from colophon.adapters.tags import read_embedded_tags
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Shiloh Walker"
+    author.mkdir(parents=True)
+    (author / "Burning Up.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    result = await ctrl.restructure_as_books([author / "Burning Up.mp3"], write_tags=True)
+    dest = author / "Burning Up" / "Burning Up.mp3"
+    tags = read_embedded_tags(dest)
+    assert tags.title == "Burning Up"
+    assert tags.artist == "Shiloh Walker"
+    assert result.retagged == 1
+    ctx.close()
+
+
+async def test_restructure_as_books_reports_failure_without_aborting(tmp_path):
+    ctx = _ctx(tmp_path)
+    author = tmp_path / "ingest" / "Author"
+    author.mkdir(parents=True)
+    (author / "Good.mp3").write_bytes(b"")
+    (author / "Bad.mp3").write_bytes(b"")
+    (author / "Bad").mkdir()  # collision: foster target for Bad.mp3 already exists
+    ctrl = AppController(ctx)
+    result = await ctrl.restructure_as_books([author / "Good.mp3", author / "Bad.mp3"])
+    assert result.fostered == 1
+    assert len(result.failures) == 1
+    assert result.failures[0].source.name == "Bad.mp3"
+    good = ctx.books.get(BookUnit.new(source_folder=author / "Good").id)
+    assert good is not None and good.title == "Good"
+    ctx.close()
