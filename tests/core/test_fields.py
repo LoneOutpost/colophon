@@ -77,6 +77,7 @@ def test_field_provenance_none_when_unset():
 
 def test_get_set_genre_round_trip():
     from pathlib import Path
+
     from colophon.core.fields import get_field, set_field
     from colophon.core.models import BookUnit
     b = BookUnit.new(source_folder=Path("/x"))
@@ -90,6 +91,7 @@ def test_get_set_genre_round_trip():
 
 def test_get_set_tag_round_trip():
     from pathlib import Path
+
     from colophon.core.fields import get_field, set_field
     from colophon.core.models import BookUnit
     b = BookUnit.new(source_folder=Path("/x"))
