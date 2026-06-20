@@ -17,7 +17,7 @@ from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
-from colophon.core.quickmatch import QuickMatchProposal
+from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
 from colophon.services.acquire import (
@@ -29,6 +29,7 @@ from colophon.services.acquire import (
 from colophon.services.cover import ensure_cached_cover
 from colophon.services.editing import (
     apply_fields,
+    bulk_apply_fields,
     remap_field,
     set_field_value,
 )
@@ -537,6 +538,44 @@ class AppController:
             )
 
         return list(await asyncio.gather(*(_scan(b) for b in books)))
+
+    def quick_match_apply(self, proposals: list[QuickMatchProposal]) -> QuickMatchSummary:
+        """Apply the best result of each proposal (overwrite all present fields,
+        capture cover) in one undoable batch, then re-score each updated book with
+        its carried results and set confidence/state. Proposals without a best
+        result are skipped. Returns a summary (applied, now_ready, batch_id)."""
+        applicable = [p for p in proposals if p.best is not None]
+        if not applicable:
+            return QuickMatchSummary()
+
+        items: list[tuple[BookUnit, dict[str, str | None], str]] = []
+        for p in applicable:
+            updates = self.match_field_values(p.best)
+            if p.best.cover_url:
+                p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
+            items.append((p.book, updates, p.best.provider))
+
+        batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
+
+        threshold = self.ctx.config.review_threshold
+        now_ready = 0
+        for p in applicable:
+            outcome = score_identification(p.book, p.results)
+            p.book.confidence = outcome.confidence
+            p.book.confidence_signals = outcome.signals
+            has_identity = bool(p.book.authors) or bool(p.book.series)
+            if outcome.confidence >= threshold and has_identity:
+                p.book.state = BookState.READY
+                now_ready += 1
+            else:
+                p.book.state = BookState.NEEDS_REVIEW
+            p.book.touch()
+            self.ctx.books.upsert(p.book)
+            self._sync_sidecar(p.book)
+
+        return QuickMatchSummary(
+            applied_count=len(applicable), now_ready_count=now_ready, batch_id=batch
+        )
 
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority
