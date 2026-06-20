@@ -13,6 +13,7 @@ from colophon.core.models import BookUnit, SeriesRef
 EDITABLE_FIELDS = [
     "title", "subtitle", "author", "narrator", "series",
     "sequence", "year", "asin", "language", "publisher", "description",
+    "genre", "tag",
 ]
 
 _SCALARS = {"title", "subtitle", "asin", "language", "publisher", "description"}
@@ -31,6 +32,8 @@ EDITABLE_TO_PROVENANCE = {
     "language": "language",
     "publisher": "publisher",
     "description": "description",
+    "genre": "genres",
+    "tag": "tags",
 }
 
 
@@ -61,6 +64,10 @@ def get_field(book: BookUnit, field: str) -> str | None:
         return None
     if field == "year":
         return str(book.publish_year) if book.publish_year is not None else None
+    if field == "genre":
+        return "; ".join(book.genres) or None
+    if field == "tag":
+        return "; ".join(book.tags) or None
     return None  # unreachable
 
 
@@ -78,6 +85,10 @@ def set_field(book: BookUnit, field: str, value: str | None) -> None:
         book.authors = _split(value)
     elif field == "narrator":
         book.narrators = _split(value)
+    elif field == "genre":
+        book.genres = _split(value)
+    elif field == "tag":
+        book.tags = _split(value)
     elif field == "series":
         if value:
             seq = book.series[0].sequence if book.series else None
