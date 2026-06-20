@@ -69,3 +69,18 @@ def normalize_description(value: str) -> str:
     s = re.sub(r"[ \t]+\n", "\n", s)                       # drop line-trailing spaces
     s = re.sub(r"\n{3,}", "\n\n", s)                       # collapse blank-line runs
     return s.strip()
+
+
+# Editable fields that hold free text worth normalizing, mapped to the normalizer
+# that applies. Numeric/code fields (year, sequence, asin, language) are excluded.
+FIELD_NORMALIZERS = {
+    "title": normalize_text,
+    "subtitle": normalize_text,
+    "author": normalize_text,
+    "narrator": normalize_text,
+    "series": normalize_text,
+    "publisher": normalize_text,
+    "description": normalize_description,
+}
+
+NORMALIZABLE_FIELDS = list(FIELD_NORMALIZERS)
