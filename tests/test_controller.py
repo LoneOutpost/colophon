@@ -720,6 +720,52 @@ async def test_search_matches_source_error_returns_empty(tmp_path):
     ctx.close()
 
 
+async def test_book_cover_serves_cached_file(tmp_path):
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "bk"
+    folder.mkdir()
+    cover = folder / "cover.jpg"
+    cover.write_bytes(b"JPGDATA")
+    b = BookUnit.new(source_folder=folder)
+    b.cover_path = cover
+    ctx.books.upsert(b)
+    result = await AppController(ctx).book_cover(b.id)
+    assert result == (b"JPGDATA", "image/jpeg")
+    ctx.close()
+
+
+async def test_book_cover_fetches_and_caches_from_url(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "bk"
+    folder.mkdir()
+    b = BookUnit.new(source_folder=folder)
+    b.cover_url = "http://x/c.png"
+    ctx.books.upsert(b)
+
+    async def fake_ensure(book, *, dest_dir, client=None):
+        p = dest_dir / "cover.png"
+        p.write_bytes(b"PNGDATA")
+        book.cover_path = p
+        return p
+
+    monkeypatch.setattr("colophon.controller.ensure_cached_cover", fake_ensure)
+    result = await AppController(ctx).book_cover(b.id)
+    assert result == (b"PNGDATA", "image/png")
+    # cover_path is persisted so the next request serves the cached file
+    assert ctx.books.get(b.id).cover_path == folder / "cover.png"
+    ctx.close()
+
+
+async def test_book_cover_none_when_no_cover(tmp_path):
+    ctx = _ctx(tmp_path)
+    b = BookUnit.new(source_folder=tmp_path / "bk")
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    assert await ctrl.book_cover(b.id) is None
+    assert await ctrl.book_cover("does-not-exist") is None
+    ctx.close()
+
+
 def test_apply_match_partial_result_only_sets_present_fields(tmp_path):
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")

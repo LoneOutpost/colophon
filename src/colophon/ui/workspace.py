@@ -84,6 +84,27 @@ def _confidence_color(value: float) -> str:
     return "negative"
 
 
+def _cover_src(book: BookUnit) -> str | None:
+    """The cover-serving URL for a book, or None when it has no cover. The
+    `?v=` cache-buster refreshes the image whenever the book changes."""
+    if book.cover_path or book.cover_url:
+        return f"/cover/{book.id}?v={int(book.updated_at.timestamp())}"
+    return None
+
+
+def _render_cover(book: BookUnit, *, width: int, height: int, icon: str = "") -> None:
+    """Render a book's cover at the given size, or a neutral placeholder box."""
+    src = _cover_src(book)
+    box = f"width:{width}px;height:{height}px"
+    if src:
+        ui.image(src).classes("rounded").style(f"{box};object-fit:cover")
+    else:
+        with ui.element("div").classes("flex items-center justify-center rounded").style(
+            f"{box};background:rgba(120,120,128,.15)"
+        ):
+            ui.icon("menu_book", color="grey-6").classes(icon)
+
+
 def render_workspace(controller: AppController) -> None:
     apply_theme()
     dark = setup_dark_mode()
@@ -169,6 +190,8 @@ def render_workspace(controller: AppController) -> None:
                     ui.label("Select a book to see its details").classes("text-grey-6")
                 return
 
+            with ui.row().classes("w-full justify-center q-mb-sm"):
+                _render_cover(book, width=160, height=240, icon="text-h2")
             with ui.row().classes("items-center w-full"):
                 ui.label(book.title or "(untitled)").classes("text-h6")
                 ui.space()
@@ -685,6 +708,8 @@ def render_workspace(controller: AppController) -> None:
                                 value=book.id in selected_ids,
                                 on_change=lambda e, bid=book.id: _toggle_book(bid, e.value),
                             ).props("dense")
+                        with ui.item_section().props("avatar"):
+                            _render_cover(book, width=36, height=54)
                         with ui.item_section().classes("cursor-pointer").on(
                             "click", lambda bid=book.id: _set_focus(bid)
                         ):

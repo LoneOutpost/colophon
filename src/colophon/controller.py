@@ -56,6 +56,10 @@ logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 
+
+def _cover_mime(path: Path) -> str:
+    return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+
 # Display labels for the metadata sources shown in the match-search dialog.
 _SOURCE_LABELS = {
     "audnexus": "Audnexus",
@@ -113,6 +117,21 @@ class AppController:
     def get_book(self, book_id: str) -> BookUnit | None:
         return self.ctx.books.get(book_id)
 
+    async def book_cover(self, book_id: str) -> tuple[bytes, str] | None:
+        """A book's cover image as (bytes, mime): the cached file if present, else
+        fetched from `cover_url` and cached for next time. None when the book has
+        no cover or the fetch fails."""
+        book = self.get_book(book_id)
+        if book is None:
+            return None
+        if book.cover_path and book.cover_path.exists():
+            return book.cover_path.read_bytes(), _cover_mime(book.cover_path)
+        if book.cover_url:
+            path = await ensure_cached_cover(book, dest_dir=book.source_folder)
+            if path is not None:
+                self.ctx.books.upsert(book)  # remember the cache location
+                return path.read_bytes(), _cover_mime(path)
+        return None
     def known_authors(self) -> list[str]:
         """Distinct author names across the library, sorted (editor autocomplete)."""
         return sorted({a for b in self.ctx.books.list_all() for a in b.authors})
