@@ -44,6 +44,7 @@ from colophon.services.encode import encode_book
 from colophon.services.foster import FosterResult, foster_one
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
+from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
 from colophon.services.tag_ops import (
     TagCommitResult,
@@ -516,22 +517,7 @@ class AppController:
     # --- match review / apply (FR-2.4, FR-3.3) ---
     async def get_matches(self, book: BookUnit) -> list[SourceResult]:
         """Re-query all sources for `book` and return candidate matches, best first."""
-        query = SourceQuery(
-            title=book.title,
-            author=book.authors[0] if book.authors else None,
-            asin=book.asin,
-            series=book.series[0].name if book.series else None,
-        )
-
-        async def _safe(source: object) -> list[SourceResult]:
-            try:
-                return await source.search(query)
-            except Exception as e:  # one source failing must not sink the lookup
-                logger.warning(f"source {getattr(source, 'name', '?')} failed in get_matches: {e}")
-                return []
-
-        gathered = await asyncio.gather(*(_safe(s) for s in self.ctx.sources))
-        results = [r for batch in gathered for r in batch]
+        results = await gather_matches(self.ctx.sources, query_for_book(book))
         return score_identification(book, results).ranked
 
     def available_sources(self) -> list[tuple[str, str]]:
