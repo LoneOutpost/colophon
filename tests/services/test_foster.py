@@ -43,3 +43,25 @@ def test_foster_result_is_pydantic_with_expected_fields(tmp_path: Path):
     assert r.ok is True and r.error is None
     r2 = FosterResult(source=tmp_path / "b.mp3", ok=False, error="boom")
     assert r2.destination is None and r2.error == "boom"
+
+
+def test_derive_book_fields_author_from_parent_folder(tmp_path):
+    from colophon.services.foster import derive_book_fields
+    dest = tmp_path / "Shiloh Walker" / "Burning Up" / "Burning Up.mp3"
+    author, title = derive_book_fields(dest, None)
+    assert author == "Shiloh Walker"
+    assert title == "Burning Up"
+
+
+def test_derive_book_fields_normalizes_title(tmp_path):
+    from colophon.services.foster import derive_book_fields
+    dest = tmp_path / "Author" / "burning_up" / "burning_up.mp3"
+    _author, title = derive_book_fields(dest, None)
+    assert title == "Burning Up"
+
+
+def test_derive_book_fields_author_override(tmp_path):
+    from colophon.services.foster import derive_book_fields
+    dest = tmp_path / "Folder" / "Book" / "Book.mp3"
+    author, _title = derive_book_fields(dest, "Pen Name")
+    assert author == "Pen Name"
