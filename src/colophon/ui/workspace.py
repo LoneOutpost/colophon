@@ -206,16 +206,25 @@ def render_workspace(controller: AppController) -> None:
                         on_click=lambda inp=inp, fn=normalizer: inp.set_value(fn(inp.value or "")),
                     ).props("flat dense round").classes("self-center").tooltip("Normalize")
 
-            def _save(b=book) -> None:
+            def _save_pending(b=book) -> bool:
+                """Persist any pending field edits silently, advancing the editor's
+                baseline. Returns True when something was saved."""
                 changed = {
                     f: (inputs[f].value or None)
                     for f in EDITABLE_FIELDS
                     if (inputs[f].value or "") != originals[f]
                 }
                 if not changed:
+                    return False
+                controller.save_fields(b, changed)
+                for f in changed:
+                    originals[f] = inputs[f].value or ""
+                return True
+
+            def _save(b=book) -> None:
+                if not _save_pending(b):
                     ui.notify("No changes")
                     return
-                controller.save_fields(b, changed)
                 ui.notify("Saved")
                 refresh_list()
                 show_detail(b.id)
@@ -354,6 +363,7 @@ def render_workspace(controller: AppController) -> None:
                 dialog.open()
 
             async def _tag_dialog(b=book) -> None:
+                _save_pending(b)  # "Write" encompasses Save: persist editor edits first
                 plan = controller.tag_plan(b)
                 with ui.dialog() as dialog, ui.card().classes("w-96"):
                     ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")
@@ -519,27 +529,38 @@ def render_workspace(controller: AppController) -> None:
                         inp.props('placeholder="(multiple values)"')
                     inputs[field] = inp
 
-            def _apply_bulk() -> None:
-                changed: dict[str, str | None] = {}
+            def _apply_pending_bulk() -> int:
+                """Apply pending bulk-field edits silently, advancing the baseline.
+                Returns the number of fields applied across the selection."""
+                applied = 0
                 for field, inp in inputs.items():
                     current = inp.value or ""
                     original = originals[field]
                     if original is _MIXED:
-                        if current:  # only touch a mixed field if the user typed something
-                            changed[field] = current
+                        if not current:  # only touch a mixed field if the user typed something
+                            continue
+                        value: str | None = current
                     elif current != original:
-                        changed[field] = current or None
-                if not changed:
+                        value = current or None
+                    else:
+                        continue
+                    controller.bulk_edit(books, field, value)
+                    originals[field] = current  # baseline now matches the applied value
+                    applied += 1
+                return applied
+
+            def _apply_bulk() -> None:
+                n = _apply_pending_bulk()
+                if not n:
                     ui.notify("No changes")
                     return
-                for field, value in changed.items():
-                    controller.bulk_edit(books, field, value)
-                ui.notify(f"Updated {len(changed)} field(s) on {len(books)} books")
+                ui.notify(f"Updated {n} field(s) on {len(books)} books")
                 refresh_list()
                 refresh_status()
                 show_bulk()
 
             async def _bulk_tag_dialog() -> None:
+                _apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
                 plans = [(b, controller.tag_plan(b)) for b in books]
                 total_files = sum(len(p.files) for _, p in plans)
                 with ui.dialog() as dialog, ui.card().classes("w-96"):
