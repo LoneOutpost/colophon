@@ -84,6 +84,33 @@ def _confidence_color(value: float) -> str:
     return "negative"
 
 
+_CHIP_FIELDS = ("genre", "tag")
+
+
+def book_haystack(book: BookUnit) -> str:
+    """Lowercased searchable text for a book: title, authors, narrators, series,
+    genres, and tags. Used by the Books list free-text filter."""
+    return " ".join(
+        filter(None, [
+            book.title or "",
+            "; ".join(book.authors),
+            "; ".join(book.narrators),
+            "; ".join(s.name for s in book.series),
+            "; ".join(book.genres),
+            "; ".join(book.tags),
+        ])
+    ).lower()
+
+
+def _editor_text(widget) -> str:
+    """Read an editor widget's value as a '; '-joined string. Chip selects hold a
+    list of values; text inputs hold a plain string."""
+    value = widget.value
+    if isinstance(value, list):
+        return "; ".join(x.strip() for x in value if x and x.strip())
+    return value or ""
+
+
 def _cover_src(book: BookUnit) -> str | None:
     """The cover-serving URL for a book, or None when it has no cover. The
     `?v=` cache-buster refreshes the image whenever the book changes."""
@@ -160,15 +187,7 @@ def render_workspace(controller: AppController) -> None:
     def _matches_filter(book, terms: list[str]) -> bool:
         if not terms:
             return True
-        hay = " ".join(
-            filter(None, [
-                book.title or "",
-                "; ".join(book.authors),
-                "; ".join(book.narrators),
-                "; ".join(s.name for s in book.series),
-                controller.book_filename(book),
-            ])
-        ).lower()
+        hay = f"{book_haystack(book)} {controller.book_filename(book).lower()}"
         return all(term in hay for term in terms)
 
     def _visible_books() -> list:
