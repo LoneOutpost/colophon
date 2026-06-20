@@ -673,6 +673,120 @@ def render_workspace(controller: AppController) -> None:
 
                 ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
 
+            async def _quick_match() -> None:
+                sources = controller.available_sources()  # [(name, label), ...]
+                with ui.dialog() as dialog, ui.card().classes("w-[32rem]"):
+                    title = ui.label(f"Quick Match {len(books)} books").classes("text-subtitle1")
+                    body = ui.column().classes("w-full")
+                    proposals: list = []
+
+                    def show_config() -> None:
+                        body.clear()
+                        title.set_text(f"Quick Match {len(books)} books")
+                        checks: dict[str, ui.checkbox] = {}
+                        with body:
+                            ui.label("Search these sources").classes("text-caption text-grey-7")
+                            for name, label in sources:
+                                checks[name] = ui.checkbox(label, value=True).props("dense")
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                                async def _search() -> None:
+                                    chosen = [n for n, c in checks.items() if c.value]
+                                    if not chosen:
+                                        ui.notify("Select at least one source")
+                                        return
+                                    await run_search(chosen)
+
+                                ui.button("Search", icon="search", on_click=_search)
+
+                    def show_searching() -> None:
+                        body.clear()
+                        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
+                            ui.spinner()
+                            ui.label(f"Searching {len(books)} books…")
+
+                    async def run_search(source_names: list[str]) -> None:
+                        show_searching()
+                        found = await controller.quick_match_scan(books, source_names)
+                        proposals.clear()
+                        proposals.extend(found)
+                        show_preview()
+
+                    def show_preview() -> None:
+                        body.clear()
+                        title.set_text(f"Quick Match {len(books)} books")
+                        threshold = controller.review_threshold()
+                        checks: dict[str, ui.checkbox] = {}
+                        with body:
+                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
+                                with ui.list().props("dense").classes("w-full"):
+                                    for p in proposals:
+                                        with ui.item():
+                                            with ui.item_section().props("avatar"):
+                                                if p.best is not None:
+                                                    checks[p.book.id] = ui.checkbox(
+                                                        value=p.confidence >= threshold
+                                                    )
+                                                else:
+                                                    ui.icon("block").classes("text-grey-5")
+                                            with ui.item_section():
+                                                cur = p.book.title or "(untitled)"
+                                                if p.best is not None:
+                                                    prov = p.best.provider
+                                                    ui.item_label(f"{cur} → {p.best.title or '?'}")
+                                                    ui.item_label(prov).props("caption")
+                                                else:
+                                                    ui.item_label(cur)
+                                                    ui.item_label("no match").props("caption")
+                                            if p.best is not None:
+                                                with ui.item_section().props("side"):
+                                                    ui.badge(f"{p.confidence:.0f}").props(
+                                                        f"color={_confidence_color(p.confidence)}"
+                                                    )
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                                def _apply() -> None:
+                                    keep_ids = {bid for bid, c in checks.items() if c.value}
+                                    chosen = [p for p in proposals if p.book.id in keep_ids]
+                                    if not chosen:
+                                        ui.notify("Nothing selected")
+                                        return
+                                    summary = controller.quick_match_apply(chosen)
+                                    show_summary(summary)
+
+                                ui.button("Apply selected", icon="done_all", on_click=_apply)
+
+                    def show_summary(summary) -> None:
+                        body.clear()
+                        with body:
+                            note = f"Applied {summary.applied_count} book(s), {summary.now_ready_count} now Ready"
+                            ui.label(note).classes("text-body2 q-pa-sm")
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                if summary.batch_id:
+                                    ui.button(
+                                        "Undo", icon="undo",
+                                        on_click=lambda b=summary.batch_id: (
+                                            controller.undo(b),
+                                            ui.notify("Reverted Quick Match"),
+                                            _close(),
+                                        ),
+                                    ).props("flat")
+                                ui.button("Close", on_click=_close)
+
+                    def _close() -> None:
+                        dialog.close()
+                        refresh_nav()
+                        refresh_list()
+                        refresh_status()
+
+                    show_config()
+                dialog.open()
+
+            with ui.row().classes("q-gutter-sm q-mt-sm"):
+                ui.button("Quick Match", icon="auto_awesome", on_click=_quick_match).props("outline")
+
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
                 ui.button("Write tags", icon="sell", on_click=_bulk_tag_dialog).props("outline")

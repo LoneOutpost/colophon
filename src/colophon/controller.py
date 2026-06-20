@@ -582,6 +582,10 @@ class AppController:
         order, so the search dialog can list exactly the available services."""
         return [(s.name, _SOURCE_LABELS.get(s.name, s.name.title())) for s in self.ctx.sources]
 
+    def review_threshold(self) -> float:
+        """The confidence threshold above which a match is auto-checked / a book is Ready."""
+        return self.ctx.config.review_threshold
+
     async def search_matches(
         self,
         book: BookUnit,
