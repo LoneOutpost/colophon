@@ -43,7 +43,12 @@ from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
 from colophon.services.encode import encode_book
-from colophon.services.foster import FosterResult, foster_one
+from colophon.services.foster import (
+    FosterResult,
+    RestructureResult,
+    derive_book_fields,
+    foster_one,
+)
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
 from colophon.services.matching import gather_matches, query_for_book
@@ -442,6 +447,53 @@ class AppController:
             return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
         except OSError:
             return False
+
+    def _restructure_sync(
+        self, paths: list[Path], author_override: str | None
+    ) -> tuple[list[FosterResult], list[BookUnit]]:
+        """Foster `paths`, then set author/title on each new book. Returns the
+        foster results and the new books. Blocking; call via asyncio.to_thread."""
+        results = self.foster_files(paths)
+        new_books: list[BookUnit] = []
+        for r in results:
+            if not r.ok or r.destination is None:
+                continue
+            book_id = BookUnit.new(source_folder=r.destination.parent).id
+            book = self.ctx.books.get(book_id)
+            if book is None:
+                logger.warning(f"restructure: no book found at {r.destination.parent}")
+                continue
+            author, title = derive_book_fields(r.destination, author_override)
+            self.save_fields(book, {"author": author, "title": title})
+            refreshed = self.ctx.books.get(book_id)
+            if refreshed is not None:
+                new_books.append(refreshed)
+        return results, new_books
+
+    async def restructure_as_books(
+        self,
+        paths: list[Path],
+        *,
+        author_override: str | None = None,
+        write_tags: bool = False,
+    ) -> RestructureResult:
+        """Foster each file into its own book directory, set author (from the
+        file's containing folder, or `author_override`) and a normalized title,
+        and optionally write the corrected tags. The blocking disk work runs in a
+        worker thread; the optional retag is awaited."""
+        results, new_books = await asyncio.to_thread(
+            self._restructure_sync, paths, author_override
+        )
+        retagged = 0
+        if write_tags and new_books:
+            tag_results = await self.write_tags_books(new_books)
+            retagged = sum(t.written for t in tag_results)
+        return RestructureResult(
+            fostered=sum(1 for r in results if r.ok),
+            retagged=retagged,
+            failures=[r for r in results if not r.ok],
+            book_ids=[b.id for b in new_books],
+        )
 
     def tag_plan(self, book: BookUnit) -> TagPlan:
         """The dry-run preview of writing this book's metadata into its files."""

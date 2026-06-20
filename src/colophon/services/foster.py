@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from colophon.core.models import _Base
+from colophon.core.normalize import normalize_text
 
 
 class FosterResult(_Base):
@@ -21,6 +22,26 @@ class FosterResult(_Base):
     destination: Path | None = None
     ok: bool
     error: str | None = None
+
+
+class RestructureResult(_Base):
+    """Outcome of restructuring loose files into books."""
+
+    fostered: int = 0  # files successfully moved into their own book dir
+    retagged: int = 0  # files whose tags were written (0 when write_tags is off)
+    failures: list[FosterResult] = []  # noqa: RUF012 - pydantic default, copied per instance
+    book_ids: list[str] = []  # noqa: RUF012 - pydantic default, copied per instance
+
+
+def derive_book_fields(destination: Path, author_override: str | None) -> tuple[str, str]:
+    """(author, title) for a fostered file at `destination`, e.g.
+    `/root/Shiloh Walker/Burning Up/Burning Up.mp3`:
+    author = `author_override` or the original parent folder name
+    (`destination.parent.parent.name`); title = `normalize_text` of the
+    stem-named book dir (`destination.parent.name`)."""
+    author = author_override or destination.parent.parent.name
+    title = normalize_text(destination.parent.name)
+    return author, title
 
 
 def foster_one(path: Path) -> Path:
