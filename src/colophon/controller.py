@@ -17,6 +17,7 @@ from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
+from colophon.core.quickmatch import QuickMatchProposal
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
 from colophon.services.acquire import (
@@ -519,6 +520,23 @@ class AppController:
         """Re-query all sources for `book` and return candidate matches, best first."""
         results = await gather_matches(self.ctx.sources, query_for_book(book))
         return score_identification(book, results).ranked
+
+    async def quick_match_scan(
+        self, books: list[BookUnit], source_names: list[str]
+    ) -> list[QuickMatchProposal]:
+        """For each book, query the chosen sources, score the candidates, and
+        return a proposal carrying the best result, all gathered results (for
+        later re-scoring), and the scan confidence. Books are scanned concurrently."""
+        chosen = [s for s in self.ctx.sources if s.name in source_names]
+
+        async def _scan(book: BookUnit) -> QuickMatchProposal:
+            results = await gather_matches(chosen, query_for_book(book))
+            outcome = score_identification(book, results)
+            return QuickMatchProposal(
+                book=book, best=outcome.best, results=results, confidence=outcome.confidence
+            )
+
+        return list(await asyncio.gather(*(_scan(b) for b in books)))
 
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority

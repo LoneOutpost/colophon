@@ -1125,3 +1125,45 @@ async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
     assert len(book_ids) == 1
     assert ctx.books.get(book_ids[0]) is not None
     ctx.close()
+
+
+async def test_quick_match_scan_picks_best_and_carries_confidence(tmp_path):
+    src = _StubSource("audnexus", [
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),
+        SourceResult(provider="audnexus", title="Dune Messiah", authors=["Frank Herbert"]),
+    ])
+    ctx = _ctx(tmp_path, sources=[src])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    proposals = await AppController(ctx).quick_match_scan([book], ["audnexus"])
+    assert len(proposals) == 1
+    assert proposals[0].best.title == "Dune"          # best ranked first
+    assert proposals[0].confidence > 0
+    assert len(proposals[0].results) == 2             # full results carried
+    ctx.close()
+
+
+async def test_quick_match_scan_filters_sources_by_name(tmp_path):
+    a = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
+    g = _StubSource("google", [SourceResult(provider="google", title="WRONG")])
+    ctx = _ctx(tmp_path, sources=[a, g])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    proposals = await AppController(ctx).quick_match_scan([book], ["audnexus"])  # google excluded
+    providers = {r.provider for r in proposals[0].results}
+    assert providers == {"audnexus"}
+    ctx.close()
+
+
+async def test_quick_match_scan_no_results_yields_none_best(tmp_path):
+    ctx = _ctx(tmp_path, sources=[_StubSource("audnexus", [])])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Unknown"
+    ctx.books.upsert(book)
+    proposals = await AppController(ctx).quick_match_scan([book], ["audnexus"])
+    assert proposals[0].best is None
+    ctx.close()
