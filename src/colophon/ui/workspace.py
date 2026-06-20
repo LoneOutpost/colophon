@@ -1176,43 +1176,64 @@ def render_workspace(controller: AppController) -> None:
         if not paths:
             ui.notify("No files selected")
             return
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
-            ui.label(f"Foster {len(paths)} file(s)?").classes("text-subtitle1")
+        parents = {p.parent for p in paths}
+        default_author = next(iter(parents)).name if len(parents) == 1 else ""
+        with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+            ui.label(f"Organize {len(paths)} file(s) into books").classes("text-subtitle1")
             ui.label(
-                "Each selected file moves into a new subfolder named after the file, so it "
-                "scans as its own book. The affected folders are then rescanned."
+                "Each file moves into its own book folder, with author set from its "
+                "containing folder and title from the filename. Optionally write the "
+                "corrected tags into each file."
             ).classes("text-caption text-grey-6")
+            override = ui.input("Override author for all", value="").props(
+                "dense clearable"
+            ).classes("w-full")
+            if default_author:
+                override.props(f'placeholder="{default_author}"')
+            write_tags_cb = ui.checkbox("Write tags now", value=False)
             body = ui.column().classes("w-full")
-            with body, ui.scroll_area().classes("w-full").style("max-height: 35vh"):
-                with ui.list().props("dense").classes("w-full"):
-                    for p in paths:
-                        with ui.item():
-                            with ui.item_section():
+
+            def _render_preview() -> None:
+                body.clear()
+                ovr = (override.value or "").strip() or None
+                with body, ui.scroll_area().classes("w-full").style("max-height: 32vh"):
+                    with ui.list().props("dense").classes("w-full"):
+                        for p in paths:
+                            author = ovr or p.parent.name
+                            title = normalize_text(p.stem)
+                            with ui.item(), ui.item_section():
                                 ui.item_label(p.name)
-                                ui.item_label(f"into {p.stem}/").props("caption")
+                                ui.item_label(f"{author} · {title}").props("caption")
+
+            override.on_value_change(lambda _e: _render_preview())
+            _render_preview()
             actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
             with actions:
                 ui.button("Cancel", on_click=dialog.close).props("flat")
-                confirm = ui.button("Foster", icon="subdirectory_arrow_right")
+                confirm = ui.button("Organize into books", icon="auto_awesome_motion")
 
             async def _commit() -> None:
-                # foster_files does disk renames + a subtree rescan (slow over network
-                # mounts), so run it off the event loop and show a busy state.
+                # Disk renames + field edits + optional tag write; run off the loop.
                 confirm.props("loading=true")
                 try:
-                    results = await asyncio.to_thread(controller.foster_files, paths)
+                    result = await controller.restructure_as_books(
+                        paths,
+                        author_override=(override.value or "").strip() or None,
+                        write_tags=write_tags_cb.value,
+                    )
                 finally:
                     confirm.props(remove="loading")
-                ok = sum(1 for r in results if r.ok)
-                failures = [r for r in results if not r.ok]
                 foster_selected.clear()
                 body.clear()
                 with body:
-                    ui.label(f"Fostered {ok} of {len(results)} file(s).").classes("text-body2")
-                    if failures:
+                    note = f"Organized {result.fostered} of {len(paths)} into books"
+                    if write_tags_cb.value:
+                        note += f", retagged {result.retagged}"
+                    ui.label(note).classes("text-body2")
+                    if result.failures:
                         ui.label("Failed:").classes("text-caption text-negative q-mt-xs")
                         with ui.list().props("dense").classes("w-full"):
-                            for r in failures:
+                            for r in result.failures:
                                 with ui.item(), ui.item_section():
                                     ui.item_label(r.source.name)
                                     ui.item_label(r.error or "unknown error").props("caption")
@@ -1276,7 +1297,7 @@ def render_workspace(controller: AppController) -> None:
                 ui.icon("folder_open").classes("text-grey-7")
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
                 ui.button(
-                    "Foster selected", icon="subdirectory_arrow_right", on_click=_foster_dialog
+                    "Organize into books", icon="subdirectory_arrow_right", on_click=_foster_dialog
                 ).props("dense color=primary")
 
             listing = controller.list_directory(cwd)
