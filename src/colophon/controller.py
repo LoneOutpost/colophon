@@ -15,7 +15,7 @@ from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
-from colophon.core.models import BookState, BookUnit, OperationRecord, Provenance, _Base
+from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
@@ -30,6 +30,9 @@ from colophon.services.editing import (
     apply_fields,
     remap_field,
     set_field_value,
+)
+from colophon.services.editing import (
+    bulk_normalize as _svc_bulk_normalize,
 )
 from colophon.services.editing import (
     bulk_remap as _svc_bulk_remap,
@@ -473,11 +476,22 @@ class AppController:
             self._sync_sidecar(book)
         return batch
 
+    def bulk_normalize(self, books: list[BookUnit], fields: list[str]) -> str:
+        """Normalize the given text `fields` across `books` in one undoable batch."""
+        batch = _svc_bulk_normalize(self.ctx.books, self.ctx.history, books, fields)
+        for book in books:
+            self._sync_sidecar(book)
+        return batch
+
     def bulk_remap(self, books: list[BookUnit], *, src: str, dst: str, clear_source: bool) -> str:
         batch = _svc_bulk_remap(self.ctx.books, self.ctx.history, books, src=src, dst=dst, clear_source=clear_source)
         for book in books:
             self._sync_sidecar(book)
         return batch
+
+    def batch_changes(self, batch_id: str) -> list[EditChange]:
+        """Return the recorded changes for `batch_id` (empty if none)."""
+        return self.ctx.history.list_batch(batch_id)
 
     def undo(self, batch_id: str) -> None:
         affected_ids = {c.book_id for c in self.ctx.history.list_batch(batch_id)}

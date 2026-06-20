@@ -22,7 +22,7 @@ from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookUnit
-from colophon.core.normalize import normalize_description, normalize_text
+from colophon.core.normalize import NORMALIZABLE_FIELDS, normalize_description, normalize_text
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
@@ -640,6 +640,38 @@ def render_workspace(controller: AppController) -> None:
 
                     commit_btn.on_click(_commit)
                 dialog.open()
+
+            ui.separator().classes("q-my-sm")
+            with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                ui.label("Normalize").classes("text-caption text-grey-7")
+                norm_options = {"__all__": "All text fields"} | {f: f for f in NORMALIZABLE_FIELDS}
+                norm_field = ui.select(
+                    norm_options, value="__all__"
+                ).props("dense outlined").classes("col")
+
+                def _normalize() -> None:
+                    chosen = norm_field.value
+                    fields = NORMALIZABLE_FIELDS if chosen == "__all__" else [chosen]
+                    batch = controller.bulk_normalize(books, fields)
+                    changed = len({c.book_id for c in controller.batch_changes(batch)})
+                    if not changed:
+                        ui.notify("Nothing to normalize")
+                        return
+                    ui.notify(
+                        f"Normalized {changed} book(s)",
+                        actions=[
+                            {
+                                "label": "Undo",
+                                "color": "white",
+                                "handler": lambda b=batch: (controller.undo(b), show_bulk()),
+                            }
+                        ],
+                    )
+                    refresh_list()
+                    refresh_status()
+                    show_bulk()
+
+                ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)

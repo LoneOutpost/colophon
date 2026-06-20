@@ -193,6 +193,36 @@ def test_edit_field_writes_sidecar(tmp_path):
     ctx.close()
 
 
+def test_bulk_normalize_titlecases_across_books_one_batch(tmp_path):
+    ctx = _ctx(tmp_path)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.title = "the hobbit"
+    a.authors = ["frank herbert"]
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.title = "dune messiah"
+    ctx.books.upsert(a)
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    batch = ctrl.bulk_normalize([a, b], ["title", "author"])
+    assert ctx.books.get(a.id).title == "The Hobbit"
+    assert ctx.books.get(a.id).authors == ["Frank Herbert"]
+    assert ctx.books.get(b.id).title == "Dune Messiah"
+    ctrl.undo(batch)  # one undoable batch reverts every change
+    assert ctx.books.get(a.id).title == "the hobbit"
+    assert ctx.books.get(a.id).authors == ["frank herbert"]
+    ctx.close()
+
+
+def test_bulk_normalize_skips_empty_and_unchanged(tmp_path):
+    ctx = _ctx(tmp_path)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.title = "Already Fine"  # already normal -> no change; author/series empty -> skipped
+    ctx.books.upsert(a)
+    AppController(ctx).bulk_normalize([a], ["title", "author", "series"])
+    assert ctx.books.get(a.id).title == "Already Fine"
+    ctx.close()
+
+
 def test_bulk_edit_writes_each_sidecar(tmp_path):
     ctx = _ctx(tmp_path)
     a = _book_in(ctx, tmp_path / "ingest" / "a")

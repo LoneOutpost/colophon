@@ -11,6 +11,7 @@ import uuid
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
 from colophon.core.fields import EDITABLE_TO_PROVENANCE, get_field, set_field
 from colophon.core.models import BookUnit, EditChange, Provenance
+from colophon.core.normalize import FIELD_NORMALIZERS
 
 
 def _new_batch_id() -> str:
@@ -81,6 +82,37 @@ def bulk_set_field(
             changes.append(_apply(book, field, value))
             book.touch()
             books.upsert(book, commit=False)
+        hist.record(batch_id, changes, commit=False)
+    return batch_id
+
+
+def bulk_normalize(
+    books: BookUnitRepo, hist: HistoryRepo, items: list[BookUnit], fields: list[str]
+) -> str:
+    """Normalize each given text `field`'s current value across `items`, in one
+    undoable batch. A field is normalized per book (its own value), and only
+    actual changes are recorded. Returns the batch id (an empty batch if nothing
+    needed normalizing)."""
+    batch_id = _new_batch_id()
+    changes: list[EditChange] = []
+    with books.conn:  # one transaction: all-or-nothing
+        for book in items:
+            book_changed = False
+            for field in fields:
+                normalizer = FIELD_NORMALIZERS.get(field)
+                if normalizer is None:
+                    continue
+                current = get_field(book, field)
+                if not current:
+                    continue
+                normalized = normalizer(current)
+                if normalized == current:
+                    continue
+                changes.append(_apply(book, field, normalized))
+                book_changed = True
+            if book_changed:
+                book.touch()
+                books.upsert(book, commit=False)
         hist.record(batch_id, changes, commit=False)
     return batch_id
 
