@@ -923,6 +923,15 @@ def render_workspace(controller: AppController) -> None:
                         ):
                             ui.item_label(book.title or "(untitled)")
                             ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
+                            chip_labels = book.genres + book.tags
+                            if chip_labels:
+                                with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
+                                    for label in chip_labels[:4]:
+                                        ui.chip(label).props(
+                                            "dense square size=sm clickable"
+                                        ).on(
+                                            "click.stop", lambda lbl=label: _filter_to(lbl)
+                                        )
                         with ui.item_section().props("side"):
                             with ui.row().classes("items-center no-wrap q-gutter-xs"):
                                 total = sum(sf.duration_seconds for sf in book.source_files)
@@ -1417,6 +1426,14 @@ def render_workspace(controller: AppController) -> None:
 
     def _set_filter(value: str | None) -> None:
         book_filter["text"] = value or ""
+        refresh_list()
+
+    def _filter_to(label: str) -> None:
+        """Filter the Books list to an exact genre/tag (clicked from a chip)."""
+        book_filter["text"] = label
+        search = refs.get("filter")
+        if search is not None:
+            search.set_value(label)
         refresh_list()
 
     def _render_middle() -> None:
