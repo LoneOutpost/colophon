@@ -577,6 +577,18 @@ def render_workspace(controller: AppController) -> None:
                 common = "" if mixed else next(iter(values), "")
                 originals[field] = _MIXED if mixed else common
                 with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                    if field in _CHIP_FIELDS:
+                        current = [s.strip() for s in common.split(";") if s.strip()]
+                        known = controller.known_genres() if field == "genre" else controller.known_tags()
+                        inp = ui.select(
+                            sorted(set(known) | set(current)), label=field,
+                            value=[] if mixed else current,
+                            multiple=True, new_value_mode="add-unique",
+                        ).props("use-chips use-input dense").classes("col")
+                        if mixed:
+                            inp.props('hint="(multiple values)"')
+                        inputs[field] = inp
+                        continue
                     if field == "description":
                         inp = ui.textarea(field, value=common).props("dense").classes("col")
                     else:
@@ -592,10 +604,10 @@ def render_workspace(controller: AppController) -> None:
                 Returns the number of fields applied across the selection."""
                 applied = 0
                 for field, inp in inputs.items():
-                    current = inp.value or ""
+                    current = _editor_text(inp)
                     original = originals[field]
                     if original is _MIXED:
-                        if not current:  # only touch a mixed field if the user typed something
+                        if not current:  # only touch a mixed field if the user set something
                             continue
                         value: str | None = current
                     elif current != original:
