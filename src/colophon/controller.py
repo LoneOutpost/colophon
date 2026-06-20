@@ -146,6 +146,14 @@ class AppController:
         """Distinct series names across the library, sorted (editor autocomplete)."""
         return sorted({s.name for b in self.ctx.books.list_all() for s in b.series})
 
+    def known_genres(self) -> list[str]:
+        """Distinct genre names across the library, sorted (editor autocomplete)."""
+        return sorted({g for b in self.ctx.books.list_all() for g in b.genres})
+
+    def known_tags(self) -> list[str]:
+        """Distinct tag names across the library, sorted (editor autocomplete)."""
+        return sorted({t for b in self.ctx.books.list_all() for t in b.tags})
+
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into Author -> Series/standalone, plus a needs-id list."""

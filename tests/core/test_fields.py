@@ -14,6 +14,7 @@ def test_editable_fields_list():
     assert EDITABLE_FIELDS == [
         "title", "subtitle", "author", "narrator", "series",
         "sequence", "year", "asin", "language", "publisher", "description",
+        "genre", "tag",
     ]
 
 
@@ -72,3 +73,34 @@ def test_field_provenance_maps_editable_key_to_source():
 def test_field_provenance_none_when_unset():
     b = _book()
     assert field_provenance(b, "year") is None
+
+
+def test_get_set_genre_round_trip():
+    from pathlib import Path
+
+    from colophon.core.fields import get_field, set_field
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=Path("/x"))
+    set_field(b, "genre", "Fantasy; Epic")
+    assert b.genres == ["Fantasy", "Epic"]
+    assert get_field(b, "genre") == "Fantasy; Epic"
+    set_field(b, "genre", None)
+    assert b.genres == []
+    assert get_field(b, "genre") is None
+
+
+def test_get_set_tag_round_trip():
+    from pathlib import Path
+
+    from colophon.core.fields import get_field, set_field
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=Path("/x"))
+    set_field(b, "tag", "to-relisten; gift")
+    assert b.tags == ["to-relisten", "gift"]
+    assert get_field(b, "tag") == "to-relisten; gift"
+
+
+def test_genre_tag_provenance_keys():
+    from colophon.core.fields import EDITABLE_TO_PROVENANCE
+    assert EDITABLE_TO_PROVENANCE["genre"] == "genres"
+    assert EDITABLE_TO_PROVENANCE["tag"] == "tags"

@@ -60,3 +60,22 @@ def test_collapses_excess_blank_lines_and_trims():
 
 def test_comma_spacing_does_not_cross_newlines():
     assert normalize_description("a,b\nc , d") == "a, b\nc, d"
+
+
+def test_normalize_genres_titlecases_and_dedupes():
+    from colophon.core.normalize import normalize_genres
+    out = normalize_genres(["fantasy", "epic fantasy", "FANTASY", "  ", "science fiction"])
+    assert out == ["Fantasy", "Epic Fantasy", "Science Fiction"]
+
+
+def test_field_normalizers_has_genre_not_tag():
+    from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
+    assert "genre" in FIELD_NORMALIZERS
+    assert "genre" in NORMALIZABLE_FIELDS
+    assert "tag" not in FIELD_NORMALIZERS
+    assert "tag" not in NORMALIZABLE_FIELDS
+
+
+def test_field_normalizers_genre_normalizes_joined_value():
+    from colophon.core.normalize import FIELD_NORMALIZERS
+    assert FIELD_NORMALIZERS["genre"]("fantasy; epic fantasy; fantasy") == "Fantasy; Epic Fantasy"

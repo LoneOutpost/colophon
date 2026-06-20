@@ -133,3 +133,32 @@ def test_book_unit_carries_cover_url_and_roundtrips_json():
     book.cover_url = "https://covers.example/abc-L.jpg"
     restored = BookUnit.model_validate_json(book.model_dump_json())
     assert restored.cover_url == "https://covers.example/abc-L.jpg"
+
+
+def test_bookunit_genres_tags_default_empty(tmp_path):
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    assert b.genres == []
+    assert b.tags == []
+
+
+def test_bookunit_loads_legacy_json_without_genres_tags(tmp_path):
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    raw = b.model_dump(mode="json")
+    raw.pop("genres", None)
+    raw.pop("tags", None)
+    import json
+    restored = BookUnit.model_validate_json(json.dumps(raw))
+    assert restored.genres == []
+    assert restored.tags == []
+
+
+def test_bookunit_genres_tags_round_trip(tmp_path):
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.genres = ["Fantasy", "Epic"]
+    b.tags = ["to-relisten"]
+    restored = BookUnit.model_validate_json(b.model_dump_json())
+    assert restored.genres == ["Fantasy", "Epic"]
+    assert restored.tags == ["to-relisten"]

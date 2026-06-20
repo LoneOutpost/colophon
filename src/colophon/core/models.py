@@ -93,6 +93,8 @@ class BookUnit(_Base):
     publish_year: int | None = None
     publisher: str | None = None
     description: str | None = None
+    genres: list[str] = []
+    tags: list[str] = []
     asin: str | None = None
     language: str | None = None
     cover_path: Path | None = None

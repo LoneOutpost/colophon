@@ -1236,3 +1236,19 @@ async def test_quick_match_apply_skips_proposals_without_best(tmp_path):
     summary = ctrl.quick_match_apply(proposals)
     assert summary.applied_count == 0
     ctx.close()
+
+
+def test_known_genres_and_tags_distinct_sorted(tmp_path):
+    ctx = _ctx(tmp_path)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.genres = ["Fantasy", "Epic"]
+    a.tags = ["gift"]
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.genres = ["Fantasy"]
+    b.tags = ["to-relisten", "gift"]
+    for x in (a, b):
+        ctx.books.upsert(x)
+    ctrl = AppController(ctx)
+    assert ctrl.known_genres() == ["Epic", "Fantasy"]
+    assert ctrl.known_tags() == ["gift", "to-relisten"]
+    ctx.close()

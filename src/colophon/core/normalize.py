@@ -71,6 +71,32 @@ def normalize_description(value: str) -> str:
     return s.strip()
 
 
+def normalize_genres(values: list[str]) -> list[str]:
+    """Title-case each genre via normalize_text, dropping blanks, and dedupe
+    case-insensitively while preserving first-seen order.
+
+    The seam for a future genre whitelist / mapping (LazyLibrarian-style): apply
+    the mapping here before the dedupe."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        name = normalize_text(raw or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def _normalize_genre_field(value: str) -> str:
+    """Normalize a '; '-joined genre string (the FIELD_NORMALIZERS adapter)."""
+    parts = [p.strip() for p in value.split(";")]
+    return "; ".join(normalize_genres(parts))
+
+
 # Editable fields that hold free text worth normalizing, mapped to the normalizer
 # that applies. Numeric/code fields (year, sequence, asin, language) are excluded.
 FIELD_NORMALIZERS = {
@@ -80,6 +106,7 @@ FIELD_NORMALIZERS = {
     "narrator": normalize_text,
     "series": normalize_text,
     "publisher": normalize_text,
+    "genre": _normalize_genre_field,
     "description": normalize_description,
 }
 

@@ -34,3 +34,21 @@ def test_empty_lists_and_missing_series_become_none():
     assert tags.narrator is None
     assert tags.series is None
     assert tags.sequence is None
+
+
+def test_project_tags_joins_genres(tmp_path):
+    from colophon.core.models import BookUnit
+    from colophon.core.tag_projection import project_tags
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.genres = ["Fantasy", "Epic"]
+    assert project_tags(b).genre == "Fantasy; Epic"
+
+
+def test_project_tags_genre_none_without_genres(tmp_path):
+    from colophon.core.models import BookUnit
+    from colophon.core.tag_projection import project_tags
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.tags = ["to-relisten"]
+    et = project_tags(b)
+    assert et.genre is None
+    assert not hasattr(et, "tag")
