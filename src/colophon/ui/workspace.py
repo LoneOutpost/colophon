@@ -1456,7 +1456,7 @@ def render_workspace(controller: AppController) -> None:
         if not is_folders:
             with middle_toolbar:
                 search = ui.input(
-                    placeholder="Filter title, author, series, narrator, filename",
+                    placeholder="Filter title, author, series, narrator, genre, tag, filename",
                     value=book_filter["text"],
                 ).props("dense clearable debounce=300").classes("w-full")
                 search.on_value_change(lambda e: _set_filter(e.value))
