@@ -233,6 +233,18 @@ def render_workspace(controller: AppController) -> None:
                 value = get_field(book, field) or ""
                 originals[field] = value
                 with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                    if field in _CHIP_FIELDS:
+                        current = [s.strip() for s in value.split(";") if s.strip()]
+                        known = controller.known_genres() if field == "genre" else controller.known_tags()
+                        inp = ui.select(
+                            sorted(set(known) | set(current)), label=field, value=current,
+                            multiple=True, new_value_mode="add-unique",
+                        ).props("use-chips use-input dense").classes("col")
+                        inputs[field] = inp
+                        source = field_provenance(book, field)
+                        if source:
+                            ui.badge(source).props("color=grey-6 outline").classes("self-center")
+                        continue
                     if field == "description":
                         inp = ui.textarea(field, value=value).props("dense").classes("col")
                     else:
@@ -240,8 +252,6 @@ def render_workspace(controller: AppController) -> None:
                             field, value=value, autocomplete=autocomplete.get(field)
                         ).props("dense").classes("col")
                     inputs[field] = inp
-                    # Source chip sits left of the action; the normalize button is
-                    # always the right-most control in the row.
                     source = field_provenance(book, field)
                     if source:
                         ui.badge(source).props("color=grey-6 outline").classes("self-center")
@@ -255,15 +265,15 @@ def render_workspace(controller: AppController) -> None:
                 """Persist any pending field edits silently, advancing the editor's
                 baseline. Returns True when something was saved."""
                 changed = {
-                    f: (inputs[f].value or None)
+                    f: (_editor_text(inputs[f]) or None)
                     for f in EDITABLE_FIELDS
-                    if (inputs[f].value or "") != originals[f]
+                    if _editor_text(inputs[f]) != originals[f]
                 }
                 if not changed:
                     return False
                 controller.save_fields(b, changed)
                 for f in changed:
-                    originals[f] = inputs[f].value or ""
+                    originals[f] = _editor_text(inputs[f])
                 return True
 
             def _save(b=book) -> None:
