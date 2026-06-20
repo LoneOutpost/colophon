@@ -113,6 +113,14 @@ class AppController:
     def get_book(self, book_id: str) -> BookUnit | None:
         return self.ctx.books.get(book_id)
 
+    def known_authors(self) -> list[str]:
+        """Distinct author names across the library, sorted (editor autocomplete)."""
+        return sorted({a for b in self.ctx.books.list_all() for a in b.authors})
+
+    def known_series(self) -> list[str]:
+        """Distinct series names across the library, sorted (editor autocomplete)."""
+        return sorted({s.name for b in self.ctx.books.list_all() for s in b.series})
+
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into Author -> Series/standalone, plus a needs-id list."""
