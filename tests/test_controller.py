@@ -1125,3 +1125,114 @@ async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
     assert len(book_ids) == 1
     assert ctx.books.get(book_ids[0]) is not None
     ctx.close()
+
+
+async def test_quick_match_scan_picks_best_and_carries_confidence(tmp_path):
+    src = _StubSource("audnexus", [
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),
+        SourceResult(provider="audnexus", title="Dune Messiah", authors=["Frank Herbert"]),
+    ])
+    ctx = _ctx(tmp_path, sources=[src])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    proposals = await AppController(ctx).quick_match_scan([book], ["audnexus"])
+    assert len(proposals) == 1
+    assert proposals[0].best.title == "Dune"          # best ranked first
+    assert proposals[0].confidence > 0
+    assert len(proposals[0].results) == 2             # full results carried
+    ctx.close()
+
+
+async def test_quick_match_scan_filters_sources_by_name(tmp_path):
+    a = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
+    g = _StubSource("google", [SourceResult(provider="google", title="WRONG")])
+    ctx = _ctx(tmp_path, sources=[a, g])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    proposals = await AppController(ctx).quick_match_scan([book], ["audnexus"])  # google excluded
+    providers = {r.provider for r in proposals[0].results}
+    assert providers == {"audnexus"}
+    ctx.close()
+
+
+async def test_quick_match_scan_no_results_yields_none_best(tmp_path):
+    ctx = _ctx(tmp_path, sources=[_StubSource("audnexus", [])])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Unknown"
+    ctx.books.upsert(book)
+    proposals = await AppController(ctx).quick_match_scan([book], ["audnexus"])
+    assert proposals[0].best is None
+    ctx.close()
+
+
+async def test_quick_match_apply_overwrites_and_sets_ready(tmp_path):
+    # Two sources agreeing on title+author pushes confidence over the default 75 threshold.
+    a = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], asin="B002V1A0WE")])
+    g = _StubSource("google", [SourceResult(provider="google", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[a, g])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "dune"          # lowercase, will be overwritten
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["audnexus", "google"])
+    summary = ctrl.quick_match_apply(proposals)
+    persisted = ctx.books.get(book.id)
+    assert persisted.title == "Dune"                       # overwritten from match
+    assert persisted.asin == "B002V1A0WE"                  # filled
+    assert persisted.provenance["title"] == "audnexus"     # provider of best result
+    assert persisted.state == BookState.READY              # re-scored over threshold
+    assert summary.applied_count == 1
+    assert summary.now_ready_count == 1
+    ctx.close()
+
+
+async def test_quick_match_apply_low_confidence_stays_needs_review(tmp_path):
+    src = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[src])  # single source -> below default threshold
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["audnexus"])
+    summary = ctrl.quick_match_apply(proposals)
+    assert ctx.books.get(book.id).state == BookState.NEEDS_REVIEW
+    assert summary.now_ready_count == 0
+    ctx.close()
+
+
+async def test_quick_match_apply_undo_reverts_fields(tmp_path):
+    a = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
+    g = _StubSource("google", [SourceResult(provider="google", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[a, g])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["audnexus", "google"])
+    summary = ctrl.quick_match_apply(proposals)
+    ctrl.undo(summary.batch_id)
+    assert ctx.books.get(book.id).title == "dune"   # field reverted
+    ctx.close()
+
+
+async def test_quick_match_apply_skips_proposals_without_best(tmp_path):
+    ctx = _ctx(tmp_path, sources=[_StubSource("audnexus", [])])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Unknown"
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["audnexus"])
+    summary = ctrl.quick_match_apply(proposals)
+    assert summary.applied_count == 0
+    ctx.close()

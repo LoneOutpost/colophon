@@ -132,6 +132,31 @@ def apply_fields(
     return _commit(books, hist, book, changes)
 
 
+def bulk_apply_fields(
+    books: BookUnitRepo,
+    hist: HistoryRepo,
+    items: list[tuple[BookUnit, dict[str, str | None], str]],
+) -> str:
+    """Apply each (book, field_updates, provenance) in ONE undoable batch. The
+    bulk sibling of apply_fields; each book's fields are stamped with its given
+    provenance (e.g. the source provider). Returns the batch id."""
+    batch_id = _new_batch_id()
+    changes: list[EditChange] = []
+    with books.conn:  # one transaction: all-or-nothing
+        for book, updates, provenance in items:
+            book_changed = False
+            for field, value in updates.items():
+                change = _apply(book, field, value, provenance=provenance)
+                changes.append(change)
+                if change.new_value != change.old_value:
+                    book_changed = True
+            if book_changed:
+                book.touch()
+                books.upsert(book, commit=False)
+        hist.record(batch_id, changes, commit=False)
+    return batch_id
+
+
 def bulk_remap(
     books: BookUnitRepo,
     hist: HistoryRepo,

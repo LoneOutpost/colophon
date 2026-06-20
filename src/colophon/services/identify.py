@@ -2,29 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
-
 from colophon.adapters.repository.store import BookUnitRepo
 from colophon.core.confidence import score_identification
 from colophon.core.models import BookState, BookUnit
-from colophon.core.sources import MetadataSource, SourceQuery, SourceResult
-
-logger = logging.getLogger(__name__)
-
-
-def _query_for(book: BookUnit) -> SourceQuery:
-    author = book.authors[0] if book.authors else None
-    series = book.series[0].name if book.series else None
-    return SourceQuery(title=book.title, author=author, asin=book.asin, series=series)
-
-
-async def _safe_search(source: MetadataSource, query: SourceQuery) -> list[SourceResult]:
-    try:
-        return await source.search(query)
-    except Exception:  # one source failing must not abort identification (BLE001 intentional)
-        logger.warning(f"source {source.name} failed during identify", exc_info=True)
-        return []
+from colophon.core.sources import MetadataSource
+from colophon.services.matching import gather_matches, query_for_book
 
 
 async def identify(
@@ -35,9 +17,7 @@ async def identify(
     threshold: float,
 ) -> BookUnit:
     """Score `book` against `sources`, persist the outcome, and return the updated book."""
-    query = _query_for(book)
-    gathered = await asyncio.gather(*(_safe_search(s, query) for s in sources))
-    results: list[SourceResult] = [r for batch in gathered for r in batch]
+    results = await gather_matches(sources, query_for_book(book))
 
     outcome = score_identification(book, results)
     book.confidence = outcome.confidence

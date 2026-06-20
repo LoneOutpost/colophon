@@ -6,12 +6,14 @@ from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo, connec
 from colophon.core.models import BookUnit, Provenance
 from colophon.services.editing import (
     apply_fields,
+    bulk_apply_fields,
     bulk_remap,
     bulk_set_field,
     remap_field,
     set_field_value,
     swap_fields,
 )
+from colophon.services.undo import undo_batch
 
 
 def _repos(tmp_path):
@@ -166,10 +168,51 @@ def test_apply_fields_sets_values_with_source_provenance(tmp_path):
 
 
 def test_apply_fields_is_undoable(tmp_path):
-    from colophon.services.undo import undo_batch
-
     books, hist = _repos(tmp_path)
     b = _book(books)  # title "Wrong Title"
     batch = apply_fields(books, hist, b, {"title": "Right"}, provenance="openlibrary")
     undo_batch(books, hist, batch)
     assert books.get(b.id).title == "Wrong Title"
+
+
+def test_bulk_apply_fields_one_batch_across_books(tmp_path):
+    books, hist = _repos(tmp_path)
+    a = BookUnit.new(source_folder=Path("/ingest/a"))
+    a.title = "old a"
+    books.upsert(a)
+    b = BookUnit.new(source_folder=Path("/ingest/b"))
+    b.title = "old b"
+    books.upsert(b)
+    batch = bulk_apply_fields(
+        books,
+        hist,
+        [
+            (a, {"title": "New A", "author": "Author A"}, "audnexus"),
+            (b, {"title": "New B"}, "google"),
+        ],
+    )
+    assert books.get(a.id).title == "New A"
+    assert books.get(a.id).authors == ["Author A"]
+    assert books.get(a.id).provenance["title"] == "audnexus"
+    assert books.get(a.id).provenance["authors"] == "audnexus"
+    assert books.get(b.id).title == "New B"
+    # one batch covers every change across both books
+    assert {c.book_id for c in hist.list_batch(batch)} == {a.id, b.id}
+
+
+def test_bulk_apply_fields_undo_reverts_all(tmp_path):
+    books, hist = _repos(tmp_path)
+    a = BookUnit.new(source_folder=Path("/ingest/a"))
+    a.title = "old a"
+    books.upsert(a)
+    b = BookUnit.new(source_folder=Path("/ingest/b"))
+    b.title = "old b"
+    books.upsert(b)
+    batch = bulk_apply_fields(
+        books,
+        hist,
+        [(a, {"title": "New A"}, "audnexus"), (b, {"title": "New B"}, "google")],
+    )
+    undo_batch(books, hist, batch)
+    assert books.get(a.id).title == "old a"
+    assert books.get(b.id).title == "old b"

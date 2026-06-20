@@ -98,11 +98,11 @@ def test_query_for_includes_series_name():
     from pathlib import Path
 
     from colophon.core.models import BookUnit, SeriesRef
-    from colophon.services.identify import _query_for
+    from colophon.services.matching import query_for_book
 
     book = BookUnit.new(source_folder=Path("/x"))
     book.title = "The Final Empire"
     book.authors = ["Brandon Sanderson"]
     book.series = [SeriesRef(name="Mistborn", sequence=1.0)]
-    q = _query_for(book)
+    q = query_for_book(book)
     assert q.series == "Mistborn" and q.title == "The Final Empire" and q.author == "Brandon Sanderson"

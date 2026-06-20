@@ -17,6 +17,7 @@ from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
+from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
 from colophon.services.acquire import (
@@ -28,6 +29,7 @@ from colophon.services.acquire import (
 from colophon.services.cover import ensure_cached_cover
 from colophon.services.editing import (
     apply_fields,
+    bulk_apply_fields,
     remap_field,
     set_field_value,
 )
@@ -44,6 +46,7 @@ from colophon.services.encode import encode_book
 from colophon.services.foster import FosterResult, foster_one
 from colophon.services.identify import identify
 from colophon.services.ingest import scan_ingest
+from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
 from colophon.services.tag_ops import (
     TagCommitResult,
@@ -516,28 +519,72 @@ class AppController:
     # --- match review / apply (FR-2.4, FR-3.3) ---
     async def get_matches(self, book: BookUnit) -> list[SourceResult]:
         """Re-query all sources for `book` and return candidate matches, best first."""
-        query = SourceQuery(
-            title=book.title,
-            author=book.authors[0] if book.authors else None,
-            asin=book.asin,
-            series=book.series[0].name if book.series else None,
-        )
-
-        async def _safe(source: object) -> list[SourceResult]:
-            try:
-                return await source.search(query)
-            except Exception as e:  # one source failing must not sink the lookup
-                logger.warning(f"source {getattr(source, 'name', '?')} failed in get_matches: {e}")
-                return []
-
-        gathered = await asyncio.gather(*(_safe(s) for s in self.ctx.sources))
-        results = [r for batch in gathered for r in batch]
+        results = await gather_matches(self.ctx.sources, query_for_book(book))
         return score_identification(book, results).ranked
+
+    async def quick_match_scan(
+        self, books: list[BookUnit], source_names: list[str]
+    ) -> list[QuickMatchProposal]:
+        """For each book, query the chosen sources, score the candidates, and
+        return a proposal carrying the best result, all gathered results (for
+        later re-scoring), and the scan confidence. Books are scanned concurrently."""
+        chosen = [s for s in self.ctx.sources if s.name in source_names]
+
+        async def _scan(book: BookUnit) -> QuickMatchProposal:
+            results = await gather_matches(chosen, query_for_book(book))
+            outcome = score_identification(book, results)
+            return QuickMatchProposal(
+                book=book, best=outcome.best, results=results, confidence=outcome.confidence
+            )
+
+        return list(await asyncio.gather(*(_scan(b) for b in books)))
+
+    def quick_match_apply(self, proposals: list[QuickMatchProposal]) -> QuickMatchSummary:
+        """Apply the best result of each proposal (overwrite all present fields,
+        capture cover) in one undoable batch, then re-score each updated book with
+        its carried results and set confidence/state. Proposals without a best
+        result are skipped. Returns a summary (applied, now_ready, batch_id)."""
+        applicable = [p for p in proposals if p.best is not None]
+        if not applicable:
+            return QuickMatchSummary()
+
+        items: list[tuple[BookUnit, dict[str, str | None], str]] = []
+        for p in applicable:
+            updates = self.match_field_values(p.best)
+            if p.best.cover_url:
+                p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
+            items.append((p.book, updates, p.best.provider))
+
+        batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
+
+        threshold = self.ctx.config.review_threshold
+        now_ready = 0
+        for p in applicable:
+            outcome = score_identification(p.book, p.results)
+            p.book.confidence = outcome.confidence
+            p.book.confidence_signals = outcome.signals
+            has_identity = bool(p.book.authors) or bool(p.book.series)
+            if outcome.confidence >= threshold and has_identity:
+                p.book.state = BookState.READY
+                now_ready += 1
+            else:
+                p.book.state = BookState.NEEDS_REVIEW
+            p.book.touch()
+            self.ctx.books.upsert(p.book)
+            self._sync_sidecar(p.book)
+
+        return QuickMatchSummary(
+            applied_count=len(applicable), now_ready_count=now_ready, batch_id=batch
+        )
 
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority
         order, so the search dialog can list exactly the available services."""
         return [(s.name, _SOURCE_LABELS.get(s.name, s.name.title())) for s in self.ctx.sources]
+
+    def review_threshold(self) -> float:
+        """The confidence threshold above which a match is auto-checked / a book is Ready."""
+        return self.ctx.config.review_threshold
 
     async def search_matches(
         self,
