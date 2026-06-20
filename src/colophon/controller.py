@@ -132,6 +132,13 @@ class AppController:
                 self.ctx.books.upsert(book)  # remember the cache location
                 return path.read_bytes(), _cover_mime(path)
         return None
+    def known_authors(self) -> list[str]:
+        """Distinct author names across the library, sorted (editor autocomplete)."""
+        return sorted({a for b in self.ctx.books.list_all() for a in b.authors})
+
+    def known_series(self) -> list[str]:
+        """Distinct series names across the library, sorted (editor autocomplete)."""
+        return sorted({s.name for b in self.ctx.books.list_all() for s in b.series})
 
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:

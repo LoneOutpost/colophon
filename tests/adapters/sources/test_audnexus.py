@@ -3,7 +3,7 @@ import httpx
 from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.core.sources import SourceQuery
 
-_BOOK = {
+_BOOK = {  # api.audnex.us /books/{asin} shape
     "asin": "B002V1A0WE",
     "title": "Dune",
     "authors": [{"name": "Frank Herbert"}],
@@ -15,13 +15,14 @@ _BOOK = {
 }
 
 
-def _source(handler) -> AudnexusSource:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://api.audnex.us")
-    return AudnexusSource(client=client)
+def _source(handler, **kwargs) -> AudnexusSource:
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return AudnexusSource(client=client, **kwargs)
 
 
 async def test_search_by_asin_normalizes_book():
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.audnex.us"
         assert request.url.path == "/books/B002V1A0WE"
         return httpx.Response(200, json=_BOOK)
 
@@ -39,12 +40,60 @@ async def test_search_by_asin_normalizes_book():
     assert r.asin == "B002V1A0WE"
 
 
-async def test_search_without_asin_returns_empty():
+async def test_title_search_uses_audible_catalog_then_audnex():
+    catalog = {"products": [{"asin": "B002V1A0WE"}, {"asin": "B0DELISTED"}]}
+    seen = {"keywords": None, "asins": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.audible.com":
+            assert request.url.path == "/1.0/catalog/products"
+            seen["keywords"] = request.url.params.get("keywords")
+            return httpx.Response(200, json=catalog)
+        assert request.url.host == "api.audnex.us"
+        asin = request.url.path.rsplit("/", 1)[-1]
+        seen["asins"].append(asin)
+        if asin == "B0DELISTED":
+            return httpx.Response(404, json={"error": "delisted"})
+        return httpx.Response(200, json=_BOOK)
+
+    src = _source(handler)
+    results = await src.search(SourceQuery(title="Dune", author="Frank Herbert"))
+    assert "Dune" in (seen["keywords"] or "") and "Frank Herbert" in seen["keywords"]
+    assert set(seen["asins"]) == {"B002V1A0WE", "B0DELISTED"}
+    assert [r.title for r in results] == ["Dune"]  # the delisted ASIN is skipped
+
+
+async def test_title_search_empty_catalog_returns_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.audible.com":
+            return httpx.Response(200, json={"products": []})
+        return httpx.Response(200, json=_BOOK)
+
+    src = _source(handler)
+    assert await src.search(SourceQuery(title="Nothing Here")) == []
+
+
+async def test_catalog_caps_to_max_results():
+    products = [{"asin": f"B{i:09d}"} for i in range(10)]
+    looked_up = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.audible.com":
+            return httpx.Response(200, json={"products": products})
+        looked_up.append(request.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(200, json=_BOOK)
+
+    src = _source(handler, max_results=3)
+    await src.search(SourceQuery(title="Many Matches"))
+    assert len(looked_up) == 3  # only the top 3 ASINs are resolved
+
+
+async def test_search_without_asin_or_title_returns_empty():
     src = _source(lambda req: httpx.Response(200, json=_BOOK))
-    assert await src.search(SourceQuery(title="Dune")) == []
+    assert await src.search(SourceQuery(narrators=[])) == []  # no asin, no title
 
 
-async def test_not_found_returns_empty():
+async def test_not_found_asin_returns_empty():
     src = _source(lambda req: httpx.Response(404, text="not found"))
     assert await src.search(SourceQuery(asin="BOGUS")) == []
 
@@ -60,6 +109,6 @@ async def test_retries_on_transport_error_then_gives_up(monkeypatch):
 
     src = _source(handler)
     # neutralize backoff so the test is instant (auto-restored by monkeypatch)
-    monkeypatch.setattr(src._get.__func__.retry, "wait", tenacity.wait_none())
+    monkeypatch.setattr(src._book_get.__func__.retry, "wait", tenacity.wait_none())
     assert await src.search(SourceQuery(asin="B0")) == []
     assert calls["n"] == 3

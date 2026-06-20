@@ -209,6 +209,7 @@ def render_workspace(controller: AppController) -> None:
             # editable fields, each prefilled with its value + provenance badge
             inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, str] = {}
+            autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
             for field in EDITABLE_FIELDS:
                 value = get_field(book, field) or ""
                 originals[field] = value
@@ -216,7 +217,9 @@ def render_workspace(controller: AppController) -> None:
                     if field == "description":
                         inp = ui.textarea(field, value=value).props("dense").classes("col")
                     else:
-                        inp = ui.input(field, value=value).props("dense").classes("col")
+                        inp = ui.input(
+                            field, value=value, autocomplete=autocomplete.get(field)
+                        ).props("dense").classes("col")
                     inputs[field] = inp
                     # Source chip sits left of the action; the normalize button is
                     # always the right-most control in the row.
@@ -528,6 +531,7 @@ def render_workspace(controller: AppController) -> None:
 
             inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, object] = {}
+            autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
             for field in EDITABLE_FIELDS:
                 values = {(get_field(b, field) or "") for b in books}
                 mixed = len(values) > 1
@@ -537,7 +541,9 @@ def render_workspace(controller: AppController) -> None:
                     if field == "description":
                         inp = ui.textarea(field, value=common).props("dense").classes("col")
                     else:
-                        inp = ui.input(field, value=common).props("dense").classes("col")
+                        inp = ui.input(
+                            field, value=common, autocomplete=autocomplete.get(field)
+                        ).props("dense").classes("col")
                     if mixed:
                         inp.props('placeholder="(multiple values)"')
                     inputs[field] = inp
