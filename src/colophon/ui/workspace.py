@@ -166,7 +166,7 @@ def render_workspace(controller: AppController) -> None:
             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                 ui.button("Cancel", on_click=d.close).props("flat")
                 ui.button(
-                    "Discard", on_click=lambda: (d.close(), then())
+                    "Discard", on_click=lambda: (d.close(), _clear_editor_state(), then())
                 ).props("flat color=negative")
 
                 def _save_and() -> None:
