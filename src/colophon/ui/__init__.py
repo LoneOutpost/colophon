@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import Response
 from nicegui import app, ui
 
@@ -12,6 +14,9 @@ from colophon.ui.workspace import render_workspace
 
 
 def create_app(controller: AppController) -> None:
+    # Serve bundled static assets (self-hosted fonts, etc.) so the UI works offline.
+    app.add_static_files("/assets", str(Path(__file__).parent / "assets"))
+
     @app.get("/cover/{book_id}")
     async def cover(book_id: str) -> Response:
         result = await controller.book_cover(book_id)
