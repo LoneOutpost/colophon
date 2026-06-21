@@ -1517,3 +1517,42 @@ def test_reset_chapters_clears(tmp_path):
     AppController(ctx).reset_chapters(book)
     assert ctx.books.get(book.id).chapters == []
     ctx.close()
+
+
+def test_process_one_passes_stored_chapters(tmp_path, monkeypatch):
+    from colophon.core.models import Chapter, SourceFile
+    from colophon.services.encode import EncodeResult
+    captured = {}
+
+    def fake_encode(book, output_path, **kwargs):
+        captured["chapters"] = kwargs.get("chapters")
+        return EncodeResult(book_id=book.id, error="stop")
+
+    monkeypatch.setattr("colophon.controller.encode_book", fake_encode)
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.source_files = [SourceFile(path=tmp_path / "a.mp3", size=1, duration_seconds=1.0, ext="mp3")]
+    book.chapters = [Chapter(title="Intro", start_ms=0, end_ms=1000)]
+    ctx.books.upsert(book)
+    AppController(ctx).process_one(book)
+    assert captured["chapters"] == book.chapters
+    ctx.close()
+
+
+def test_process_one_no_chapters_passes_none(tmp_path, monkeypatch):
+    from colophon.core.models import SourceFile
+    from colophon.services.encode import EncodeResult
+    captured = {}
+
+    def fake_encode(book, output_path, **kwargs):
+        captured["chapters"] = kwargs.get("chapters")
+        return EncodeResult(book_id=book.id, error="stop")
+
+    monkeypatch.setattr("colophon.controller.encode_book", fake_encode)
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.source_files = [SourceFile(path=tmp_path / "a.mp3", size=1, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+    AppController(ctx).process_one(book)
+    assert captured["chapters"] is None
+    ctx.close()

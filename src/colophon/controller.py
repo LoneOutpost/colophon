@@ -817,6 +817,7 @@ class AppController:
             book, staging / f"{book.id}.m4b",
             bitrate=self.ctx.config.transcode_bitrate,
             delete_sources=confirm_delete, confirm_delete=confirm_delete,
+            chapters=book.chapters or None,
         )
         if not enc.verified or enc.output_path is None:
             book.state = BookState.FAILED
