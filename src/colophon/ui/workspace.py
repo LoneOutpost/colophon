@@ -406,7 +406,7 @@ def render_workspace(controller: AppController) -> None:
                                     return
                                 controller.apply_match_fields(b, res, selected)
                                 dialog.close()
-                                ui.notify(f"Applied {len(selected)} field(s) from {res.provider}")
+                                ui.notify(f"Applied {len(selected)} field(s) from {controller.source_label(res.provider)}")
                                 refresh_list()
                                 show_detail(b.id)
 

@@ -1363,3 +1363,26 @@ def test_source_label_maps_audnexus_to_audible(tmp_path):
     assert ctrl.source_label("manual") == "Manual"
     assert ctrl.source_label("googlebooks") == "Google Books"
     ctx.close()
+
+
+async def test_quick_match_apply_merges_genres_tags(tmp_path):
+    a = _StubSource("audnexus", [SourceResult(
+        provider="audnexus", title="Dune", authors=["Frank Herbert"],
+        genres=["Fantasy", "Epic"], tags=["from-audible"],
+    )])
+    g = _StubSource("google", [SourceResult(provider="google", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[a, g])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.genres = ["My Custom"]
+    book.tags = ["mine"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["audnexus", "google"])
+    ctrl.quick_match_apply(proposals)
+    p = ctx.books.get(book.id)
+    assert p.genres == ["My Custom", "Fantasy", "Epic"]  # merged, existing first
+    assert p.tags == ["mine", "from-audible"]
+    ctx.close()

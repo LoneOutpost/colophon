@@ -612,6 +612,7 @@ class AppController:
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in applicable:
             updates = self.match_field_values(p.best)
+            self._merge_genre_tag_updates(p.book, p.best, updates)
             if p.best.cover_url:
                 p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
             items.append((p.book, updates, p.best.provider))
@@ -709,6 +710,19 @@ class AppController:
             updates["tag"] = "; ".join(result.tags)
         return updates
 
+    def _merge_genre_tag_updates(
+        self, book: BookUnit, result: SourceResult, updates: dict[str, str | None]
+    ) -> None:
+        """Rewrite any genre/tag entries in `updates` to merge with the book's
+        existing genres/tags (union, deduped) so applying a match never clobbers
+        curated entries. Mutates `updates` in place. Genres dedupe
+        case-insensitively (normalize_genres); tags dedupe exactly, order-preserving
+        (merge_preserve)."""
+        if "genre" in updates:
+            updates["genre"] = "; ".join(normalize_genres(book.genres + result.genres)) or None
+        if "tag" in updates:
+            updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
+
     def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
         """Apply only the chosen fields from `result` (per-field selection), stamping
         the source as provenance. Returns the batch id of the editable-field changes
@@ -718,10 +732,7 @@ class AppController:
         if "cover" in fields and result.cover_url:
             book.cover_url = result.cover_url
         updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
-        if "genre" in updates:
-            updates["genre"] = "; ".join(normalize_genres(book.genres + result.genres)) or None
-        if "tag" in updates:
-            updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
+        self._merge_genre_tag_updates(book, result, updates)
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch
