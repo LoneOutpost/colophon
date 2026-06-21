@@ -1928,15 +1928,20 @@ def render_workspace(controller: AppController) -> None:
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)
     # which fails over remote/high-latency connections. A card avoids that.
+    # The cards fill the row's height via items-stretch, NOT height:100%. The row's
+    # height comes from flex:1, which is not a definite reference for a percentage
+    # height, so height:100% would collapse each card to its content and flatten the
+    # internal scroll-areas to 0. Stretch sizes them correctly and the scroll-areas
+    # absorb any overflow.
     with ui.row().classes("w-full no-wrap q-gutter-md q-pa-md items-stretch").style(
         "flex: 1; min-height: 0"
     ):
-        with ui.card().classes("column").style("width: 260px; height: 100%"):
+        with ui.card().classes("column").style("width: 260px"):
             ui.label("Library").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
                 nav_container = ui.column().classes("w-full gap-0")
-        with ui.card().classes("col-5 column").style("height: 100%"):
+        with ui.card().classes("col-5 column"):
             with ui.row().classes("items-center w-full no-wrap"):
                 middle_title = ui.label("Books").classes("text-subtitle1")
                 middle_filter = ui.row().classes("items-center q-gutter-xs q-ml-sm no-wrap")
@@ -1946,7 +1951,7 @@ def render_workspace(controller: AppController) -> None:
             ui.separator().classes("q-mt-xs")
             with ui.scroll_area().classes("col"):
                 list_container = ui.column().classes("w-full gap-0")
-        with ui.card().classes("col column").style("height: 100%"):
+        with ui.card().classes("col column"):
             ui.label("Details").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
