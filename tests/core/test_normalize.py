@@ -79,3 +79,11 @@ def test_field_normalizers_has_genre_not_tag():
 def test_field_normalizers_genre_normalizes_joined_value():
     from colophon.core.normalize import FIELD_NORMALIZERS
     assert FIELD_NORMALIZERS["genre"]("fantasy; epic fantasy; fantasy") == "Fantasy; Epic Fantasy"
+
+
+def test_merge_preserve_existing_first_dedupe_order():
+    from colophon.core.normalize import merge_preserve
+    assert merge_preserve(["a", "b"], ["b", "c"]) == ["a", "b", "c"]
+    assert merge_preserve([], ["x", "x"]) == ["x"]
+    assert merge_preserve(["Keep"], []) == ["Keep"]
+    assert merge_preserve(["a"], ["  ", "a", "d"]) == ["a", "d"]
