@@ -228,8 +228,9 @@ def render_workspace(controller: AppController) -> None:
                     ui.button("Set from URL", icon="link", on_click=_set_url).props("flat dense no-caps")
                     ui.separator()
 
-                    def _on_upload(e) -> None:
-                        res = controller.set_cover_upload(b, e.content.read(), e.name)
+                    async def _on_upload(e) -> None:
+                        data = await e.file.read()
+                        res = controller.set_cover_upload(b, data, e.file.name)
                         if not res.ok:
                             ui.notify(res.error or "Upload failed", type="warning")
                             return
