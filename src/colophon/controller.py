@@ -730,7 +730,8 @@ class AppController:
         case-insensitively (normalize_genres); tags dedupe exactly, order-preserving
         (merge_preserve)."""
         if "genre" in updates:
-            updates["genre"] = "; ".join(normalize_genres(book.genres + result.genres)) or None
+            incoming = self.genre_policy().canonicalize(result.genres)
+            updates["genre"] = "; ".join(normalize_genres(book.genres + incoming)) or None
         if "tag" in updates:
             updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
 
