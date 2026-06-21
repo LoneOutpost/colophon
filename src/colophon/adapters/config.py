@@ -31,6 +31,9 @@ class Config(BaseModel):
     hardcover_api_token: str | None = None
     real_debrid_token: str | None = None
     real_debrid_download_dir: Path | None = None  # None => <data dir>/downloads
+    genre_mapping: dict[str, str] = {}
+    accepted_genres: list[str] = []
+    genre_whitelist_enabled: bool = False
 
 
 def default_config_path() -> Path:

@@ -1365,6 +1365,16 @@ def test_source_label_maps_audnexus_to_audible(tmp_path):
     ctx.close()
 
 
+def test_genre_policy_reflects_config(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.genre_mapping = {"scifi": "Science Fiction"}
+    ctx.config.accepted_genres = ["Science Fiction"]
+    ctx.config.genre_whitelist_enabled = True
+    pol = AppController(ctx).genre_policy()
+    assert pol.canonicalize(["scifi", "Dragons"]) == ["Science Fiction"]
+    ctx.close()
+
+
 async def test_quick_match_apply_merges_genres_tags(tmp_path):
     a = _StubSource("audnexus", [SourceResult(
         provider="audnexus", title="Dune", authors=["Frank Herbert"],
