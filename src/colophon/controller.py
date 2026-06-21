@@ -551,7 +551,9 @@ class AppController:
 
     def bulk_normalize(self, books: list[BookUnit], fields: list[str]) -> str:
         """Normalize the given text `fields` across `books` in one undoable batch."""
-        batch = _svc_bulk_normalize(self.ctx.books, self.ctx.history, books, fields)
+        batch = _svc_bulk_normalize(
+            self.ctx.books, self.ctx.history, books, fields, genre_policy=self.genre_policy()
+        )
         for book in books:
             self._sync_sidecar(book)
         return batch

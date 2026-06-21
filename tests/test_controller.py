@@ -1365,6 +1365,35 @@ def test_source_label_maps_audnexus_to_audible(tmp_path):
     ctx.close()
 
 
+def test_bulk_normalize_genre_applies_policy(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.genre_mapping = {"scifi": "Science Fiction"}
+    ctx.config.accepted_genres = ["Science Fiction"]
+    ctx.config.genre_whitelist_enabled = True
+    book = BookUnit.new(source_folder=tmp_path / "a")
+    book.genres = ["scifi", "Dragons"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    ctrl.bulk_normalize([book], ["genre"])
+    p = ctx.books.get(book.id)
+    assert p.genres == ["Science Fiction"]
+    ctx.close()
+
+
+def test_bulk_normalize_genre_no_filter_when_disabled(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.genre_mapping = {"scifi": "Science Fiction"}
+    ctx.config.genre_whitelist_enabled = False
+    book = BookUnit.new(source_folder=tmp_path / "a")
+    book.genres = ["scifi", "Dragons"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    ctrl.bulk_normalize([book], ["genre"])
+    p = ctx.books.get(book.id)
+    assert p.genres == ["Science Fiction", "Dragons"]
+    ctx.close()
+
+
 def test_genre_policy_reflects_config(tmp_path):
     ctx = _ctx(tmp_path)
     ctx.config.genre_mapping = {"scifi": "Science Fiction"}
