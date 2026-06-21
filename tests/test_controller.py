@@ -1676,3 +1676,31 @@ async def test_ensure_cover_cached_fetches_and_persists(tmp_path, monkeypatch):
     await AppController(ctx).ensure_cover_cached(book)
     assert ctx.books.get(book.id).cover_path == cached
     ctx.close()
+
+
+class _CapturingSource:
+    name = "cap"
+
+    def __init__(self):
+        self.queries = []
+
+    async def search(self, query):
+        self.queries.append(query)
+        return [SourceResult(provider="cap", title="Dune", authors=["Frank Herbert"])]
+
+
+def test_quick_match_scan_passes_search_fields(tmp_path):
+    src = _CapturingSource()
+    ctx = _ctx(tmp_path, sources=[src])
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Wrong Author"]
+    b.asin = "B002V1A0WE"
+    ctx.books.upsert(b)
+    asyncio.run(AppController(ctx).quick_match_scan([b], ["cap"], {"title"}))
+    assert len(src.queries) == 1
+    q = src.queries[0]
+    assert q.title == "Dune"
+    assert q.author is None
+    assert q.asin is None
+    ctx.close()

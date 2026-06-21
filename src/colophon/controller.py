@@ -678,15 +678,19 @@ class AppController:
         return score_identification(book, results).ranked
 
     async def quick_match_scan(
-        self, books: list[BookUnit], source_names: list[str]
+        self,
+        books: list[BookUnit],
+        source_names: list[str],
+        search_fields: set[str] | None = None,
     ) -> list[QuickMatchProposal]:
         """For each book, query the chosen sources, score the candidates, and
         return a proposal carrying the best result, all gathered results (for
-        later re-scoring), and the scan confidence. Books are scanned concurrently."""
+        later re-scoring), and the scan confidence. Books are scanned concurrently.
+        `search_fields` (when given) restricts which fields seed the query."""
         chosen = [s for s in self.ctx.sources if s.name in source_names]
 
         async def _scan(book: BookUnit) -> QuickMatchProposal:
-            results = await gather_matches(chosen, query_for_book(book))
+            results = await gather_matches(chosen, query_for_book(book, search_fields))
             outcome = score_identification(book, results)
             return QuickMatchProposal(
                 book=book, best=outcome.best, results=results, confidence=outcome.confidence
