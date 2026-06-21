@@ -34,6 +34,7 @@ class Config(BaseModel):
     genre_mapping: dict[str, str] = {}
     accepted_genres: list[str] = []
     genre_whitelist_enabled: bool = False
+    normalize_on_match: list[str] = []
 
 
 def default_config_path() -> Path:
