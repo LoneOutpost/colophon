@@ -140,3 +140,44 @@ async def test_search_no_genres_key_yields_empty_lists():
     (r,) = await src.search(SourceQuery(asin="B002V1A0WE"))
     assert r.genres == []
     assert r.tags == []
+
+
+_CHAPTERS = {
+    "asin": "B002V1A0WE",
+    "runtimeLengthMs": 3_600_000,
+    "chapters": [
+        {"startOffsetMs": 0, "lengthMs": 120_000, "title": "Introduction"},
+        {"startOffsetMs": 120_000, "lengthMs": 3_480_000, "title": ""},
+    ],
+}
+
+
+async def test_fetch_chapters_maps_offsets_and_titles():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/books/B002V1A0WE/chapters"
+        return httpx.Response(200, json=_CHAPTERS)
+
+    src = _source(handler)
+    fetch = await src.fetch_chapters("B002V1A0WE")
+    assert fetch is not None
+    assert fetch.runtime_ms == 3_600_000
+    assert [c.title for c in fetch.chapters] == ["Introduction", "Chapter 2"]
+    assert (fetch.chapters[0].start_ms, fetch.chapters[0].end_ms) == (0, 120_000)
+    assert (fetch.chapters[1].start_ms, fetch.chapters[1].end_ms) == (120_000, 3_600_000)
+
+
+async def test_fetch_chapters_404_returns_none():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    src = _source(handler)
+    assert await src.fetch_chapters("X") is None
+
+
+async def test_fetch_chapters_missing_key_yields_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"runtimeLengthMs": 1000})
+
+    src = _source(handler)
+    fetch = await src.fetch_chapters("X")
+    assert fetch is not None and fetch.chapters == []

@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from colophon.core.models import _Base
+from colophon.core.models import Chapter
 
-
-class Chapter(_Base):
-    title: str
-    start_ms: int
-    end_ms: int
+__all__ = ["Chapter", "file_boundary_chapters", "to_ffmetadata"]
 
 
 def file_boundary_chapters(files: list[tuple[str, float]]) -> list[Chapter]:
