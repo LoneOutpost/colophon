@@ -73,6 +73,21 @@ _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 def _cover_mime(path: Path) -> str:
     return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
 
+
+class CoverSetResult(_Base):
+    ok: bool = False
+    error: str | None = None
+
+
+def _detect_image_ext(data: bytes) -> str | None:
+    """'.jpg' / '.png' from the leading magic bytes, or None if not a JPEG/PNG."""
+    if data[:2] == b"\xff\xd8":
+        return ".jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    return None
+
+
 # Display labels for the metadata sources shown in the match-search dialog.
 _SOURCE_LABELS = {
     "audnexus": "Audible",
@@ -154,6 +169,55 @@ class AppController:
                 self.ctx.books.upsert(book)  # remember the cache location
                 return path.read_bytes(), _cover_mime(path)
         return None
+    def set_cover_url(self, book: BookUnit, url: str) -> None:
+        """Point the book at a new cover URL, clearing any cached file so the new
+        image is fetched + served on demand."""
+        book.cover_url = (url or "").strip() or None
+        book.cover_path = None
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
+
+    def set_cover_upload(
+        self, book: BookUnit, data: bytes, filename: str | None = None
+    ) -> CoverSetResult:
+        """Write an uploaded JPEG/PNG to the book's folder as cover.<ext> and use
+        it (clearing cover_url). Rejects non-image bytes."""
+        ext = _detect_image_ext(data)
+        if ext is None:
+            return CoverSetResult(ok=False, error="Not a JPEG or PNG image")
+        path = book.source_folder / f"cover{ext}"
+        try:
+            book.source_folder.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except OSError as e:
+            logger.warning(f"writing cover to {path} failed: {e}")
+            return CoverSetResult(ok=False, error="Could not write cover file")
+        book.cover_path = path
+        book.cover_url = None
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
+        return CoverSetResult(ok=True)
+
+    async def cover_candidates(self, book: BookUnit) -> list[str]:
+        """Distinct cover URLs from a match search, best-ranked first."""
+        out: list[str] = []
+        seen: set[str] = set()
+        for r in await self.get_matches(book):
+            if r.cover_url and r.cover_url not in seen:
+                seen.add(r.cover_url)
+                out.append(r.cover_url)
+        return out
+
+    def clear_cover(self, book: BookUnit) -> None:
+        """Remove the book's cover (both URL and cached file reference)."""
+        book.cover_url = None
+        book.cover_path = None
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
+
     def known_authors(self) -> list[str]:
         """Distinct author names across the library, sorted (editor autocomplete)."""
         return sorted({a for b in self.ctx.books.list_all() for a in b.authors})

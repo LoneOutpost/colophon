@@ -1556,3 +1556,84 @@ def test_process_one_no_chapters_passes_none(tmp_path, monkeypatch):
     AppController(ctx).process_one(book)
     assert captured["chapters"] is None
     ctx.close()
+
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"fakepngbody"
+_JPEG = b"\xff\xd8\xff\xe0" + b"fakejpegbody"
+
+
+def test_set_cover_url_sets_and_clears_cached_path(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.cover_path = tmp_path / "old.jpg"
+    ctx.books.upsert(book)
+    AppController(ctx).set_cover_url(book, "http://example/cover.jpg")
+    p = ctx.books.get(book.id)
+    assert p.cover_url == "http://example/cover.jpg"
+    assert p.cover_path is None
+    ctx.close()
+
+
+def test_set_cover_upload_png_writes_file(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.cover_url = "http://old"
+    ctx.books.upsert(book)
+    res = AppController(ctx).set_cover_upload(book, _PNG, "art.png")
+    assert res.ok
+    p = ctx.books.get(book.id)
+    assert p.cover_path == book.source_folder / "cover.png"
+    assert p.cover_path.read_bytes() == _PNG
+    assert p.cover_url is None
+    ctx.close()
+
+
+def test_set_cover_upload_jpeg_extension(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    ctx.books.upsert(book)
+    res = AppController(ctx).set_cover_upload(book, _JPEG, "art.jpg")
+    assert res.ok
+    assert ctx.books.get(book.id).cover_path == book.source_folder / "cover.jpg"
+    ctx.close()
+
+
+def test_set_cover_upload_rejects_non_image(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    ctx.books.upsert(book)
+    res = AppController(ctx).set_cover_upload(book, b"not an image", "x.txt")
+    assert res.ok is False and res.error
+    assert ctx.books.get(book.id).cover_path is None
+    ctx.close()
+
+
+async def test_cover_candidates_distinct_in_order(tmp_path):
+    src = _StubSource("audnexus", [
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], cover_url="http://a/1.jpg"),
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], cover_url="http://a/1.jpg"),
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], cover_url="http://a/2.jpg"),
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),
+    ])
+    ctx = _ctx(tmp_path, sources=[src])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    cands = await AppController(ctx).cover_candidates(book)
+    assert cands == ["http://a/1.jpg", "http://a/2.jpg"]
+    ctx.close()
+
+
+def test_clear_cover_clears_both(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.cover_url = "http://u"
+    book.cover_path = tmp_path / "c.jpg"
+    ctx.books.upsert(book)
+    AppController(ctx).clear_cover(book)
+    p = ctx.books.get(book.id)
+    assert p.cover_url is None and p.cover_path is None
+    ctx.close()
