@@ -144,6 +144,42 @@ def render_workspace(controller: AppController) -> None:
     folder_filter: dict[str, object] = {"path": None}
     foster_selected: set[Path] = set()
     book_filter: dict[str, str] = {"text": ""}
+    editor_state: dict[str, object] = {
+        "book_id": None, "is_dirty": None, "save_pending": None, "save": None, "write": None,
+    }
+
+    def _clear_editor_state() -> None:
+        editor_state.update(
+            book_id=None, is_dirty=None, save_pending=None, save=None, write=None
+        )
+        ui.run_javascript("window.__colophon_dirty = false")
+
+    def _guard_nav(target_book_id, then) -> bool:
+        """If a different dirty detail is open, prompt and return True (handled);
+        else return False so the caller proceeds."""
+        is_dirty = editor_state["is_dirty"]
+        if is_dirty is None or not is_dirty() or editor_state["book_id"] == target_book_id:
+            return False
+        with ui.dialog() as d, ui.card().classes("w-96"):
+            ui.label("Unsaved changes").classes("text-subtitle1")
+            ui.label("This book has unsaved edits.").classes("text-caption text-grey-7")
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                ui.button("Cancel", on_click=d.close).props("flat")
+                ui.button(
+                    "Discard", on_click=lambda: (d.close(), then())
+                ).props("flat color=negative")
+
+                def _save_and() -> None:
+                    save_pending = editor_state["save_pending"]
+                    if save_pending is not None:
+                        save_pending()
+                    d.close()
+                    then()
+
+                ui.button("Save and continue", icon="save", on_click=_save_and)
+        d.open()
+        return True
+
     # Keyboard navigation: the focused book row and the live row elements + a
     # registry of widgets the shortcuts drive (the filter input).
     focus: dict[str, str | None] = {"id": None}
@@ -200,10 +236,13 @@ def render_workspace(controller: AppController) -> None:
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
+        if _guard_nav(book_id, lambda: show_detail(book_id)):
+            return
         detail_container.clear()
         book = controller.get_book(book_id)
         with detail_container:
             if book is None:
+                _clear_editor_state()
                 with ui.column().classes("w-full items-center q-pa-lg"):
                     ui.icon("menu_book").classes("text-h3 text-grey-5")
                     ui.label("Select a book to see its details").classes("text-grey-6")
@@ -337,6 +376,9 @@ def render_workspace(controller: AppController) -> None:
                         on_click=lambda inp=inp, fn=normalizer: inp.set_value(fn(inp.value or "")),
                     ).props("flat dense round").classes("self-center").tooltip("Normalize")
 
+            for _inp in inputs.values():
+                _inp.on_value_change(lambda _e=None: ui.run_javascript("window.__colophon_dirty = true"))
+
             def _save_pending(b=book) -> bool:
                 """Persist any pending field edits silently, advancing the editor's
                 baseline. Returns True when something was saved."""
@@ -352,10 +394,14 @@ def render_workspace(controller: AppController) -> None:
                     originals[f] = _editor_text(inputs[f])
                 return True
 
+            def _is_dirty() -> bool:
+                return any(_editor_text(inputs[f]) != originals[f] for f in EDITABLE_FIELDS)
+
             def _save(b=book) -> None:
                 if not _save_pending(b):
                     ui.notify("No changes")
                     return
+                ui.run_javascript("window.__colophon_dirty = false")
                 ui.notify("Saved")
                 refresh_list()
                 show_detail(b.id)
@@ -582,6 +628,12 @@ def render_workspace(controller: AppController) -> None:
                     on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
                 ).props("flat")
 
+            editor_state.update(
+                book_id=book_id, is_dirty=_is_dirty,
+                save_pending=_save_pending, save=_save, write=lambda b=book: _tag_dialog(b),
+            )
+            ui.run_javascript("window.__colophon_dirty = false")
+
             if book.source_files:
                 ui.separator().classes("q-my-sm")
                 ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
@@ -687,6 +739,9 @@ def render_workspace(controller: AppController) -> None:
 
     # --- bulk editor (shown when 2+ books are selected) ---
     def show_bulk() -> None:
+        if _guard_nav(None, show_bulk):
+            return
+        _clear_editor_state()
         detail_container.clear()
         books = _selected_books()
         with detail_container:
@@ -1638,6 +1693,9 @@ def render_workspace(controller: AppController) -> None:
             refresh_list()
 
     def _set_mode(mode: str) -> None:
+        if _guard_nav(None, lambda: _set_mode(mode)):
+            return
+        _clear_editor_state()
         view["mode"] = mode
         refresh_nav()
         _render_middle()
@@ -1815,6 +1873,32 @@ def render_workspace(controller: AppController) -> None:
     # --- application shell ---
     # Keyboard navigation for the Books list (ignored while typing in a field).
     ui.keyboard(on_key=_on_key)
+
+    async def _on_save_key(e) -> None:
+        if not e.action.keydown or not (e.modifiers.ctrl or e.modifiers.meta):
+            return
+        if (e.key.name or "").lower() != "s":
+            return
+        if editor_state["save"] is None:
+            return
+        if e.modifiers.shift:
+            await editor_state["write"]()
+        else:
+            editor_state["save"]()
+
+    ui.keyboard(on_key=_on_save_key, ignore=[])
+    ui.add_head_html(
+        "<script>"
+        "document.addEventListener('keydown', e => {"
+        " if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) e.preventDefault();"
+        "}, true);"
+        "window.__colophon_dirty = false;"
+        "window.addEventListener('beforeunload', e => {"
+        " if (window.__colophon_dirty) { e.preventDefault(); e.returnValue = ''; }"
+        "});"
+        "</script>"
+    )
+
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
