@@ -209,8 +209,82 @@ def render_workspace(controller: AppController) -> None:
                     ui.label("Select a book to see its details").classes("text-grey-6")
                 return
 
+            def _cover_dialog(b=book) -> None:
+                with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+                    ui.label("Change cover").classes("text-subtitle1")
+
+                    url_in = ui.input("Image URL").props("dense clearable").classes("w-full")
+
+                    def _set_url() -> None:
+                        value = (url_in.value or "").strip()
+                        if not value:
+                            ui.notify("Enter a URL")
+                            return
+                        controller.set_cover_url(b, value)
+                        dialog.close()
+                        ui.notify("Cover set")
+                        show_detail(b.id)
+
+                    ui.button("Set from URL", icon="link", on_click=_set_url).props("flat dense no-caps")
+                    ui.separator()
+
+                    async def _on_upload(e) -> None:
+                        data = await e.file.read()
+                        res = controller.set_cover_upload(b, data, e.file.name)
+                        if not res.ok:
+                            ui.notify(res.error or "Upload failed", type="warning")
+                            return
+                        dialog.close()
+                        ui.notify("Cover uploaded")
+                        show_detail(b.id)
+
+                    ui.upload(on_upload=_on_upload, auto_upload=True).props(
+                        'accept="image/*" flat'
+                    ).classes("w-full")
+                    ui.separator()
+
+                    grid = ui.row().classes("w-full q-gutter-xs q-mt-sm")
+
+                    async def _search() -> None:
+                        grid.clear()
+                        with grid:
+                            ui.spinner()
+                        cands = await controller.cover_candidates(b)
+                        grid.clear()
+                        if not cands:
+                            with grid:
+                                ui.label("No covers found").classes("text-grey-6")
+                            return
+                        with grid:
+                            for url in cands[:12]:
+                                ui.image(url).classes("cursor-pointer rounded").style(
+                                    "width:80px;height:120px;object-fit:cover"
+                                ).on(
+                                    "click",
+                                    lambda u=url: (
+                                        controller.set_cover_url(b, u),
+                                        dialog.close(),
+                                        ui.notify("Cover set"),
+                                        show_detail(b.id),
+                                    ),
+                                )
+
+                    ui.button("Search Audible and others", icon="search", on_click=_search).props(
+                        "flat dense no-caps"
+                    )
+                    with ui.row().classes("w-full justify-end q-mt-sm"):
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                dialog.open()
+
             with ui.row().classes("w-full justify-center q-mb-sm"):
                 _render_cover(book, width=160, height=240, icon="text-h2")
+            with ui.row().classes("w-full justify-center q-gutter-sm q-mb-sm"):
+                ui.button("Change cover", icon="image", on_click=_cover_dialog).props("flat dense no-caps")
+                if book.cover_path or book.cover_url:
+                    ui.button(
+                        "Remove", icon="delete",
+                        on_click=lambda b=book: (controller.clear_cover(b), ui.notify("Cover removed"), show_detail(b.id)),
+                    ).props("flat dense no-caps color=negative")
             with ui.row().classes("items-center w-full"):
                 ui.label(book.title or "(untitled)").classes("text-h6")
                 ui.space()
