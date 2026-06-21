@@ -9,54 +9,99 @@ from __future__ import annotations
 
 from nicegui import app, ui
 
-# A single calm indigo accent on a zinc-neutral scale. Flat (no gradients or
-# glows); the accent lightens slightly for dark surfaces via Quasar's dark plugin.
-_PRIMARY = "#4f46e5"
+# Warm "Clay & paper": a terracotta accent on warm stone neutrals. Flat (no
+# gradients or glows). The accent lightens to a burnt orange on dark surfaces.
+_PRIMARY = "#bf5a3c"
 
 _CSS = """
-:root { --col-radius: 12px; }
+:root {
+  --col-radius: 12px;
+  --colophon-accent: #bf5a3c;
+  --colophon-sel: rgba(191, 90, 60, .12);
+  --colophon-hover: rgba(191, 90, 60, .06);
+  --colophon-ring: rgba(191, 90, 60, .45);
+  --colophon-line: #e7ded2;
+  --colophon-faint: #9a8f7e;
+  --colophon-muted: #6c6256;
+  --colophon-surface: #fcf9f4;
+  --colophon-page: #f6f1ea;
+}
+.body--dark {
+  /* Lighten the Quasar accent on dark surfaces (buttons, badges, .text-primary).
+     !important beats the inline --q-primary that ui.colors sets on <body>. */
+  --q-primary: #d6754f !important;
+  --colophon-accent: #d6754f;
+  --colophon-sel: rgba(214, 117, 79, .18);
+  --colophon-hover: rgba(214, 117, 79, .08);
+  --colophon-ring: rgba(214, 117, 79, .5);
+  --colophon-line: #473f35;
+  --colophon-faint: #8a8073;
+  --colophon-muted: #b6ab9c;
+  --colophon-surface: #262019;
+  --colophon-page: #1c1916;
+}
+@font-face {
+  font-family: 'Spectral'; font-style: normal; font-weight: 600;
+  font-display: swap; src: url('/assets/fonts/spectral-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Spectral'; font-style: normal; font-weight: 700;
+  font-display: swap; src: url('/assets/fonts/spectral-700.woff2') format('woff2');
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
+  background: var(--colophon-page);
+  color: #2c271f;
 }
+.body--dark body { color: #ece4d8; }
+/* Warm page surface in light mode (dark uses Quasar's dark_page). */
+.q-page-container, .q-page { background: var(--colophon-page); }
+.body--dark .q-page-container, .body--dark .q-page { background: #1c1916; }
+/* Helper type classes consumed by the workspace. */
+.colophon-book-title { font-family: 'Spectral', Georgia, 'Times New Roman', serif; }
+.colophon-mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 /* One soft elevation for every card; 12px radius everywhere. */
 .q-card {
   border-radius: var(--col-radius);
+  background: var(--colophon-surface);
   box-shadow: 0 1px 2px rgba(24, 24, 27, .06), 0 1px 3px rgba(24, 24, 27, .05);
 }
-.body--dark .q-card { box-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
+.body--dark .q-card { background: #262019; box-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
 /* Neutral, flat header/footer with a hairline rule (accent is reserved for
    actions, not the whole app bar). */
 .q-header {
   box-shadow: none;
-  background: #ffffff;
-  color: #18181b;
-  border-bottom: 1px solid rgba(24, 24, 27, .10);
+  background: var(--colophon-surface);
+  color: #2c271f;
+  border-bottom: 1px solid var(--colophon-line);
 }
 .body--dark .q-header {
-  background: #1e1e24;
-  color: #fafafa;
-  border-bottom-color: rgba(255, 255, 255, .08);
+  background: #262019;
+  color: #ece4d8;
+  border-bottom-color: var(--colophon-line);
 }
 .q-footer {
-  background: #ffffff;
-  color: #18181b;
-  border-top: 1px solid rgba(24, 24, 27, .10);
+  background: var(--colophon-surface);
+  color: #2c271f;
+  border-top: 1px solid var(--colophon-line);
 }
 .body--dark .q-footer {
-  background: #1e1e24;
-  color: #fafafa;
-  border-top-color: rgba(255, 255, 255, .08);
+  background: #262019;
+  color: #ece4d8;
+  border-top-color: var(--colophon-line);
 }
 /* Rounded inputs and list rows to match the card radius scale. */
 .q-field--outlined .q-field__control { border-radius: 8px; }
 .q-item { border-radius: 8px; }
-/* Keyboard-focused book row: a left accent rule + a faint accent tint. */
+/* Row states: full warm tint for selection/hover, an inset ring for keyboard
+   focus. No left-edge accent bar. */
+.book-row-selected { background: var(--colophon-sel); }
+.book-row:hover { background: var(--colophon-hover); }
 .book-row-focused {
-  box-shadow: inset 3px 0 0 var(--q-primary);
-  background: rgba(79, 70, 229, .07);
+  background: var(--colophon-sel);
+  box-shadow: inset 0 0 0 1px var(--colophon-ring);
 }
-.body--dark .book-row-focused { background: rgba(99, 102, 241, .16); }
 /* Calmer scrollbars. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, .4); border-radius: 8px; }
@@ -68,14 +113,14 @@ def apply_theme() -> None:
     """Set the brand palette and inject base CSS for the current page."""
     ui.colors(
         primary=_PRIMARY,
-        secondary="#64748b",
+        secondary="#8a7f70",
         accent=_PRIMARY,
         positive="#16a34a",
         negative="#dc2626",
         info="#0ea5e9",
         warning="#d97706",
-        dark="#1e1e24",        # elevated dark surface (cards, header)
-        dark_page="#141418",   # dark page background
+        dark="#262019",        # elevated dark surface (cards, header)
+        dark_page="#1c1916",   # dark page background
     )
     ui.add_css(_CSS)
 
