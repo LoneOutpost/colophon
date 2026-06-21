@@ -11,6 +11,7 @@ from nicegui import ui
 
 from colophon.adapters.config import Config
 from colophon.controller import AppController
+from colophon.core.normalize import NORMALIZABLE_FIELDS
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,14 @@ def render_settings(controller: AppController) -> None:
                     _add_mapping_row(_frm, _to)
                 ui.button("Add row", icon="add", on_click=lambda: _add_mapping_row()).props("flat dense")
 
+            with _section("Matching", "Fields to auto-normalize when a match is applied."):
+                normalize_on_match = ui.select(
+                    NORMALIZABLE_FIELDS,
+                    value=list(cfg.normalize_on_match),
+                    multiple=True,
+                    label="Auto-normalize on match",
+                ).props("use-chips dense").classes("w-full")
+
             def do_save() -> None:
                 try:
                     new = Config(
@@ -201,6 +210,9 @@ def render_settings(controller: AppController) -> None:
                             for f, t, _row in mapping_rows
                             if f.value and f.value.strip() and t.value and t.value.strip()
                         },
+                        normalize_on_match=[
+                            f for f in (normalize_on_match.value or []) if f
+                        ],
                     )
                     controller.save_settings(new)
                     ui.notify("Settings saved")
