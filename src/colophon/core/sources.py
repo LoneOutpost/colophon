@@ -27,6 +27,8 @@ class SourceResult(_Base):
     asin: str | None = None
     cover_url: str | None = None
     description: str | None = None
+    genres: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
+    tags: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     raw: dict[str, object] = {}  # noqa: RUF012 - pydantic field default, copied per instance
 
 

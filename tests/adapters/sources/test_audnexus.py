@@ -112,3 +112,31 @@ async def test_retries_on_transport_error_then_gives_up(monkeypatch):
     monkeypatch.setattr(src._book_get.__func__.retry, "wait", tenacity.wait_none())
     assert await src.search(SourceQuery(asin="B0")) == []
     assert calls["n"] == 3
+
+
+async def test_search_parses_genres_and_tags_by_type():
+    book = {**_BOOK, "genres": [
+        {"asin": "1", "name": "Science Fiction & Fantasy", "type": "genre"},
+        {"asin": "2", "name": "Fantasy", "type": "genre"},
+        {"asin": "3", "name": "Epic", "type": "tag"},
+        {"asin": "4", "type": "genre"},  # no name -> skipped
+        {"name": "Mystery"},             # no type -> skipped
+    ]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=book)
+
+    src = _source(handler)
+    (r,) = await src.search(SourceQuery(asin="B002V1A0WE"))
+    assert r.genres == ["Science Fiction & Fantasy", "Fantasy"]
+    assert r.tags == ["Epic"]
+
+
+async def test_search_no_genres_key_yields_empty_lists():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_BOOK)
+
+    src = _source(handler)
+    (r,) = await src.search(SourceQuery(asin="B002V1A0WE"))
+    assert r.genres == []
+    assert r.tags == []

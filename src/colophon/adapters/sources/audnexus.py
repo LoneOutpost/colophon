@@ -111,6 +111,8 @@ class AudnexusSource:
             asin=book.get("asin"),
             cover_url=book.get("image"),
             description=book.get("summary"),
+            genres=[g["name"] for g in book.get("genres") or [] if g.get("name") and g.get("type") == "genre"],
+            tags=[g["name"] for g in book.get("genres") or [] if g.get("name") and g.get("type") == "tag"],
             raw=book,
         )
 
