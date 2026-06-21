@@ -146,6 +146,33 @@ def render_settings(controller: AppController) -> None:
                         "Test connection", icon="wifi_tethering", on_click=test_rd
                     ).props("flat").classes("q-ml-auto")
 
+            with _section("Genres", "Canonicalize and optionally restrict genres."):
+                genre_whitelist = ui.switch(
+                    "Enforce accepted-genres whitelist", value=cfg.genre_whitelist_enabled
+                )
+                accepted = ui.select(
+                    sorted(cfg.accepted_genres), value=list(cfg.accepted_genres),
+                    multiple=True, new_value_mode="add-unique", label="Accepted genres",
+                ).props("use-chips use-input dense").classes("w-full")
+                ui.label("Synonym mapping (from → to)").classes("text-caption text-grey q-mt-sm")
+                mapping_rows: list[tuple] = []
+                mapping_box = ui.column().classes("w-full")
+
+                def _add_mapping_row(frm: str = "", to: str = "") -> None:
+                    with mapping_box, ui.row().classes("items-center w-full no-wrap q-gutter-sm") as row:
+                        frm_in = ui.input("from", value=frm).props("dense").classes("col")
+                        to_in = ui.input("to", value=to).props("dense").classes("col")
+                        entry = (frm_in, to_in, row)
+                        mapping_rows.append(entry)
+                        ui.button(
+                            icon="close",
+                            on_click=lambda e=entry: (e[2].delete(), mapping_rows.remove(e)),
+                        ).props("flat dense round")
+
+                for _frm, _to in sorted(cfg.genre_mapping.items()):
+                    _add_mapping_row(_frm, _to)
+                ui.button("Add row", icon="add", on_click=lambda: _add_mapping_row()).props("flat dense")
+
             def do_save() -> None:
                 try:
                     new = Config(
@@ -167,6 +194,13 @@ def render_settings(controller: AppController) -> None:
                         hardcover_api_token=_opt_str(hc_token.value),
                         real_debrid_token=_opt_str(rd_token.value),
                         real_debrid_download_dir=_opt_path(rd_dir.value),
+                        genre_whitelist_enabled=bool(genre_whitelist.value),
+                        accepted_genres=[g for g in (accepted.value or []) if g and g.strip()],
+                        genre_mapping={
+                            f.value.strip(): t.value.strip()
+                            for f, t, _row in mapping_rows
+                            if f.value and f.value.strip() and t.value and t.value.strip()
+                        },
                     )
                     controller.save_settings(new)
                     ui.notify("Settings saved")
