@@ -82,6 +82,15 @@ _SOURCE_LABELS = {
 }
 
 
+class ChapterApplyResult(_Base):
+    ok: bool = False
+    count: int = 0
+    audible_runtime_ms: int = 0
+    source_runtime_ms: int = 0
+    mismatch: bool = False
+    error: str | None = None
+
+
 class ProcessResult(_Base):
     book_id: str
     encoded: bool = False
@@ -755,6 +764,43 @@ class AppController:
         if result.cover_url:
             fields.add("cover")
         return self.apply_match_fields(book, result, fields)
+
+    # --- chapters ---
+    async def apply_audnexus_chapters(
+        self, book: BookUnit, asin: str | None = None
+    ) -> ChapterApplyResult:
+        """Fetch named chapters from Audnexus for `asin` (or book.asin), store them
+        on the book, and report a runtime mismatch vs the source files."""
+        target = (asin or book.asin or "").strip()
+        if not target:
+            return ChapterApplyResult(ok=False, error="no ASIN")
+        source = next((s for s in self.ctx.sources if s.name == "audnexus"), None)
+        fetch_chapters = getattr(source, "fetch_chapters", None)
+        if fetch_chapters is None:
+            return ChapterApplyResult(ok=False, error="Audible source not available")
+        fetch = await fetch_chapters(target)
+        if fetch is None or not fetch.chapters:
+            return ChapterApplyResult(ok=False, error="no chapters found")
+        book.chapters = fetch.chapters
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
+        source_runtime_ms = round(sum(sf.duration_seconds for sf in book.source_files) * 1000)
+        mismatch = abs(fetch.runtime_ms - source_runtime_ms) > 60_000
+        return ChapterApplyResult(
+            ok=True,
+            count=len(fetch.chapters),
+            audible_runtime_ms=fetch.runtime_ms,
+            source_runtime_ms=source_runtime_ms,
+            mismatch=mismatch,
+        )
+
+    def reset_chapters(self, book: BookUnit) -> None:
+        """Clear stored chapters (revert to the file-boundary default)."""
+        book.chapters = []
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
 
     # --- encode + organize ---
     def ready_books(self) -> list[BookUnit]:

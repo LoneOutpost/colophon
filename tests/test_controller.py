@@ -1441,3 +1441,79 @@ async def test_quick_match_apply_merges_genres_tags(tmp_path):
     assert p.genres == ["My Custom", "Fantasy", "Epic"]  # merged, existing first
     assert p.tags == ["mine", "from-audible"]
     ctx.close()
+
+
+class _ChapterStub:
+    name = "audnexus"
+
+    def __init__(self, fetch):
+        self._fetch = fetch
+
+    async def search(self, query):
+        return []
+
+    async def fetch_chapters(self, asin):
+        return self._fetch
+
+
+async def test_apply_audnexus_chapters_sets_and_flags_mismatch(tmp_path):
+    from colophon.adapters.sources.audnexus import ChapterFetch
+    from colophon.core.models import Chapter, SourceFile
+    chs = [Chapter(title="Intro", start_ms=0, end_ms=120_000)]
+    ctx = _ctx(tmp_path, sources=[_ChapterStub(ChapterFetch(chapters=chs, runtime_ms=3_600_000))])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.asin = "B00X"
+    book.source_files = [SourceFile(path=tmp_path / "a.mp3", size=1, duration_seconds=100.0, ext="mp3")]
+    ctx.books.upsert(book)
+    res = await AppController(ctx).apply_audnexus_chapters(book)
+    assert res.ok and res.count == 1 and res.mismatch is True
+    assert res.audible_runtime_ms == 3_600_000 and res.source_runtime_ms == 100_000
+    assert ctx.books.get(book.id).chapters[0].title == "Intro"
+    ctx.close()
+
+
+async def test_apply_audnexus_chapters_within_tolerance_no_mismatch(tmp_path):
+    from colophon.adapters.sources.audnexus import ChapterFetch
+    from colophon.core.models import Chapter, SourceFile
+    chs = [Chapter(title="Intro", start_ms=0, end_ms=100_000)]
+    ctx = _ctx(tmp_path, sources=[_ChapterStub(ChapterFetch(chapters=chs, runtime_ms=100_000))])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.asin = "B00X"
+    book.source_files = [SourceFile(path=tmp_path / "a.mp3", size=1, duration_seconds=100.0, ext="mp3")]
+    ctx.books.upsert(book)
+    res = await AppController(ctx).apply_audnexus_chapters(book)
+    assert res.ok and res.mismatch is False
+    ctx.close()
+
+
+async def test_apply_audnexus_chapters_no_asin_errors(tmp_path):
+    from colophon.adapters.sources.audnexus import ChapterFetch
+    ctx = _ctx(tmp_path, sources=[_ChapterStub(ChapterFetch())])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    ctx.books.upsert(book)
+    res = await AppController(ctx).apply_audnexus_chapters(book)
+    assert res.ok is False and res.error
+    ctx.close()
+
+
+async def test_apply_audnexus_chapters_none_fetch_errors(tmp_path):
+    ctx = _ctx(tmp_path, sources=[_ChapterStub(None)])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.asin = "B00X"
+    ctx.books.upsert(book)
+    res = await AppController(ctx).apply_audnexus_chapters(book)
+    assert res.ok is False
+    ctx.close()
+
+
+def test_reset_chapters_clears(tmp_path):
+    from colophon.core.models import Chapter
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.chapters = [Chapter(title="Intro", start_ms=0, end_ms=1000)]
+    ctx.books.upsert(book)
+    AppController(ctx).reset_chapters(book)
+    assert ctx.books.get(book.id).chapters == []
+    ctx.close()
