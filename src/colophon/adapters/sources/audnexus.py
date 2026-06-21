@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from colophon.core.models import Chapter, _Base
 from colophon.core.sources import SourceQuery, SourceResult
 
 _AUDNEX_BASE = "https://api.audnex.us"
@@ -25,6 +26,13 @@ _RETRY = retry(
     retry=retry_if_exception_type(httpx.TransportError),
     reraise=True,
 )
+
+
+class ChapterFetch(_Base):
+    """Named chapters fetched from Audnexus plus the reported total runtime."""
+
+    chapters: list[Chapter] = []  # noqa: RUF012 - pydantic default, copied per instance
+    runtime_ms: int = 0
 
 
 class AudnexusSource:
@@ -84,6 +92,40 @@ class AudnexusSource:
     async def _book_get(self, asin: str) -> httpx.Response:
         return await self._client.get(
             f"{_AUDNEX_BASE}/books/{asin}", params={"region": self._region}
+        )
+
+    async def fetch_chapters(self, asin: str) -> ChapterFetch | None:
+        """GET /books/{asin}/chapters -> named chapters + total runtime. None on
+        404 / transport error; an empty chapter list when the body has no usable
+        chapters."""
+        try:
+            resp = await self._chapters_get(asin)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code >= 400:
+            return None
+        data = resp.json() or {}
+        raw = data.get("chapters")
+        chapters: list[Chapter] = []
+        if isinstance(raw, list):
+            for n, c in enumerate(raw, start=1):
+                if not isinstance(c, dict):
+                    continue
+                start = c.get("startOffsetMs")
+                length = c.get("lengthMs")
+                if not isinstance(start, int) or not isinstance(length, int):
+                    continue
+                title = (c.get("title") or "").strip() or f"Chapter {n}"
+                chapters.append(Chapter(title=title, start_ms=start, end_ms=start + length))
+        runtime = data.get("runtimeLengthMs")
+        return ChapterFetch(
+            chapters=chapters, runtime_ms=runtime if isinstance(runtime, int) else 0
+        )
+
+    @_RETRY
+    async def _chapters_get(self, asin: str) -> httpx.Response:
+        return await self._client.get(
+            f"{_AUDNEX_BASE}/books/{asin}/chapters", params={"region": self._region}
         )
 
     @_RETRY
