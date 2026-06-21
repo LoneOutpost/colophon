@@ -46,6 +46,12 @@ class SourceFile(_Base):
     ext: str
 
 
+class Chapter(_Base):
+    title: str
+    start_ms: int
+    end_ms: int
+
+
 class ConfidenceSignal(_Base):
     """One contribution to a book unit's confidence score, kept for auditability."""
 
@@ -100,6 +106,7 @@ class BookUnit(_Base):
     cover_path: Path | None = None
     cover_url: str | None = None  # source-provided cover image URL, fetched into cover_path
     output_path: Path | None = None  # the produced M4B's final location once organized
+    chapters: list[Chapter] = []
 
     provenance: dict[str, str] = {}
     confidence: float = 0.0

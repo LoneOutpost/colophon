@@ -162,3 +162,24 @@ def test_bookunit_genres_tags_round_trip(tmp_path):
     restored = BookUnit.model_validate_json(b.model_dump_json())
     assert restored.genres == ["Fantasy", "Epic"]
     assert restored.tags == ["to-relisten"]
+
+
+def test_bookunit_chapters_default_empty(tmp_path):
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    assert b.chapters == []
+
+
+def test_bookunit_chapters_round_trip(tmp_path):
+    from colophon.core.models import BookUnit, Chapter
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.chapters = [Chapter(title="Intro", start_ms=0, end_ms=1000)]
+    restored = BookUnit.model_validate_json(b.model_dump_json())
+    assert restored.chapters[0].title == "Intro"
+    assert restored.chapters[0].end_ms == 1000
+
+
+def test_chapter_still_importable_from_chapters_module():
+    from colophon.core.chapters import Chapter as ChapterFromChapters
+    from colophon.core.models import Chapter as ChapterFromModels
+    assert ChapterFromChapters is ChapterFromModels
