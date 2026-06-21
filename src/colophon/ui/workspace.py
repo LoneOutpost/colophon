@@ -243,7 +243,7 @@ def render_workspace(controller: AppController) -> None:
                         inputs[field] = inp
                         source = field_provenance(book, field)
                         if source:
-                            ui.badge(source).props("color=grey-6 outline").classes("self-center")
+                            ui.badge(controller.source_label(source)).props("color=grey-6 outline").classes("self-center")
                         continue
                     if field == "description":
                         inp = ui.textarea(field, value=value).props("dense").classes("col")
@@ -254,7 +254,7 @@ def render_workspace(controller: AppController) -> None:
                     inputs[field] = inp
                     source = field_provenance(book, field)
                     if source:
-                        ui.badge(source).props("color=grey-6 outline").classes("self-center")
+                        ui.badge(controller.source_label(source)).props("color=grey-6 outline").classes("self-center")
                     normalizer = normalize_description if field == "description" else normalize_text
                     ui.button(
                         icon="auto_fix_high",
@@ -372,7 +372,7 @@ def render_workspace(controller: AppController) -> None:
                                     with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
                                         with ui.item_section():
                                             ui.item_label(m.title or "?")
-                                            ui.item_label(f"{m.provider} · {authors}{year}").props("caption")
+                                            ui.item_label(f"{controller.source_label(m.provider)} · {authors}{year}").props("caption")
 
                     def show_picker(result) -> None:
                         body.clear()
@@ -774,7 +774,7 @@ def render_workspace(controller: AppController) -> None:
                                             with ui.item_section():
                                                 cur = p.book.title or "(untitled)"
                                                 if p.best is not None:
-                                                    prov = p.best.provider
+                                                    prov = controller.source_label(p.best.provider)
                                                     ui.item_label(f"{cur} → {p.best.title or '?'}")
                                                     ui.item_label(prov).props("caption")
                                                 else:

@@ -661,7 +661,7 @@ def test_known_authors_and_series_empty_library(tmp_path):
 def test_available_sources_lists_configured_with_labels(tmp_path):
     ctx = _ctx(tmp_path)  # default: audnexus, openlibrary, googlebooks (no hardcover token)
     labels = dict(AppController(ctx).available_sources())
-    assert labels["audnexus"] == "Audnexus"
+    assert labels["audnexus"] == "Audible"
     assert labels["googlebooks"] == "Google Books"
     assert "hardcover" not in labels  # not configured without a token
     ctx.close()
@@ -1353,4 +1353,13 @@ def test_apply_match_merges_genres_and_tags(tmp_path):
     assert p.genres == ["Fantasy", "My Custom", "Epic"]
     assert p.tags == ["mine", "audible-tag"]
     assert p.provenance["genres"] == "audnexus"
+    ctx.close()
+
+
+def test_source_label_maps_audnexus_to_audible(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    assert ctrl.source_label("audnexus") == "Audible"
+    assert ctrl.source_label("manual") == "Manual"
+    assert ctrl.source_label("googlebooks") == "Google Books"
     ctx.close()

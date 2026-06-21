@@ -74,7 +74,7 @@ def _cover_mime(path: Path) -> str:
 
 # Display labels for the metadata sources shown in the match-search dialog.
 _SOURCE_LABELS = {
-    "audnexus": "Audnexus",
+    "audnexus": "Audible",
     "openlibrary": "OpenLibrary",
     "googlebooks": "Google Books",
     "hardcover": "Hardcover",
@@ -642,6 +642,10 @@ class AppController:
         """The configured metadata sources as (name, display label), in priority
         order, so the search dialog can list exactly the available services."""
         return [(s.name, _SOURCE_LABELS.get(s.name, s.name.title())) for s in self.ctx.sources]
+
+    def source_label(self, name: str) -> str:
+        """Human-facing label for a source/provenance name (e.g. 'audnexus' -> 'Audible')."""
+        return _SOURCE_LABELS.get(name, name.title())
 
     def review_threshold(self) -> float:
         """The confidence threshold above which a match is auto-checked / a book is Ready."""
