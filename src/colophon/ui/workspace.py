@@ -1782,6 +1782,7 @@ def render_workspace(controller: AppController) -> None:
                 failed = []
                 for b in targets:
                     statuses[b.id].set_text("working…")
+                    await controller.ensure_cover_cached(b)
                     result = await asyncio.to_thread(controller.process_one, b, confirm_delete=False)
                     if result.organized:
                         statuses[b.id].set_text("organized")

@@ -169,6 +169,16 @@ class AppController:
                 self.ctx.books.upsert(book)  # remember the cache location
                 return path.read_bytes(), _cover_mime(path)
         return None
+    async def ensure_cover_cached(self, book: BookUnit) -> None:
+        """Cache the book's cover_url into cover_path (if not already cached) so a
+        synchronous encode can embed it. No-op when a cached cover exists or there
+        is no cover_url."""
+        if book.cover_path and book.cover_path.exists():
+            return
+        path = await ensure_cached_cover(book, dest_dir=book.source_folder)
+        if path is not None:
+            self.ctx.books.upsert(book)
+
     def set_cover_url(self, book: BookUnit, url: str) -> None:
         """Point the book at a new cover URL, clearing any cached file so the new
         image is fetched + served on demand."""

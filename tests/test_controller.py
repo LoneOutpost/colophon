@@ -1637,3 +1637,42 @@ def test_clear_cover_clears_both(tmp_path):
     p = ctx.books.get(book.id)
     assert p.cover_url is None and p.cover_path is None
     ctx.close()
+
+
+async def test_ensure_cover_cached_noop_when_already_cached(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.source_folder.mkdir(parents=True)
+    cp = book.source_folder / "cover.jpg"
+    cp.write_bytes(b"img")
+    book.cover_path = cp
+    ctx.books.upsert(book)
+    calls = {"n": 0}
+
+    async def fake_ensure(*args, **kwargs):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr("colophon.controller.ensure_cached_cover", fake_ensure)
+    await AppController(ctx).ensure_cover_cached(book)
+    assert calls["n"] == 0
+    ctx.close()
+
+
+async def test_ensure_cover_cached_fetches_and_persists(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.source_folder.mkdir(parents=True)
+    book.cover_url = "http://example/c.jpg"
+    ctx.books.upsert(book)
+    cached = book.source_folder / "cover.jpg"
+
+    async def fake_ensure(b, *, dest_dir, client=None):
+        cached.write_bytes(b"img")
+        b.cover_path = cached
+        return cached
+
+    monkeypatch.setattr("colophon.controller.ensure_cached_cover", fake_ensure)
+    await AppController(ctx).ensure_cover_cached(book)
+    assert ctx.books.get(book.id).cover_path == cached
+    ctx.close()
