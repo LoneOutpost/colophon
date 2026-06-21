@@ -17,6 +17,7 @@ from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
+from colophon.core.normalize import merge_preserve, normalize_genres
 from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
@@ -73,7 +74,7 @@ def _cover_mime(path: Path) -> str:
 
 # Display labels for the metadata sources shown in the match-search dialog.
 _SOURCE_LABELS = {
-    "audnexus": "Audnexus",
+    "audnexus": "Audible",
     "openlibrary": "OpenLibrary",
     "googlebooks": "Google Books",
     "hardcover": "Hardcover",
@@ -611,6 +612,7 @@ class AppController:
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in applicable:
             updates = self.match_field_values(p.best)
+            self._merge_genre_tag_updates(p.book, p.best, updates)
             if p.best.cover_url:
                 p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
             items.append((p.book, updates, p.best.provider))
@@ -641,6 +643,10 @@ class AppController:
         """The configured metadata sources as (name, display label), in priority
         order, so the search dialog can list exactly the available services."""
         return [(s.name, _SOURCE_LABELS.get(s.name, s.name.title())) for s in self.ctx.sources]
+
+    def source_label(self, name: str) -> str:
+        """Human-facing label for a source/provenance name (e.g. 'audnexus' -> 'Audible')."""
+        return _SOURCE_LABELS.get(name, name.title())
 
     def review_threshold(self) -> float:
         """The confidence threshold above which a match is auto-checked / a book is Ready."""
@@ -698,7 +704,24 @@ class AppController:
             updates["asin"] = result.asin
         if result.description:
             updates["description"] = result.description
+        if result.genres:
+            updates["genre"] = "; ".join(result.genres)
+        if result.tags:
+            updates["tag"] = "; ".join(result.tags)
         return updates
+
+    def _merge_genre_tag_updates(
+        self, book: BookUnit, result: SourceResult, updates: dict[str, str | None]
+    ) -> None:
+        """Rewrite any genre/tag entries in `updates` to merge with the book's
+        existing genres/tags (union, deduped) so applying a match never clobbers
+        curated entries. Mutates `updates` in place. Genres dedupe
+        case-insensitively (normalize_genres); tags dedupe exactly, order-preserving
+        (merge_preserve)."""
+        if "genre" in updates:
+            updates["genre"] = "; ".join(normalize_genres(book.genres + result.genres)) or None
+        if "tag" in updates:
+            updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
 
     def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
         """Apply only the chosen fields from `result` (per-field selection), stamping
@@ -709,6 +732,7 @@ class AppController:
         if "cover" in fields and result.cover_url:
             book.cover_url = result.cover_url
         updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
+        self._merge_genre_tag_updates(book, result, updates)
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch

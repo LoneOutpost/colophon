@@ -91,6 +91,21 @@ def normalize_genres(values: list[str]) -> list[str]:
     return out
 
 
+def merge_preserve(existing: list[str], new: list[str]) -> list[str]:
+    """Union of two string lists: `existing` first, then `new`, exact-string
+    dedupe preserving first-seen order, dropping blanks. Used to merge tags
+    (fluid, no case-folding)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in [*existing, *new]:
+        s = item.strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
 def _normalize_genre_field(value: str) -> str:
     """Normalize a '; '-joined genre string (the FIELD_NORMALIZERS adapter)."""
     parts = [p.strip() for p in value.split(";")]

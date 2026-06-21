@@ -661,7 +661,7 @@ def test_known_authors_and_series_empty_library(tmp_path):
 def test_available_sources_lists_configured_with_labels(tmp_path):
     ctx = _ctx(tmp_path)  # default: audnexus, openlibrary, googlebooks (no hardcover token)
     labels = dict(AppController(ctx).available_sources())
-    assert labels["audnexus"] == "Audnexus"
+    assert labels["audnexus"] == "Audible"
     assert labels["googlebooks"] == "Google Books"
     assert "hardcover" not in labels  # not configured without a token
     ctx.close()
@@ -1320,4 +1320,69 @@ async def test_restructure_as_books_reports_failure_without_aborting(tmp_path):
     assert result.failures[0].source.name == "Bad.mp3"
     good = ctx.books.get(BookUnit.new(source_folder=author / "Good").id)
     assert good is not None and good.title == "Good"
+    ctx.close()
+
+
+def test_match_field_values_includes_genres_tags():
+    r = SourceResult(provider="audnexus", genres=["Fantasy"], tags=["Epic"])
+    updates = AppController.match_field_values(r)
+    assert updates["genre"] == "Fantasy"
+    assert updates["tag"] == "Epic"
+
+
+def test_match_field_values_omits_genres_tags_when_absent():
+    r = SourceResult(provider="audnexus", title="Dune")
+    updates = AppController.match_field_values(r)
+    assert "genre" not in updates
+    assert "tag" not in updates
+
+
+def test_apply_match_merges_genres_and_tags(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.genres = ["Fantasy", "My Custom"]
+    book.tags = ["mine"]
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", genres=["Fantasy", "Epic"], tags=["mine", "audible-tag"]
+    )
+    ctrl = AppController(ctx)
+    ctrl.apply_match_fields(book, result, {"genre", "tag"})
+    p = ctx.books.get(book.id)
+    assert p.genres == ["Fantasy", "My Custom", "Epic"]
+    assert p.tags == ["mine", "audible-tag"]
+    assert p.provenance["genres"] == "audnexus"
+    ctx.close()
+
+
+def test_source_label_maps_audnexus_to_audible(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    assert ctrl.source_label("audnexus") == "Audible"
+    assert ctrl.source_label("manual") == "Manual"
+    assert ctrl.source_label("googlebooks") == "Google Books"
+    ctx.close()
+
+
+async def test_quick_match_apply_merges_genres_tags(tmp_path):
+    a = _StubSource("audnexus", [SourceResult(
+        provider="audnexus", title="Dune", authors=["Frank Herbert"],
+        genres=["Fantasy", "Epic"], tags=["from-audible"],
+    )])
+    g = _StubSource("google", [SourceResult(provider="google", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[a, g])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.genres = ["My Custom"]
+    book.tags = ["mine"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["audnexus", "google"])
+    ctrl.quick_match_apply(proposals)
+    p = ctx.books.get(book.id)
+    assert p.genres == ["My Custom", "Fantasy", "Epic"]  # merged, existing first
+    assert p.tags == ["mine", "from-audible"]
     ctx.close()
