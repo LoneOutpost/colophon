@@ -27,9 +27,6 @@ from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
 
-# Height of the carded content area, leaving room for the app header and footer.
-_CONTENT_HEIGHT = "calc(100vh - 136px)"
-
 # Sentinel marking a bulk-edit field whose selected books hold differing values.
 _MIXED = object()
 
@@ -134,6 +131,11 @@ def _render_cover(book: BookUnit, *, width: int, height: int, icon: str = "") ->
 
 def render_workspace(controller: AppController) -> None:
     apply_theme()
+    # Make the content area fill exactly between the fixed header and footer so the
+    # three-pane workspace never spills into a page-level scroll (each pane scrolls
+    # internally). Flex-fill the Quasar page instead of a fragile fixed height.
+    ui.query(".nicegui-content").classes("!p-0").style("flex: 1; min-height: 0")
+    ui.query(".q-page").classes("column")
     dark = setup_dark_mode()
     selected_ids: set[str] = set()
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
@@ -1483,7 +1485,9 @@ def render_workspace(controller: AppController) -> None:
                 ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
                 ui.button(
                     "Organize into books", icon="subdirectory_arrow_right", on_click=_foster_dialog
-                ).props("dense color=primary")
+                ).props("color=primary").tooltip(
+                    "Move the selected loose files into a new book subfolder and retag them."
+                )
 
             listing = controller.list_directory(cwd)
             with ui.list().props("dense bordered").classes("w-full"):
@@ -1548,7 +1552,9 @@ def render_workspace(controller: AppController) -> None:
                 {"library": "Library", "folders": "Folders"},
                 value=view["mode"],
                 on_change=lambda e: _set_mode(e.value),
-            ).props("dense no-caps").classes("w-full q-mb-sm")
+            ).props("dense no-caps").classes("w-full q-mb-sm").tooltip(
+                "Browse scan folders and organize loose files into their own book folders."
+            )
             if view["mode"] == "folders":
                 ui.label(
                     "Browse scan folders and foster loose files into their own subfolders."
@@ -1923,7 +1929,7 @@ def render_workspace(controller: AppController) -> None:
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)
     # which fails over remote/high-latency connections. A card avoids that.
     with ui.row().classes("w-full no-wrap q-gutter-md q-pa-md items-stretch").style(
-        f"height: {_CONTENT_HEIGHT}"
+        "flex: 1; min-height: 0"
     ):
         with ui.card().classes("column").style("width: 260px; height: 100%"):
             ui.label("Library").classes("text-subtitle1")
