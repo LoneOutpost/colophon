@@ -117,14 +117,16 @@ def _cover_src(book: BookUnit) -> str | None:
 
 
 def _render_cover(book: BookUnit, *, width: int, height: int, icon: str = "") -> None:
-    """Render a book's cover at the given size, or a neutral placeholder box."""
+    """Render a book's cover at its natural aspect ratio: the width is fixed and the
+    height follows the image, so portrait (book) and square covers both show
+    uncropped. `height` sizes the neutral placeholder box shown when there is no
+    cover (kept book-shaped)."""
     src = _cover_src(book)
-    box = f"width:{width}px;height:{height}px"
     if src:
-        ui.image(src).classes("rounded").style(f"{box};object-fit:cover")
+        ui.image(src).classes("rounded").style(f"width:{width}px;height:auto")
     else:
         with ui.element("div").classes("flex items-center justify-center rounded").style(
-            f"{box};background:rgba(120,120,128,.15)"
+            f"width:{width}px;height:{height}px;background:rgba(120,120,128,.15)"
         ):
             ui.icon("menu_book", color="grey-6").classes(icon)
 
@@ -136,6 +138,52 @@ def render_workspace(controller: AppController) -> None:
     # internally). Flex-fill the Quasar page instead of a fragile fixed height.
     ui.query(".nicegui-content").classes("!p-0").style("flex: 1; min-height: 0")
     ui.query(".q-page").classes("column")
+    # Draggable dividers between the three panes. The nav and middle widths are
+    # driven by CSS custom properties on :root so NiceGUI's Vue style bindings never
+    # clobber them (direct element-style mutation does not survive a re-render). The
+    # detail pane keeps flex:1 and absorbs the rest. Widths persist per browser in
+    # localStorage; window.colophonResetColumns() (Reset columns button) clears them.
+    ui.add_head_html(
+        "<style>"
+        ".colophon-pane-nav{flex:0 0 var(--colophon-nav-w,260px);"
+        "width:var(--colophon-nav-w,260px);min-width:0}"
+        ".colophon-pane-mid{flex:0 0 var(--colophon-mid-w,460px);"
+        "width:var(--colophon-mid-w,460px);min-width:0}"
+        ".colophon-resizer{flex:0 0 10px;cursor:col-resize;align-self:stretch;"
+        "display:flex;align-items:center;justify-content:center;touch-action:none}"
+        ".colophon-resizer::after{content:'';width:2px;height:36px;border-radius:2px;"
+        "background:rgba(120,120,128,.35);transition:background .15s}"
+        ".colophon-resizer:hover::after{background:var(--q-primary)}"
+        "</style>"
+        "<script>"
+        "(function(){"
+        "var MIN={nav:200,mid:320},MAX={nav:520,mid:960};"
+        "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'};"
+        "var KEY={nav:'colophon.navW',mid:'colophon.midW'};"
+        "function setW(key,px){document.documentElement.style.setProperty(VAR[key],px+'px');}"
+        "['nav','mid'].forEach(function(k){"
+        "var v=localStorage.getItem(KEY[k]);if(v)setW(k,parseInt(v,10));});"
+        "var drag=null;"
+        "document.addEventListener('pointerdown',function(e){"
+        "var h=e.target.closest&&e.target.closest('.colophon-resizer');if(!h)return;"
+        "var pane=h.previousElementSibling;if(!pane)return;"
+        "var key=pane.classList.contains('colophon-pane-nav')?'nav':'mid';"
+        "drag={key:key,startX:e.clientX,startW:pane.getBoundingClientRect().width};"
+        "document.body.style.userSelect='none';e.preventDefault();});"
+        "document.addEventListener('pointermove',function(e){"
+        "if(!drag)return;var w=drag.startW+(e.clientX-drag.startX);"
+        "w=Math.round(Math.max(MIN[drag.key],Math.min(MAX[drag.key],w)));"
+        "setW(drag.key,w);drag.last=w;});"
+        "document.addEventListener('pointerup',function(){"
+        "if(!drag)return;if(drag.last)localStorage.setItem(KEY[drag.key],drag.last);"
+        "drag=null;document.body.style.userSelect='';});"
+        "window.colophonResetColumns=function(){"
+        "['nav','mid'].forEach(function(k){"
+        "localStorage.removeItem(KEY[k]);"
+        "document.documentElement.style.removeProperty(VAR[k]);});};"
+        "})();"
+        "</script>"
+    )
     dark = setup_dark_mode()
     selected_ids: set[str] = set()
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
@@ -299,7 +347,7 @@ def render_workspace(controller: AppController) -> None:
                         with grid:
                             for url in cands[:12]:
                                 ui.image(url).classes("cursor-pointer rounded").style(
-                                    "width:80px;height:120px;object-fit:cover"
+                                    "width:80px;height:120px;object-fit:contain"
                                 ).on(
                                     "click",
                                     lambda u=url: (
@@ -1932,6 +1980,10 @@ def render_workspace(controller: AppController) -> None:
                 "Acquire", icon="cloud_download", on_click=lambda: ui.navigate.to("/acquire")
             ).props("flat")
         dark_mode_button(dark)
+        ui.button(
+            icon="view_column",
+            on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
+        ).props("flat round").tooltip("Reset column widths")
         ui.button(icon="settings", on_click=lambda: ui.navigate.to("/settings")).props(
             "flat round"
         ).tooltip("Settings")
@@ -1948,15 +2000,16 @@ def render_workspace(controller: AppController) -> None:
     # height, so height:100% would collapse each card to its content and flatten the
     # internal scroll-areas to 0. Stretch sizes them correctly and the scroll-areas
     # absorb any overflow.
-    with ui.row().classes("w-full no-wrap q-gutter-md q-pa-md items-stretch").style(
+    with ui.row().classes("w-full no-wrap q-gutter-sm q-pa-md items-stretch").style(
         "flex: 1; min-height: 0"
     ):
-        with ui.card().classes("column").style("width: 260px"):
+        with ui.card().classes("column colophon-pane-nav"):
             ui.label("Library").classes("text-subtitle1")
             ui.separator()
             with ui.scroll_area().classes("col"):
                 nav_container = ui.column().classes("w-full gap-0")
-        with ui.card().classes("col-5 column"):
+        ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
+        with ui.card().classes("column colophon-pane-mid"):
             with ui.row().classes("items-center w-full no-wrap"):
                 middle_title = ui.label("Books").classes("text-subtitle1")
                 middle_filter = ui.row().classes("items-center q-gutter-xs q-ml-sm no-wrap")
@@ -1966,6 +2019,7 @@ def render_workspace(controller: AppController) -> None:
             ui.separator().classes("q-mt-xs")
             with ui.scroll_area().classes("col"):
                 list_container = ui.column().classes("w-full gap-0")
+        ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
         with ui.card().classes("col column"):
             ui.label("Details").classes("text-subtitle1")
             ui.separator()
