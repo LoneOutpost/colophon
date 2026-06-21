@@ -912,10 +912,21 @@ def render_workspace(controller: AppController) -> None:
                         body.clear()
                         title.set_text(f"Quick Match {len(books)} books")
                         checks: dict[str, ui.checkbox] = {}
+                        field_checks: dict[str, ui.checkbox] = {}
                         with body:
                             ui.label("Search these sources").classes("text-caption text-grey-7")
                             for name, label in sources:
                                 checks[name] = ui.checkbox(label, value=True).props("dense")
+                            ui.label("Match using these fields").classes(
+                                "text-caption text-grey-7 q-mt-sm"
+                            )
+                            for key, flabel in (
+                                ("title", "Title"),
+                                ("author", "Author"),
+                                ("series", "Series"),
+                                ("asin", "ASIN"),
+                            ):
+                                field_checks[key] = ui.checkbox(flabel, value=True).props("dense")
                             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                                 ui.button("Cancel", on_click=dialog.close).props("flat")
 
@@ -924,7 +935,11 @@ def render_workspace(controller: AppController) -> None:
                                     if not chosen:
                                         ui.notify("Select at least one source")
                                         return
-                                    await run_search(chosen)
+                                    fields = {k for k, c in field_checks.items() if c.value}
+                                    if not fields:
+                                        ui.notify("Select at least one field to match on")
+                                        return
+                                    await run_search(chosen, fields)
 
                                 ui.button("Search", icon="search", on_click=_search)
 
@@ -934,9 +949,9 @@ def render_workspace(controller: AppController) -> None:
                             ui.spinner()
                             ui.label(f"Searching {len(books)} books…")
 
-                    async def run_search(source_names: list[str]) -> None:
+                    async def run_search(source_names: list[str], search_fields: set[str]) -> None:
                         show_searching()
-                        found = await controller.quick_match_scan(books, source_names)
+                        found = await controller.quick_match_scan(books, source_names, search_fields)
                         proposals.clear()
                         proposals.extend(found)
                         show_preview()
