@@ -1365,6 +1365,61 @@ def test_source_label_maps_audnexus_to_audible(tmp_path):
     ctx.close()
 
 
+def test_bulk_normalize_genre_applies_policy(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.genre_mapping = {"scifi": "Science Fiction"}
+    ctx.config.accepted_genres = ["Science Fiction"]
+    ctx.config.genre_whitelist_enabled = True
+    book = BookUnit.new(source_folder=tmp_path / "a")
+    book.genres = ["scifi", "Dragons"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    ctrl.bulk_normalize([book], ["genre"])
+    p = ctx.books.get(book.id)
+    assert p.genres == ["Science Fiction"]
+    ctx.close()
+
+
+def test_bulk_normalize_genre_no_filter_when_disabled(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.genre_mapping = {"scifi": "Science Fiction"}
+    ctx.config.genre_whitelist_enabled = False
+    book = BookUnit.new(source_folder=tmp_path / "a")
+    book.genres = ["scifi", "Dragons"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    ctrl.bulk_normalize([book], ["genre"])
+    p = ctx.books.get(book.id)
+    assert p.genres == ["Science Fiction", "Dragons"]
+    ctx.close()
+
+
+def test_genre_policy_reflects_config(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.genre_mapping = {"scifi": "Science Fiction"}
+    ctx.config.accepted_genres = ["Science Fiction"]
+    ctx.config.genre_whitelist_enabled = True
+    pol = AppController(ctx).genre_policy()
+    assert pol.canonicalize(["scifi", "Dragons"]) == ["Science Fiction"]
+    ctx.close()
+
+
+def test_apply_match_gates_incoming_genres_keeps_existing(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.accepted_genres = ["Science Fiction"]
+    ctx.config.genre_whitelist_enabled = True
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.genres = ["My Custom"]
+    ctx.books.upsert(book)
+    result = SourceResult(provider="audnexus", genres=["Science Fiction", "Dragons"])
+    ctrl = AppController(ctx)
+    ctrl.apply_match_fields(book, result, {"genre"})
+    p = ctx.books.get(book.id)
+    assert p.genres == ["My Custom", "Science Fiction"]
+    ctx.close()
+
+
 async def test_quick_match_apply_merges_genres_tags(tmp_path):
     a = _StubSource("audnexus", [SourceResult(
         provider="audnexus", title="Dune", authors=["Frank Herbert"],

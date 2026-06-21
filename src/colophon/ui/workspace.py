@@ -236,6 +236,8 @@ def render_workspace(controller: AppController) -> None:
                     if field in _CHIP_FIELDS:
                         current = [s.strip() for s in value.split(";") if s.strip()]
                         known = controller.known_genres() if field == "genre" else controller.known_tags()
+                        if field == "genre":
+                            known = sorted(set(known) | set(controller.genre_policy().accepted))
                         inp = ui.select(
                             sorted(set(known) | set(current)), label=field, value=current,
                             multiple=True, new_value_mode="add-unique",
@@ -580,6 +582,8 @@ def render_workspace(controller: AppController) -> None:
                     if field in _CHIP_FIELDS:
                         current = [s.strip() for s in common.split(";") if s.strip()]
                         known = controller.known_genres() if field == "genre" else controller.known_tags()
+                        if field == "genre":
+                            known = sorted(set(known) | set(controller.genre_policy().accepted))
                         inp = ui.select(
                             sorted(set(known) | set(current)), label=field,
                             value=[] if mixed else current,

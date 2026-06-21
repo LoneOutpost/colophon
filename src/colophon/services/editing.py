@@ -10,6 +10,7 @@ import uuid
 
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
 from colophon.core.fields import EDITABLE_TO_PROVENANCE, get_field, set_field
+from colophon.core.genre_policy import GenrePolicy
 from colophon.core.models import BookUnit, EditChange, Provenance
 from colophon.core.normalize import FIELD_NORMALIZERS
 
@@ -87,19 +88,30 @@ def bulk_set_field(
 
 
 def bulk_normalize(
-    books: BookUnitRepo, hist: HistoryRepo, items: list[BookUnit], fields: list[str]
+    books: BookUnitRepo,
+    hist: HistoryRepo,
+    items: list[BookUnit],
+    fields: list[str],
+    genre_policy: GenrePolicy | None = None,
 ) -> str:
     """Normalize each given text `field`'s current value across `items`, in one
     undoable batch. A field is normalized per book (its own value), and only
-    actual changes are recorded. Returns the batch id (an empty batch if nothing
-    needed normalizing)."""
+    actual changes are recorded. When `genre_policy` is given, the `genre` field
+    is canonicalized through it (map + optional whitelist) instead of the plain
+    normalizer. Returns the batch id (an empty batch if nothing needed
+    normalizing)."""
+    normalizers = dict(FIELD_NORMALIZERS)
+    if genre_policy is not None:
+        normalizers["genre"] = lambda v: "; ".join(
+            genre_policy.canonicalize([p.strip() for p in v.split(";") if p.strip()])
+        )
     batch_id = _new_batch_id()
     changes: list[EditChange] = []
     with books.conn:  # one transaction: all-or-nothing
         for book in items:
             book_changed = False
             for field in fields:
-                normalizer = FIELD_NORMALIZERS.get(field)
+                normalizer = normalizers.get(field)
                 if normalizer is None:
                     continue
                 current = get_field(book, field)

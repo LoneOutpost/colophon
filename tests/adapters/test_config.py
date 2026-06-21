@@ -145,3 +145,24 @@ def test_real_debrid_defaults_are_none():
     cfg = Config()
     assert cfg.real_debrid_token is None
     assert cfg.real_debrid_download_dir is None
+
+
+def test_genre_policy_fields_default_empty():
+    c = Config()
+    assert c.genre_mapping == {}
+    assert c.accepted_genres == []
+    assert c.genre_whitelist_enabled is False
+
+
+def test_genre_policy_fields_round_trip(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    c = Config(
+        genre_mapping={"scifi": "Science Fiction"},
+        accepted_genres=["Science Fiction", "Fantasy"],
+        genre_whitelist_enabled=True,
+    )
+    save_config(c, cfg_path)
+    loaded = load_config(cfg_path)
+    assert loaded.genre_mapping == {"scifi": "Science Fiction"}
+    assert loaded.accepted_genres == ["Science Fiction", "Fantasy"]
+    assert loaded.genre_whitelist_enabled is True

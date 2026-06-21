@@ -15,6 +15,7 @@ from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
+from colophon.core.genre_policy import GenrePolicy
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.normalize import merge_preserve, normalize_genres
@@ -151,6 +152,14 @@ class AppController:
     def known_series(self) -> list[str]:
         """Distinct series names across the library, sorted (editor autocomplete)."""
         return sorted({s.name for b in self.ctx.books.list_all() for s in b.series})
+
+    def genre_policy(self) -> GenrePolicy:
+        """Build the active genre policy from config."""
+        return GenrePolicy(
+            mapping=self.ctx.config.genre_mapping,
+            accepted=self.ctx.config.accepted_genres,
+            whitelist_enabled=self.ctx.config.genre_whitelist_enabled,
+        )
 
     def known_genres(self) -> list[str]:
         """Distinct genre names across the library, sorted (editor autocomplete)."""
@@ -542,7 +551,9 @@ class AppController:
 
     def bulk_normalize(self, books: list[BookUnit], fields: list[str]) -> str:
         """Normalize the given text `fields` across `books` in one undoable batch."""
-        batch = _svc_bulk_normalize(self.ctx.books, self.ctx.history, books, fields)
+        batch = _svc_bulk_normalize(
+            self.ctx.books, self.ctx.history, books, fields, genre_policy=self.genre_policy()
+        )
         for book in books:
             self._sync_sidecar(book)
         return batch
@@ -719,7 +730,8 @@ class AppController:
         case-insensitively (normalize_genres); tags dedupe exactly, order-preserving
         (merge_preserve)."""
         if "genre" in updates:
-            updates["genre"] = "; ".join(normalize_genres(book.genres + result.genres)) or None
+            incoming = self.genre_policy().canonicalize(result.genres)
+            updates["genre"] = "; ".join(normalize_genres(book.genres + incoming)) or None
         if "tag" in updates:
             updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
 
