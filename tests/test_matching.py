@@ -59,3 +59,38 @@ def test_gather_matches_flattens_all_sources():
 def test_gather_matches_empty_when_no_sources():
     results = asyncio.run(gather_matches([], SourceQuery(title="x")))
     assert results == []
+
+
+def test_query_for_book_filters_to_selected_fields(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Frank Herbert"]
+    b.series = [SeriesRef(name="Dune")]
+    b.asin = "B002V1A0WE"
+    q = query_for_book(b, {"title"})
+    assert q.title == "Dune"
+    assert q.author is None
+    assert q.series is None
+    assert q.asin is None
+
+
+def test_query_for_book_empty_fields_yields_all_none(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Frank Herbert"]
+    q = query_for_book(b, set())
+    assert q.title is None
+    assert q.author is None
+    assert q.series is None
+    assert q.asin is None
+
+
+def test_query_for_book_none_filter_keeps_all(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Frank Herbert"]
+    b.asin = "B002V1A0WE"
+    q = query_for_book(b, None)
+    assert q.title == "Dune"
+    assert q.author == "Frank Herbert"
+    assert q.asin == "B002V1A0WE"

@@ -1676,3 +1676,87 @@ async def test_ensure_cover_cached_fetches_and_persists(tmp_path, monkeypatch):
     await AppController(ctx).ensure_cover_cached(book)
     assert ctx.books.get(book.id).cover_path == cached
     ctx.close()
+
+
+class _CapturingSource:
+    name = "cap"
+
+    def __init__(self):
+        self.queries = []
+
+    async def search(self, query):
+        self.queries.append(query)
+        return [SourceResult(provider="cap", title="Dune", authors=["Frank Herbert"])]
+
+
+def test_quick_match_scan_passes_search_fields(tmp_path):
+    src = _CapturingSource()
+    ctx = _ctx(tmp_path, sources=[src])
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Wrong Author"]
+    b.asin = "B002V1A0WE"
+    ctx.books.upsert(b)
+    asyncio.run(AppController(ctx).quick_match_scan([b], ["cap"], {"title"}))
+    assert len(src.queries) == 1
+    q = src.queries[0]
+    assert q.title == "Dune"
+    assert q.author is None
+    assert q.asin is None
+    ctx.close()
+
+
+def test_normalize_match_updates_only_configured_fields(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.normalize_on_match = ["title"]
+    ctrl = AppController(ctx)
+    updates = {"title": "the lost   metal", "author": "brandon sanderson"}
+    ctrl._normalize_match_updates(updates)
+    assert updates["title"] == "The Lost Metal"
+    assert updates["author"] == "brandon sanderson"  # not configured: untouched
+    ctx.close()
+
+
+def test_normalize_match_updates_ignores_unknown_and_empty(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.normalize_on_match = ["bogus", "title"]
+    ctrl = AppController(ctx)
+    updates = {"title": None}
+    ctrl._normalize_match_updates(updates)
+    assert updates["title"] is None
+    ctx.close()
+
+
+def test_apply_match_fields_normalizes_configured_field(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.normalize_on_match = ["title"]
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    ctx.books.upsert(b)
+    result = SourceResult(provider="stub", title="the lost   metal")
+    ctrl.apply_match_fields(b, result, {"title"})
+    assert ctx.books.get(b.id).title == "The Lost Metal"
+    ctx.close()
+
+
+def test_quick_match_apply_normalizes_configured_field(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.normalize_on_match = ["title"]
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    ctx.books.upsert(b)
+    from colophon.core.quickmatch import QuickMatchProposal
+
+    best = SourceResult(provider="stub", title="the lost   metal", authors=["Brandon Sanderson"])
+    proposal = QuickMatchProposal(book=b, best=best, results=[best], confidence=90.0)
+    ctrl.quick_match_apply([proposal])
+    assert ctx.books.get(b.id).title == "The Lost Metal"
+    ctx.close()
+
+
+def test_normalize_on_match_config_round_trip(tmp_path):
+    from colophon.adapters.config import Config, load_config, save_config
+
+    path = tmp_path / "config.toml"
+    save_config(Config(normalize_on_match=["title", "description"]), path)
+    assert load_config(path).normalize_on_match == ["title", "description"]

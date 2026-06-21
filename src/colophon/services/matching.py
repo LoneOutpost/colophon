@@ -12,11 +12,23 @@ from colophon.core.sources import MetadataSource, SourceQuery, SourceResult
 logger = logging.getLogger(__name__)
 
 
-def query_for_book(book: BookUnit) -> SourceQuery:
-    """A SourceQuery from a book's title, first author, first series, and asin."""
+SEARCH_FIELDS = ("title", "author", "series", "asin")
+
+
+def query_for_book(book: BookUnit, fields: set[str] | None = None) -> SourceQuery:
+    """A SourceQuery from a book's title, first author, first series, and asin.
+    When `fields` is given, only the named fields (a subset of SEARCH_FIELDS) are
+    populated; the others are left None so the source ignores them. `fields=None`
+    keeps all four (backward compatible)."""
+    use = set(SEARCH_FIELDS) if fields is None else fields
     author = book.authors[0] if book.authors else None
     series = book.series[0].name if book.series else None
-    return SourceQuery(title=book.title, author=author, asin=book.asin, series=series)
+    return SourceQuery(
+        title=book.title if "title" in use else None,
+        author=author if "author" in use else None,
+        asin=book.asin if "asin" in use else None,
+        series=series if "series" in use else None,
+    )
 
 
 async def _safe_search(source: MetadataSource, query: SourceQuery) -> list[SourceResult]:

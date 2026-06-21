@@ -18,7 +18,7 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
-from colophon.core.normalize import merge_preserve, normalize_genres
+from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
@@ -678,15 +678,19 @@ class AppController:
         return score_identification(book, results).ranked
 
     async def quick_match_scan(
-        self, books: list[BookUnit], source_names: list[str]
+        self,
+        books: list[BookUnit],
+        source_names: list[str],
+        search_fields: set[str] | None = None,
     ) -> list[QuickMatchProposal]:
         """For each book, query the chosen sources, score the candidates, and
         return a proposal carrying the best result, all gathered results (for
-        later re-scoring), and the scan confidence. Books are scanned concurrently."""
+        later re-scoring), and the scan confidence. Books are scanned concurrently.
+        `search_fields` (when given) restricts which fields seed the query."""
         chosen = [s for s in self.ctx.sources if s.name in source_names]
 
         async def _scan(book: BookUnit) -> QuickMatchProposal:
-            results = await gather_matches(chosen, query_for_book(book))
+            results = await gather_matches(chosen, query_for_book(book, search_fields))
             outcome = score_identification(book, results)
             return QuickMatchProposal(
                 book=book, best=outcome.best, results=results, confidence=outcome.confidence
@@ -707,6 +711,7 @@ class AppController:
         for p in applicable:
             updates = self.match_field_values(p.best)
             self._merge_genre_tag_updates(p.book, p.best, updates)
+            self._normalize_match_updates(updates)
             if p.best.cover_url:
                 p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
             items.append((p.book, updates, p.best.provider))
@@ -818,6 +823,16 @@ class AppController:
         if "tag" in updates:
             updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
 
+    def _normalize_match_updates(self, updates: dict[str, str | None]) -> None:
+        """Run the configured auto-normalize fields (config.normalize_on_match)
+        through FIELD_NORMALIZERS in place. No-op for fields not selected, absent,
+        None, or without a normalizer."""
+        for field in self.ctx.config.normalize_on_match:
+            normalizer = FIELD_NORMALIZERS.get(field)
+            value = updates.get(field)
+            if normalizer is not None and value:
+                updates[field] = normalizer(value)
+
     def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
         """Apply only the chosen fields from `result` (per-field selection), stamping
         the source as provenance. Returns the batch id of the editable-field changes
@@ -828,6 +843,7 @@ class AppController:
             book.cover_url = result.cover_url
         updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
         self._merge_genre_tag_updates(book, result, updates)
+        self._normalize_match_updates(updates)
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch
