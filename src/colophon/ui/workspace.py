@@ -543,11 +543,63 @@ def render_workspace(controller: AppController) -> None:
                                     ui.button(icon="edit", on_click=lambda p=sf.path: _rename_dialog(p)).props("flat dense round")
                                     ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props("flat dense round color=negative")
 
-                # chapter preview (read-only) reflecting current file order
-                chapters = file_boundary_chapters(
+                # chapters: applied named chapters (book.chapters) or file-boundary default
+                applied = bool(book.chapters)
+                chapters = book.chapters if applied else file_boundary_chapters(
                     [(sf.path.name, sf.duration_seconds) for sf in book.source_files]
                 )
-                ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2 q-mt-sm")
+                with ui.row().classes("items-center w-full no-wrap q-mt-sm"):
+                    ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2")
+                    if applied:
+                        ui.badge("from Audible").props("color=grey-6 outline").classes("self-center")
+                    ui.space()
+
+                    async def _fetch_chapters(b=book, asin=None) -> None:
+                        res = await controller.apply_audnexus_chapters(b, asin=asin)
+                        if not res.ok:
+                            ui.notify(res.error or "No chapters found", type="warning")
+                            return
+                        ui.notify(f"Applied {res.count} chapters from Audible")
+                        if res.mismatch:
+                            def _fmt(ms: int) -> str:
+                                s = ms // 1000
+                                return f"{s // 3600}:{(s % 3600) // 60:02d}"
+                            ui.notify(
+                                f"Audible runtime {_fmt(res.audible_runtime_ms)} vs your files "
+                                f"{_fmt(res.source_runtime_ms)} - chapters may not line up",
+                                type="warning", timeout=8000,
+                            )
+                        show_detail(b.id)
+
+                    async def _fetch_clicked(b=book) -> None:
+                        if (b.asin or "").strip():
+                            await _fetch_chapters(b)
+                            return
+                        with ui.dialog() as dlg, ui.card().classes("w-80"):
+                            ui.label("Fetch chapters from Audible").classes("text-subtitle1")
+                            asin_in = ui.input("ASIN").props("dense").classes("w-full")
+                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                                ui.button("Cancel", on_click=dlg.close).props("flat")
+
+                                async def _go() -> None:
+                                    value = (asin_in.value or "").strip()
+                                    if not value:
+                                        ui.notify("Enter an ASIN")
+                                        return
+                                    dlg.close()
+                                    await _fetch_chapters(b, asin=value)
+
+                                ui.button("Fetch", icon="cloud_download", on_click=_go)
+                        dlg.open()
+
+                    ui.button(
+                        "Fetch from Audible", icon="cloud_download", on_click=_fetch_clicked
+                    ).props("flat dense no-caps")
+                    if applied:
+                        ui.button(
+                            "Reset to file boundaries", icon="restart_alt",
+                            on_click=lambda b=book: (controller.reset_chapters(b), show_detail(b.id)),
+                        ).props("flat dense no-caps")
                 with ui.list().props("dense").classes("w-full"):
                     for n, ch in enumerate(chapters, start=1):
                         with ui.item():
