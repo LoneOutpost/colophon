@@ -1321,3 +1321,36 @@ async def test_restructure_as_books_reports_failure_without_aborting(tmp_path):
     good = ctx.books.get(BookUnit.new(source_folder=author / "Good").id)
     assert good is not None and good.title == "Good"
     ctx.close()
+
+
+def test_match_field_values_includes_genres_tags():
+    r = SourceResult(provider="audnexus", genres=["Fantasy"], tags=["Epic"])
+    updates = AppController.match_field_values(r)
+    assert updates["genre"] == "Fantasy"
+    assert updates["tag"] == "Epic"
+
+
+def test_match_field_values_omits_genres_tags_when_absent():
+    r = SourceResult(provider="audnexus", title="Dune")
+    updates = AppController.match_field_values(r)
+    assert "genre" not in updates
+    assert "tag" not in updates
+
+
+def test_apply_match_merges_genres_and_tags(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.genres = ["Fantasy", "My Custom"]
+    book.tags = ["mine"]
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", genres=["Fantasy", "Epic"], tags=["mine", "audible-tag"]
+    )
+    ctrl = AppController(ctx)
+    ctrl.apply_match_fields(book, result, {"genre", "tag"})
+    p = ctx.books.get(book.id)
+    assert p.genres == ["Fantasy", "My Custom", "Epic"]
+    assert p.tags == ["mine", "audible-tag"]
+    assert p.provenance["genres"] == "audnexus"
+    ctx.close()

@@ -17,6 +17,7 @@ from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
+from colophon.core.normalize import merge_preserve, normalize_genres
 from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
@@ -698,6 +699,10 @@ class AppController:
             updates["asin"] = result.asin
         if result.description:
             updates["description"] = result.description
+        if result.genres:
+            updates["genre"] = "; ".join(result.genres)
+        if result.tags:
+            updates["tag"] = "; ".join(result.tags)
         return updates
 
     def apply_match_fields(self, book: BookUnit, result: SourceResult, fields: set[str]) -> str:
@@ -709,6 +714,10 @@ class AppController:
         if "cover" in fields and result.cover_url:
             book.cover_url = result.cover_url
         updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
+        if "genre" in updates:
+            updates["genre"] = "; ".join(normalize_genres(book.genres + result.genres)) or None
+        if "tag" in updates:
+            updates["tag"] = "; ".join(merge_preserve(book.tags, result.tags)) or None
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         self._sync_sidecar(book)
         return batch
