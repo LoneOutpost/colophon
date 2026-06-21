@@ -16,6 +16,7 @@ from colophon.adapters.ffmpeg import (
 )
 from colophon.core.chapters import Chapter, file_boundary_chapters, to_ffmetadata
 from colophon.core.models import BookUnit, _Base
+from colophon.services.tag_ops import write_output_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ def encode_book(
             verified=False,
             error=f"duration mismatch: expected ~{expected_s:.1f}s, got {actual_s:.1f}s",
         )
+
+    write_output_metadata(book, output_path)
 
     deleted = False
     if delete_sources and confirm_delete:
