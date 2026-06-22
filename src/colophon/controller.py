@@ -96,6 +96,7 @@ _SOURCE_LABELS = {
     "openlibrary": "OpenLibrary",
     "googlebooks": "Google Books",
     "hardcover": "Hardcover",
+    "internetarchive": "Internet Archive",
 }
 
 
