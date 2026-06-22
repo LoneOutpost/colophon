@@ -29,7 +29,7 @@ from colophon.core.models import (
 )
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
-from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
+from colophon.core.quickmatch import IdentifyPlan, QuickMatchProposal, QuickMatchSummary
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
 from colophon.services.acquire import (
@@ -764,6 +764,27 @@ class AppController:
         """Re-query all sources for `book` and return candidate matches, best first."""
         results = await gather_matches(self.ctx.sources, query_for_book(book))
         return score_identification(book, results).ranked
+
+    def identify_candidates(self) -> list[BookUnit]:
+        """Books eligible for Identify: not manually confirmed and not organized."""
+        return [
+            b for b in self.ctx.books.list_all()
+            if not b.manually_confirmed and b.output_path is None
+        ]
+
+    async def identify_preview(self) -> IdentifyPlan:
+        """Query all sources for every candidate and partition by the review
+        threshold, without persisting anything."""
+        candidates = self.identify_candidates()
+        source_names = [s.name for s in self.ctx.sources]
+        proposals = await self.quick_match_scan(candidates, source_names)
+        threshold = self.ctx.config.review_threshold
+        to_apply = sum(1 for p in proposals if p.best is not None and p.confidence >= threshold)
+        skipped = len(self.ctx.books.list_all()) - len(candidates)
+        return IdentifyPlan(
+            proposals=proposals, threshold=threshold,
+            to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,
+        )
 
     async def quick_match_scan(
         self,

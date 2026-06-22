@@ -1980,3 +1980,25 @@ def test_scan_preview_does_not_write_then_apply_persists(tmp_path):
     assert written == 1
     assert len(ctx.books.list_all()) == 1
     ctx.close()
+
+
+async def test_identify_preview_partitions_without_writing(tmp_path):
+    src = _StubSource([SourceResult(provider="stub", title="Dune", authors=["Frank Herbert"], asin="B0DUNE")])
+    ctx = _ctx(tmp_path, sources=[src])
+    strong = BookUnit.new(source_folder=tmp_path / "dune")
+    strong.title, strong.authors, strong.asin = "Dune", ["Frank Herbert"], "B0DUNE"
+    weak = BookUnit.new(source_folder=tmp_path / "misc")
+    weak.title, weak.authors = "Totally Different", ["Nobody"]
+    confirmed = BookUnit.new(source_folder=tmp_path / "conf")
+    confirmed.title, confirmed.manually_confirmed = "X", True
+    organized = BookUnit.new(source_folder=tmp_path / "org")
+    organized.title, organized.output_path = "Y", tmp_path / "y.m4b"
+    for b in (strong, weak, confirmed, organized):
+        ctx.books.upsert(b)
+
+    plan = await AppController(ctx).identify_preview()
+    assert plan.to_apply == 1
+    assert plan.to_review == 1
+    assert plan.skipped == 2
+    assert ctx.books.get(strong.id).state == BookState.DETECTED
+    ctx.close()
