@@ -163,3 +163,18 @@ def test_embedded_outranks_directory_fields():
     )
     assert book.authors == ["Tagged Author"]
     assert book.provenance["authors"] == "tag"
+
+
+def test_reconcile_fills_only_empty_fields_on_existing_book(tmp_path):
+    book = BookUnit.new(source_folder=Path("/x"))
+    book.title = "My Edited Title"
+    book.authors = ["Edited Author"]
+    reconcile(
+        book,
+        embedded=EmbeddedTags(title="Tag Title", artist="Tag Author", asin="B0TAG"),
+        dir_title="Folder",
+        filename_fields={},
+    )
+    assert book.title == "My Edited Title"
+    assert book.authors == ["Edited Author"]
+    assert book.asin == "B0TAG"
