@@ -111,3 +111,60 @@ def test_perfect_cross_source_scores_full_sixty_points():
     ]
     sig = next(s for s in score_identification(book, results).signals if s.name == "cross_source_agreement")
     assert sig.points == 60  # round(60 * 1.0) -> scaling formula
+
+
+def _book_with_duration(tmp_path, ms):
+    from colophon.core.models import BookUnit, SourceFile
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Frank Herbert"]
+    if ms:
+        b.source_files = [SourceFile(path=tmp_path / "a.mp3", size=0, duration_seconds=ms / 1000, ext="mp3")]
+    return b
+
+
+def test_runtime_match_bonus(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    r = SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], runtime_ms=8_100_000)
+    out = score_identification(b, [r])
+    assert any(s.name == "runtime_match" for s in out.signals)
+
+
+def test_runtime_mismatch_penalty(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    r = SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], runtime_ms=4_000_000)
+    out = score_identification(b, [r])
+    assert any(s.name == "runtime_mismatch" for s in out.signals)
+
+
+def test_no_runtime_signal_without_book_duration(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 0)
+    r = SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"], runtime_ms=8_000_000)
+    out = score_identification(b, [r])
+    assert not any(s.name.startswith("runtime_") for s in out.signals)
+
+
+def test_runtime_breaks_ranking_tie(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    far = SourceResult(provider="a", title="Dune", authors=["Frank Herbert"], runtime_ms=4_000_000)
+    near = SourceResult(provider="b", title="Dune", authors=["Frank Herbert"], runtime_ms=8_050_000)
+    out = score_identification(b, [far, near])
+    assert out.best is near
+
+
+def test_abridged_mismatch_penalty(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 0)
+    b.abridged = False
+    r = SourceResult(provider="a", title="Dune", authors=["Frank Herbert"], abridged=True)
+    out = score_identification(b, [r])
+    assert any(s.name == "format_mismatch" for s in out.signals)
