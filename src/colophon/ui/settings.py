@@ -12,6 +12,7 @@ from nicegui import ui
 from colophon.adapters.config import Config
 from colophon.controller import AppController
 from colophon.core.normalize import NORMALIZABLE_FIELDS
+from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
@@ -55,10 +56,8 @@ def render_settings(controller: AppController) -> None:
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         ui.label("Settings").classes("text-subtitle2 q-ml-md").style("opacity: .7")
+        app_tabs(controller, "settings")
         ui.space()
-        ui.button(
-            "Back to Library", icon="arrow_back", on_click=lambda: ui.navigate.to("/")
-        ).props("flat")
         dark_mode_button(dark)
 
     field = "outlined dense"

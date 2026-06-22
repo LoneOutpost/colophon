@@ -9,6 +9,7 @@ from nicegui import app, ui
 
 from colophon.controller import AppController
 from colophon.ui.acquire import render_acquire
+from colophon.ui.manage import render_manage
 from colophon.ui.settings import render_settings
 from colophon.ui.workspace import render_workspace
 
@@ -28,6 +29,10 @@ def create_app(controller: AppController) -> None:
     @ui.page("/")
     def index() -> None:
         render_workspace(controller)
+
+    @ui.page("/manage")
+    def manage() -> None:
+        render_manage(controller)
 
     @ui.page("/settings")
     def settings() -> None:

@@ -23,6 +23,7 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import NORMALIZABLE_FIELDS, normalize_description, normalize_text
+from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
@@ -2065,22 +2066,16 @@ def render_workspace(controller: AppController) -> None:
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
+        app_tabs(controller, "library")
         ui.space()
         scan_btn = ui.button("Scan", icon="search").props("flat")
         identify_btn = ui.button("Identify", icon="travel_explore").props("flat")
         process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated")
-        if controller.rd_configured():
-            ui.button(
-                "Acquire", icon="cloud_download", on_click=lambda: ui.navigate.to("/acquire")
-            ).props("flat")
         dark_mode_button(dark)
         ui.button(
             icon="view_column",
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
-        ui.button(icon="settings", on_click=lambda: ui.navigate.to("/settings")).props(
-            "flat round"
-        ).tooltip("Settings")
 
     scan_btn.on_click(lambda: _run(scan_btn, _scan, "Scan complete"))
     identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
