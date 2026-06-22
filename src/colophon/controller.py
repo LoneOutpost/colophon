@@ -13,6 +13,7 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, default_db_path
+from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
@@ -28,6 +29,7 @@ from colophon.services.acquire import (
     download_torrent,
     list_candidates,
 )
+from colophon.services.catalog import apply_catalog_mapping
 from colophon.services.cover import ensure_cached_cover
 from colophon.services.editing import (
     apply_fields,
@@ -104,6 +106,11 @@ class ChapterApplyResult(_Base):
     source_runtime_ms: int = 0
     mismatch: bool = False
     error: str | None = None
+
+
+class CatalogResult(_Base):
+    affected_count: int = 0
+    batch_id: str | None = None
 
 
 class ProcessResult(_Base):
@@ -255,6 +262,27 @@ class AppController:
     def known_genres(self) -> list[str]:
         """Distinct genre names across the library, sorted (editor autocomplete)."""
         return sorted({g for b in self.ctx.books.list_all() for g in b.genres})
+
+    def catalog_entries(self, kind: str) -> list[CatalogEntry]:
+        """Distinct values of `kind` across the whole library, with usage counts."""
+        return list_entries(self.ctx.books.list_all(), kind)
+
+    def _catalog_apply(self, kind: str, mapping: dict[str, str | None]) -> CatalogResult:
+        affected, batch_id = apply_catalog_mapping(self.ctx.books, self.ctx.history, kind, mapping)
+        for book_id in affected:
+            book = self.ctx.books.get(book_id)
+            if book is not None:
+                self._sync_sidecar(book)
+        return CatalogResult(affected_count=len(affected), batch_id=batch_id)
+
+    def rename_catalog_entry(self, kind: str, old: str, new: str) -> CatalogResult:
+        return self._catalog_apply(kind, {old: new})
+
+    def merge_catalog_entries(self, kind: str, sources: list[str], target: str) -> CatalogResult:
+        return self._catalog_apply(kind, {s: target for s in sources})
+
+    def delete_catalog_entry(self, kind: str, name: str) -> CatalogResult:
+        return self._catalog_apply(kind, {name: None})
 
     def known_tags(self) -> list[str]:
         """Distinct tag names across the library, sorted (editor autocomplete)."""
