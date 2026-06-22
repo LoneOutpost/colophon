@@ -29,6 +29,7 @@ class Config(BaseModel):
     lazylibrarian_url: str | None = None
     lazylibrarian_api_key: str | None = None
     hardcover_api_token: str | None = None
+    abs_agg_url: str | None = None  # base URL of a self-hosted abs-agg, e.g. http://host:3000
     real_debrid_token: str | None = None
     real_debrid_download_dir: Path | None = None  # None => <data dir>/downloads
     genre_mapping: dict[str, str] = {}
@@ -113,8 +114,13 @@ root_path = ""
 # lazylibrarian_url = "http://localhost:5299"
 # lazylibrarian_api_key = "your-ll-api-key"
 
-# Hardcover metadata source. Set a token to enable it.
+# Hardcover is now provided through abs-agg (set HARDCOVER_TOKEN on the abs-agg
+# side); the legacy hardcover_api_token below is unused.
 # hardcover_api_token = "your-hardcover-token"
+
+# abs-agg metadata aggregator (https://github.com/Vito0912/abs-agg). Set its base
+# URL to auto-discover and enable its providers.
+# abs_agg_url = "http://localhost:3000"
 
 # Real-Debrid acquisition. Set a private API token to enable the Acquire page.
 # real_debrid_token = "your-rd-private-token"
