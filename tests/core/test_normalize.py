@@ -1,4 +1,34 @@
-from colophon.core.normalize import normalize_description, normalize_text
+from colophon.core.normalize import (
+    FIELD_NORMALIZERS,
+    normalize_description,
+    normalize_name,
+    normalize_text,
+)
+
+
+def test_normalize_name_keeps_single_letter_capital():
+    assert normalize_name("john a smith") == "John A Smith"
+    assert normalize_name("a. a. milne") == "A. A. Milne"
+
+
+def test_normalize_name_does_not_lowercase_small_words():
+    # "van" / "de" particles and short words keep their leading capital in names
+    assert normalize_name("brandon de sanderson") == "Brandon De Sanderson"
+
+
+def test_normalize_text_lowercases_a_in_titles():
+    # The default (title) path still treats a lone "a" as a small word.
+    assert normalize_text("the lord of the rings") == "The Lord of the Rings"
+
+
+def test_normalize_text_lowercases_vs():
+    assert normalize_text("alien vs predator") == "Alien vs Predator"
+    assert normalize_text("kramer vs. kramer") == "Kramer vs. Kramer"
+
+
+def test_field_normalizers_author_is_name_aware():
+    assert FIELD_NORMALIZERS["author"]("john a smith") == "John A Smith"
+    assert FIELD_NORMALIZERS["narrator"]("john a smith") == "John A Smith"
 
 
 def test_titlecase_lowercases_small_words_but_not_first_or_last():

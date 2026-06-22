@@ -16,6 +16,7 @@ _SMALL_WORDS = {
     "a", "an", "the",
     "and", "or", "but", "nor", "for", "yet", "so",
     "of", "in", "on", "at", "to", "by", "up", "as", "off", "per", "via", "from", "into", "with", "over",
+    "vs", "vs.",
 }
 
 
@@ -24,7 +25,11 @@ def _cap(word: str) -> str:
     return word[:1].upper() + word[1:].lower()
 
 
-def _titlecase(text: str) -> str:
+def _titlecase(text: str, *, lowercase_small: bool = True) -> str:
+    """Title-case `text`. When `lowercase_small` is False, small words (articles,
+    conjunctions, short prepositions, and single letters like the initial "A") are
+    NOT lowercased; every word is capitalized. Use that for person names, where
+    initials and particles must keep their case."""
     words = text.split(" ")
     last = len(words) - 1
     out: list[str] = []
@@ -33,7 +38,7 @@ def _titlecase(text: str) -> str:
         if not word:
             out.append(word)
             continue
-        if cap_next or i == last or word.lower() not in _SMALL_WORDS:
+        if not lowercase_small or cap_next or i == last or word.lower() not in _SMALL_WORDS:
             out.append(_cap(word))
         else:
             out.append(word.lower())
@@ -42,8 +47,10 @@ def _titlecase(text: str) -> str:
     return " ".join(out)
 
 
-def normalize_text(value: str) -> str:
-    """Title-case + separator/comma cleanup for short text fields."""
+def normalize_text(value: str, *, lowercase_small: bool = True) -> str:
+    """Title-case + separator/comma cleanup for short text fields. Set
+    `lowercase_small=False` for names (see `normalize_name`) so short words and
+    single-letter initials keep their capitalization."""
     s = value.strip()
     if not s:
         return ""
@@ -54,7 +61,14 @@ def normalize_text(value: str) -> str:
     s = re.sub(r"\s*-\s*", lambda m: " - " if m.group(0) != "-" else " ", s)
     s = re.sub(r"\s*,\s*", ", ", s)        # no space before a comma, one after
     s = re.sub(r"\s+", " ", s).strip()     # collapse runs of whitespace
-    return _titlecase(s)
+    return _titlecase(s, lowercase_small=lowercase_small)
+
+
+def normalize_name(value: str) -> str:
+    """Normalize a person name: same cleanup as `normalize_text` but without
+    lowercasing small words, so initials like "A" and particles stay capitalized
+    (for example 'john a smith' -> 'John A Smith')."""
+    return normalize_text(value, lowercase_small=False)
 
 
 def normalize_description(value: str) -> str:
@@ -117,8 +131,8 @@ def _normalize_genre_field(value: str) -> str:
 FIELD_NORMALIZERS = {
     "title": normalize_text,
     "subtitle": normalize_text,
-    "author": normalize_text,
-    "narrator": normalize_text,
+    "author": normalize_name,
+    "narrator": normalize_name,
     "series": normalize_text,
     "publisher": normalize_text,
     "genre": _normalize_genre_field,
