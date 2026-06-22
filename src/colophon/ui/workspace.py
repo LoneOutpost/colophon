@@ -22,7 +22,7 @@ from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
-from colophon.core.normalize import NORMALIZABLE_FIELDS, normalize_description, normalize_text
+from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -470,9 +470,9 @@ def render_workspace(controller: AppController) -> None:
 
             def _normalize_all() -> None:
                 for f, inp in inputs.items():
-                    if f in _CHIP_FIELDS:
+                    fn = FIELD_NORMALIZERS.get(f)
+                    if fn is None or f in _CHIP_FIELDS:
                         continue
-                    fn = normalize_description if f == "description" else normalize_text
                     inp.set_value(fn(_editor_text(inp)))
                 ui.notify("Normalized fields")
 
