@@ -22,6 +22,7 @@ from colophon.adapters.repository.store import (
 from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
 from colophon.adapters.sources.hardcover import HardcoverSource
+from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
 from colophon.core.sources import MetadataSource
 
@@ -53,7 +54,9 @@ class AppContext:
             if config.lazylibrarian_config_ini
             else AudiobookPatterns()
         )
-        sources: list[MetadataSource] = [AudnexusSource(), OpenLibrarySource(), GoogleBooksSource()]
+        sources: list[MetadataSource] = [
+            AudnexusSource(), OpenLibrarySource(), GoogleBooksSource(), InternetArchiveSource()
+        ]
         if config.hardcover_api_token:
             sources.append(HardcoverSource(token=config.hardcover_api_token))
         abs_client = (

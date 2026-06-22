@@ -10,7 +10,7 @@ def test_create_wires_db_repos_and_sources(tmp_path):
     assert ctx.history.latest_batch_id() is None
     # default sources present and named
     names = {s.name for s in ctx.sources}
-    assert names == {"audnexus", "openlibrary", "googlebooks"}
+    assert names == {"audnexus", "openlibrary", "googlebooks", "internetarchive"}
     assert ctx.config.library_root == tmp_path / "lib"
     ctx.close()
 
