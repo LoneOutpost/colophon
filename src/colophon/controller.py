@@ -16,6 +16,7 @@ from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.confidence import score_identification
+from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.models import (
@@ -29,7 +30,12 @@ from colophon.core.models import (
 )
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
-from colophon.core.quickmatch import IdentifyPlan, QuickMatchProposal, QuickMatchSummary
+from colophon.core.quickmatch import (
+    IdentifyPlan,
+    IdentifySummary,
+    QuickMatchProposal,
+    QuickMatchSummary,
+)
 from colophon.core.sources import SourceQuery, SourceResult
 from colophon.services import files as file_ops
 from colophon.services.acquire import (
@@ -62,7 +68,6 @@ from colophon.services.foster import (
     derive_book_fields,
     foster_one,
 )
-from colophon.services.identify import identify
 from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, scan_ingest
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
@@ -176,11 +181,6 @@ class AppController:
     def scan(self, roots: list[Path] | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
         return self.apply_scan(self.scan_preview(roots))
-
-    async def identify_pending(self) -> None:
-        threshold = self.ctx.config.review_threshold
-        for book in self.ctx.books.list_by_state(BookState.DETECTED):
-            await identify(self.ctx.books, book, self.ctx.sources, threshold=threshold)
 
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
@@ -784,6 +784,37 @@ class AppController:
         return IdentifyPlan(
             proposals=proposals, threshold=threshold,
             to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,
+        )
+
+    def apply_identify(self, plan: IdentifyPlan) -> IdentifySummary:
+        """Fill-empty apply the confident proposals (Ready) and re-score the rest
+        (Needs review), in one undo batch. Manually-confirmed and organized books
+        are not in the plan and are never touched."""
+        items: list[tuple[BookUnit, dict[str, str | None], str]] = []
+        for p in plan.proposals:
+            if p.best is not None and p.confidence >= plan.threshold:
+                updates = {
+                    k: v for k, v in self.match_field_values(p.best).items()
+                    if not get_field(p.book, k)
+                }
+                self._normalize_match_updates(updates)
+                if not p.book.cover_path and not p.book.cover_url and p.best.cover_url:
+                    p.book.cover_url = p.best.cover_url
+                if p.book.abridged is None and p.best.abridged is not None:
+                    p.book.abridged = p.best.abridged
+                items.append((p.book, updates, p.best.provider))
+        batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items) if items else ""
+
+        auto = 0
+        for p in plan.proposals:
+            ready = self._rescore_after_match(p.book, p.results)
+            if ready and p.best is not None and p.confidence >= plan.threshold:
+                auto += 1
+            p.book.touch()
+            self.ctx.books.upsert(p.book)
+            self._sync_sidecar(p.book)
+        return IdentifySummary(
+            auto_matched=auto, routed_to_review=len(plan.proposals) - auto, batch_id=batch,
         )
 
     async def quick_match_scan(

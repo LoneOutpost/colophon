@@ -53,18 +53,6 @@ def test_scan_counts_and_persists(tmp_path):
     ctx.close()
 
 
-async def test_identify_pending_sets_state(tmp_path):
-    src = _StubSource([SourceResult(provider="stub", title="Dune", authors=["Frank Herbert"])])
-    ctx = _ctx(tmp_path, sources=[src])
-    ingest = _seed_ingest(tmp_path)
-    ctrl = AppController(ctx)
-    ctrl.scan([ingest])
-    await ctrl.identify_pending()
-    states = {b.state for b in ctx.books.list_all()}
-    assert states <= {BookState.READY, BookState.NEEDS_REVIEW}
-    ctx.close()
-
-
 def test_dashboard_stats_counts_by_state(tmp_path):
     ctx = _ctx(tmp_path)
     a = BookUnit.new(source_folder=tmp_path / "a")
@@ -2001,4 +1989,48 @@ async def test_identify_preview_partitions_without_writing(tmp_path):
     assert plan.to_review == 1
     assert plan.skipped == 2
     assert ctx.books.get(strong.id).state == BookState.DETECTED
+    ctx.close()
+
+
+async def test_apply_identify_fills_empty_and_marks_ready(tmp_path):
+    src = _StubSource([SourceResult(
+        provider="stub", title="Dune", authors=["Frank Herbert"],
+        narrators=["Scott Brick"], series_name="Dune", series_sequence=1.0, asin="B0DUNE",
+    )])
+    ctx = _ctx(tmp_path, sources=[src])
+    b = BookUnit.new(source_folder=tmp_path / "dune")
+    b.title, b.authors, b.asin = "Dune (My Edit)", ["Frank Herbert"], "B0DUNE"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+
+    plan = await ctrl.identify_preview()
+    summary = ctrl.apply_identify(plan)
+
+    out = ctx.books.get(b.id)
+    assert out.state == BookState.READY
+    assert out.title == "Dune (My Edit)"
+    assert out.narrators == ["Scott Brick"]
+    assert out.series and out.series[0].name == "Dune"
+    assert summary.auto_matched == 1
+    ctx.close()
+
+
+async def test_apply_identify_routes_low_confidence_and_skips_confirmed(tmp_path):
+    src = _StubSource([SourceResult(provider="stub", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[src])
+    weak = BookUnit.new(source_folder=tmp_path / "misc")
+    weak.title, weak.authors = "Totally Different", ["Nobody"]
+    confirmed = BookUnit.new(source_folder=tmp_path / "conf")
+    confirmed.title, confirmed.manually_confirmed, confirmed.confidence = "Keep Me", True, 100.0
+    confirmed.state = BookState.READY
+    ctx.books.upsert(weak)
+    ctx.books.upsert(confirmed)
+    ctrl = AppController(ctx)
+
+    summary = ctrl.apply_identify(await ctrl.identify_preview())
+
+    assert ctx.books.get(weak.id).state == BookState.NEEDS_REVIEW
+    assert summary.routed_to_review == 1
+    after = ctx.books.get(confirmed.id)
+    assert after.manually_confirmed is True and after.title == "Keep Me" and after.confidence == 100.0
     ctx.close()

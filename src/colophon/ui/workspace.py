@@ -2055,7 +2055,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         dialog.open()
 
     async def _identify() -> None:
-        await controller.identify_pending()
+        plan = await controller.identify_preview()
+        await asyncio.to_thread(controller.apply_identify, plan)
 
     async def _process() -> None:
         books = _selected_books() or controller.ready_books()
