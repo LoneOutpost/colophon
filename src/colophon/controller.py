@@ -756,18 +756,9 @@ class AppController:
 
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
 
-        threshold = self.ctx.config.review_threshold
         now_ready = 0
         for p in applicable:
-            outcome = score_identification(p.book, p.results)
-            p.book.confidence = outcome.confidence
-            p.book.confidence_signals = outcome.signals
-            has_identity = bool(p.book.authors) or bool(p.book.series)
-            if outcome.confidence >= threshold and has_identity:
-                p.book.state = BookState.READY
-                now_ready += 1
-            else:
-                p.book.state = BookState.NEEDS_REVIEW
+            now_ready += self._rescore_after_match(p.book, p.results)
             p.book.touch()
             self.ctx.books.upsert(p.book)
             self._sync_sidecar(p.book)
@@ -775,6 +766,19 @@ class AppController:
         return QuickMatchSummary(
             applied_count=len(applicable), now_ready_count=now_ready, batch_id=batch
         )
+
+    def _rescore_after_match(self, book: BookUnit, results: list[SourceResult]) -> bool:
+        """Re-score `book` against `results` and set its confidence, signals, and
+        state (Ready when confident and it has an identity). Returns True if it is
+        now Ready. Confidence/state are persisted by the caller (not part of the
+        undoable field batch)."""
+        outcome = score_identification(book, results)
+        book.confidence = outcome.confidence
+        book.confidence_signals = outcome.signals
+        has_identity = bool(book.authors) or bool(book.series)
+        ready = outcome.confidence >= self.ctx.config.review_threshold and has_identity
+        book.state = BookState.READY if ready else BookState.NEEDS_REVIEW
+        return ready
 
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority
@@ -887,6 +891,11 @@ class AppController:
         self._merge_genre_tag_updates(book, result, updates)
         self._normalize_match_updates(updates)
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
+        # Re-score against the applied result so the book's confidence and state
+        # reflect the match, consistent with Quick Match.
+        self._rescore_after_match(book, [result])
+        book.touch()
+        self.ctx.books.upsert(book)
         self._sync_sidecar(book)
         return batch
 
