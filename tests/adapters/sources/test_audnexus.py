@@ -181,3 +181,21 @@ async def test_fetch_chapters_missing_key_yields_empty():
     src = _source(handler)
     fetch = await src.fetch_chapters("X")
     assert fetch is not None and fetch.chapters == []
+
+
+def test_to_result_runtime_and_format():
+    src = _source(lambda req: httpx.Response(200, json={}))
+
+    r = src._to_result({
+        "title": "Dune", "authors": [{"name": "Frank Herbert"}],
+        "runtimeLengthMin": 1260, "formatType": "unabridged", "asin": "B000",
+    })
+    assert r.runtime_ms == 1260 * 60000
+    assert r.abridged is False
+
+    r2 = src._to_result({"title": "X", "formatType": "abridged"})
+    assert r2.runtime_ms is None
+    assert r2.abridged is True
+
+    r3 = src._to_result({"title": "Y"})
+    assert r3.runtime_ms is None and r3.abridged is None

@@ -142,6 +142,10 @@ class AudnexusSource:
 
     def _to_result(self, book: dict[str, Any]) -> SourceResult:
         series = book.get("seriesPrimary") or {}
+        runtime_min = book.get("runtimeLengthMin")
+        runtime_ms = int(runtime_min) * 60000 if isinstance(runtime_min, (int, float)) and runtime_min > 0 else None
+        fmt = book.get("formatType")
+        abridged = {"abridged": True, "unabridged": False}.get(fmt.lower()) if isinstance(fmt, str) else None
         return SourceResult(
             provider=self.name,
             title=book.get("title"),
@@ -155,6 +159,8 @@ class AudnexusSource:
             description=book.get("summary"),
             genres=[g["name"] for g in book.get("genres") or [] if g.get("name") and g.get("type") == "genre"],
             tags=[g["name"] for g in book.get("genres") or [] if g.get("name") and g.get("type") == "tag"],
+            runtime_ms=runtime_ms,
+            abridged=abridged,
             raw=book,
         )
 

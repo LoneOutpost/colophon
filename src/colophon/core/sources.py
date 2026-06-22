@@ -29,6 +29,8 @@ class SourceResult(_Base):
     description: str | None = None
     genres: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     tags: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
+    runtime_ms: int | None = None
+    abridged: bool | None = None
     raw: dict[str, object] = {}  # noqa: RUF012 - pydantic field default, copied per instance
 
 

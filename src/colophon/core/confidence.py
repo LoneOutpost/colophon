@@ -37,7 +37,13 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
     if not results:
         return IdentificationOutcome(confidence=max(0.0, min(100.0, score)), signals=signals)
 
-    ranked = sorted(results, key=lambda r: _result_score(book, r), reverse=True)
+    def _rank_key(r: SourceResult) -> tuple[float, float]:
+        closeness = 0.0
+        if book.duration_ms > 0 and r.runtime_ms:
+            closeness = -abs(r.runtime_ms - book.duration_ms)
+        return (_result_score(book, r), closeness)
+
+    ranked = sorted(results, key=_rank_key, reverse=True)
     best = ranked[0]
 
     # ASIN exact match — strongest single signal.
@@ -75,6 +81,23 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
         penalty = -25
         score += penalty
         signals.append(ConfidenceSignal(name="disagreement_penalty", points=penalty, detail=f"best match {best_score:.2f}"))
+
+    if book.duration_ms > 0 and best.runtime_ms:
+        rel = abs(best.runtime_ms - book.duration_ms) / book.duration_ms
+        if rel <= 0.05:
+            score += 12
+            signals.append(ConfidenceSignal(name="runtime_match", points=12, detail=f"runtime within {rel * 100:.0f}%"))
+        elif rel >= 0.25:
+            score += -15
+            signals.append(ConfidenceSignal(name="runtime_mismatch", points=-15, detail=f"runtime off by {rel * 100:.0f}% (abridged or wrong edition?)"))
+
+    if book.abridged is not None and best.abridged is not None:
+        if book.abridged == best.abridged:
+            score += 5
+            signals.append(ConfidenceSignal(name="format_match", points=5, detail="abridged flag agrees"))
+        else:
+            score += -15
+            signals.append(ConfidenceSignal(name="format_mismatch", points=-15, detail="abridged flag differs"))
 
     confidence = max(0.0, min(100.0, score))
     return IdentificationOutcome(confidence=confidence, signals=signals, ranked=ranked, best=best)
