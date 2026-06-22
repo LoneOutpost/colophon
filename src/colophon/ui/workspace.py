@@ -131,6 +131,19 @@ def _render_cover(book: BookUnit, *, width: int, height: int, icon: str = "") ->
             ui.icon("menu_book", color="grey-6").classes(icon)
 
 
+def _short_location(folder: Path | None) -> str:
+    """A compact display of a book's folder: the last two path segments joined by
+    ' / ' (for example 'Sanderson / The Way of Kings'), or the final segment alone,
+    or '' when there is no folder. The full path is shown in a tooltip by the
+    caller."""
+    if folder is None:
+        return ""
+    parts = [p for p in folder.parts if p not in ("/", "\\")]
+    if not parts:
+        return ""
+    return " / ".join(parts[-2:])
+
+
 def render_workspace(controller: AppController) -> None:
     apply_theme()
     # Make the content area fill exactly between the fixed header and footer so the
