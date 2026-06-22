@@ -149,6 +149,7 @@ class AudnexusSource:
         return SourceResult(
             provider=self.name,
             title=book.get("title"),
+            subtitle=book.get("subtitle"),
             authors=[a["name"] for a in book.get("authors") or [] if a.get("name")],
             narrators=[n["name"] for n in book.get("narrators") or [] if n.get("name")],
             series_name=series.get("name"),

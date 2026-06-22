@@ -1814,3 +1814,15 @@ def test_catalog_merge_and_delete(tmp_path):
     assert res2.affected_count == 2
     assert ctx.books.get(a.id).authors == []
     ctx.close()
+
+
+def test_match_field_values_includes_subtitle():
+    from colophon.controller import AppController
+    from colophon.core.sources import SourceResult
+    updates = AppController.match_field_values(
+        SourceResult(provider="audnexus", title="PHM", subtitle="A Novel")
+    )
+    assert updates["subtitle"] == "A Novel"
+    assert "subtitle" not in AppController.match_field_values(
+        SourceResult(provider="audnexus", title="PHM")
+    )
