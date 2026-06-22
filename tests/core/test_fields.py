@@ -13,7 +13,7 @@ def _book() -> BookUnit:
 def test_editable_fields_list():
     assert EDITABLE_FIELDS == [
         "title", "subtitle", "author", "narrator", "series",
-        "sequence", "year", "asin", "language", "publisher", "description",
+        "sequence", "year", "asin", "isbn", "language", "publisher", "description",
         "genre", "tag",
     ]
 
@@ -104,3 +104,14 @@ def test_genre_tag_provenance_keys():
     from colophon.core.fields import EDITABLE_TO_PROVENANCE
     assert EDITABLE_TO_PROVENANCE["genre"] == "genres"
     assert EDITABLE_TO_PROVENANCE["tag"] == "tags"
+
+
+def test_isbn_field_roundtrip(tmp_path):
+    from colophon.core.fields import EDITABLE_FIELDS, get_field, set_field
+    from colophon.core.models import BookUnit
+    assert "isbn" in EDITABLE_FIELDS
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    assert get_field(b, "isbn") is None
+    set_field(b, "isbn", "9780306406157")
+    assert b.isbn == "9780306406157"
+    assert get_field(b, "isbn") == "9780306406157"

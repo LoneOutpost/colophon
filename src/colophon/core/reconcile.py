@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from colophon.adapters.sidecar import SidecarMetadata
 from colophon.core.coerce import to_float, to_int
+from colophon.core.isbn import normalize_isbn
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
 
 
@@ -114,3 +115,9 @@ def reconcile(
         book.asin, book.provenance["asin"] = embedded.asin, Provenance.TAG.value
     elif sc and sc.asin:
         book.asin, book.provenance["asin"] = sc.asin, Provenance.SIDECAR.value
+
+    # isbn: embedded -> sidecar (normalized)
+    if embedded.isbn:
+        book.isbn, book.provenance["isbn"] = normalize_isbn(embedded.isbn), Provenance.TAG.value
+    elif sc and sc.isbn:
+        book.isbn, book.provenance["isbn"] = normalize_isbn(sc.isbn), Provenance.SIDECAR.value

@@ -26,4 +26,5 @@ def project_tags(book: BookUnit) -> EmbeddedTags:
         genre="; ".join(book.genres) or None,
         description=book.description,
         asin=book.asin,
+        isbn=book.isbn,
     )

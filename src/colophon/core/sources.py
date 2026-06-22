@@ -11,6 +11,7 @@ class SourceQuery(_Base):
     title: str | None = None
     author: str | None = None
     asin: str | None = None
+    isbn: str | None = None
     series: str | None = None
 
 
@@ -26,6 +27,7 @@ class SourceResult(_Base):
     series_sequence: float | None = None
     publish_year: int | None = None
     asin: str | None = None
+    isbn: str | None = None
     cover_url: str | None = None
     description: str | None = None
     genres: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance

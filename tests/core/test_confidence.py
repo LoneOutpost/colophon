@@ -21,6 +21,22 @@ def test_asin_exact_match_scores_near_certain():
     assert outcome.best is not None and outcome.best.asin == "B002V1A0WE"
 
 
+def test_isbn_exact_match_fires_on_isbn10_vs_isbn13():
+    # book carries an ISBN-10, the source result its equivalent ISBN-13.
+    book = _book(title="Compilers", authors=["Aho"], isbn="0306406152")
+    results = [SourceResult(provider="openlibrary", title="Compilers", authors=["Aho"], isbn="9780306406157")]
+    outcome = score_identification(book, results)
+    assert any(s.name == "isbn_exact_match" and s.points == 60 for s in outcome.signals)
+
+
+def test_no_isbn_signal_when_absent_or_different():
+    book = _book(title="Compilers", authors=["Aho"], isbn="0306406152")
+    none_results = [SourceResult(provider="openlibrary", title="Compilers", authors=["Aho"])]
+    diff_results = [SourceResult(provider="openlibrary", title="Compilers", authors=["Aho"], isbn="9780134685991")]
+    assert not any(s.name == "isbn_exact_match" for s in score_identification(book, none_results).signals)
+    assert not any(s.name == "isbn_exact_match" for s in score_identification(book, diff_results).signals)
+
+
 def test_cross_source_agreement_without_asin_is_high_not_certain():
     book = _book(title="Dune", authors=["Frank Herbert"])
     results = [

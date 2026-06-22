@@ -19,6 +19,12 @@ def test_source_result_runtime_and_abridged_default_none():
     assert r.abridged is None
 
 
+def test_isbn_defaults_to_none():
+    from colophon.core.sources import SourceQuery, SourceResult
+    assert SourceResult(provider="x").isbn is None
+    assert SourceQuery().isbn is None
+
+
 def test_source_result_round_trips():
     r = SourceResult(
         provider="audnexus",

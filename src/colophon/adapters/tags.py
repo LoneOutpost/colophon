@@ -69,6 +69,7 @@ def _read_mp3(path: Path) -> EmbeddedTags:
         genre=frame_text("TCON"),
         description=comm(),
         asin=txxx("asin"),
+        isbn=txxx("isbn"),
     )
 
 
@@ -100,6 +101,7 @@ def _read_mp4(path: Path) -> EmbeddedTags:
         genre=_first(m.get("\xa9gen")),
         description=_first(m.get("desc")) or _first(m.get("\xa9cmt")),
         asin=freeform("asin"),
+        isbn=freeform("isbn"),
     )
 
 
@@ -170,6 +172,7 @@ def _write_mp3(path: Path, tags: EmbeddedTags) -> None:
     set_txxx("series", tags.series)
     set_txxx("sequence", tags.sequence)
     set_txxx("asin", tags.asin)
+    set_txxx("isbn", tags.isbn)
     id3.save(path, v2_version=3)
 
 
@@ -202,6 +205,7 @@ def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
     set_freeform("series", tags.series)
     set_freeform("sequence", tags.sequence)
     set_freeform("asin", tags.asin)
+    set_freeform("isbn", tags.isbn)
     m.save()
 
 

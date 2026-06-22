@@ -39,6 +39,21 @@ async def test_search_normalizes_docs():
     assert r.cover_url == "https://covers.openlibrary.org/b/id/12345-L.jpg"
 
 
+async def test_search_by_isbn():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/search.json"
+        assert request.url.params["isbn"] == "9780306406157"
+        assert "title" not in request.url.params
+        return httpx.Response(
+            200,
+            json={"docs": [{"title": "Dune", "isbn": ["9780306406157", "0306406152"]}]},
+        )
+
+    results = await _source(handler).search(SourceQuery(isbn="9780306406157"))
+    assert len(results) == 1
+    assert results[0].isbn == "9780306406157"
+
+
 async def test_search_without_title_returns_empty():
     src = _source(lambda req: httpx.Response(200, json={"docs": []}))
     assert await src.search(SourceQuery(asin="B0")) == []

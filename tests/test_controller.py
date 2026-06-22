@@ -694,10 +694,13 @@ async def test_search_matches_builds_query_from_edited_fields(tmp_path):
     book = BookUnit.new(source_folder=tmp_path / "x")
     book.title = "Original"
     await AppController(ctx).search_matches(
-        book, title="Edited", author="A", series="S", asin="B01", source_name="audnexus"
+        book, title="Edited", author="A", series="S", asin="B01",
+        isbn="9780306406157", source_name="audnexus"
     )
     q = captured["q"]
-    assert (q.title, q.author, q.series, q.asin) == ("Edited", "A", "S", "B01")
+    assert (q.title, q.author, q.series, q.asin, q.isbn) == (
+        "Edited", "A", "S", "B01", "9780306406157"
+    )
     ctx.close()
 
 
@@ -1358,6 +1361,12 @@ def test_match_field_values_omits_genres_tags_when_absent():
     assert "tag" not in updates
 
 
+def test_match_field_values_includes_isbn():
+    r = SourceResult(provider="openlibrary", isbn="9780306406157")
+    assert AppController.match_field_values(r)["isbn"] == "9780306406157"
+    assert "isbn" not in AppController.match_field_values(SourceResult(provider="x", title="T"))
+
+
 def test_apply_match_merges_genres_and_tags(tmp_path):
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
@@ -1841,7 +1850,7 @@ def test_catalog_result_reports_affected_ids(tmp_path):
     assert res.affected_ids == [a.id]
     assert ctx.books.get(a.id).publisher == "Tor Books"
     ctx.close()
-    
+
 def test_apply_match_fields_rescores_confidence(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)

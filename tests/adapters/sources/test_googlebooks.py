@@ -42,6 +42,32 @@ async def test_search_builds_q_and_normalizes():
     assert r.publish_year == 1979
     assert r.cover_url == "http://books/cover.jpg"
     assert r.description == "Don't panic."
+    assert r.isbn is None  # _BODY has no industryIdentifiers
+
+
+async def test_search_by_isbn():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["q"] == "isbn:9780306406157"
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "volumeInfo": {
+                            "title": "Dune",
+                            "industryIdentifiers": [
+                                {"type": "ISBN_10", "identifier": "0306406152"},
+                                {"type": "ISBN_13", "identifier": "9780306406157"},
+                            ],
+                        }
+                    }
+                ]
+            },
+        )
+
+    results = await _source(handler).search(SourceQuery(isbn="9780306406157"))
+    assert len(results) == 1
+    assert results[0].isbn == "9780306406157"
 
 
 async def test_search_without_title_returns_empty():

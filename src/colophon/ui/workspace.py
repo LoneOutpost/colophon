@@ -437,7 +437,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         inp = ui.input(
                             field, value=value, autocomplete=autocomplete.get(field)
                         ).props("dense").classes("col")
-                        if field in ("year", "asin"):
+                        if field in ("year", "asin", "isbn"):
                             inp.classes("colophon-mono")
                     inputs[field] = inp
                     source = field_provenance(book, field)
@@ -483,7 +483,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 field_labels = {
                     "title": "Title", "author": "Author", "narrator": "Narrator",
                     "series": "Series", "sequence": "Sequence", "year": "Year",
-                    "asin": "ASIN", "description": "Description",
+                    "asin": "ASIN", "isbn": "ISBN", "description": "Description",
                 }
                 services = controller.available_sources()  # [(name, label), ...]
                 service_label = dict(services)
@@ -492,6 +492,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     "author": get_field(b, "author") or "",
                     "series": get_field(b, "series") or "",
                     "asin": get_field(b, "asin") or "",
+                    "isbn": get_field(b, "isbn") or "",
                     "service": services[0][0] if services else None,
                 }
                 matches: list = []
@@ -511,6 +512,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             author_in = ui.input("Author", value=state["author"]).props("dense").classes("w-full")
                             series_in = ui.input("Series", value=state["series"]).props("dense").classes("w-full")
                             asin_in = ui.input("ASIN", value=state["asin"]).props("dense").classes("w-full")
+                            isbn_in = ui.input("ISBN", value=state["isbn"]).props("dense").classes("w-full")
                             ui.label("Search with").classes("text-caption text-grey-7 q-mt-sm")
                             service_radio = ui.radio(dict(services), value=state["service"]).props("dense")
 
@@ -518,7 +520,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 state.update(
                                     title=title_in.value, author=author_in.value,
                                     series=series_in.value, asin=asin_in.value,
-                                    service=service_radio.value,
+                                    isbn=isbn_in.value, service=service_radio.value,
                                 )
                                 await run_search()
 
@@ -538,7 +540,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             results = await controller.search_matches(
                                 b, title=state["title"], author=state["author"],
                                 series=state["series"], asin=state["asin"],
-                                source_name=state["service"],
+                                isbn=state["isbn"], source_name=state["service"],
                             )
                         except Exception:
                             logger.exception("search_matches failed")
@@ -782,7 +784,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     _build_field("description")
                     ui.label("Publication").classes("colophon-seccap")
                     with ui.grid(columns=2).classes("w-full"):
-                        for f in ("year", "publisher", "language", "asin"):
+                        for f in ("year", "publisher", "language", "asin", "isbn"):
                             _build_field(f)
                     _abridged_opts = {None: "Unknown", False: "Unabridged", True: "Abridged"}
                     ui.select(
@@ -1061,6 +1063,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ("author", "Author"),
                                 ("series", "Series"),
                                 ("asin", "ASIN"),
+                                ("isbn", "ISBN"),
                             ):
                                 field_checks[key] = ui.checkbox(flabel, value=True).props("dense")
                             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):

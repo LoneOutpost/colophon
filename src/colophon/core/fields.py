@@ -12,11 +12,11 @@ from colophon.core.models import BookUnit, SeriesRef
 
 EDITABLE_FIELDS = [
     "title", "subtitle", "author", "narrator", "series",
-    "sequence", "year", "asin", "language", "publisher", "description",
+    "sequence", "year", "asin", "isbn", "language", "publisher", "description",
     "genre", "tag",
 ]
 
-_SCALARS = {"title", "subtitle", "asin", "language", "publisher", "description"}
+_SCALARS = {"title", "subtitle", "asin", "isbn", "language", "publisher", "description"}
 
 # Editable-field key -> the key under which its provenance is stored on BookUnit.
 # (List/derived fields differ: "author" edits BookUnit.authors, stored as "authors".)
@@ -29,6 +29,7 @@ EDITABLE_TO_PROVENANCE = {
     "sequence": "series",
     "year": "publish_year",
     "asin": "asin",
+    "isbn": "isbn",
     "language": "language",
     "publisher": "publisher",
     "description": "description",
