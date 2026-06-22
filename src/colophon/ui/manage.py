@@ -37,7 +37,6 @@ def render_manage(controller: AppController) -> None:
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("category", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
-        ui.label("Manage").classes("text-subtitle2 q-ml-md").style("opacity: .7")
         app_tabs(controller, "manage")
         ui.space()
         dark_mode_button(dark)
@@ -151,7 +150,7 @@ def render_manage(controller: AppController) -> None:
         with ui.column().classes("w-full gap-3").style("max-width: 760px"):
             ui.toggle(_KIND_LABELS, value="author", on_change=lambda e: _on_kind(e.value)).props(
                 "no-caps"
-            )
+            ).classes("colophon-seg")
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
                 ui.input(placeholder="Filter").props("dense clearable outlined").classes(
                     "col"

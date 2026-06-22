@@ -61,6 +61,10 @@ body {
 /* Helper type classes consumed by the workspace. */
 .colophon-book-title { font-family: 'Spectral', Georgia, 'Times New Roman', serif; }
 .colophon-mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+/* Segmented toggle (Manage kind switcher): full-contrast unselected options, not the
+   faint Quasar default. The active option keeps its accent fill + light text. */
+.colophon-seg .q-btn:not(.q-btn--active) { color: #2c271f; }
+.body--dark .colophon-seg .q-btn:not(.q-btn--active) { color: #ece4d8; }
 /* One soft elevation for every card; 12px radius everywhere. */
 .q-card {
   border-radius: var(--col-radius);
