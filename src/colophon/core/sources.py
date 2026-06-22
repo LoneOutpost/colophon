@@ -30,6 +30,8 @@ class SourceResult(_Base):
     isbn: str | None = None
     cover_url: str | None = None
     description: str | None = None
+    publisher: str | None = None
+    language: str | None = None
     genres: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     tags: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     runtime_ms: int | None = None

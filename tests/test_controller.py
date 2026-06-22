@@ -1367,6 +1367,15 @@ def test_match_field_values_includes_isbn():
     assert "isbn" not in AppController.match_field_values(SourceResult(provider="x", title="T"))
 
 
+def test_match_field_values_includes_publisher_and_language():
+    r = SourceResult(provider="x", publisher="Tor Books", language="English")
+    updates = AppController.match_field_values(r)
+    assert updates["publisher"] == "Tor Books"
+    assert updates["language"] == "English"
+    bare = AppController.match_field_values(SourceResult(provider="x", title="T"))
+    assert "publisher" not in bare and "language" not in bare
+
+
 def test_apply_match_merges_genres_and_tags(tmp_path):
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")

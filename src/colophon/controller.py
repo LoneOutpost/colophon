@@ -851,6 +851,10 @@ class AppController:
             updates["asin"] = result.asin
         if result.isbn:
             updates["isbn"] = result.isbn
+        if result.publisher:
+            updates["publisher"] = result.publisher
+        if result.language:
+            updates["language"] = result.language
         if result.description:
             updates["description"] = result.description
         if result.genres:
