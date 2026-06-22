@@ -112,7 +112,8 @@ _CHIP_FIELDS = ("genre", "tag")
 
 def book_haystack(book: BookUnit) -> str:
     """Lowercased searchable text for a book: title, authors, narrators, series,
-    genres, and tags. Used by the Books list free-text filter."""
+    genres, tags, publisher, and language. Used by the Books list free-text filter
+    (and the Manage tab's 'show books' jump)."""
     return " ".join(
         filter(None, [
             book.title or "",
@@ -121,6 +122,8 @@ def book_haystack(book: BookUnit) -> str:
             "; ".join(s.name for s in book.series),
             "; ".join(book.genres),
             "; ".join(book.tags),
+            book.publisher or "",
+            book.language or "",
         ])
     ).lower()
 
@@ -170,7 +173,7 @@ def _short_location(folder: Path | None) -> str:
     return " / ".join(parts[-2:])
 
 
-def render_workspace(controller: AppController) -> None:
+def render_workspace(controller: AppController, initial_filter: str = "") -> None:
     apply_theme()
     # Make the content area fill exactly between the fixed header and footer so the
     # three-pane workspace never spills into a page-level scroll (each pane scrolls
@@ -233,7 +236,7 @@ def render_workspace(controller: AppController) -> None:
     scope: dict[str, object] = {"kind": "all", "key": None}
     folder_filter: dict[str, object] = {"path": None}
     foster_selected: set[Path] = set()
-    book_filter: dict[str, str] = {"text": ""}
+    book_filter: dict[str, str] = {"text": initial_filter or ""}
     editor_state: dict[str, object] = {
         "book_id": None, "is_dirty": None, "save_pending": None, "save": None, "write": None,
     }
