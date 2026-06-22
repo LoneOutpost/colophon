@@ -54,7 +54,7 @@ from colophon.services.foster import (
     foster_one,
 )
 from colophon.services.identify import identify
-from colophon.services.ingest import scan_ingest
+from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, scan_ingest
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
 from colophon.services.tag_ops import (
@@ -135,17 +135,31 @@ class AppController:
         self.ctx.config = config
 
     # --- scanning / identification ---
-    def scan(self, roots: list[Path] | None = None) -> int:
+    def scan_preview(self, roots: list[Path] | None = None) -> ScanPlan:
+        """Compute, without persisting, what a scan of `roots` (default: the
+        configured scan paths) would do across all roots."""
         roots = roots or self.ctx.config.scan_paths
-        count = 0
+        combined = ScanPlan()
         for root in roots:
-            count += len(scan_ingest(
-                self.ctx.books,
-                root,
+            plan = plan_scan(
+                self.ctx.books, root,
                 template=self.ctx.config.filename_template,
                 directory_scheme=self.ctx.config.directory_scheme,
-            ))
-        return count
+            )
+            combined.units.extend(plan.units)
+            combined.new_books += plan.new_books
+            combined.existing_books += plan.existing_books
+            combined.fields_filled += plan.fields_filled
+            combined.files_added += plan.files_added
+        return combined
+
+    def apply_scan(self, plan: ScanPlan) -> int:
+        """Persist a previously-computed scan plan; returns the number written."""
+        return commit_scan(self.ctx.books, plan)
+
+    def scan(self, roots: list[Path] | None = None) -> int:
+        """Convenience: preview then immediately commit. Returns the count."""
+        return self.apply_scan(self.scan_preview(roots))
 
     async def identify_pending(self) -> None:
         threshold = self.ctx.config.review_threshold

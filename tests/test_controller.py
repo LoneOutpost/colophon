@@ -1893,3 +1893,16 @@ def test_apply_match_fields_rescores_confidence(tmp_path):
     assert saved.confidence > 0
     assert saved.confidence_signals  # signals recorded, not empty
     ctx.close()
+
+
+def test_scan_preview_does_not_write_then_apply_persists(tmp_path):
+    ingest = _seed_ingest(tmp_path)
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    plan = ctrl.scan_preview([ingest])
+    assert plan.new_books == 1
+    assert ctx.books.list_all() == []          # preview wrote nothing
+    written = ctrl.apply_scan(plan)
+    assert written == 1
+    assert len(ctx.books.list_all()) == 1
+    ctx.close()
