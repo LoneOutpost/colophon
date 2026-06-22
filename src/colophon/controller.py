@@ -18,7 +18,15 @@ from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.confidence import score_identification
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
-from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord, Provenance, _Base
+from colophon.core.models import (
+    BookState,
+    BookUnit,
+    ConfidenceSignal,
+    EditChange,
+    OperationRecord,
+    Provenance,
+    _Base,
+)
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.quickmatch import QuickMatchProposal, QuickMatchSummary
@@ -731,6 +739,26 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
+    def confirm_confidence(self, book: BookUnit) -> None:
+        """Manually confirm a book: force confidence to 100, mark it Ready, and
+        flag it as manual so the badge/recheck know it was set by hand."""
+        book.confidence = 100.0
+        book.confidence_signals = [
+            ConfidenceSignal(name="manual_confirmation", points=100, detail="Manually confirmed")
+        ]
+        book.manually_confirmed = True
+        book.state = BookState.READY
+        book.touch()
+        self.ctx.books.upsert(book)
+
+    async def recheck_confidence(self, book: BookUnit) -> None:
+        """Revert to auto confidence: re-query all sources, rescore, clear the
+        manual flag, and persist."""
+        results = await gather_matches(self.ctx.sources, query_for_book(book))
+        self._rescore_after_match(book, results)
+        book.touch()
+        self.ctx.books.upsert(book)
+
     # --- match review / apply (FR-2.4, FR-3.3) ---
     async def get_matches(self, book: BookUnit) -> list[SourceResult]:
         """Re-query all sources for `book` and return candidate matches, best first."""
@@ -799,6 +827,7 @@ class AppController:
         outcome = score_identification(book, results)
         book.confidence = outcome.confidence
         book.confidence_signals = outcome.signals
+        book.manually_confirmed = False
         has_identity = bool(book.authors) or bool(book.series)
         ready = outcome.confidence >= self.ctx.config.review_threshold and has_identity
         book.state = BookState.READY if ready else BookState.NEEDS_REVIEW

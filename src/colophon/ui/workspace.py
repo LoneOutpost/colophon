@@ -107,6 +107,15 @@ def _confidence_color(value: float) -> str:
     return "negative"
 
 
+def _confidence_tooltip(book: BookUnit, threshold: float) -> str:
+    if book.manually_confirmed:
+        return "Manually confirmed (100%). Use Recheck Confidence to recompute from sources."
+    return (
+        f"Match confidence 0-100: how strongly the metadata agrees with the sources. "
+        f"At or above {threshold:.0f} a book is auto-marked Ready."
+    )
+
+
 _CHIP_FIELDS = ("genre", "tag")
 
 
@@ -741,7 +750,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 # Left aside: cover, status, location.
                 with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
                     _render_cover(book, width=112, height=168, icon="text-h2")
-                    ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
+                    ui.badge(f"{book.confidence:.0f}").props(
+                        f"color={_confidence_color(book.confidence)}"
+                    ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
                     _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
                     ui.badge(_slabel).props(f"color={_scolor} outline")
                     if book.source_folder is not None:
@@ -769,6 +780,28 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ui.button("Matches", icon="search", on_click=_compare).props("flat dense no-caps").tooltip("Find and apply metadata matches")
                                 ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
                                 ui.button("Cover", icon="image", on_click=_cover_dialog).props("flat dense no-caps").tooltip("Search or set the cover")
+                        with ui.element("div").classes("colophon-toolgroup"):
+                            ui.label("Confidence").classes("colophon-seccap")
+                            with ui.row().classes("q-gutter-xs"):
+                                if book.manually_confirmed:
+                                    async def _recheck(b=book) -> None:
+                                        ui.notify("Rechecking confidence...")
+                                        await controller.recheck_confidence(b)
+                                        show_detail(b.id)
+                                        refresh_list()
+                                        refresh_status()
+                                    ui.button("Recheck Confidence", icon="refresh", on_click=_recheck).props(
+                                        "flat dense no-caps"
+                                    ).tooltip("Re-query sources and revert to the computed confidence")
+                                else:
+                                    def _confirm(b=book) -> None:
+                                        controller.confirm_confidence(b)
+                                        show_detail(b.id)
+                                        refresh_list()
+                                        refresh_status()
+                                    ui.button("Manual Confirmation", icon="verified", on_click=_confirm).props(
+                                        "flat dense no-caps"
+                                    ).tooltip("Confirm this book and set its confidence to 100%")
                         with ui.element("div").classes("colophon-toolgroup"):
                             ui.label("Clean up").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
@@ -1275,7 +1308,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     )
                                 ui.badge(f"{book.confidence:.0f}").props(
                                     f"color={_confidence_color(book.confidence)}"
-                                )
+                                ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
                                 _slabel, _scolor = _STATE_BADGE.get(
                                     book.state, (book.state.value, "grey-6")
                                 )

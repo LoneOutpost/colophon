@@ -1925,6 +1925,50 @@ def test_apply_match_fields_rescores_confidence(tmp_path):
     ctx.close()
 
 
+def test_confirm_confidence_sets_100_ready_and_manual_flag(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    AppController(ctx).confirm_confidence(book)
+    assert book.confidence == 100.0
+    assert book.manually_confirmed is True
+    assert book.state == BookState.READY
+    assert any(s.name == "manual_confirmation" for s in book.confidence_signals)
+    assert ctx.books.get(book.id).manually_confirmed is True
+    ctx.close()
+
+
+async def test_recheck_confidence_reverts_to_auto_and_clears_flag(tmp_path):
+    src = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
+    ctx = _ctx(tmp_path, sources=[src])
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    ctrl.confirm_confidence(book)
+    assert book.manually_confirmed is True
+    await ctrl.recheck_confidence(book)
+    assert book.manually_confirmed is False
+    assert not any(s.name == "manual_confirmation" for s in book.confidence_signals)
+    ctx.close()
+
+
+def test_rescore_after_match_clears_manual_flag(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctrl = AppController(ctx)
+    ctrl.confirm_confidence(book)
+    assert book.manually_confirmed is True
+    ctrl._rescore_after_match(book, [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
+    assert book.manually_confirmed is False
+    ctx.close()
+
+
 def test_scan_preview_does_not_write_then_apply_persists(tmp_path):
     ingest = _seed_ingest(tmp_path)
     ctx = _ctx(tmp_path)

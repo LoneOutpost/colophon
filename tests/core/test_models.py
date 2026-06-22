@@ -195,3 +195,9 @@ def test_book_duration_ms_sums_files(tmp_path):
     ]
     assert b.duration_ms == 3725500
     assert b.abridged is None
+
+
+def test_book_unit_manually_confirmed_defaults_false(tmp_path):
+    from colophon.core.models import BookUnit
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    assert b.manually_confirmed is False
