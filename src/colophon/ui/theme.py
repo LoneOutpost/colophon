@@ -106,6 +106,13 @@ body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, .4); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(120, 120, 128, .6); }
+/* Detail-pane structure: section captions, tool groups, sticky action bar. */
+.colophon-seccap { font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--colophon-accent); font-weight: 700; margin: 10px 0 4px; }
+.colophon-toolgroup { border: 1px solid var(--colophon-line); border-radius: 8px; padding: 6px 8px; }
+.colophon-actionbar { position: sticky; bottom: 0; margin-top: 8px; padding: 8px 0;
+  background: var(--colophon-surface); border-top: 1px solid var(--colophon-line); }
+.body--dark .colophon-actionbar { background: #262019; }
 """
 
 

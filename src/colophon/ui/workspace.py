@@ -391,34 +391,12 @@ def render_workspace(controller: AppController) -> None:
                         ui.button("Cancel", on_click=dialog.close).props("flat")
                 dialog.open()
 
-            with ui.row().classes("w-full justify-center q-mb-sm"):
-                _render_cover(book, width=160, height=240, icon="text-h2")
-            with ui.row().classes("w-full justify-center q-gutter-sm q-mb-sm"):
-                ui.button("Change cover", icon="image", on_click=_cover_dialog).props("flat dense no-caps")
-                if book.cover_path or book.cover_url:
-                    ui.button(
-                        "Remove", icon="delete",
-                        on_click=lambda b=book: (controller.clear_cover(b), ui.notify("Cover removed"), show_detail(b.id)),
-                    ).props("flat dense no-caps color=negative")
-            with ui.row().classes("items-center w-full"):
-                ui.label(book.title or "(untitled)").classes("text-h6")
-                ui.space()
-                ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
-                ui.label(book.state.value).classes("text-caption text-grey-7 q-ml-sm")
-            if book.confidence_signals:
-                with ui.row().classes("items-center w-full q-gutter-xs"):
-                    for sig in book.confidence_signals:
-                        color = "positive" if sig.points >= 0 else "negative"
-                        ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
-                            f"color={color} outline"
-                        ).tooltip(sig.detail)
-            ui.separator().classes("q-my-sm")
-
             # editable fields, each prefilled with its value + provenance badge
             inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, str] = {}
             autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
-            for field in EDITABLE_FIELDS:
+
+            def _build_field(field: str) -> None:
                 value = get_field(book, field) or ""
                 originals[field] = value
                 with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
@@ -435,25 +413,19 @@ def render_workspace(controller: AppController) -> None:
                         source = field_provenance(book, field)
                         if source:
                             ui.badge(controller.source_label(source)).props("color=grey-6 outline").classes("self-center")
-                        continue
+                        return
                     if field == "description":
                         inp = ui.textarea(field, value=value).props("dense").classes("col")
                     else:
                         inp = ui.input(
                             field, value=value, autocomplete=autocomplete.get(field)
                         ).props("dense").classes("col")
+                        if field in ("year", "asin"):
+                            inp.classes("colophon-mono")
                     inputs[field] = inp
                     source = field_provenance(book, field)
                     if source:
                         ui.badge(controller.source_label(source)).props("color=grey-6 outline").classes("self-center")
-                    normalizer = normalize_description if field == "description" else normalize_text
-                    ui.button(
-                        icon="auto_fix_high",
-                        on_click=lambda inp=inp, fn=normalizer: inp.set_value(fn(inp.value or "")),
-                    ).props("flat dense round").classes("self-center").tooltip("Normalize")
-
-            for _inp in inputs.values():
-                _inp.on_value_change(lambda _e=None: ui.run_javascript("window.__colophon_dirty = true"))
 
             def _save_pending(b=book) -> bool:
                 """Persist any pending field edits silently, advancing the editor's
@@ -481,6 +453,14 @@ def render_workspace(controller: AppController) -> None:
                 ui.notify("Saved")
                 refresh_list()
                 show_detail(b.id)
+
+            def _normalize_all() -> None:
+                for f, inp in inputs.items():
+                    if f in _CHIP_FIELDS:
+                        continue
+                    fn = normalize_description if f == "description" else normalize_text
+                    inp.set_value(fn(_editor_text(inp)))
+                ui.notify("Normalized fields")
 
             def _compare(b=book) -> None:
                 field_labels = {
@@ -693,14 +673,106 @@ def render_workspace(controller: AppController) -> None:
                         ui.button("Remap", icon="swap_horiz", on_click=_apply)
                 dialog.open()
 
-            with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Save", icon="save", on_click=_save)
-                ui.button("Retrieve matches", icon="search", on_click=_compare).props("outline")
+            async def _fetch_chapters(b=book, asin=None) -> None:
+                res = await controller.apply_audnexus_chapters(b, asin=asin)
+                if not res.ok:
+                    ui.notify(res.error or "No chapters found", type="warning")
+                    return
+                ui.notify(f"Applied {res.count} chapters from Audible")
+                if res.mismatch:
+                    def _fmt(ms: int) -> str:
+                        s = ms // 1000
+                        return f"{s // 3600}:{(s % 3600) // 60:02d}"
+                    ui.notify(
+                        f"Audible runtime {_fmt(res.audible_runtime_ms)} vs your files "
+                        f"{_fmt(res.source_runtime_ms)} - chapters may not line up",
+                        type="warning", timeout=8000,
+                    )
+                show_detail(b.id)
+
+            async def _fetch_clicked(b=book) -> None:
+                if (b.asin or "").strip():
+                    await _fetch_chapters(b)
+                    return
+                with ui.dialog() as dlg, ui.card().classes("w-80"):
+                    ui.label("Fetch chapters from Audible").classes("text-subtitle1")
+                    asin_in = ui.input("ASIN").props("dense").classes("w-full")
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Cancel", on_click=dlg.close).props("flat")
+
+                        async def _go() -> None:
+                            value = (asin_in.value or "").strip()
+                            if not value:
+                                ui.notify("Enter an ASIN")
+                                return
+                            dlg.close()
+                            await _fetch_chapters(b, asin=value)
+
+                        ui.button("Fetch", icon="cloud_download", on_click=_go)
+                dlg.open()
+
+            with ui.row().classes("w-full no-wrap items-start q-gutter-md"):
+                # Left aside: cover, status, location.
+                with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
+                    _render_cover(book, width=112, height=168, icon="text-h2")
+                    ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
+                    _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
+                    ui.badge(_slabel).props(f"color={_scolor} outline")
+                    if book.source_folder is not None:
+                        with ui.row().classes("items-center no-wrap q-gutter-xs").style("max-width:112px"):
+                            ui.icon("folder", size="14px").classes("text-grey-6")
+                            ui.label(_short_location(book.source_folder)).classes(
+                                "text-caption text-grey-6 ellipsis"
+                            ).tooltip(str(book.source_folder))
+                # Main column: title, tools, grouped fields.
+                with ui.column().classes("col q-gutter-none"):
+                    ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
+                    if book.confidence_signals:
+                        with ui.row().classes("items-center w-full q-gutter-xs q-mb-xs"):
+                            for sig in book.confidence_signals:
+                                color = "positive" if sig.points >= 0 else "negative"
+                                ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
+                                    f"color={color} outline"
+                                ).tooltip(sig.detail)
+
+                    # --- metadata tool groups ---
+                    with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
+                        with ui.element("div").classes("colophon-toolgroup col"):
+                            ui.label("Fetch from sources").classes("colophon-seccap")
+                            with ui.row().classes("q-gutter-xs"):
+                                ui.button("Matches", icon="search", on_click=_compare).props("flat dense no-caps").tooltip("Find and apply metadata matches")
+                                ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
+                                ui.button("Cover", icon="image", on_click=_cover_dialog).props("flat dense no-caps").tooltip("Search or set the cover")
+                        with ui.element("div").classes("colophon-toolgroup"):
+                            ui.label("Clean up").classes("colophon-seccap")
+                            with ui.row().classes("q-gutter-xs"):
+                                ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
+                                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat dense no-caps").tooltip("Move one field's value to another")
+
+                    # --- grouped fields ---
+                    ui.label("Identity").classes("colophon-seccap")
+                    with ui.grid(columns=2).classes("w-full"):
+                        for f in ("title", "subtitle", "author", "narrator", "series", "sequence"):
+                            _build_field(f)
+                    ui.label("Description").classes("colophon-seccap")
+                    _build_field("description")
+                    ui.label("Publication").classes("colophon-seccap")
+                    with ui.grid(columns=2).classes("w-full"):
+                        for f in ("year", "publisher", "language", "asin"):
+                            _build_field(f)
+                    ui.label("Classification").classes("colophon-seccap")
+                    _build_field("genre")
+                    _build_field("tag")
+
+            for _inp in inputs.values():
+                _inp.on_value_change(lambda _e=None: ui.run_javascript("window.__colophon_dirty = true"))
+
+            with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
+                ui.button("Save", icon="save", on_click=_save).props("unelevated")
                 ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
-                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat")
+                ui.space()
                 ui.button(
-                    "Mark ready",
-                    icon="check",
+                    "Mark ready", icon="check",
                     on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
                 ).props("flat")
 
@@ -755,45 +827,6 @@ def render_workspace(controller: AppController) -> None:
                     if applied:
                         ui.badge("from Audible").props("color=grey-6 outline").classes("self-center")
                     ui.space()
-
-                    async def _fetch_chapters(b=book, asin=None) -> None:
-                        res = await controller.apply_audnexus_chapters(b, asin=asin)
-                        if not res.ok:
-                            ui.notify(res.error or "No chapters found", type="warning")
-                            return
-                        ui.notify(f"Applied {res.count} chapters from Audible")
-                        if res.mismatch:
-                            def _fmt(ms: int) -> str:
-                                s = ms // 1000
-                                return f"{s // 3600}:{(s % 3600) // 60:02d}"
-                            ui.notify(
-                                f"Audible runtime {_fmt(res.audible_runtime_ms)} vs your files "
-                                f"{_fmt(res.source_runtime_ms)} - chapters may not line up",
-                                type="warning", timeout=8000,
-                            )
-                        show_detail(b.id)
-
-                    async def _fetch_clicked(b=book) -> None:
-                        if (b.asin or "").strip():
-                            await _fetch_chapters(b)
-                            return
-                        with ui.dialog() as dlg, ui.card().classes("w-80"):
-                            ui.label("Fetch chapters from Audible").classes("text-subtitle1")
-                            asin_in = ui.input("ASIN").props("dense").classes("w-full")
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dlg.close).props("flat")
-
-                                async def _go() -> None:
-                                    value = (asin_in.value or "").strip()
-                                    if not value:
-                                        ui.notify("Enter an ASIN")
-                                        return
-                                    dlg.close()
-                                    await _fetch_chapters(b, asin=value)
-
-                                ui.button("Fetch", icon="cloud_download", on_click=_go)
-                        dlg.open()
-
                     ui.button(
                         "Fetch from Audible", icon="cloud_download", on_click=_fetch_clicked
                     ).props("flat dense no-caps")
