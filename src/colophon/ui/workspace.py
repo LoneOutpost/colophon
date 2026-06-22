@@ -85,6 +85,19 @@ def _fmt_duration(seconds: float) -> str:
     return f"{hours}h {mins}m" if hours else f"{mins}m"
 
 
+def _fmt_runtime_delta(candidate_ms: int | None, book_ms: int) -> str:
+    """'8h 12m · +6m' (delta vs the book) or '8h 12m' when the book length is
+    unknown; '' when the candidate has no runtime."""
+    if not candidate_ms:
+        return ""
+    base = _fmt_duration(candidate_ms / 1000)
+    if not book_ms:
+        return base
+    delta_s = (candidate_ms - book_ms) / 1000
+    sign = "+" if delta_s >= 0 else "-"
+    return f"{base} · {sign}{_fmt_duration(abs(delta_s))}"
+
+
 def _confidence_color(value: float) -> str:
     if value >= 75:
         return "positive"
@@ -551,6 +564,13 @@ def render_workspace(controller: AppController) -> None:
                                         with ui.item_section():
                                             ui.item_label(m.title or "?")
                                             ui.item_label(f"{controller.source_label(m.provider)} · {authors}{year}").props("caption")
+                                            rt = _fmt_runtime_delta(m.runtime_ms, b.duration_ms)
+                                            if rt or m.abridged is not None:
+                                                with ui.row().classes("items-center no-wrap q-gutter-xs"):
+                                                    if rt:
+                                                        ui.item_label(rt).props("caption").classes("colophon-mono")
+                                                    if m.abridged is not None:
+                                                        ui.badge("Abridged" if m.abridged else "Unabridged").props("color=grey-6 outline")
 
                     def show_picker(result) -> None:
                         body.clear()
@@ -760,6 +780,11 @@ def render_workspace(controller: AppController) -> None:
                     with ui.grid(columns=2).classes("w-full"):
                         for f in ("year", "publisher", "language", "asin"):
                             _build_field(f)
+                    _abridged_opts = {None: "Unknown", False: "Unabridged", True: "Abridged"}
+                    ui.select(
+                        _abridged_opts, value=book.abridged, label="Abridged",
+                        on_change=lambda e, b=book: (controller.set_abridged(b, e.value), refresh_list()),
+                    ).props("dense").classes("w-full")
                     ui.label("Classification").classes("colophon-seccap")
                     _build_field("genre")
                     _build_field("tag")
