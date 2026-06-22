@@ -847,6 +847,8 @@ class AppController:
             updates["year"] = str(result.publish_year)
         if result.asin:
             updates["asin"] = result.asin
+        if result.isbn:
+            updates["isbn"] = result.isbn
         if result.description:
             updates["description"] = result.description
         if result.genres:

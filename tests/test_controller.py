@@ -1358,6 +1358,12 @@ def test_match_field_values_omits_genres_tags_when_absent():
     assert "tag" not in updates
 
 
+def test_match_field_values_includes_isbn():
+    r = SourceResult(provider="openlibrary", isbn="9780306406157")
+    assert AppController.match_field_values(r)["isbn"] == "9780306406157"
+    assert "isbn" not in AppController.match_field_values(SourceResult(provider="x", title="T"))
+
+
 def test_apply_match_merges_genres_and_tags(tmp_path):
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")

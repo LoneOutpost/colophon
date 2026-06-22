@@ -6,6 +6,7 @@ Pure function over (candidate, source results). Signals are additive, clamped to
 
 from __future__ import annotations
 
+from colophon.core.isbn import isbn_equal
 from colophon.core.match import title_author_score
 from colophon.core.models import BookUnit, ConfidenceSignal, _Base
 from colophon.core.sources import SourceResult
@@ -51,6 +52,12 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
     if asin_hit:
         score += 60
         signals.append(ConfidenceSignal(name="asin_exact_match", points=60, detail=f"ASIN {book.asin}"))
+
+    # ISBN exact match — equally strong; ISBN-10 and its ISBN-13 are treated as equal.
+    isbn_hit = book.isbn and any(isbn_equal(book.isbn, r.isbn) for r in results)
+    if isbn_hit:
+        score += 60
+        signals.append(ConfidenceSignal(name="isbn_exact_match", points=60, detail=f"ISBN {book.isbn}"))
 
     # Cross-source agreement on title+author — counted by DISTINCT provider, with
     # points scaled by match quality so a near-perfect agreement scores higher than
