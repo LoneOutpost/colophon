@@ -1960,17 +1960,36 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             show_bulk()
 
     # --- async actions ---
+    def _ui_safe(fn) -> None:
+        """Run a UI update, swallowing the RuntimeError NiceGUI raises when the
+        browser client has disconnected (its elements are gone). Without this, a
+        long action whose client drops mid-run would dump a traceback from the
+        post-action notify/refresh."""
+        try:
+            fn()
+        except RuntimeError:
+            logger.info("skipped a UI update; the client appears to have disconnected")
+
     async def _run(button, action, done_msg: str) -> None:
-        button.props("loading=true")
+        _ui_safe(lambda: button.props("loading=true"))
+        failed = False
         try:
             await action()
-            ui.notify(done_msg)
+        except RuntimeError:
+            # The action's own UI calls raised because the client disconnected; the
+            # work itself ran. Nothing left to update.
+            logger.exception("workspace action ended with RuntimeError (client gone?)")
+            return
         except Exception:
             logger.exception("workspace action failed")
-            ui.notify("Action failed (see logs)", type="negative")
-        finally:
-            button.props(remove="loading")
-            _refresh_all()
+            failed = True
+        _ui_safe(lambda: button.props(remove="loading"))
+        _ui_safe(
+            (lambda: ui.notify("Action failed (see logs)", type="negative"))
+            if failed
+            else (lambda: ui.notify(done_msg))
+        )
+        _ui_safe(_refresh_all)
 
     async def _scan() -> None:
         n = await asyncio.to_thread(controller.scan)

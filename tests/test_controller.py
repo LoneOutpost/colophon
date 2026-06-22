@@ -1841,3 +1841,17 @@ def test_catalog_result_reports_affected_ids(tmp_path):
     assert res.affected_ids == [a.id]
     assert ctx.books.get(a.id).publisher == "Tor Books"
     ctx.close()
+    
+def test_apply_match_fields_rescores_confidence(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "old title"
+    b.authors = ["old"]
+    ctx.books.upsert(b)
+    result = SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])
+    ctrl.apply_match_fields(b, result, {"title", "author"})
+    saved = ctx.books.get(b.id)
+    assert saved.confidence > 0
+    assert saved.confidence_signals  # signals recorded, not empty
+    ctx.close()
