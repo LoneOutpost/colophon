@@ -24,6 +24,7 @@ def test_reads_id3_frames_from_mp3(tmp_path: Path):
     id3.add(TXXX(encoding=3, desc="series", text=["Stormlight Archive"]))
     id3.add(TXXX(encoding=3, desc="sequence", text=["1"]))
     id3.add(TXXX(encoding=3, desc="asin", text=["B0041JKFJW"]))
+    id3.add(TXXX(encoding=3, desc="isbn", text=["9780306406157"]))
     id3.save(path)
 
     tags = read_embedded_tags(path)
@@ -32,6 +33,7 @@ def test_reads_id3_frames_from_mp3(tmp_path: Path):
     assert tags.series == "Stormlight Archive"
     assert tags.sequence == 1.0
     assert tags.asin == "B0041JKFJW"
+    assert tags.isbn == "9780306406157"
 
 
 def test_reads_comm_description_from_mp3(tmp_path: Path):
@@ -65,6 +67,7 @@ def test_write_then_read_roundtrips_mp3(tmp_path: Path):
         title="The Way of Kings", album="The Way of Kings", artist="Brandon Sanderson",
         narrator="Michael Kramer; Kate Reading", series="Stormlight Archive", sequence=1.0,
         year=2010, genre="Fantasy", description="A long book.", asin="B0041JKFJW",
+        isbn="9780306406157",
     )
     write_embedded_tags(path, tags)
     assert read_embedded_tags(path) == tags
@@ -75,7 +78,7 @@ def test_write_then_read_roundtrips_mp4(make_audio):
     tags = EmbeddedTags(
         title="Mistborn", album="Mistborn", artist="Brandon Sanderson", narrator="Michael Kramer",
         series="Mistborn", sequence=1.0, year=2006, genre="Fantasy",
-        description="Heist with magic.", asin="B002UZMUVK",
+        description="Heist with magic.", asin="B002UZMUVK", isbn="9780765311788",
     )
     write_embedded_tags(path, tags)
     assert read_embedded_tags(path) == tags

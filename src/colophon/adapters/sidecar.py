@@ -29,6 +29,7 @@ class SidecarMetadata(BaseModel):
     publisher: str | None = None
     description: str | None = None
     asin: str | None = None
+    isbn: str | None = None
 
 
 def _str_or_none(value: object) -> str | None:
@@ -71,6 +72,7 @@ def read_sidecar(folder: Path) -> SidecarMetadata | None:
         publisher=_str_or_none(data.get("publisher")),
         description=_str_or_none(data.get("description")),
         asin=_str_or_none(data.get("asin")),
+        isbn=_str_or_none(data.get("isbn")),
     )
 
 
@@ -115,6 +117,7 @@ def write_sidecar(folder: Path, book: BookUnit) -> None:
             "publisher": book.publisher,
             "description": book.description,
             "asin": book.asin,
+            "isbn": book.isbn,
         }
     )
 

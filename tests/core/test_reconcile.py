@@ -88,6 +88,20 @@ def test_sidecar_fills_gaps_below_embedded():
     assert book.description == "desc" and book.provenance["description"] == "sidecar"
 
 
+def test_embedded_isbn_is_normalized_onto_book():
+    book = _unit()
+    embedded = EmbeddedTags(title="T", isbn="978-0-306-40615-7")
+    reconcile(book, embedded=embedded, dir_title=None, filename_fields={})
+    assert book.isbn == "9780306406157" and book.provenance["isbn"] == "tag"
+
+
+def test_sidecar_isbn_fills_when_embedded_lacks_it():
+    book = _unit()
+    sidecar = SidecarMetadata(isbn="0-306-40615-2")
+    reconcile(book, embedded=EmbeddedTags(title="T"), sidecar=sidecar, dir_title=None, filename_fields={})
+    assert book.isbn == "0306406152" and book.provenance["isbn"] == "sidecar"
+
+
 def test_sidecar_title_used_when_no_embedded_title():
     book = _unit()
     reconcile(
