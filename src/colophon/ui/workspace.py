@@ -1230,7 +1230,24 @@ def render_workspace(controller: AppController) -> None:
                         with ui.item_section().classes("cursor-pointer").on(
                             "click", lambda bid=book.id: _set_focus(bid)
                         ):
-                            ui.item_label(book.title or "(untitled)").classes("colophon-book-title")
+                            # Line 1: title (ellipsized) with confidence + state badges
+                            # pinned right, so the badges never clip on a narrow pane.
+                            with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                                ui.label(book.title or "(untitled)").classes(
+                                    "colophon-book-title col ellipsis"
+                                )
+                                total = sum(sf.duration_seconds for sf in book.source_files)
+                                if book.source_files:
+                                    ui.label(_fmt_duration(total)).classes(
+                                        "text-caption text-grey-6 colophon-mono"
+                                    )
+                                ui.badge(f"{book.confidence:.0f}").props(
+                                    f"color={_confidence_color(book.confidence)}"
+                                )
+                                _slabel, _scolor = _STATE_BADGE.get(
+                                    book.state, (book.state.value, "grey-6")
+                                )
+                                ui.badge(_slabel).props(f"color={_scolor} outline")
                             series = book.series[0].name if book.series else ""
                             author = ", ".join(book.authors) or "unknown author"
                             line2 = f"{author} · {series}" if series else author
@@ -1244,20 +1261,6 @@ def render_workspace(controller: AppController) -> None:
                                         ).on(
                                             "click.stop", lambda lbl=label: _filter_to(lbl)
                                         )
-                        with ui.item_section().props("side"):
-                            with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                                total = sum(sf.duration_seconds for sf in book.source_files)
-                                if book.source_files:
-                                    ui.label(_fmt_duration(total)).classes(
-                                        "text-caption text-grey-6 colophon-mono"
-                                    )
-                                ui.badge(f"{book.confidence:.0f}").props(
-                                    f"color={_confidence_color(book.confidence)}"
-                                )
-                                _slabel, _scolor = _STATE_BADGE.get(
-                                    book.state, (book.state.value, "grey-6")
-                                )
-                                ui.badge(_slabel).props(f"color={_scolor} outline")
 
     # --- keyboard navigation ---
     def _set_focus(book_id: str) -> None:
