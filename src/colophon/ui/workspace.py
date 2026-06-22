@@ -1995,8 +1995,31 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _ui_safe(_refresh_all)
 
     async def _scan() -> None:
-        n = await asyncio.to_thread(controller.scan)
-        ui.notify(f"Scanned {n} book units")
+        plan = await asyncio.to_thread(controller.scan_preview)
+        if plan.new_books == 0 and plan.existing_books == 0:
+            ui.notify("Nothing to scan")
+            return
+
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label("Scan results").classes("text-subtitle1")
+            ui.label(f"{plan.new_books} new books")
+            ui.label(f"{plan.existing_books} existing books (preserved)")
+            ui.label(f"{plan.fields_filled} empty fields filled")
+            ui.label(f"{plan.files_added} new files added")
+            ui.label("Existing covers, edits, and review status are preserved.").classes(
+                "text-caption text-grey-7"
+            )
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                async def _apply() -> None:
+                    dialog.close()
+                    written = await asyncio.to_thread(controller.apply_scan, plan)
+                    _refresh_all()
+                    ui.notify(f"Scan complete ({written} books)")
+
+                ui.button("Scan", icon="search", on_click=_apply)
+        dialog.open()
 
     async def _identify() -> None:
         await controller.identify_pending()
@@ -2102,7 +2125,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
 
-    scan_btn.on_click(lambda: _run(scan_btn, _scan, "Scan complete"))
+    scan_btn.on_click(_scan)  # manages its own preview dialog + refresh
     identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
     process_btn.on_click(_process)  # manages its own progress dialog + refresh
 
