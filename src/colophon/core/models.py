@@ -102,6 +102,7 @@ class BookUnit(_Base):
     genres: list[str] = []
     tags: list[str] = []
     asin: str | None = None
+    isbn: str | None = None
     language: str | None = None
     abridged: bool | None = None
     cover_path: Path | None = None
@@ -178,3 +179,4 @@ class EmbeddedTags(_Base):
     genre: str | None = None
     description: str | None = None
     asin: str | None = None
+    isbn: str | None = None

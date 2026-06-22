@@ -1841,7 +1841,7 @@ def test_catalog_result_reports_affected_ids(tmp_path):
     assert res.affected_ids == [a.id]
     assert ctx.books.get(a.id).publisher == "Tor Books"
     ctx.close()
-    
+
 def test_apply_match_fields_rescores_confidence(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
