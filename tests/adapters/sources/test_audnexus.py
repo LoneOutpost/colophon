@@ -199,3 +199,10 @@ def test_to_result_runtime_and_format():
 
     r3 = src._to_result({"title": "Y"})
     assert r3.runtime_ms is None and r3.abridged is None
+
+
+def test_to_result_parses_subtitle():
+    src = _source(lambda req: httpx.Response(200, json={}))
+    r = src._to_result({"title": "Project Hail Mary", "subtitle": "A Novel"})
+    assert r.subtitle == "A Novel"
+    assert src._to_result({"title": "X"}).subtitle is None

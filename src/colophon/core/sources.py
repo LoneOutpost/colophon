@@ -19,6 +19,7 @@ class SourceResult(_Base):
 
     provider: str
     title: str | None = None
+    subtitle: str | None = None
     authors: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     narrators: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     series_name: str | None = None

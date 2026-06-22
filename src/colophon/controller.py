@@ -827,6 +827,8 @@ class AppController:
         updates: dict[str, str | None] = {}
         if result.title:
             updates["title"] = result.title
+        if result.subtitle:
+            updates["subtitle"] = result.subtitle
         if result.authors:
             updates["author"] = "; ".join(result.authors)
         if result.narrators:

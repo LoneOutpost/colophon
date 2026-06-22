@@ -71,6 +71,7 @@ class HardcoverSource:
         return SourceResult(
             provider=self.name,
             title=book.get("title"),
+            subtitle=book.get("subtitle"),
             authors=authors,
             publish_year=year if isinstance(year, int) else None,
             cover_url=image.get("url"),
