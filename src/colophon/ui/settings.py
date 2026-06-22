@@ -55,7 +55,6 @@ def render_settings(controller: AppController) -> None:
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
-        ui.label("Settings").classes("text-subtitle2 q-ml-md").style("opacity: .7")
         app_tabs(controller, "settings")
         ui.space()
         dark_mode_button(dark)
