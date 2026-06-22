@@ -113,6 +113,7 @@ class BookUnit(_Base):
     provenance: dict[str, str] = {}
     confidence: float = 0.0
     confidence_signals: list[ConfidenceSignal] = []
+    manually_confirmed: bool = False
     state: BookState = BookState.DETECTED
 
     created_at: datetime = Field(frozen=True)
