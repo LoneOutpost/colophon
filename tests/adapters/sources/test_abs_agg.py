@@ -1,6 +1,6 @@
 import httpx
 
-from colophon.adapters.sources.abs_agg import AbsAggSource
+from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
 from colophon.core.sources import SourceQuery
 
 
@@ -83,3 +83,43 @@ async def test_partial_match_missing_optional_fields():
     assert r.authors == ["Doyle"]
     assert r.narrators == [] and r.isbn is None and r.series_name is None
     assert r.publish_year is None and r.runtime_ms is None
+
+
+def test_discover_providers_registers_available(monkeypatch):
+    import colophon.adapters.sources.abs_agg as mod
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/providers"
+        return httpx.Response(200, json=[
+            {"id": "hardcover", "name": "Hardcover", "available": True},
+            {"id": "goodreads", "name": "Goodreads", "available": True},
+            {"id": "broken", "name": "Broken", "available": False},
+        ])
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        mod.httpx, "Client",
+        lambda _c=real_client, **kw: _c(transport=httpx.MockTransport(handler), base_url="http://abs-agg"),
+    )
+    sources = discover_providers("http://abs-agg")
+    assert [s.name for s in sources] == ["hardcover", "goodreads"]
+    assert sources[0].label == "Hardcover"
+
+
+def test_discover_providers_unreachable_returns_empty(monkeypatch):
+    import colophon.adapters.sources.abs_agg as mod
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        mod.httpx, "Client",
+        lambda _c=real_client, **kw: _c(transport=httpx.MockTransport(handler), base_url="http://abs-agg"),
+    )
+    assert discover_providers("http://abs-agg") == []
+
+
+def test_discover_providers_blank_url_returns_empty():
+    assert discover_providers("") == []
+    assert discover_providers(None) == []

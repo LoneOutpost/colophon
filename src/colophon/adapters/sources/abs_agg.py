@@ -95,3 +95,27 @@ class AbsAggSource:
             runtime_ms=duration * 1000 if isinstance(duration, int) else None,
             raw=m,
         )
+
+
+def discover_providers(base_url: str | None) -> list[AbsAggSource]:
+    """One synchronous GET /providers at startup; register each available
+    provider as an AbsAggSource bound to a shared async client. Any failure
+    (no url, unreachable, non-200, bad body) registers nothing (logged)."""
+    if not base_url:
+        return []
+    try:
+        with httpx.Client(base_url=base_url, timeout=5.0) as client:
+            resp = client.get("/providers")
+            if resp.status_code >= 400:
+                logger.warning(f"abs-agg /providers returned {resp.status_code}")
+                return []
+            providers = resp.json() or []
+    except (httpx.HTTPError, ValueError):
+        logger.warning(f"abs-agg discovery failed at {base_url}", exc_info=True)
+        return []
+    shared = httpx.AsyncClient(base_url=base_url, timeout=15.0)
+    out: list[AbsAggSource] = []
+    for p in providers:
+        if isinstance(p, dict) and p.get("available") and p.get("id"):
+            out.append(AbsAggSource(provider=p["id"], label=p.get("name") or p["id"], client=shared))
+    return out
