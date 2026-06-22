@@ -567,6 +567,36 @@ def test_save_settings_persists_and_updates_live_config(tmp_path):
     ctx.close()
 
 
+def test_save_settings_rediscovers_abs_agg_sources(tmp_path, monkeypatch):
+    import colophon.controller as ctrlmod
+    from colophon.adapters.config import Config as _Config
+    from colophon.adapters.sources.abs_agg import AbsAggSource
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"), config_path=tmp_path / "c.toml")
+    ctrl = AppController(ctx)
+    base_count = len(ctx.sources)  # built-ins only; abs_agg_url unset at startup
+
+    monkeypatch.setattr(
+        ctrlmod, "discover_providers",
+        lambda url: [AbsAggSource(provider="goodreads", label="Goodreads", base_url=url)] if url else [],
+    )
+
+    # adding the URL makes providers appear live (no restart)
+    ctrl.save_settings(_Config(db_path=tmp_path / "db.sqlite", abs_agg_url="http://abs-agg"))
+    assert "goodreads" in {s.name for s in ctx.sources}
+    assert len(ctx.sources) == base_count + 1
+
+    # saving again with the same URL does not duplicate
+    ctrl.save_settings(_Config(db_path=tmp_path / "db.sqlite", abs_agg_url="http://abs-agg"))
+    assert len(ctx.sources) == base_count + 1
+
+    # clearing the URL removes the abs-agg sources
+    ctrl.save_settings(_Config(db_path=tmp_path / "db.sqlite"))
+    assert "goodreads" not in {s.name for s in ctx.sources}
+    assert len(ctx.sources) == base_count
+    ctx.close()
+
+
 def test_get_matches_returns_ranked(tmp_path):
     import asyncio as _asyncio
 

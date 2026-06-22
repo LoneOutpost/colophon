@@ -12,6 +12,7 @@ from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
+from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.confidence import score_identification
@@ -129,10 +130,17 @@ class AppController:
     def save_settings(self, config: Config) -> None:
         """Persist `config` to the config file and update the live context.
 
+        When `abs_agg_url` changes, the abs-agg sources are re-discovered in place
+        so a new (or cleared) endpoint takes effect without a restart.
+
         Note: db_path changes take effect on next launch (the live DB
         connection is not rebuilt here)."""
+        old_abs_agg_url = self.ctx.config.abs_agg_url
         save_config(config, self.ctx.config_path)
         self.ctx.config = config
+        if config.abs_agg_url != old_abs_agg_url:
+            self.ctx.sources = [s for s in self.ctx.sources if not isinstance(s, AbsAggSource)]
+            self.ctx.sources.extend(discover_providers(config.abs_agg_url))
 
     # --- scanning / identification ---
     def scan(self, roots: list[Path] | None = None) -> int:
