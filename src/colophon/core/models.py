@@ -103,6 +103,7 @@ class BookUnit(_Base):
     tags: list[str] = []
     asin: str | None = None
     language: str | None = None
+    abridged: bool | None = None
     cover_path: Path | None = None
     cover_url: str | None = None  # source-provided cover image URL, fetched into cover_path
     output_path: Path | None = None  # the produced M4B's final location once organized
@@ -130,6 +131,12 @@ class BookUnit(_Base):
     def touch(self) -> None:
         """Bump updated_at to now; call after any mutation before persisting."""
         self.updated_at = _now()
+
+    @property
+    def duration_ms(self) -> int:
+        """Total measured audio length across source files, in milliseconds
+        (0 when there are no files)."""
+        return round(sum(sf.duration_seconds for sf in self.source_files) * 1000)
 
 
 class EditChange(_Base):

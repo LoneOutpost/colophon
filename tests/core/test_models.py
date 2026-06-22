@@ -183,3 +183,15 @@ def test_chapter_still_importable_from_chapters_module():
     from colophon.core.chapters import Chapter as ChapterFromChapters
     from colophon.core.models import Chapter as ChapterFromModels
     assert ChapterFromChapters is ChapterFromModels
+
+
+def test_book_duration_ms_sums_files(tmp_path):
+    from colophon.core.models import BookUnit, SourceFile
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    assert b.duration_ms == 0
+    b.source_files = [
+        SourceFile(path=tmp_path / "a.mp3", size=0, duration_seconds=3600.0, ext="mp3"),
+        SourceFile(path=tmp_path / "b.mp3", size=0, duration_seconds=125.5, ext="mp3"),
+    ]
+    assert b.duration_ms == 3725500
+    assert b.abridged is None

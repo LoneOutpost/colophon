@@ -12,6 +12,13 @@ def test_source_query_allows_all_none():
     assert q.title is None and q.author is None and q.asin is None
 
 
+def test_source_result_runtime_and_abridged_default_none():
+    from colophon.core.sources import SourceResult
+    r = SourceResult(provider="x", title="t")
+    assert r.runtime_ms is None
+    assert r.abridged is None
+
+
 def test_source_result_round_trips():
     r = SourceResult(
         provider="audnexus",
