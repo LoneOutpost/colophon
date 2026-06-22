@@ -1781,3 +1781,36 @@ def test_normalize_on_match_config_round_trip(tmp_path):
     path = tmp_path / "config.toml"
     save_config(Config(normalize_on_match=["title", "description"]), path)
     assert load_config(path).normalize_on_match == ["title", "description"]
+
+
+def test_catalog_entries_and_rename(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.authors = ["JRR Tolkien"]
+    ctx.books.upsert(b)
+    assert any(e.name == "JRR Tolkien" and e.count == 1 for e in ctrl.catalog_entries("author"))
+    res = ctrl.rename_catalog_entry("author", "JRR Tolkien", "J.R.R. Tolkien")
+    assert res.affected_count == 1
+    assert res.batch_id
+    assert ctx.books.get(b.id).authors == ["J.R.R. Tolkien"]
+    ctx.close()
+
+
+def test_catalog_merge_and_delete(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.authors = ["JRR Tolkien"]
+    ctx.books.upsert(a)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.authors = ["J.R.R Tolkien"]
+    ctx.books.upsert(b)
+    res = ctrl.merge_catalog_entries("author", ["JRR Tolkien", "J.R.R Tolkien"], "J.R.R. Tolkien")
+    assert res.affected_count == 2
+    assert ctx.books.get(a.id).authors == ["J.R.R. Tolkien"]
+    assert ctx.books.get(b.id).authors == ["J.R.R. Tolkien"]
+    res2 = ctrl.delete_catalog_entry("author", "J.R.R. Tolkien")
+    assert res2.affected_count == 2
+    assert ctx.books.get(a.id).authors == []
+    ctx.close()
