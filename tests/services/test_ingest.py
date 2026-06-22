@@ -114,3 +114,56 @@ def test_scan_infers_author_from_directory_scheme(tmp_path: Path):
     assert book.authors == ["Brandon Sanderson"]
     assert book.provenance["authors"] == "directory"
     assert book.title == "Warbreaker"
+
+
+def test_rescan_preserves_app_state_and_fills_empty(tmp_path):
+    from colophon.services.ingest import commit_scan, plan_scan
+
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Dune"
+    dune.mkdir(parents=True)
+    f = dune / "01.mp3"
+    f.write_bytes(b"")
+    id3 = ID3()
+    id3.add(TPE1(encoding=3, text=["Frank Herbert"]))
+    id3.save(f)
+
+    repo = _repo(tmp_path)
+    commit_scan(repo, plan_scan(repo, ingest, template="%author% - %title%"))
+    book = repo.list_all()[0]
+    book.cover_path = tmp_path / "cover.jpg"
+    book.confidence = 100.0
+    book.state = BookState.READY
+    book.genres = ["Fantasy"]
+    book.title = "User Edited Title"
+    repo.upsert(book)
+
+    plan = plan_scan(repo, ingest, template="%author% - %title%")
+    assert plan.new_books == 0
+    assert plan.existing_books == 1
+    commit_scan(repo, plan)
+
+    after = repo.get(book.id)
+    assert after.cover_path == tmp_path / "cover.jpg"
+    assert after.confidence == 100.0
+    assert after.state == BookState.READY
+    assert after.genres == ["Fantasy"]
+    assert after.title == "User Edited Title"
+
+
+def test_plan_scan_does_not_persist(tmp_path):
+    from colophon.services.ingest import plan_scan
+
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Dune"
+    dune.mkdir(parents=True)
+    f = dune / "01.mp3"
+    f.write_bytes(b"")
+    id3 = ID3()
+    id3.add(TPE1(encoding=3, text=["Frank Herbert"]))
+    id3.save(f)
+
+    repo = _repo(tmp_path)
+    plan = plan_scan(repo, ingest, template="%author% - %title%")
+    assert plan.new_books == 1
+    assert repo.list_all() == []
