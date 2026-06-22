@@ -694,10 +694,13 @@ async def test_search_matches_builds_query_from_edited_fields(tmp_path):
     book = BookUnit.new(source_folder=tmp_path / "x")
     book.title = "Original"
     await AppController(ctx).search_matches(
-        book, title="Edited", author="A", series="S", asin="B01", source_name="audnexus"
+        book, title="Edited", author="A", series="S", asin="B01",
+        isbn="9780306406157", source_name="audnexus"
     )
     q = captured["q"]
-    assert (q.title, q.author, q.series, q.asin) == ("Edited", "A", "S", "B01")
+    assert (q.title, q.author, q.series, q.asin, q.isbn) == (
+        "Edited", "A", "S", "B01", "9780306406157"
+    )
     ctx.close()
 
 

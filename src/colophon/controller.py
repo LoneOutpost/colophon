@@ -803,6 +803,7 @@ class AppController:
         author: str | None,
         series: str | None,
         asin: str | None,
+        isbn: str | None = None,
         source_name: str,
     ) -> list[SourceResult]:
         """Query a single chosen source with the (user-edited) fields and return
@@ -817,6 +818,7 @@ class AppController:
             author=(author or "").strip() or None,
             series=(series or "").strip() or None,
             asin=(asin or "").strip() or None,
+            isbn=(isbn or "").strip() or None,
         )
         try:
             results = await source.search(query)
