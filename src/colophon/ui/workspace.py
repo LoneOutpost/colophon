@@ -149,7 +149,7 @@ def render_workspace(controller: AppController) -> None:
         "width:var(--colophon-nav-w,260px);min-width:0}"
         ".colophon-pane-mid{flex:0 0 var(--colophon-mid-w,460px);"
         "width:var(--colophon-mid-w,460px);min-width:0}"
-        ".colophon-resizer{flex:0 0 4px;cursor:col-resize;align-self:stretch;"
+        ".colophon-resizer{flex:0 0 9px;cursor:col-resize;align-self:stretch;"
         "display:flex;align-items:center;justify-content:center;touch-action:none}"
         ".colophon-resizer::after{content:'';width:1px;height:32px;border-radius:1px;"
         "background:rgba(120,120,128,.35);transition:background .15s}"
@@ -2001,8 +2001,8 @@ def render_workspace(controller: AppController) -> None:
     # height, so height:100% would collapse each card to its content and flatten the
     # internal scroll-areas to 0. Stretch sizes them correctly and the scroll-areas
     # absorb any overflow.
-    with ui.row().classes("w-full no-wrap q-gutter-sm q-pa-md items-stretch").style(
-        "flex: 1; min-height: 0"
+    with ui.row().classes("w-full no-wrap q-pa-md items-stretch").style(
+        "flex: 1; min-height: 0; gap: 0"
     ):
         with ui.card().classes("column colophon-pane-nav"):
             ui.label("Library").classes("text-subtitle1")
