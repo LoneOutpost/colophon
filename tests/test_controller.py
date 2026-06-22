@@ -1048,6 +1048,27 @@ def test_apply_match_applies_all_present_fields_and_cover(tmp_path):
     ctx.close()
 
 
+def test_apply_match_fields_captures_abridged(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    ctx.books.upsert(b)
+    result = SourceResult(provider="stub", title="Dune", abridged=True)
+    ctrl.apply_match_fields(b, result, {"title"})
+    assert ctx.books.get(b.id).abridged is True
+    ctx.close()
+
+
+def test_set_abridged_persists(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    ctx.books.upsert(b)
+    ctrl.set_abridged(b, False)
+    assert ctx.books.get(b.id).abridged is False
+    ctx.close()
+
+
 def test_rd_configured_reflects_token(tmp_path):
     from colophon.adapters.config import Config
     from colophon.app_context import AppContext

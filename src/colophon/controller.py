@@ -210,6 +210,14 @@ class AppController:
         self._sync_sidecar(book)
         return CoverSetResult(ok=True)
 
+    def set_abridged(self, book: BookUnit, value: bool | None) -> None:
+        """Set the abridged flag directly (None = unknown) and persist. Not part of
+        the undoable field history."""
+        book.abridged = value
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
+
     async def cover_candidates(self, book: BookUnit) -> list[str]:
         """Distinct cover URLs from a match search, best-ranked first."""
         out: list[str] = []
@@ -714,6 +722,8 @@ class AppController:
             self._normalize_match_updates(updates)
             if p.best.cover_url:
                 p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
+            if p.best.abridged is not None:
+                p.book.abridged = p.best.abridged
             items.append((p.book, updates, p.best.provider))
 
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
@@ -841,6 +851,8 @@ class AppController:
         undoable batch."""
         if "cover" in fields and result.cover_url:
             book.cover_url = result.cover_url
+        if result.abridged is not None:
+            book.abridged = result.abridged
         updates = {k: v for k, v in self.match_field_values(result).items() if k in fields}
         self._merge_genre_tag_updates(book, result, updates)
         self._normalize_match_updates(updates)
