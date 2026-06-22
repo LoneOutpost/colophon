@@ -667,6 +667,26 @@ def test_available_sources_lists_configured_with_labels(tmp_path):
     ctx.close()
 
 
+def test_available_sources_and_label_prefer_source_label_attr(tmp_path):
+    ctx = _ctx(tmp_path)
+
+    class _Labeled:
+        name = "librivox"
+        label = "LibriVox"
+
+        async def search(self, query):
+            return []
+
+    ctx.sources.append(_Labeled())
+    ctrl = AppController(ctx)
+    labels = dict(ctrl.available_sources())
+    assert labels["librivox"] == "LibriVox"
+    assert ctrl.source_label("librivox") == "LibriVox"
+    # built-in sources without a .label still use the static map
+    assert ctrl.source_label("audnexus") == "Audible"
+    ctx.close()
+
+
 async def test_search_matches_queries_only_chosen_source(tmp_path):
     audn = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune")])
     other = _StubSource("openlibrary", [SourceResult(provider="openlibrary", title="WRONG")])

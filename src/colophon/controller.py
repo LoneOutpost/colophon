@@ -785,10 +785,14 @@ class AppController:
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority
         order, so the search dialog can list exactly the available services."""
-        return [(s.name, _SOURCE_LABELS.get(s.name, s.name.title())) for s in self.ctx.sources]
+        return [(s.name, getattr(s, "label", None) or _SOURCE_LABELS.get(s.name, s.name.title()))
+                for s in self.ctx.sources]
 
     def source_label(self, name: str) -> str:
         """Human-facing label for a source/provenance name (e.g. 'audnexus' -> 'Audible')."""
+        for s in self.ctx.sources:
+            if s.name == name and getattr(s, "label", None):
+                return s.label
         return _SOURCE_LABELS.get(name, name.title())
 
     def review_threshold(self) -> float:
