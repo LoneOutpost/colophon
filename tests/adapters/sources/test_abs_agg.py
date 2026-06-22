@@ -90,11 +90,11 @@ def test_discover_providers_registers_available(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/providers"
-        return httpx.Response(200, json=[
+        return httpx.Response(200, json={"providers": [
             {"id": "hardcover", "name": "Hardcover", "available": True},
             {"id": "goodreads", "name": "Goodreads", "available": True},
             {"id": "broken", "name": "Broken", "available": False},
-        ])
+        ]})
 
     real_client = httpx.Client
     monkeypatch.setattr(

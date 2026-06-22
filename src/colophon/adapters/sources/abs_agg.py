@@ -109,10 +109,12 @@ def discover_providers(base_url: str | None) -> list[AbsAggSource]:
             if resp.status_code >= 400:
                 logger.warning(f"abs-agg /providers returned {resp.status_code}")
                 return []
-            providers = resp.json() or []
+            payload = resp.json() or []
     except (httpx.HTTPError, ValueError):
         logger.warning(f"abs-agg discovery failed at {base_url}", exc_info=True)
         return []
+    # The API wraps the list as {"providers": [...]}; tolerate a bare list too.
+    providers = payload.get("providers") or [] if isinstance(payload, dict) else payload
     shared = httpx.AsyncClient(base_url=base_url, timeout=15.0)
     out: list[AbsAggSource] = []
     for p in providers:
