@@ -21,7 +21,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
-from colophon.core.models import BookUnit
+from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import NORMALIZABLE_FIELDS, normalize_description, normalize_text
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -55,6 +55,18 @@ def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
     index = max(0, min(len(ids) - 1, ids.index(current) + delta))
     return ids[index]
 
+
+# Short state label + Quasar color for the per-row state badge.
+_STATE_BADGE: dict[BookState, tuple[str, str]] = {
+    BookState.DETECTED: ("Detected", "grey-6"),
+    BookState.IDENTIFIED: ("Identified", "grey-6"),
+    BookState.NEEDS_REVIEW: ("Review", "warning"),
+    BookState.READY: ("Ready", "positive"),
+    BookState.ENCODING: ("Encoding", "info"),
+    BookState.ORGANIZED: ("Organized", "info"),
+    BookState.FAILED: ("Failed", "negative"),
+    BookState.SKIPPED: ("Skipped", "grey-6"),
+}
 
 # Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
 _STATUS_BADGES = [
@@ -1185,8 +1197,11 @@ def render_workspace(controller: AppController) -> None:
                         with ui.item_section().classes("cursor-pointer").on(
                             "click", lambda bid=book.id: _set_focus(bid)
                         ):
-                            ui.item_label(book.title or "(untitled)")
-                            ui.item_label(", ".join(book.authors) or "unknown author").props("caption")
+                            ui.item_label(book.title or "(untitled)").classes("colophon-book-title")
+                            series = book.series[0].name if book.series else ""
+                            author = ", ".join(book.authors) or "unknown author"
+                            line2 = f"{author} · {series}" if series else author
+                            ui.item_label(line2).props("caption")
                             chip_labels = book.genres + book.tags
                             if chip_labels:
                                 with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
@@ -1201,11 +1216,15 @@ def render_workspace(controller: AppController) -> None:
                                 total = sum(sf.duration_seconds for sf in book.source_files)
                                 if book.source_files:
                                     ui.label(_fmt_duration(total)).classes(
-                                        "text-caption text-grey-6"
+                                        "text-caption text-grey-6 colophon-mono"
                                     )
                                 ui.badge(f"{book.confidence:.0f}").props(
                                     f"color={_confidence_color(book.confidence)}"
                                 )
+                                _slabel, _scolor = _STATE_BADGE.get(
+                                    book.state, (book.state.value, "grey-6")
+                                )
+                                ui.badge(_slabel).props(f"color={_scolor} outline")
 
     # --- keyboard navigation ---
     def _set_focus(book_id: str) -> None:
