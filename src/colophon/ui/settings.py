@@ -111,9 +111,9 @@ def render_settings(controller: AppController) -> None:
                     "API key", value=cfg.lazylibrarian_api_key or "", password=True
                 ).props(field).classes("w-full")
 
-            with _section("Hardcover", "Metadata source; set a token to enable it."):
-                hc_token = ui.input(
-                    "API token", value=cfg.hardcover_api_token or "", password=True
+            with _section("abs-agg", "Audiobook metadata aggregator. Set its base URL to enable its providers."):
+                abs_agg_url = ui.input(
+                    "Base URL", value=cfg.abs_agg_url or ""
                 ).props(field).classes("w-full")
 
             with _section("Real-Debrid", "Browse and download audiobooks from your account."):
@@ -198,7 +198,7 @@ def render_settings(controller: AppController) -> None:
                         audiobookshelf_library_id=_opt_str(abs_lib.value),
                         lazylibrarian_url=_opt_str(ll_url.value),
                         lazylibrarian_api_key=_opt_str(ll_key.value),
-                        hardcover_api_token=_opt_str(hc_token.value),
+                        abs_agg_url=_opt_str(abs_agg_url.value),
                         real_debrid_token=_opt_str(rd_token.value),
                         real_debrid_download_dir=_opt_path(rd_dir.value),
                         genre_whitelist_enabled=bool(genre_whitelist.value),

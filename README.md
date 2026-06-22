@@ -49,7 +49,7 @@ table below lists every setting.
 | `audiobookshelf_library_id` | unset | no | AudiobookShelf library to rescan. |
 | `lazylibrarian_url` | unset | no | LazyLibrarian base URL for read-only status lookups. |
 | `lazylibrarian_api_key` | unset | no | LazyLibrarian API key. |
-| `hardcover_api_token` | unset | no | Enables the Hardcover metadata source when set. |
+| `abs_agg_url` | unset | no | Base URL of a self-hosted [abs-agg](https://github.com/Vito0912/abs-agg) instance. When set, its providers are auto-discovered and added as metadata sources. |
 
 Credentials are stored in this file. Keep it outside any shared or version
 controlled location.
@@ -78,9 +78,12 @@ controlled location.
 
 * Audnexus: audiobook-specific data including narrator, series, ASIN, and cover.
   A matching ASIN yields high confidence.
-* OpenLibrary: title and author fallback.
+* OpenLibrary: title and author fallback, with ISBN.
 * Google Books: broad catalog fallback, no authentication required.
-* Hardcover: enabled when an API token is configured.
+* Internet Archive: spoken-word and LibriVox recordings.
+* abs-agg: when `abs_agg_url` is set, each provider it aggregates (Hardcover,
+  Goodreads, LibriVox, BookBeat, Storytel, and more) is auto-discovered and added
+  as its own source.
 
 ## Development
 

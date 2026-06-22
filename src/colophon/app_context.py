@@ -19,9 +19,9 @@ from colophon.adapters.repository.store import (
     connect,
     migrate,
 )
+from colophon.adapters.sources.abs_agg import discover_providers
 from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
-from colophon.adapters.sources.hardcover import HardcoverSource
 from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
 from colophon.core.sources import MetadataSource
@@ -57,8 +57,7 @@ class AppContext:
         sources: list[MetadataSource] = [
             AudnexusSource(), OpenLibrarySource(), GoogleBooksSource(), InternetArchiveSource()
         ]
-        if config.hardcover_api_token:
-            sources.append(HardcoverSource(token=config.hardcover_api_token))
+        sources.extend(discover_providers(config.abs_agg_url))
         abs_client = (
             AbsClient(base_url=config.audiobookshelf_url, token=config.audiobookshelf_token)
             if config.audiobookshelf_url and config.audiobookshelf_token

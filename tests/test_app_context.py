@@ -43,14 +43,19 @@ def test_clients_built_when_configured(tmp_path):
     ctx.close()
 
 
-def test_hardcover_source_added_only_when_token_present(tmp_path):
+def test_abs_agg_sources_discovered_when_url_set(tmp_path, monkeypatch):
+    import colophon.app_context as appctx
+    monkeypatch.setattr(
+        appctx, "discover_providers",
+        lambda url: [object()] if url else [],
+    )
     base = AppContext.create(Config(db_path=tmp_path / "a.db"))
-    assert "hardcover" not in {s.name for s in base.sources}
+    base_count = len(base.sources)
     base.close()
 
-    with_hc = AppContext.create(Config(db_path=tmp_path / "b.db", hardcover_api_token="hc"))
-    assert "hardcover" in {s.name for s in with_hc.sources}
-    with_hc.close()
+    with_agg = AppContext.create(Config(db_path=tmp_path / "b.db", abs_agg_url="http://abs-agg"))
+    assert len(with_agg.sources) == base_count + 1
+    with_agg.close()
 
 
 def test_config_path_defaults_to_standard_location(tmp_path):
