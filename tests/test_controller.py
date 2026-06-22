@@ -1826,3 +1826,18 @@ def test_match_field_values_includes_subtitle():
     assert "subtitle" not in AppController.match_field_values(
         SourceResult(provider="audnexus", title="PHM")
     )
+
+
+def test_catalog_result_reports_affected_ids(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.publisher = "Tor"
+    ctx.books.upsert(a)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.publisher = "Macmillan"
+    ctx.books.upsert(b)
+    res = ctrl.rename_catalog_entry("publisher", "Tor", "Tor Books")
+    assert res.affected_ids == [a.id]
+    assert ctx.books.get(a.id).publisher == "Tor Books"
+    ctx.close()

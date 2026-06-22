@@ -110,6 +110,7 @@ class ChapterApplyResult(_Base):
 
 class CatalogResult(_Base):
     affected_count: int = 0
+    affected_ids: list[str] = []  # noqa: RUF012 - pydantic field default, copied per instance
     batch_id: str | None = None
 
 
@@ -273,7 +274,7 @@ class AppController:
             book = self.ctx.books.get(book_id)
             if book is not None:
                 self._sync_sidecar(book)
-        return CatalogResult(affected_count=len(affected), batch_id=batch_id)
+        return CatalogResult(affected_count=len(affected), affected_ids=affected, batch_id=batch_id)
 
     def rename_catalog_entry(self, kind: str, old: str, new: str) -> CatalogResult:
         return self._catalog_apply(kind, {old: new})

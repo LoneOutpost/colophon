@@ -5,6 +5,7 @@ batches."""
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 
 from nicegui import ui
 
@@ -20,6 +21,8 @@ _KIND_LABELS = {
     "series": "Series",
     "genre": "Genres",
     "tag": "Tags",
+    "publisher": "Publisher",
+    "language": "Language",
 }
 
 
@@ -63,22 +66,40 @@ def render_manage(controller: AppController) -> None:
         ui.notify("Reverted")
         refresh()
 
+    async def _maybe_write_tags(res, do_write: bool) -> None:
+        """When the 'update file tags' box was checked, rewrite embedded tags on the
+        books the operation changed (best-effort, async)."""
+        if not do_write or not res.affected_ids:
+            return
+        books = [b for b in (controller.get_book(i) for i in res.affected_ids) if b is not None]
+        if not books:
+            return
+        ui.notify(f"Writing tags to {len(books)} book(s)...")
+        results = await controller.write_tags_books(books)
+        ok = sum(1 for r in results if getattr(r, "ok", True))
+        ui.notify(f"Updated tags on {ok} of {len(books)} book(s)")
+
+    def _write_tags_checkbox():
+        return ui.checkbox("Also update file tags").props("dense").classes("q-mt-sm")
+
     # --- dialogs ---
     def _edit_dialog(name: str) -> None:
         kind = state["kind"]
         with ui.dialog() as dialog, ui.card().classes("w-96"):
             ui.label(f"Rename {kind}").classes("text-subtitle1")
             new_in = ui.input("New name", value=name).props("dense autofocus").classes("w-full")
+            write_tags = _write_tags_checkbox()
 
-            def _confirm() -> None:
+            async def _confirm() -> None:
                 new = (new_in.value or "").strip()
                 if not new:
                     ui.notify("Enter a name", type="warning")
                     return
                 res = controller.rename_catalog_entry(kind, name, new)  # type: ignore[arg-type]
                 state["last_batch"] = res.batch_id
-                dialog.close()
                 ui.notify(f"Renamed in {res.affected_count} book(s)")
+                await _maybe_write_tags(res, write_tags.value)
+                dialog.close()
                 _selected().clear()
                 refresh()
 
@@ -94,12 +115,14 @@ def render_manage(controller: AppController) -> None:
             ui.label(f"Used by {count} books. Remove from all?").classes(
                 "text-caption text-grey-7"
             )
+            write_tags = _write_tags_checkbox()
 
-            def _confirm() -> None:
+            async def _confirm() -> None:
                 res = controller.delete_catalog_entry(kind, name)  # type: ignore[arg-type]
                 state["last_batch"] = res.batch_id
-                dialog.close()
                 ui.notify(f"Removed from {res.affected_count} book(s)")
+                await _maybe_write_tags(res, write_tags.value)
+                dialog.close()
                 _selected().clear()
                 refresh()
 
@@ -124,8 +147,9 @@ def render_manage(controller: AppController) -> None:
                 label="Merge into",
                 new_value_mode="add-unique",
             ).props("dense use-input").classes("w-full")
+            write_tags = _write_tags_checkbox()
 
-            def _confirm() -> None:
+            async def _confirm() -> None:
                 target = (target_in.value or "").strip()
                 if not target:
                     ui.notify("Pick or type a target name", type="warning")
@@ -135,8 +159,9 @@ def render_manage(controller: AppController) -> None:
                     return
                 res = controller.merge_catalog_entries(kind, sources, target)  # type: ignore[arg-type]
                 state["last_batch"] = res.batch_id
-                dialog.close()
                 ui.notify(f"Merged {len(sources)} into {target}")
+                await _maybe_write_tags(res, write_tags.value)
+                dialog.close()
                 _selected().clear()
                 refresh()
 
@@ -199,6 +224,12 @@ def render_manage(controller: AppController) -> None:
                             with ui.item_section().props("side"):
                                 with ui.row().classes("items-center no-wrap q-gutter-xs"):
                                     ui.badge(str(entry.count)).props("color=grey-6 outline")
+                                    ui.button(
+                                        icon="arrow_outward",
+                                        on_click=lambda n=entry.name: ui.navigate.to(
+                                            f"/?filter={quote(n)}"
+                                        ),
+                                    ).props("flat dense round").tooltip("Show books in the Library")
                                     ui.button(
                                         icon="edit",
                                         on_click=lambda n=entry.name: _edit_dialog(n),

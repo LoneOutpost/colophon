@@ -12,7 +12,7 @@ from collections import Counter
 from colophon.core.fields import get_field
 from colophon.core.models import BookUnit, _Base
 
-CATALOG_KINDS = ("author", "narrator", "series", "genre", "tag")
+CATALOG_KINDS = ("author", "narrator", "series", "genre", "tag", "publisher", "language")
 
 
 class CatalogEntry(_Base):

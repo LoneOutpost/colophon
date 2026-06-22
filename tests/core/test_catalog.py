@@ -16,7 +16,7 @@ def _book(tmp_path, **kw):
 
 
 def test_kinds():
-    assert CATALOG_KINDS == ("author", "narrator", "series", "genre", "tag")
+    assert CATALOG_KINDS == ("author", "narrator", "series", "genre", "tag", "publisher", "language")
 
 
 def test_entry_names_per_kind(tmp_path):
@@ -42,3 +42,16 @@ def test_remap_rename_dedupes():
 def test_remap_merge_and_delete():
     assert remap_names(["a", "b", "c"], {"a": "X", "b": "X"}) == ["X", "c"]
     assert remap_names(["a", "b"], {"a": None}) == ["b"]
+
+
+def test_catalog_kinds_include_publisher_and_language():
+    assert "publisher" in CATALOG_KINDS
+    assert "language" in CATALOG_KINDS
+
+
+def test_list_entries_publisher(tmp_path):
+    b1 = _book(tmp_path, publisher="Tor")
+    b2 = _book(tmp_path, publisher="Tor")
+    b3 = _book(tmp_path, publisher="Macmillan")
+    entries = {e.name: e.count for e in list_entries([b1, b2, b3], "publisher")}
+    assert entries == {"Tor": 2, "Macmillan": 1}
