@@ -12,7 +12,7 @@ from colophon.core.sources import MetadataSource, SourceQuery, SourceResult
 logger = logging.getLogger(__name__)
 
 
-SEARCH_FIELDS = ("title", "author", "series", "asin")
+SEARCH_FIELDS = ("title", "author", "series", "asin", "isbn")
 
 
 def query_for_book(book: BookUnit, fields: set[str] | None = None) -> SourceQuery:
@@ -27,6 +27,7 @@ def query_for_book(book: BookUnit, fields: set[str] | None = None) -> SourceQuer
         title=book.title if "title" in use else None,
         author=author if "author" in use else None,
         asin=book.asin if "asin" in use else None,
+        isbn=book.isbn if "isbn" in use else None,
         series=series if "series" in use else None,
     )
 

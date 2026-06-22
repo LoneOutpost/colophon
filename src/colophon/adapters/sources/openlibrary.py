@@ -7,9 +7,10 @@ from typing import Any
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
 
-_FIELDS = "title,author_name,first_publish_year,cover_i,key"
+_FIELDS = "title,author_name,first_publish_year,cover_i,key,isbn"
 
 _RETRY = retry(
     stop=stop_after_attempt(3),
@@ -26,11 +27,14 @@ class OpenLibrarySource:
         self._client = client or httpx.AsyncClient(base_url="https://openlibrary.org", timeout=15.0)
 
     async def search(self, query: SourceQuery) -> list[SourceResult]:
-        if not query.title:
+        if not query.title and not query.isbn:
             return []
-        params: dict[str, object] = {"title": query.title, "limit": 5, "fields": _FIELDS}
-        if query.author:
-            params["author"] = query.author
+        if query.isbn:
+            params: dict[str, object] = {"isbn": query.isbn, "limit": 5, "fields": _FIELDS}
+        else:
+            params = {"title": query.title, "limit": 5, "fields": _FIELDS}
+            if query.author:
+                params["author"] = query.author
         try:
             resp = await self._get(params)
         except httpx.HTTPError:
@@ -51,6 +55,18 @@ class OpenLibrarySource:
             title=doc.get("title"),
             authors=list(doc.get("author_name") or []),
             publish_year=doc.get("first_publish_year"),
+            isbn=self._pick_isbn(doc.get("isbn")),
             cover_url=f"https://covers.openlibrary.org/b/id/{cover}-L.jpg" if cover else None,
             raw=doc,
         )
+
+    @staticmethod
+    def _pick_isbn(isbns: object) -> str | None:
+        """First ISBN from the doc's list, preferring an ISBN-13, normalized."""
+        if not isinstance(isbns, list) or not isbns:
+            return None
+        candidates = [i for i in isbns if isinstance(i, str)]
+        if not candidates:
+            return None
+        preferred = next((i for i in candidates if len(normalize_isbn(i) or "") == 13), candidates[0])
+        return normalize_isbn(preferred)

@@ -27,11 +27,13 @@ def test_query_for_book_uses_first_author_and_series(tmp_path):
     b.authors = ["Frank Herbert", "Someone Else"]
     b.series = [SeriesRef(name="Dune")]
     b.asin = "B002V1A0WE"
+    b.isbn = "9780306406157"
     q = query_for_book(b)
     assert q.title == "Dune"
     assert q.author == "Frank Herbert"
     assert q.series == "Dune"
     assert q.asin == "B002V1A0WE"
+    assert q.isbn == "9780306406157"
 
 
 def test_query_for_book_none_when_fields_absent(tmp_path):
@@ -69,6 +71,22 @@ def test_query_for_book_filters_to_selected_fields(tmp_path):
     b.asin = "B002V1A0WE"
     q = query_for_book(b, {"title"})
     assert q.title == "Dune"
+    assert q.author is None
+    assert q.series is None
+    assert q.asin is None
+    assert q.isbn is None
+
+
+def test_query_for_book_includes_isbn_when_selected(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "Dune"
+    b.authors = ["Frank Herbert"]
+    b.series = [SeriesRef(name="Dune")]
+    b.asin = "B002V1A0WE"
+    b.isbn = "9780306406157"
+    q = query_for_book(b, {"isbn"})
+    assert q.isbn == "9780306406157"
+    assert q.title is None
     assert q.author is None
     assert q.series is None
     assert q.asin is None

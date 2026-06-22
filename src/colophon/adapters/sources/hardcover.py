@@ -68,6 +68,7 @@ class HardcoverSource:
         ]
         image = book.get("image") or {}
         year = book.get("release_year")
+        # ISBN not yet wired for Hardcover: its GraphQL editions/ISBN schema is unconfirmed.
         return SourceResult(
             provider=self.name,
             title=book.get("title"),

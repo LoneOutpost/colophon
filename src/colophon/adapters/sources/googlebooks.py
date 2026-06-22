@@ -8,6 +8,7 @@ import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from colophon.core.coerce import year_or_none
+from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
 
 _RETRY = retry(
@@ -31,13 +32,16 @@ class GoogleBooksSource:
         return await self._client.get("/books/v1/volumes", params={"q": q, "maxResults": 5})
 
     async def search(self, query: SourceQuery) -> list[SourceResult]:
-        if not query.title:
+        if not query.title and not query.isbn:
             return []
-        q = f"intitle:{query.title}"
-        if query.author:
-            q += f"+inauthor:{query.author}"
-        if query.series:
-            q += f"+{query.series}"  # additive free-text term to disambiguate within a series
+        if query.isbn:
+            q = f"isbn:{query.isbn}"
+        else:
+            q = f"intitle:{query.title}"
+            if query.author:
+                q += f"+inauthor:{query.author}"
+            if query.series:
+                q += f"+{query.series}"  # additive free-text term to disambiguate within a series
         try:
             resp = await self._get(q)
         except httpx.HTTPError:
@@ -54,7 +58,20 @@ class GoogleBooksSource:
             title=vol.get("title"),
             authors=[a for a in (vol.get("authors") or []) if isinstance(a, str)],
             publish_year=year_or_none(vol.get("publishedDate")),
+            isbn=self._pick_isbn(vol.get("industryIdentifiers")),
             cover_url=images.get("thumbnail"),
             description=vol.get("description"),
             raw=vol,
         )
+
+    @staticmethod
+    def _pick_isbn(identifiers: object) -> str | None:
+        """ISBN-13 if present, else ISBN-10, from industryIdentifiers; normalized."""
+        if not isinstance(identifiers, list):
+            return None
+        by_type = {
+            ident.get("type"): ident.get("identifier")
+            for ident in identifiers
+            if isinstance(ident, dict)
+        }
+        return normalize_isbn(by_type.get("ISBN_13") or by_type.get("ISBN_10"))
