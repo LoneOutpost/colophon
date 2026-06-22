@@ -51,25 +51,6 @@ async def test_title_search_has_no_isbn_when_editions_absent():
     assert results[0].isbn is None
 
 
-async def test_title_search_parses_isbn_from_default_edition():
-    body = {
-        "data": {
-            "books": [
-                {
-                    "title": "Dune",
-                    "release_year": 1965,
-                    "contributions": [{"author": {"name": "Frank Herbert"}}],
-                    "default_physical_edition": {"isbn_13": "9780441172719", "isbn_10": None},
-                    "default_ebook_edition": {"isbn_13": None, "isbn_10": None},
-                }
-            ]
-        }
-    }
-    src = _source(lambda req: httpx.Response(200, json=body))
-    results = await src.search(SourceQuery(title="Dune"))
-    assert results[0].isbn == "9780441172719"
-
-
 async def test_search_by_isbn_queries_editions_and_maps_book():
     captured = {}
 

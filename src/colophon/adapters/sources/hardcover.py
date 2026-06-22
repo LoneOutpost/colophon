@@ -10,8 +10,6 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
 
-# Title search: ISBN lives on editions, so pull the default print/ebook edition's
-# ISBN alongside the book (audiobook editions carry ASIN, not ISBN).
 _QUERY = """
 query ColophonBookSearch($q: String!) {
   books(where: {title: {_ilike: $q}}, limit: 5) {
@@ -20,13 +18,13 @@ query ColophonBookSearch($q: String!) {
     description
     contributions { author { name } }
     image { url }
-    default_physical_edition { isbn_13 isbn_10 }
-    default_ebook_edition { isbn_13 isbn_10 }
   }
 }
 """.strip()
 
 # ISBN search: match an edition by either ISBN form, then map back to its book.
+# (Title search cannot carry ISBN: Hardcover's gateway blocks the _ilike books scan
+# needed to also pull editions, so title results have no ISBN.)
 _ISBN_QUERY = """
 query ColophonEditionByIsbn($isbn: String!) {
   editions(where: {_or: [{isbn_13: {_eq: $isbn}}, {isbn_10: {_eq: $isbn}}]}, limit: 5) {
@@ -90,7 +88,7 @@ class HardcoverSource:
                 for e in editions
                 if isinstance(e.get("book"), dict)
             ]
-        return [self._build(book, _book_isbn(book)) for book in (data.get("books") or [])]
+        return [self._build(book, None) for book in (data.get("books") or [])]
 
     def _build(self, book: dict[str, Any], isbn: str | None) -> SourceResult:
         authors = [
@@ -116,13 +114,3 @@ class HardcoverSource:
 def _edition_isbn(edition: dict[str, Any]) -> str | None:
     """ISBN-13 if present on the matched edition, else ISBN-10, normalized."""
     return normalize_isbn(edition.get("isbn_13") or edition.get("isbn_10"))
-
-
-def _book_isbn(book: dict[str, Any]) -> str | None:
-    """ISBN from a book's default print edition, falling back to its ebook edition."""
-    for key in ("default_physical_edition", "default_ebook_edition"):
-        edition = book.get(key) or {}
-        isbn = edition.get("isbn_13") or edition.get("isbn_10")
-        if isbn:
-            return normalize_isbn(isbn)
-    return None
