@@ -123,3 +123,28 @@ def test_discover_providers_unreachable_returns_empty(monkeypatch):
 def test_discover_providers_blank_url_returns_empty():
     assert discover_providers("") == []
     assert discover_providers(None) == []
+
+
+async def test_hardcover_splits_comma_joined_authors():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"matches": [
+            {"title": "Skyward Flight", "author": "Brandon Sanderson, Janci Patterson"}
+        ]})
+
+    results = await _source(handler, provider="hardcover").search(
+        SourceQuery(title="Skyward Flight")
+    )
+    assert results[0].authors == ["Brandon Sanderson", "Janci Patterson"]
+
+
+async def test_unknown_provider_uses_auto_heuristic_keeps_last_first():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"matches": [
+            {"title": "Dune", "author": "Herbert, Frank"}
+        ]})
+
+    results = await _source(handler, provider="someprovider").search(
+        SourceQuery(title="Dune")
+    )
+    # Auto mode: "Herbert, Frank" parts lack internal whitespace -> kept as one.
+    assert results[0].authors == ["Herbert, Frank"]
