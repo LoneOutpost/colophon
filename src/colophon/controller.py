@@ -1181,6 +1181,8 @@ class AppController:
                     _emit(book.id, "cancelled")
                     return BookProcessResult(book_id=book.id, status="cancelled")
                 _emit(book.id, "encoding" if options.encode else "organizing")
+                if options.encode:
+                    await self.ensure_cover_cached(book)
                 result = await asyncio.to_thread(self._process_book, book, options)
                 _emit(book.id, result.status)
                 return result

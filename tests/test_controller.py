@@ -2212,3 +2212,28 @@ async def test_run_encode_job_graceful_cancel_skips_queued(tmp_path, make_audio)
     )
     assert [r.status for r in result.results] == ["cancelled", "cancelled", "cancelled"]
     ctx.close()
+
+
+async def test_run_encode_job_caches_cover_before_encode(tmp_path, make_audio, monkeypatch):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController, EncodeJobOptions
+    from colophon.core.models import BookState, SourceFile
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib"))
+    d = tmp_path / "s"; d.mkdir()
+    a = make_audio("s/a.mp3", seconds=1)
+    book = BookUnit.new(source_folder=d)
+    book.title = "B"; book.authors = ["A"]; book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    ctrl = AppController(ctx)
+    cached: list[str] = []
+
+    async def _fake_cache(b):
+        cached.append(b.id)
+
+    monkeypatch.setattr(ctrl, "ensure_cover_cached", _fake_cache)
+    await ctrl.run_encode_job([book], EncodeJobOptions(encode=True, organize=False))
+    assert cached == [book.id]
