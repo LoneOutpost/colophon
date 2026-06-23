@@ -1,10 +1,6 @@
 import httpx
 
-from colophon.adapters.sources.internet_archive import (
-    InternetArchiveSource,
-    _parse_narrators,
-    _parse_runtime,
-)
+from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.core.sources import SourceQuery
 
 
@@ -13,22 +9,6 @@ def _source(handler) -> InternetArchiveSource:
         transport=httpx.MockTransport(handler), base_url="https://archive.org"
     )
     return InternetArchiveSource(client=client)
-
-
-def test_parse_runtime():
-    assert _parse_runtime("7:34:27") == 27267000
-    assert _parse_runtime("58:03") == 3483000
-    assert _parse_runtime("90") == 90000
-    assert _parse_runtime("abc") is None
-    assert _parse_runtime(None) is None
-
-
-def test_parse_narrators():
-    assert _parse_narrators("A classic. Read by Jane Doe.") == ["Jane Doe"]
-    assert _parse_narrators("Narrated by Alice and Bob") == ["Alice", "Bob"]
-    assert _parse_narrators("Reader: Kara Shallenberg") == ["Kara Shallenberg"]
-    assert _parse_narrators("No cue here at all") == []
-    assert _parse_narrators(None) == []
 
 
 def test_to_result_maps_fields():

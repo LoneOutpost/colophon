@@ -7,8 +7,7 @@ from __future__ import annotations
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
 from colophon.core.catalog import entry_names, remap_names
 from colophon.core.fields import get_field, set_field
-from colophon.core.models import EditChange
-from colophon.services.editing import _new_batch_id
+from colophon.core.models import EditChange, new_batch_id
 
 
 def apply_catalog_mapping(
@@ -18,7 +17,7 @@ def apply_catalog_mapping(
 
     Returns (affected_book_ids, batch_id); batch_id is None when nothing changed.
     """
-    batch_id = _new_batch_id()
+    batch_id = new_batch_id()
     changes: list[EditChange] = []
     touched = []
     for book in books.list_all():

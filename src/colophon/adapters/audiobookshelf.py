@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import httpx
 from pydantic import BaseModel
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from colophon.adapters.http import HTTP_RETRY
 
 
 class AbsError(RuntimeError):
@@ -16,12 +17,6 @@ class AbsLibrary(BaseModel):
     name: str
 
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 class AbsClient:
@@ -32,11 +27,11 @@ class AbsClient:
             timeout=30.0,
         )
 
-    @_RETRY
+    @HTTP_RETRY
     async def _get(self, path: str) -> httpx.Response:
         return await self._client.get(path)
 
-    @_RETRY
+    @HTTP_RETRY
     async def _post(self, path: str) -> httpx.Response:
         return await self._client.post(path)
 

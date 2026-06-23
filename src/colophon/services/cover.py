@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from colophon.adapters.cover import fetch_cover
+from colophon.adapters.cover import ext_for_mime, fetch_cover
 from colophon.core.models import BookUnit
 
 logger = logging.getLogger(__name__)
@@ -28,8 +28,7 @@ async def ensure_cached_cover(
     cover = await fetch_cover(book.cover_url, client=client)
     if cover is None:
         return None
-    ext = ".png" if cover.mime == "image/png" else ".jpg"
-    path = dest_dir / f"cover{ext}"
+    path = dest_dir / f"cover{ext_for_mime(cover.mime)}"
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
         path.write_bytes(cover.data)

@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from colophon.adapters.http import HTTP_RETRY
 
 
 class LLError(RuntimeError):
     """A LazyLibrarian request failed (4xx or exhausted retries)."""
 
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 class LazyLibrarianClient:
@@ -23,7 +18,7 @@ class LazyLibrarianClient:
         self._api_key = api_key
         self._client = client or httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=30.0)
 
-    @_RETRY
+    @HTTP_RETRY
     async def _cmd(self, command: str, **params: str) -> httpx.Response:
         query = {"cmd": command, "apikey": self._api_key, **params}
         return await self._client.get("/api", params=query)

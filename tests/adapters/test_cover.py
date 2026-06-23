@@ -1,6 +1,30 @@
+from pathlib import Path
+
 import httpx
 
-from colophon.adapters.cover import CoverImage, fetch_cover
+from colophon.adapters.cover import (
+    CoverImage,
+    ext_for_mime,
+    fetch_cover,
+    mime_for_suffix,
+)
+
+
+def test_mime_for_suffix():
+    assert mime_for_suffix(Path("c.png")) == "image/png"
+    assert mime_for_suffix(Path("c.PNG")) == "image/png"
+    assert mime_for_suffix(Path("c.jpg")) == "image/jpeg"
+    assert mime_for_suffix(Path("c.jpeg")) == "image/jpeg"
+
+
+def test_ext_for_mime():
+    assert ext_for_mime("image/png") == ".png"
+    assert ext_for_mime("image/jpeg") == ".jpg"
+
+
+def test_mime_ext_round_trip():
+    assert mime_for_suffix(Path("c" + ext_for_mime("image/png"))) == "image/png"
+    assert mime_for_suffix(Path("c" + ext_for_mime("image/jpeg"))) == "image/jpeg"
 
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"

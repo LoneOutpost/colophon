@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from colophon.core.coerce import to_float, to_int
 from colophon.core.models import BookUnit, SeriesRef
+from colophon.core.textlist import join_list, split_list
 
 EDITABLE_FIELDS = [
     "title", "subtitle", "author", "narrator", "series",
@@ -54,9 +55,9 @@ def get_field(book: BookUnit, field: str) -> str | None:
     if field in _SCALARS:
         return getattr(book, field)
     if field == "author":
-        return "; ".join(book.authors) or None
+        return join_list(book.authors)
     if field == "narrator":
-        return "; ".join(book.narrators) or None
+        return join_list(book.narrators)
     if field == "series":
         return book.series[0].name if book.series else None
     if field == "sequence":
@@ -66,16 +67,10 @@ def get_field(book: BookUnit, field: str) -> str | None:
     if field == "year":
         return str(book.publish_year) if book.publish_year is not None else None
     if field == "genre":
-        return "; ".join(book.genres) or None
+        return join_list(book.genres)
     if field == "tag":
-        return "; ".join(book.tags) or None
+        return join_list(book.tags)
     return None  # unreachable
-
-
-def _split(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [part.strip() for part in value.split(";") if part.strip()]
 
 
 def set_field(book: BookUnit, field: str, value: str | None) -> None:
@@ -83,13 +78,13 @@ def set_field(book: BookUnit, field: str, value: str | None) -> None:
     if field in _SCALARS:
         setattr(book, field, value or None)
     elif field == "author":
-        book.authors = _split(value)
+        book.authors = split_list(value)
     elif field == "narrator":
-        book.narrators = _split(value)
+        book.narrators = split_list(value)
     elif field == "genre":
-        book.genres = _split(value)
+        book.genres = split_list(value)
     elif field == "tag":
-        book.tags = _split(value)
+        book.tags = split_list(value)
     elif field == "series":
         if value:
             seq = book.series[0].sequence if book.series else None

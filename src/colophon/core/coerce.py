@@ -16,12 +16,12 @@ def to_int(value: str | None) -> int | None:
         return None
 
 
-def to_float(value: str | None) -> float | None:
-    if value is None:
+def to_float(value: str | int | float | None) -> float | None:
+    if value is None or value == "":
         return None
     try:
         return float(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
 
 

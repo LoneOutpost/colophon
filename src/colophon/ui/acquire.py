@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 def _fmt_size(num_bytes: int) -> str:
     size = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} TB"
@@ -52,7 +52,8 @@ def render_acquire(controller: AppController) -> None:
             load_btn = ui.button("Load torrents", icon="refresh")
             ui.switch("Show all (not just audiobooks)", on_change=lambda e: _set_show_all(e.value))
             ui.space()
-            download_btn = ui.button("Download selected", icon="download").props("disable")
+            download_btn = ui.button("Download selected", icon="download")
+            download_btn.set_enabled(False)
         list_box = ui.column().classes("w-full gap-0")
         progress_box = ui.column().classes("w-full gap-1 q-mt-sm")
 
@@ -70,10 +71,7 @@ def render_acquire(controller: AppController) -> None:
             selected.add(torrent_id)
         else:
             selected.discard(torrent_id)
-        if selected:
-            download_btn.props(remove="disable")
-        else:
-            download_btn.props("disable")
+        download_btn.set_enabled(bool(selected))
 
     def _render_list() -> None:
         list_box.clear()
@@ -116,7 +114,7 @@ def render_acquire(controller: AppController) -> None:
         candidates.clear()
         candidates.extend(result)
         selected.clear()
-        download_btn.props("disable")
+        download_btn.set_enabled(False)
         _render_list()
 
     async def _download() -> None:

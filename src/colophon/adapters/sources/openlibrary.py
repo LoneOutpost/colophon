@@ -5,19 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from colophon.adapters.http import HTTP_RETRY
 from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
 
 _FIELDS = "title,author_name,first_publish_year,cover_i,key,isbn"
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 class OpenLibrarySource:
@@ -44,7 +38,7 @@ class OpenLibrarySource:
         docs = (resp.json() or {}).get("docs") or []
         return [self._to_result(doc) for doc in docs]
 
-    @_RETRY
+    @HTTP_RETRY
     async def _get(self, params: dict[str, object]) -> httpx.Response:
         return await self._client.get("/search.json", params=params)
 

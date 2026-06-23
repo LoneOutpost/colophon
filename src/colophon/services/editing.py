@@ -6,17 +6,11 @@ affected field's provenance as 'manual'. No file writes — candidate records on
 
 from __future__ import annotations
 
-import uuid
-
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
 from colophon.core.fields import EDITABLE_TO_PROVENANCE, get_field, set_field
 from colophon.core.genre_policy import GenrePolicy
-from colophon.core.models import BookUnit, EditChange, Provenance
+from colophon.core.models import BookUnit, EditChange, Provenance, new_batch_id
 from colophon.core.normalize import FIELD_NORMALIZERS
-
-
-def _new_batch_id() -> str:
-    return uuid.uuid4().hex
 
 
 def _apply(
@@ -35,7 +29,7 @@ def _apply(
 def _commit(
     books: BookUnitRepo, hist: HistoryRepo, book: BookUnit, changes: list[EditChange]
 ) -> str:
-    batch_id = _new_batch_id()
+    batch_id = new_batch_id()
     book.touch()
     books.upsert(book)
     hist.record(batch_id, changes)
@@ -76,7 +70,7 @@ def swap_fields(
 def bulk_set_field(
     books: BookUnitRepo, hist: HistoryRepo, items: list[BookUnit], field: str, value: str | None
 ) -> str:
-    batch_id = _new_batch_id()
+    batch_id = new_batch_id()
     changes: list[EditChange] = []
     with books.conn:  # one transaction: all-or-nothing
         for book in items:
@@ -105,7 +99,7 @@ def bulk_normalize(
         normalizers["genre"] = lambda v: "; ".join(
             genre_policy.canonicalize([p.strip() for p in v.split(";") if p.strip()])
         )
-    batch_id = _new_batch_id()
+    batch_id = new_batch_id()
     changes: list[EditChange] = []
     with books.conn:  # one transaction: all-or-nothing
         for book in items:
@@ -152,7 +146,7 @@ def bulk_apply_fields(
     """Apply each (book, field_updates, provenance) in ONE undoable batch. The
     bulk sibling of apply_fields; each book's fields are stamped with its given
     provenance (e.g. the source provider). Returns the batch id."""
-    batch_id = _new_batch_id()
+    batch_id = new_batch_id()
     changes: list[EditChange] = []
     with books.conn:  # one transaction: all-or-nothing
         for book, updates, provenance in items:
@@ -178,7 +172,7 @@ def bulk_remap(
     dst: str,
     clear_source: bool,
 ) -> str:
-    batch_id = _new_batch_id()
+    batch_id = new_batch_id()
     changes: list[EditChange] = []
     with books.conn:  # one transaction: all-or-nothing
         for book in items:

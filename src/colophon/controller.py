@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
+from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.catalog import CatalogEntry, list_entries
+from colophon.core.chapters import runtime_mismatch
 from colophon.core.confidence import score_identification
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
@@ -27,8 +28,14 @@ from colophon.core.models import (
     OperationRecord,
     Provenance,
     _Base,
+    new_batch_id,
 )
-from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
+from colophon.core.navigator import (
+    DirectoryListing,
+    DirEntry,
+    LibraryTree,
+    build_library_tree,
+)
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.quickmatch import (
     IdentifyPlan,
@@ -84,10 +91,6 @@ from colophon.services.undo import undo_batch
 logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
-
-
-def _cover_mime(path: Path) -> str:
-    return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
 
 
 class CoverSetResult(_Base):
@@ -201,12 +204,12 @@ class AppController:
         if book is None:
             return None
         if book.cover_path and book.cover_path.exists():
-            return book.cover_path.read_bytes(), _cover_mime(book.cover_path)
+            return book.cover_path.read_bytes(), mime_for_suffix(book.cover_path)
         if book.cover_url:
             path = await ensure_cached_cover(book, dest_dir=book.source_folder)
             if path is not None:
                 self.ctx.books.upsert(book)  # remember the cache location
-                return path.read_bytes(), _cover_mime(path)
+                return path.read_bytes(), mime_for_suffix(path)
         return None
     async def ensure_cover_cached(self, book: BookUnit) -> None:
         """Cache the book's cover_url into cover_path (if not already cached) so a
@@ -279,13 +282,17 @@ class AppController:
         """All persisted books (used by callers that need the full set)."""
         return self.ctx.books.list_all()
 
+    def _distinct(self, project: Callable[[BookUnit], Iterable[str]]) -> list[str]:
+        """Sorted distinct values projected from every book (editor autocomplete)."""
+        return sorted({v for b in self.ctx.books.list_all() for v in project(b)})
+
     def known_authors(self) -> list[str]:
         """Distinct author names across the library, sorted (editor autocomplete)."""
-        return sorted({a for b in self.ctx.books.list_all() for a in b.authors})
+        return self._distinct(lambda b: b.authors)
 
     def known_series(self) -> list[str]:
         """Distinct series names across the library, sorted (editor autocomplete)."""
-        return sorted({s.name for b in self.ctx.books.list_all() for s in b.series})
+        return self._distinct(lambda b: (s.name for s in b.series))
 
     def genre_policy(self) -> GenrePolicy:
         """Build the active genre policy from config."""
@@ -297,7 +304,7 @@ class AppController:
 
     def known_genres(self) -> list[str]:
         """Distinct genre names across the library, sorted (editor autocomplete)."""
-        return sorted({g for b in self.ctx.books.list_all() for g in b.genres})
+        return self._distinct(lambda b: b.genres)
 
     def catalog_entries(self, kind: str) -> list[CatalogEntry]:
         """Distinct values of `kind` across the whole library, with usage counts."""
@@ -322,52 +329,12 @@ class AppController:
 
     def known_tags(self) -> list[str]:
         """Distinct tag names across the library, sorted (editor autocomplete)."""
-        return sorted({t for b in self.ctx.books.list_all() for t in b.tags})
+        return self._distinct(lambda b: b.tags)
 
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into Author -> Series/standalone, plus a needs-id list."""
-        books = self.ctx.books.list_all()
-        needs_id = sorted(
-            (b for b in books if not b.authors and not b.series),
-            key=lambda b: b.confidence,
-        )
-        identified = [b for b in books if b.authors or b.series]
-
-        by_author: dict[str, list[BookUnit]] = {}
-        for b in identified:
-            author = b.authors[0] if b.authors else b.series[0].name
-            by_author.setdefault(author, []).append(b)
-
-        authors: list[AuthorNode] = []
-        for author in sorted(by_author):
-            in_series: dict[str, list[BookUnit]] = {}
-            standalone: list[BookUnit] = []
-            for b in by_author[author]:
-                if b.series:
-                    in_series.setdefault(b.series[0].name, []).append(b)
-                else:
-                    standalone.append(b)
-            series_nodes = [
-                SeriesNode(
-                    name=name,
-                    books=sorted(
-                        items,
-                        key=lambda b: (
-                            b.series[0].sequence if b.series and b.series[0].sequence is not None else 0.0
-                        ),
-                    ),
-                )
-                for name, items in sorted(in_series.items())
-            ]
-            authors.append(
-                AuthorNode(
-                    name=author,
-                    series=series_nodes,
-                    standalone=sorted(standalone, key=lambda b: b.title or ""),
-                )
-            )
-        return LibraryTree(needs_id=needs_id, authors=authors)
+        return build_library_tree(self.ctx.books.list_all())
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
@@ -602,7 +569,7 @@ class AppController:
                 directory_scheme=self.ctx.config.directory_scheme,
             )
             if not self._has_direct_audio(parent):
-                self.ctx.books.delete(BookUnit.new(source_folder=parent).id)
+                self.ctx.books.delete(BookUnit.id_for(parent))
         return results
 
     @staticmethod
@@ -623,7 +590,7 @@ class AppController:
         for r in results:
             if not r.ok or r.destination is None:
                 continue
-            book_id = BookUnit.new(source_folder=r.destination.parent).id
+            book_id = BookUnit.id_for(r.destination.parent)
             book = self.ctx.books.get(book_id)
             if book is None:
                 logger.warning(f"restructure: no book found at {r.destination.parent}")
@@ -678,7 +645,7 @@ class AppController:
         one batch id, so a single undo reverts the whole selection. `progress`, when
         given, is called after each book as (done_count, book, result) so the UI can
         show per-book status."""
-        batch_id = uuid.uuid4().hex
+        batch_id = new_batch_id()
         results: list[TagCommitResult] = []
         for book in books:
             await ensure_cached_cover(book, dest_dir=book.source_folder)
@@ -785,12 +752,13 @@ class AppController:
     async def identify_preview(self) -> IdentifyPlan:
         """Query all sources for every candidate and partition by the review
         threshold, without persisting anything."""
-        candidates = self.identify_candidates()
+        all_books = self.ctx.books.list_all()
+        candidates = [b for b in all_books if not b.manually_confirmed and b.output_path is None]
         source_names = [s.name for s in self.ctx.sources]
         proposals = await self.quick_match_scan(candidates, source_names)
         threshold = self.ctx.config.review_threshold
         to_apply = sum(1 for p in proposals if p.best is not None and p.confidence >= threshold)
-        skipped = len(self.ctx.books.list_all()) - len(candidates)
+        skipped = len(all_books) - len(candidates)
         return IdentifyPlan(
             proposals=proposals, threshold=threshold,
             to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,
@@ -808,21 +776,15 @@ class AppController:
                     if not get_field(p.book, k)
                 }
                 self._normalize_match_updates(updates)
-                if not p.book.cover_path and not p.book.cover_url and p.best.cover_url:
-                    p.book.cover_url = p.best.cover_url
-                if p.book.abridged is None and p.best.abridged is not None:
-                    p.book.abridged = p.best.abridged
+                self._capture_match_signals(p.book, p.best, fill_empty=True)
                 items.append((p.book, updates, p.best.provider))
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items) if items else ""
 
         auto = 0
         for p in plan.proposals:
-            ready = self._rescore_after_match(p.book, p.results)
+            ready = self._rescore_and_persist(p)
             if ready and p.best is not None and p.confidence >= plan.threshold:
                 auto += 1
-            p.book.touch()
-            self.ctx.books.upsert(p.book)
-            self._sync_sidecar(p.book)
         return IdentifySummary(
             auto_matched=auto, routed_to_review=len(plan.proposals) - auto, batch_id=batch,
         )
@@ -862,24 +824,34 @@ class AppController:
             updates = self.match_field_values(p.best)
             self._merge_genre_tag_updates(p.book, p.best, updates)
             self._normalize_match_updates(updates)
-            if p.best.cover_url:
-                p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
-            if p.best.abridged is not None:
-                p.book.abridged = p.best.abridged
+            self._capture_match_signals(p.book, p.best, fill_empty=False)
             items.append((p.book, updates, p.best.provider))
 
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
 
-        now_ready = 0
-        for p in applicable:
-            now_ready += self._rescore_after_match(p.book, p.results)
-            p.book.touch()
-            self.ctx.books.upsert(p.book)
-            self._sync_sidecar(p.book)
+        now_ready = sum(self._rescore_and_persist(p) for p in applicable)
 
         return QuickMatchSummary(
             applied_count=len(applicable), now_ready_count=now_ready, batch_id=batch
         )
+
+    def _capture_match_signals(self, book: BookUnit, best: SourceResult, *, fill_empty: bool) -> None:
+        """Capture the non-field match signals (cover URL, abridged) onto `book`.
+        With `fill_empty`, only set a value the book is missing (Identify's
+        non-destructive semantics); otherwise overwrite (Quick Match)."""
+        if best.cover_url and (not fill_empty or (not book.cover_path and not book.cover_url)):
+            book.cover_url = best.cover_url
+        if best.abridged is not None and (not fill_empty or book.abridged is None):
+            book.abridged = best.abridged
+
+    def _rescore_and_persist(self, proposal: QuickMatchProposal) -> bool:
+        """Re-score a proposal's book against its carried results, then persist the
+        book and sync its sidecar. Returns whether the book is now Ready."""
+        ready = self._rescore_after_match(proposal.book, proposal.results)
+        proposal.book.touch()
+        self.ctx.books.upsert(proposal.book)
+        self._sync_sidecar(proposal.book)
+        return ready
 
     def _rescore_after_match(self, book: BookUnit, results: list[SourceResult]) -> bool:
         """Re-score `book` against `results` and set its confidence, signals, and
@@ -1053,14 +1025,13 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
         self._sync_sidecar(book)
-        source_runtime_ms = round(sum(sf.duration_seconds for sf in book.source_files) * 1000)
-        mismatch = abs(fetch.runtime_ms - source_runtime_ms) > 60_000
+        source_runtime_ms = book.duration_ms
         return ChapterApplyResult(
             ok=True,
             count=len(fetch.chapters),
             audible_runtime_ms=fetch.runtime_ms,
             source_runtime_ms=source_runtime_ms,
-            mismatch=mismatch,
+            mismatch=runtime_mismatch(source_runtime_ms, fetch.runtime_ms),
         )
 
     def reset_chapters(self, book: BookUnit) -> None:
@@ -1104,7 +1075,7 @@ class AppController:
 
         # Embed tags into the M4B at its final location so the audit record's path
         # is truthful and any later revert targets the real file (FR-5.3 / FR-8.4).
-        batch_id = uuid.uuid4().hex
+        batch_id = new_batch_id()
         self.ctx.operations.record(OperationRecord(
             batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
             target=str(org.target_path), before=str(enc.output_path), outcome="ok",

@@ -257,11 +257,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "book_id": None, "is_dirty": None, "save_pending": None, "save": None, "write": None,
     }
 
+    def _set_dirty(value: bool) -> None:
+        """Mirror the editor's unsaved-changes state into the browser so the
+        beforeunload guard (see the keyboard/unload block) can warn on navigation."""
+        ui.run_javascript(f"window.__colophon_dirty = {'true' if value else 'false'}")
+
     def _clear_editor_state() -> None:
         editor_state.update(
             book_id=None, is_dirty=None, save_pending=None, save=None, write=None
         )
-        ui.run_javascript("window.__colophon_dirty = false")
+        _set_dirty(False)
         _persist_view()
 
     def _guard_nav(target_book_id, then) -> bool:
@@ -522,7 +527,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 if not _save_pending(b):
                     ui.notify("No changes")
                     return
-                ui.run_javascript("window.__colophon_dirty = false")
+                _set_dirty(False)
                 ui.notify("Saved")
                 refresh_list()
                 show_detail(b.id)
@@ -876,7 +881,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     _build_field("tag")
 
             for _inp in inputs.values():
-                _inp.on_value_change(lambda _e=None: ui.run_javascript("window.__colophon_dirty = true"))
+                _inp.on_value_change(lambda _e=None: _set_dirty(True))
 
             with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
                 ui.button("Save", icon="save", on_click=_save).props("unelevated")
@@ -891,7 +896,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 book_id=book_id, is_dirty=_is_dirty,
                 save_pending=_save_pending, save=_save, write=lambda b=book: _tag_dialog(b),
             )
-            ui.run_javascript("window.__colophon_dirty = false")
+            _set_dirty(False)
             _persist_view()
 
             if book.source_files:
@@ -1291,14 +1296,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _persist_view()
 
     def _deselect_all() -> None:
-        selected_ids.clear()
-        refresh_nav()
-        refresh_list()
-        refresh_status()
-        _update_count()
-        _after_select()
-        _persist_view()
+        # _clear_selection already clears + refreshes nav/list/status/count and
+        # collapses the detail pane; we only add view persistence on top.
         _clear_selection()
+        _persist_view()
 
     def _select_visible() -> None:
         # Books-header "Select all": additive over the filtered, visible books.
