@@ -185,7 +185,6 @@ def render_settings(controller: AppController) -> None:
                 {"name": name, "label": label, "enabled": enabled}
                 for name, label, enabled in controller.source_settings()
             ]
-            sources_box = ui.column().classes("w-full gap-1")
 
             def _set_enabled(row: dict, value: bool) -> None:
                 row["enabled"] = value
@@ -222,6 +221,7 @@ def render_settings(controller: AppController) -> None:
                 "Enable/disable providers and order them by authority "
                 "(top = most trusted).",
             ):
+                sources_box = ui.column().classes("w-full gap-1")
                 _render_sources()
 
             def do_save() -> None:
