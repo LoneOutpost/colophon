@@ -27,3 +27,22 @@ class QuickMatchSummary(_Base):
     applied_count: int = 0
     now_ready_count: int = 0
     batch_id: str = ""
+
+
+class IdentifyPlan(_Base):
+    """A computed Identify run: per-candidate proposals plus the partition counts.
+    Produced without persisting; consumed by apply_identify."""
+
+    proposals: list[QuickMatchProposal] = []  # noqa: RUF012 - pydantic field default, copied per instance
+    threshold: float = 0.0
+    to_apply: int = 0
+    to_review: int = 0
+    skipped: int = 0
+
+
+class IdentifySummary(_Base):
+    """Outcome of applying an IdentifyPlan."""
+
+    auto_matched: int = 0
+    routed_to_review: int = 0
+    batch_id: str = ""

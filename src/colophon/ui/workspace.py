@@ -2051,7 +2051,47 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         dialog.open()
 
     async def _identify() -> None:
-        await controller.identify_pending()
+        identify_btn.props("loading=true")  # the preview queries every source; show progress
+        try:
+            plan = await controller.identify_preview()
+        finally:
+            identify_btn.props(remove="loading")
+        if not plan.proposals:
+            ui.notify("Nothing to identify")
+            return
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label("Identify results").classes("text-subtitle1")
+            ui.label(f"{plan.to_apply} books auto-matched (fields filled)")
+            ui.label(f"{plan.to_review} routed to Needs review")
+            if plan.skipped:
+                ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
+                    "text-caption text-grey-7"
+                )
+            ui.label(
+                "Only empty fields are filled; covers, edits, and confirmed books are preserved."
+            ).classes("text-caption text-grey-7")
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                async def _apply() -> None:
+                    dialog.close()
+                    summary = await asyncio.to_thread(controller.apply_identify, plan)
+                    _refresh_all()
+                    actions = (
+                        [{
+                            "label": "Undo", "color": "white",
+                            "handler": lambda b=summary.batch_id: (controller.undo(b), _refresh_all()),
+                        }]
+                        if summary.batch_id else None
+                    )
+                    ui.notify(
+                        f"Identified {summary.auto_matched} book(s); "
+                        f"{summary.routed_to_review} need review",
+                        actions=actions,
+                    )
+
+                ui.button("Identify", icon="travel_explore", on_click=_apply)
+        dialog.open()
 
     async def _process() -> None:
         books = _selected_books() or controller.ready_books()
@@ -2155,7 +2195,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         ).props("flat round").tooltip("Reset column widths")
 
     scan_btn.on_click(_scan)  # manages its own preview dialog + refresh
-    identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
+    identify_btn.on_click(_identify)  # manages its own preview dialog + refresh
     process_btn.on_click(_process)  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer

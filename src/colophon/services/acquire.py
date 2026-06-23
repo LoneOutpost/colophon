@@ -86,7 +86,7 @@ async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list
     """Ready RD torrents, each classified by whether it contains audio files.
 
     One torrent's info failing is isolated (logged, omitted), never aborting the
-    whole listing (mirrors services/identify._safe_search)."""
+    whole listing."""
     torrents = await client.list_torrents(limit)
     ready = [t for t in torrents if t.status == _READY_STATUS]
 
