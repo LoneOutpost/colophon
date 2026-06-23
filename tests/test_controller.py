@@ -1024,6 +1024,27 @@ def test_tag_plan_and_write_tags_roundtrip(tmp_path):
     ctx.close()
 
 
+async def test_write_tags_books_reports_progress_per_book(tmp_path):
+    ctx = _ctx(tmp_path)
+    books = []
+    for i in range(3):
+        b = BookUnit.new(source_folder=tmp_path / f"b{i}")
+        b.title = f"Book {i}"
+        ctx.books.upsert(b)  # no source_files: commit_tag is a 0-file no-op
+        books.append(b)
+    ctrl = AppController(ctx)
+
+    seen: list[tuple[int, str]] = []
+    results = await ctrl.write_tags_books(
+        books, progress=lambda done, book, result: seen.append((done, book.id))
+    )
+    assert len(results) == 3
+    # called once per book, with a 1-based increasing count, in order
+    assert [d for d, _ in seen] == [1, 2, 3]
+    assert [bid for _, bid in seen] == [b.id for b in books]
+    ctx.close()
+
+
 def test_process_one_embeds_tags_into_the_m4b(tmp_path, make_audio):
     from colophon.adapters.tags import read_embedded_tags
     from colophon.core.models import SourceFile
