@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -43,6 +43,11 @@ def migrate(conn: sqlite3.Connection) -> None:
 @dataclass
 class BookUnitRepo:
     conn: sqlite3.Connection
+    # Memoized full-table read. A workspace refresh calls list_all() several times
+    # (nav tree, list, stats); without this each call re-deserializes every row on
+    # the event loop. Invalidated on every write below. Colophon owns its DB, so no
+    # external writer can stale it.
+    _cache: list[BookUnit] | None = field(default=None, init=False, repr=False)
 
     def upsert(self, book: BookUnit, commit: bool = True) -> None:
         # The denormalized columns (source_folder, state, confidence, created_at,
@@ -71,6 +76,7 @@ class BookUnitRepo:
         )
         if commit:
             self.conn.commit()
+        self._cache = None
 
     def get(self, id: str) -> BookUnit | None:
         row = self.conn.execute(
@@ -85,10 +91,13 @@ class BookUnitRepo:
         self.conn.execute("DELETE FROM book_units WHERE id = ?", (id,))
         if commit:
             self.conn.commit()
+        self._cache = None
 
     def list_all(self) -> list[BookUnit]:
-        rows = self.conn.execute("SELECT data FROM book_units").fetchall()
-        return [BookUnit.model_validate_json(r["data"]) for r in rows]
+        if self._cache is None:
+            rows = self.conn.execute("SELECT data FROM book_units").fetchall()
+            self._cache = [BookUnit.model_validate_json(r["data"]) for r in rows]
+        return list(self._cache)  # shallow copy: callers may sort/append without corrupting the cache
 
     def list_by_state(self, state: BookState) -> list[BookUnit]:
         rows = self.conn.execute(
