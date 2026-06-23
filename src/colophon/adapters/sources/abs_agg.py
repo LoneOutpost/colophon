@@ -16,18 +16,25 @@ import httpx
 from colophon.adapters.http import HTTP_RETRY
 from colophon.core.coerce import to_float, year_or_none
 from colophon.core.isbn import normalize_isbn
+from colophon.core.people import split_people
 from colophon.core.sources import SourceQuery, SourceResult
 
 logger = logging.getLogger(__name__)
 
 
 
-def _first_str(value: Any) -> list[str]:
-    """abs-agg author/narrator are single strings; wrap as a one-element list
-    (never comma-split, which would mangle 'Last, First' or 'Smith, Jr.')."""
-    if isinstance(value, str) and value.strip():
-        return [value.strip()]
-    return []
+def _str_or_none(value: Any) -> str | None:
+    """Pass through a non-empty string; everything else becomes None."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+# Known per-provider name conventions. A provider listed here splits on exactly
+# these delimiters; unlisted providers fall back to split_people's auto
+# heuristic. Confirm provider-id keys against the live abs-agg /providers
+# response before adding (unconfirmed providers safely stay on auto).
+_PROVIDER_SEPARATORS: dict[str, list[str]] = {
+    "hardcover": [","],  # "First Last, First Last" (issue #86); never "Last, First"
+}
 
 
 class AbsAggSource:
@@ -37,6 +44,7 @@ class AbsAggSource:
     ) -> None:
         self.name = provider
         self.label = label
+        self._separators = _PROVIDER_SEPARATORS.get(provider)
         self._client = client or httpx.AsyncClient(base_url=base_url or "", timeout=15.0)
 
     async def search(self, query: SourceQuery) -> list[SourceResult]:
@@ -66,8 +74,8 @@ class AbsAggSource:
             provider=self.name,
             title=m.get("title"),
             subtitle=m.get("subtitle"),
-            authors=_first_str(m.get("author")),
-            narrators=_first_str(m.get("narrator")),
+            authors=split_people(_str_or_none(m.get("author")), separators=self._separators),
+            narrators=split_people(_str_or_none(m.get("narrator")), separators=self._separators),
             series_name=first.get("series"),
             series_sequence=to_float(first.get("sequence")),
             publish_year=year_or_none(m.get("publishedYear")),
