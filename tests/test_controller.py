@@ -2221,10 +2221,13 @@ async def test_run_encode_job_caches_cover_before_encode(tmp_path, make_audio, m
     from colophon.core.models import BookState, SourceFile
 
     ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib"))
-    d = tmp_path / "s"; d.mkdir()
+    d = tmp_path / "s"
+    d.mkdir()
     a = make_audio("s/a.mp3", seconds=1)
     book = BookUnit.new(source_folder=d)
-    book.title = "B"; book.authors = ["A"]; book.state = BookState.READY
+    book.title = "B"
+    book.authors = ["A"]
+    book.state = BookState.READY
     book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
     ctx.books.upsert(book)
 
