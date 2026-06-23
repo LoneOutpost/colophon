@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from colophon.adapters.ffmpeg import (
@@ -99,29 +97,3 @@ def encode_book(
         deleted = True
 
     return EncodeResult(book_id=book.id, output_path=output_path, verified=True, deleted_sources=deleted)
-
-
-def encode_batch(
-    books: list[BookUnit],
-    output_for: Callable[[BookUnit], Path],
-    *,
-    bitrate: str,
-    max_workers: int = 2,
-    delete_sources: bool = False,
-    confirm_delete: bool = False,
-) -> list[EncodeResult]:
-    """Encode `books` concurrently. One failure never aborts the rest; every book
-    yields an EncodeResult. Order of results matches `books`.
-    """
-    def _one(book: BookUnit) -> EncodeResult:
-        try:
-            return encode_book(
-                book, output_for(book), bitrate=bitrate,
-                delete_sources=delete_sources, confirm_delete=confirm_delete,
-            )
-        except Exception as e:  # never let one book sink the batch
-            logger.warning(f"unexpected encode error for {book.id}: {e}")
-            return EncodeResult(book_id=book.id, error=str(e))
-
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return list(pool.map(_one, books))

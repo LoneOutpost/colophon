@@ -1189,42 +1189,18 @@ class AppController:
         return EncodeJobResult(results=list(results))
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
-        library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
-        staging = library_root / ".staging"
-        staging.mkdir(parents=True, exist_ok=True)
-
-        book.state = BookState.ENCODING
-        self.ctx.books.upsert(book)
-        enc = encode_book(
-            book, staging / f"{book.id}.m4b",
-            bitrate=self.ctx.config.transcode_bitrate,
-            delete_sources=confirm_delete, confirm_delete=confirm_delete,
-            chapters=book.chapters or None,
+        """Encode + organize a single book (delegates to the unified worker, which
+        handles encode-in-place, single-tag, and optional source delete)."""
+        res = self._process_book(
+            book, EncodeJobOptions(encode=True, organize=True, delete_sources=confirm_delete),
         )
-        if not enc.verified or enc.output_path is None:
-            book.state = BookState.FAILED
-            self.ctx.books.upsert(book)
-            return ProcessResult(book_id=book.id, encoded=False, detail=enc.error)
-
-        org = organize_book(self.ctx.books, book, enc.output_path, root=library_root, patterns=self.ctx.patterns)
-        if not org.moved or org.target_path is None:
-            book.state = BookState.FAILED
-            book.touch()
-            self.ctx.books.upsert(book)
-            return ProcessResult(
-                book_id=book.id, encoded=True, organized=False,
-                detail=("collision" if org.collision else org.error),
-            )
-
-        # Embed tags into the M4B at its final location so the audit record's path
-        # is truthful and any later revert targets the real file (FR-5.3 / FR-8.4).
-        batch_id = new_batch_id()
-        self.ctx.operations.record(OperationRecord(
-            batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
-            target=str(org.target_path), before=str(enc.output_path), outcome="ok",
-        ))
-        tag_file(org.target_path, book, operations=self.ctx.operations, batch_id=batch_id)
-        return ProcessResult(book_id=book.id, encoded=True, organized=True)
+        organized = res.status == "done" and book.state == BookState.ORGANIZED
+        return ProcessResult(
+            book_id=book.id,
+            encoded=book.state in (BookState.ENCODED, BookState.ORGANIZED),
+            organized=organized,
+            detail=res.detail,
+        )
 
     def process_ready(
         self,

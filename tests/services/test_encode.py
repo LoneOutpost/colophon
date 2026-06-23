@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from colophon.core.models import BookUnit, SourceFile
-from colophon.services.encode import EncodeResult, encode_batch, encode_book
+from colophon.services.encode import EncodeResult, encode_book
 
 
 def _book_from(paths_durations: list[tuple[Path, float]]) -> BookUnit:
@@ -96,26 +96,3 @@ def test_encode_book_produces_untagged_output(make_audio, tmp_path):
 
     assert result.verified and result.output_path == out
     assert read_embedded_tags(out).title != "Tagged Title"
-
-
-def test_encode_batch_returns_one_result_per_book(make_audio, tmp_path):
-    a = make_audio("book_a/a1.mp3", seconds=1)
-    b = make_audio("book_b/b1.mp3", seconds=1)
-    book_a = _book_from([(a, 1.0)])
-    book_b = _book_from([(b, 1.0)])
-    # a book with no sources -> a failed result, must not abort the batch
-    book_bad = BookUnit.new(source_folder=tmp_path / "empty")
-
-    assert len({book_a.id, book_b.id, book_bad.id}) == 3  # ids genuinely distinct
-
-    def out_for(book):
-        return tmp_path / "out" / f"{book.id}.m4b"
-
-    results = encode_batch([book_a, book_b, book_bad], out_for, bitrate="64k", max_workers=2)
-
-    by_id = {r.book_id: r for r in results}
-    assert len(results) == 3
-    assert len(by_id) == 3
-    assert by_id[book_a.id].verified is True
-    assert by_id[book_b.id].verified is True
-    assert by_id[book_bad.id].verified is False  # failed, but batch completed
