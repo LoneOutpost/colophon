@@ -776,21 +776,15 @@ class AppController:
                     if not get_field(p.book, k)
                 }
                 self._normalize_match_updates(updates)
-                if not p.book.cover_path and not p.book.cover_url and p.best.cover_url:
-                    p.book.cover_url = p.best.cover_url
-                if p.book.abridged is None and p.best.abridged is not None:
-                    p.book.abridged = p.best.abridged
+                self._capture_match_signals(p.book, p.best, fill_empty=True)
                 items.append((p.book, updates, p.best.provider))
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items) if items else ""
 
         auto = 0
         for p in plan.proposals:
-            ready = self._rescore_after_match(p.book, p.results)
+            ready = self._rescore_and_persist(p)
             if ready and p.best is not None and p.confidence >= plan.threshold:
                 auto += 1
-            p.book.touch()
-            self.ctx.books.upsert(p.book)
-            self._sync_sidecar(p.book)
         return IdentifySummary(
             auto_matched=auto, routed_to_review=len(plan.proposals) - auto, batch_id=batch,
         )
@@ -830,24 +824,34 @@ class AppController:
             updates = self.match_field_values(p.best)
             self._merge_genre_tag_updates(p.book, p.best, updates)
             self._normalize_match_updates(updates)
-            if p.best.cover_url:
-                p.book.cover_url = p.best.cover_url  # cover capture: persisted, not in batch
-            if p.best.abridged is not None:
-                p.book.abridged = p.best.abridged
+            self._capture_match_signals(p.book, p.best, fill_empty=False)
             items.append((p.book, updates, p.best.provider))
 
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
 
-        now_ready = 0
-        for p in applicable:
-            now_ready += self._rescore_after_match(p.book, p.results)
-            p.book.touch()
-            self.ctx.books.upsert(p.book)
-            self._sync_sidecar(p.book)
+        now_ready = sum(self._rescore_and_persist(p) for p in applicable)
 
         return QuickMatchSummary(
             applied_count=len(applicable), now_ready_count=now_ready, batch_id=batch
         )
+
+    def _capture_match_signals(self, book: BookUnit, best: SourceResult, *, fill_empty: bool) -> None:
+        """Capture the non-field match signals (cover URL, abridged) onto `book`.
+        With `fill_empty`, only set a value the book is missing (Identify's
+        non-destructive semantics); otherwise overwrite (Quick Match)."""
+        if best.cover_url and (not fill_empty or (not book.cover_path and not book.cover_url)):
+            book.cover_url = best.cover_url
+        if best.abridged is not None and (not fill_empty or book.abridged is None):
+            book.abridged = best.abridged
+
+    def _rescore_and_persist(self, proposal: QuickMatchProposal) -> bool:
+        """Re-score a proposal's book against its carried results, then persist the
+        book and sync its sidecar. Returns whether the book is now Ready."""
+        ready = self._rescore_after_match(proposal.book, proposal.results)
+        proposal.book.touch()
+        self.ctx.books.upsert(proposal.book)
+        self._sync_sidecar(proposal.book)
+        return ready
 
     def _rescore_after_match(self, book: BookUnit, results: list[SourceResult]) -> bool:
         """Re-score `book` against `results` and set its confidence, signals, and
