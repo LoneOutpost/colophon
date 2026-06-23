@@ -20,6 +20,11 @@ _SMALL_WORDS = {
 }
 
 
+_DASH_RE = re.compile(r"\s*-\s*")
+_COMMA_RE = re.compile(r"\s*,\s*")
+_WS_RE = re.compile(r"\s+")
+
+
 def _cap(word: str) -> str:
     """Capitalize the first character and lowercase the rest (fixes ALL-CAPS input)."""
     return word[:1].upper() + word[1:].lower()
@@ -58,9 +63,9 @@ def normalize_text(value: str, *, lowercase_small: bool = True) -> str:
     # A hyphen with adjacent whitespace is a dash separator -> " - "; a bare
     # hyphen (kebab joiner) -> space. (Note: this splits hyphenated words like
     # "well-known"; an exceptions list could be added later.)
-    s = re.sub(r"\s*-\s*", lambda m: " - " if m.group(0) != "-" else " ", s)
-    s = re.sub(r"\s*,\s*", ", ", s)        # no space before a comma, one after
-    s = re.sub(r"\s+", " ", s).strip()     # collapse runs of whitespace
+    s = _DASH_RE.sub(lambda m: " - " if m.group(0) != "-" else " ", s)
+    s = _COMMA_RE.sub(", ", s)             # no space before a comma, one after
+    s = _WS_RE.sub(" ", s).strip()         # collapse runs of whitespace
     return _titlecase(s, lowercase_small=lowercase_small)
 
 

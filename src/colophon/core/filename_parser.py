@@ -45,13 +45,14 @@ def compile_template(template: str) -> Pattern[str]:
     return re.compile("^" + "".join(parts) + "$")
 
 
-def _strip_ext(filename: str) -> str:
+def strip_ext(filename: str) -> str:
+    """The filename without its final extension ('a.b.mp3' -> 'a.b')."""
     return filename.rsplit(".", 1)[0] if "." in filename else filename
 
 
 def parse_filename(pattern: Pattern[str], filename: str) -> dict[str, str] | None:
     """Parse a filename (extension stripped) into field values, or None if no match."""
-    match = pattern.match(_strip_ext(filename))
+    match = pattern.match(strip_ext(filename))
     if match is None:
         return None
     return {key: value.strip() for key, value in match.groupdict().items()}

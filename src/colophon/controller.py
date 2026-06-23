@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from colophon.adapters.audio import is_audio_file
@@ -276,13 +276,17 @@ class AppController:
         """All persisted books (used by callers that need the full set)."""
         return self.ctx.books.list_all()
 
+    def _distinct(self, project: Callable[[BookUnit], Iterable[str]]) -> list[str]:
+        """Sorted distinct values projected from every book (editor autocomplete)."""
+        return sorted({v for b in self.ctx.books.list_all() for v in project(b)})
+
     def known_authors(self) -> list[str]:
         """Distinct author names across the library, sorted (editor autocomplete)."""
-        return sorted({a for b in self.ctx.books.list_all() for a in b.authors})
+        return self._distinct(lambda b: b.authors)
 
     def known_series(self) -> list[str]:
         """Distinct series names across the library, sorted (editor autocomplete)."""
-        return sorted({s.name for b in self.ctx.books.list_all() for s in b.series})
+        return self._distinct(lambda b: (s.name for s in b.series))
 
     def genre_policy(self) -> GenrePolicy:
         """Build the active genre policy from config."""
@@ -294,7 +298,7 @@ class AppController:
 
     def known_genres(self) -> list[str]:
         """Distinct genre names across the library, sorted (editor autocomplete)."""
-        return sorted({g for b in self.ctx.books.list_all() for g in b.genres})
+        return self._distinct(lambda b: b.genres)
 
     def catalog_entries(self, kind: str) -> list[CatalogEntry]:
         """Distinct values of `kind` across the whole library, with usage counts."""
@@ -319,7 +323,7 @@ class AppController:
 
     def known_tags(self) -> list[str]:
         """Distinct tag names across the library, sorted (editor autocomplete)."""
-        return sorted({t for b in self.ctx.books.list_all() for t in b.tags})
+        return self._distinct(lambda b: b.tags)
 
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
@@ -782,12 +786,13 @@ class AppController:
     async def identify_preview(self) -> IdentifyPlan:
         """Query all sources for every candidate and partition by the review
         threshold, without persisting anything."""
-        candidates = self.identify_candidates()
+        all_books = self.ctx.books.list_all()
+        candidates = [b for b in all_books if not b.manually_confirmed and b.output_path is None]
         source_names = [s.name for s in self.ctx.sources]
         proposals = await self.quick_match_scan(candidates, source_names)
         threshold = self.ctx.config.review_threshold
         to_apply = sum(1 for p in proposals if p.best is not None and p.confidence >= threshold)
-        skipped = len(self.ctx.books.list_all()) - len(candidates)
+        skipped = len(all_books) - len(candidates)
         return IdentifyPlan(
             proposals=proposals, threshold=threshold,
             to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,

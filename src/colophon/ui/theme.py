@@ -171,19 +171,15 @@ def dark_mode_button(dark: ui.dark_mode) -> None:
     """A header button that toggles light/dark and persists the choice."""
     button = ui.button().props("flat round")
 
-    def _icon() -> str:
-        return "light_mode" if dark.value else "dark_mode"
-
-    def _tooltip() -> str:
-        return "Switch to light mode" if dark.value else "Switch to dark mode"
+    def _sync() -> None:
+        button.props(f"icon={'light_mode' if dark.value else 'dark_mode'}")
+        button.tooltip("Switch to light mode" if dark.value else "Switch to dark mode")
 
     def _toggle() -> None:
         going_dark = not bool(dark.value)
         dark.value = going_dark
         app.storage.general["dark_mode"] = "dark" if going_dark else "light"
-        button.props(f"icon={_icon()}")
-        button.tooltip(_tooltip())
+        _sync()
 
-    button.props(f"icon={_icon()}")
-    button.tooltip(_tooltip())
+    _sync()
     button.on_click(_toggle)

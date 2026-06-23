@@ -38,11 +38,15 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
     if not results:
         return IdentificationOutcome(confidence=max(0.0, min(100.0, score)), signals=signals)
 
+    # title/author closeness is a fuzzy match used several times below; compute
+    # it once per result rather than re-running SequenceMatcher on every read.
+    score_for = {id(r): _result_score(book, r) for r in results}
+
     def _rank_key(r: SourceResult) -> tuple[float, float]:
         closeness = 0.0
         if book.duration_ms > 0 and r.runtime_ms:
             closeness = -abs(r.runtime_ms - book.duration_ms)
-        return (_result_score(book, r), closeness)
+        return (score_for[id(r)], closeness)
 
     ranked = sorted(results, key=_rank_key, reverse=True)
     best = ranked[0]
@@ -64,10 +68,10 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
     # a borderline one. Tuned so a strong two-source agreement (15 embedded + ~60)
     # reaches the default review threshold without needing an ASIN match.
     agreeing_providers = {
-        r.provider for r in results if _result_score(book, r) >= _AGREEMENT_THRESHOLD
+        r.provider for r in results if score_for[id(r)] >= _AGREEMENT_THRESHOLD
     }
     if agreeing_providers:
-        quality = max(_result_score(book, r) for r in results if r.provider in agreeing_providers)
+        quality = max(score_for[id(r)] for r in results if r.provider in agreeing_providers)
         if len(agreeing_providers) >= 2:
             pts = round(60 * quality)
             score += pts
@@ -83,7 +87,7 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
             ))
 
     # Disagreement penalty — best match is poor.
-    best_score = _result_score(book, best)
+    best_score = score_for[id(best)]
     if best_score < 0.5:
         penalty = -25
         score += penalty

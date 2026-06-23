@@ -8,6 +8,7 @@ free; complements OpenLibrary (which is print-grade and carries no narrator/runt
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -100,11 +101,10 @@ class InternetArchiveSource:
         if resp.status_code >= 400:
             return []
         docs = (((resp.json() or {}).get("response")) or {}).get("docs") or []
-        results: list[SourceResult] = []
-        for doc in docs:
-            meta = await self._metadata(doc.get("identifier"))
-            results.append(self._to_result(doc, meta))
-        return results
+        # Fetch each candidate's per-item metadata concurrently rather than in a
+        # serial await loop (the search returns up to _MAX_CANDIDATES docs).
+        metas = await asyncio.gather(*(self._metadata(d.get("identifier")) for d in docs))
+        return [self._to_result(doc, meta) for doc, meta in zip(docs, metas, strict=True)]
 
     @HTTP_RETRY
     async def _search(self, params: dict[str, object]) -> httpx.Response:

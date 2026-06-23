@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from colophon.core.filename_parser import strip_ext
 from colophon.core.models import Chapter
 
 __all__ = ["Chapter", "file_boundary_chapters", "to_ffmetadata"]
@@ -16,7 +17,7 @@ def file_boundary_chapters(files: list[tuple[str, float]]) -> list[Chapter]:
     cursor_ms = 0
     for name, duration_s in files:
         length_ms = round(duration_s * 1000)
-        title = name.rsplit(".", 1)[0] if "." in name else name
+        title = strip_ext(name)
         chapters.append(Chapter(title=title, start_ms=cursor_ms, end_ms=cursor_ms + length_ms))
         cursor_ms += length_ms
     return chapters
