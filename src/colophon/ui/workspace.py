@@ -2264,20 +2264,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         dialog.open()
 
     async def _process() -> None:
+        from colophon.controller import CancelToken, EncodeJobOptions
+        from colophon.core.models import BookState
+
         books = _selected_books() or controller.ready_books()
         if not books:
             ui.notify("Nothing selected or ready")
             return
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
-            ui.label(f"Encode + organize {len(books)} book(s)").classes("text-subtitle1")
-            statuses: dict[str, ui.item_label] = {}
-            with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
-                with ui.list().props("dense").classes("w-full"):
-                    for b in books:
-                        with ui.item(), ui.item_section():
-                            ui.item_label(b.title or "(untitled)")
-                            statuses[b.id] = ui.item_label("pending").props("caption")
-            summary = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
+
+        with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+            body = ui.column().classes("w-full")
 
             def _close() -> None:
                 # Refresh the underlying views only on close — _render_middle rebuilds
@@ -2287,39 +2283,86 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 _render_middle()
                 refresh_status()
 
-            async def _run_batch(targets: list) -> list:
-                failed = []
-                for b in targets:
-                    statuses[b.id].set_text("working…")
-                    await controller.ensure_cover_cached(b)
-                    result = await asyncio.to_thread(controller.process_one, b, confirm_delete=False)
-                    if result.organized:
-                        statuses[b.id].set_text("organized")
-                    else:
-                        statuses[b.id].set_text(f"failed: {result.detail or 'see logs'}")
-                        failed.append(b)
-                return failed
+            def show_options() -> None:
+                body.clear()
+                n_encode = sum(1 for b in books if b.source_files)
+                n_organize = sum(1 for b in books if b.state == BookState.ENCODED and b.output_path)
+                with body:
+                    ui.label(f"Encode + organize {len(books)} book(s)").classes("text-subtitle1")
+                    enc = ui.checkbox("Encode to M4B", value=True).props("dense")
+                    org = ui.checkbox("Organize into library", value=True).props("dense")
+                    dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
+                    conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
+                    ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
+                        "text-caption text-grey-6"
+                    )
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
 
-            async def _go(targets: list) -> None:
-                summary.clear()
-                with summary:
-                    ui.spinner(size="sm")
-                    ui.label(f"Processing {len(targets)}...").classes("text-caption")
-                failed = await _run_batch(targets)
+                        async def _run() -> None:
+                            if not enc.value and not org.value:
+                                ui.notify("Select Encode and/or Organize")
+                                return
+                            if dele.value and not enc.value:
+                                ui.notify("Delete sources requires Encode")
+                                return
+                            options = EncodeJobOptions(
+                                encode=bool(enc.value), organize=bool(org.value),
+                                delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
+                            )
+                            await show_progress(options)
+
+                        ui.button("Run", icon="play_arrow", on_click=_run).props("unelevated")
+
+            async def show_progress(options) -> None:
+                body.clear()
+                statuses: dict[str, ui.item_label] = {}
+                token = CancelToken()
+                with body:
+                    ui.label(f"Processing {len(books)} book(s)").classes("text-subtitle1")
+                    with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
+                        with ui.list().props("dense").classes("w-full"):
+                            for b in books:
+                                with ui.item(), ui.item_section():
+                                    ui.item_label(b.title or "(untitled)")
+                                    statuses[b.id] = ui.item_label("queued").props("caption")
+                    actions = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
+                    with actions:
+                        ui.button("Cancel", icon="stop", on_click=token.cancel).props("flat")
+
+                def _progress(book_id: str, status: str) -> None:
+                    if book_id in statuses:
+                        statuses[book_id].set_text(status)
+
+                result = await controller.run_encode_job(books, options, progress=_progress, cancel=token)
                 selected_ids.clear()
                 await controller.trigger_abs_scan()  # best-effort library rescan
-                summary.clear()
-                with summary:
-                    note = f"{len(targets) - len(failed)} organized" + (
-                        f", {len(failed)} failed" if failed else ""
-                    )
+
+                failed = [r for r in result.results if r.status == "failed"]
+                done = sum(1 for r in result.results if r.status == "done")
+                cancelled = sum(1 for r in result.results if r.status == "cancelled")
+                actions.clear()
+                with actions:
+                    note = f"{done} done"
+                    if failed:
+                        note += f", {len(failed)} failed"
+                    if cancelled:
+                        note += f", {cancelled} cancelled"
                     ui.label(note).classes("text-body2 q-mr-auto self-center")
                     if failed:
-                        ui.button("Retry failed", icon="replay", on_click=lambda f=failed: _go(f))
+                        failed_ids = {r.book_id for r in failed}
+                        retry = [b for b in books if b.id in failed_ids]
+                        ui.button("Retry failed", icon="replay",
+                                  on_click=lambda r=retry, o=options: _retry(r, o))
                     ui.button("Close", on_click=_close).props("flat")
 
+            async def _retry(retry_books: list, options) -> None:
+                nonlocal books
+                books = retry_books
+                await show_progress(options)
+
             dialog.open()
-            await _go(books)
+            show_options()
 
     # --- application shell ---
     # Keyboard navigation for the Books list (ignored while typing in a field).
