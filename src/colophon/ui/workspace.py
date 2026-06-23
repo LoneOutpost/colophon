@@ -15,7 +15,7 @@ import logging
 import re
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import app, ui
 
 from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
@@ -23,6 +23,7 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
+from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -255,6 +256,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             book_id=None, is_dirty=None, save_pending=None, save=None, write=None
         )
         ui.run_javascript("window.__colophon_dirty = false")
+        _persist_view()
 
     def _guard_nav(target_book_id, then) -> bool:
         """If a different dirty detail is open, prompt and return True (handled);
@@ -290,6 +292,28 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     view: dict[str, object] = {
         "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
     }
+
+    _VIEW_KEY = "workspace_view"
+
+    def _persist_view() -> None:
+        app.storage.tab[_VIEW_KEY] = view_to_snapshot(
+            scope=scope, folder_filter=folder_filter, view=view,
+            filter_text=book_filter["text"], selected_ids=selected_ids,
+            open_book_id=editor_state["book_id"],
+        )
+
+    _restored = snapshot_to_view(
+        app.storage.tab.get(_VIEW_KEY),
+        known_book_ids={b.id for b in controller.books_all()},
+        known_authors=set(controller.known_authors()),
+        known_series=set(controller.known_series()),
+    )
+    scope.update(_restored.scope)
+    folder_filter["path"] = _restored.folder_filter_path
+    view.update(_restored.view)
+    if not initial_filter:  # an explicit ?filter= query wins over the snapshot
+        book_filter["text"] = _restored.filter_text
+    selected_ids.update(_restored.selected_ids)
 
     def _scan_roots() -> list[Path]:
         return list(controller.ctx.config.scan_paths)
@@ -845,6 +869,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 save_pending=_save_pending, save=_save, write=lambda b=book: _tag_dialog(b),
             )
             ui.run_javascript("window.__colophon_dirty = false")
+            _persist_view()
 
             if book.source_files:
                 ui.separator().classes("q-my-sm")
@@ -1225,6 +1250,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_status()
         _update_count()
         _after_select()
+        _persist_view()
 
     def _deselect_all() -> None:
         selected_ids.clear()
@@ -1233,6 +1259,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_status()
         _update_count()
         _after_select()
+        _persist_view()
 
     def _select_visible() -> None:
         # Books-header "Select all": additive over the filtered, visible books.
@@ -1242,6 +1269,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_status()
         _update_count()
         _after_select()
+        _persist_view()
 
     def _deselect_visible() -> None:
         # Books-header "Deselect all": subtractive over the filtered, visible books;
@@ -1252,6 +1280,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_status()
         _update_count()
         _after_select()
+        _persist_view()
 
     def _toggle_book(book_id: str, on: bool) -> None:
         if on:
@@ -1262,6 +1291,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_status()
         _update_count()
         _after_select()
+        _persist_view()
 
     def refresh_list() -> None:
         list_container.clear()
@@ -1836,6 +1866,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _set_filter(value: str | None) -> None:
         book_filter["text"] = value or ""
         refresh_list()
+        _persist_view()
 
     def _filter_to(label: str) -> None:
         """Filter the Books list to an exact genre/tag (clicked from a chip)."""
@@ -1844,6 +1875,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if search is not None:
             search.set_value(label)
         refresh_list()
+        _persist_view()
 
     def _render_middle() -> None:
         is_folders = view["mode"] == "folders"
@@ -1902,12 +1934,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         view["mode"] = mode
         refresh_nav()
         _render_middle()
+        _persist_view()
 
     def _set_group_by(value: str) -> None:
         view["group_by"] = value
         scope["kind"], scope["key"] = "all", None  # reset scope when switching grouping
         refresh_nav()
         _render_middle()
+        _persist_view()
 
     def _set_multiselect(on: bool) -> None:
         # The navigator's Multiselect switch only toggles author/series-node
@@ -1915,16 +1949,19 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         # toggling it must not disturb the current selection.
         view["multiselect"] = on
         refresh_nav()
+        _persist_view()
 
     def _set_scope(kind: str, key) -> None:
         scope["kind"], scope["key"] = kind, key
         refresh_nav()
         _render_middle()
+        _persist_view()
 
     def _clear_folder_filter() -> None:
         folder_filter["path"] = None
         refresh_nav()  # author/series list returns to the full library
         _render_middle()
+        _persist_view()
 
     def _browse_to(folder: Path) -> None:
         # Navigating the folder browser sets a folder filter that constrains both
@@ -1934,6 +1971,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         folder_filter["path"] = str(folder)
         scope["kind"], scope["key"] = "all", None
         refresh_folders()
+        _persist_view()
 
     def _select_root(value: str) -> None:
         if value == "__all__":
@@ -1941,6 +1979,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             scope["kind"], scope["key"] = "all", None
             view["cwd"] = None  # no scan path selected: show the pick-a-path prompt
             refresh_folders()
+            _persist_view()
         else:
             _browse_to(Path(value))
 
@@ -1964,6 +2003,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_status()
         _update_count()
         _after_select()
+        _persist_view()
 
     def _undo() -> None:
         if controller.undo_last():
@@ -2200,4 +2240,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
-    show_detail("")  # initial empty-state in the detail pane
+    if _restored.open_book_id is not None:
+        show_detail(_restored.open_book_id)  # reopen the book remembered for this tab
+    else:
+        show_detail("")  # initial empty-state in the detail pane

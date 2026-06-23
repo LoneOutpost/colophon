@@ -275,6 +275,10 @@ class AppController:
         self.ctx.books.upsert(book)
         self._sync_sidecar(book)
 
+    def books_all(self) -> list[BookUnit]:
+        """All persisted books (used by callers that need the full set)."""
+        return self.ctx.books.list_all()
+
     def known_authors(self) -> list[str]:
         """Distinct author names across the library, sorted (editor autocomplete)."""
         return sorted({a for b in self.ctx.books.list_all() for a in b.authors})
