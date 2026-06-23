@@ -83,17 +83,19 @@ def test_encode_book_remuxes_single_aac(make_audio, tmp_path):
     assert out.exists()
 
 
-def test_encode_book_embeds_tags_in_output(make_audio, tmp_path):
+def test_encode_book_produces_untagged_output(make_audio, tmp_path):
     from colophon.adapters.tags import read_embedded_tags
-    a = make_audio("01.mp3", seconds=1)
-    book = _book_from([(a, 1.0)])
+
+    a = make_audio("a.mp3", seconds=2)
+    book = _book_from([(a, 2.0)])
+    book.title = "Tagged Title"
     book.authors = ["An Author"]
     out = tmp_path / "out.m4b"
+
     result = encode_book(book, out, bitrate="64k")
-    assert result.verified is True
-    tags = read_embedded_tags(out)
-    assert tags.title == "Test Book"
-    assert tags.artist == "An Author"
+
+    assert result.verified and result.output_path == out
+    assert read_embedded_tags(out).title != "Tagged Title"
 
 
 def test_encode_batch_returns_one_result_per_book(make_audio, tmp_path):
