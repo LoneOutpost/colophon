@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 import os
 import unicodedata
+import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
+
+
+def new_batch_id() -> str:
+    """A fresh id grouping the operations of one undoable action (edit/tag/move)."""
+    return uuid.uuid4().hex
 
 
 class _Base(BaseModel):
@@ -119,16 +125,27 @@ class BookUnit(_Base):
     created_at: datetime = Field(frozen=True)
     updated_at: datetime
 
-    @classmethod
-    def new(cls, *, source_folder: Path) -> BookUnit:
-        now = _now()
+    @staticmethod
+    def id_for(source_folder: Path) -> str:
+        """Derive the deterministic id for a source folder. The id is a pure function
+        of the (normalized) folder, so callers can look a unit up by folder without
+        constructing a throwaway model."""
         # Normalize so logically-identical paths hash to the same id. normpath
         # collapses "." and trailing slashes; NFC unifies unicode equivalents.
         # We avoid Path.resolve() because the folder may not exist yet.
         normalized = unicodedata.normalize("NFC", os.path.normpath(str(source_folder)))
         # 64-bit (16 hex char) truncation is an accepted collision tradeoff.
-        book_id = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
-        return cls(id=book_id, source_folder=source_folder, created_at=now, updated_at=now)
+        return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
+
+    @classmethod
+    def new(cls, *, source_folder: Path) -> BookUnit:
+        now = _now()
+        return cls(
+            id=cls.id_for(source_folder),
+            source_folder=source_folder,
+            created_at=now,
+            updated_at=now,
+        )
 
     def touch(self) -> None:
         """Bump updated_at to now; call after any mutation before persisting."""

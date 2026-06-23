@@ -9,6 +9,7 @@ accepts — from the response Content-Type, falling back to the URL extension.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import httpx
 
@@ -20,6 +21,16 @@ logger = logging.getLogger(__name__)
 class CoverImage(_Base):
     data: bytes
     mime: str
+
+
+def mime_for_suffix(path: Path) -> str:
+    """The embed mime ('image/png' or 'image/jpeg') for a file's extension."""
+    return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+
+
+def ext_for_mime(mime: str) -> str:
+    """The on-disk extension ('.png' or '.jpg') for a normalized cover mime."""
+    return ".png" if mime == "image/png" else ".jpg"
 
 
 def _normalize_mime(content_type: str | None, url: str) -> str:

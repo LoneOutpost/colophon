@@ -67,6 +67,19 @@ def test_book_unit_id_is_normalized():
     assert base.id == trailing.id == dot.id
 
 
+def test_id_for_matches_new():
+    folder = Path("/ingest/The Way of Kings")
+    assert BookUnit.id_for(folder) == BookUnit.new(source_folder=folder).id
+
+
+def test_new_batch_id_is_unique_hex():
+    from colophon.core.models import new_batch_id
+
+    a, b = new_batch_id(), new_batch_id()
+    assert a != b
+    assert len(a) == 32 and int(a, 16) >= 0
+
+
 def test_created_at_is_frozen():
     bu = BookUnit.new(source_folder=Path("/ingest/x"))
     with pytest.raises(ValidationError):
