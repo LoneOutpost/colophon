@@ -1,7 +1,24 @@
 from pathlib import Path
 
 from colophon.core.models import BookUnit
-from colophon.ui.workspace import _editor_text, book_haystack
+from colophon.ui.workspace import _editor_text, _fmt_series_label, book_haystack
+
+
+def test_fmt_series_label_drops_trailing_zero():
+    assert _fmt_series_label("Stormlight", 1.0) == "Stormlight #1"
+
+
+def test_fmt_series_label_keeps_fractional_sequence():
+    assert _fmt_series_label("Stormlight", 2.5) == "Stormlight #2.5"
+
+
+def test_fmt_series_label_no_sequence():
+    assert _fmt_series_label("Stormlight", None) == "Stormlight"
+
+
+def test_fmt_series_label_empty_name_is_blank():
+    assert _fmt_series_label(None, 1.0) == ""
+    assert _fmt_series_label("", 1.0) == ""
 
 
 def test_book_haystack_includes_genres_and_tags():

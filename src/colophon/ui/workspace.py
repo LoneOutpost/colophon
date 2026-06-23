@@ -23,6 +23,7 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
+from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
@@ -100,6 +101,43 @@ def _fmt_runtime_delta(candidate_ms: int | None, book_ms: int) -> str:
     delta_s = (candidate_ms - book_ms) / 1000
     sign = "+" if delta_s >= 0 else "-"
     return f"{base} · {sign}{_fmt_duration(abs(delta_s))}"
+
+
+def _fmt_series_label(name: str | None, sequence: float | None) -> str:
+    """'Stormlight #1' / 'Stormlight #2.5' / 'Stormlight' (no seq) / '' (no name).
+    The sequence drops a trailing '.0' so whole numbers read as integers."""
+    if not name:
+        return ""
+    if sequence is None:
+        return name
+    seq = int(sequence) if sequence == int(sequence) else sequence
+    return f"{name} #{seq}"
+
+
+def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
+    """Render a candidate's metadata block (captions + runtime/abridged row),
+    comparing runtime against `book`. Emits NiceGUI elements into the current
+    layout context; the caller owns any surrounding row/checkbox/expansion.
+    Empty fields are omitted."""
+    authors = ", ".join(result.authors) or "unknown"
+    year = f" ({result.publish_year})" if result.publish_year else ""
+    ui.item_label(f"{source_label} · {authors}{year}").props("caption")
+
+    if result.narrators:
+        ui.item_label(f"Narr: {', '.join(result.narrators)}").props("caption")
+
+    series = _fmt_series_label(result.series_name, result.series_sequence)
+    pub_bits = [bit for bit in (series, result.publisher) if bit]
+    if pub_bits:
+        ui.item_label(" · ".join(pub_bits)).props("caption")
+
+    rt = _fmt_runtime_delta(result.runtime_ms, book.duration_ms)
+    if rt or result.abridged is not None:
+        with ui.row().classes("items-center no-wrap q-gutter-xs"):
+            if rt:
+                ui.item_label(rt).props("caption").classes("colophon-mono")
+            if result.abridged is not None:
+                ui.badge("Abridged" if result.abridged else "Unabridged").props("color=grey-6 outline")
 
 
 def _confidence_color(value: float) -> str:
@@ -625,19 +663,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ui.label("No matches found").classes("text-grey-6 q-pa-sm")
                             with ui.list().props("dense").classes("w-full"):
                                 for m in matches[:10]:
-                                    authors = ", ".join(m.authors) or "unknown"
-                                    year = f" ({m.publish_year})" if m.publish_year else ""
                                     with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
                                         with ui.item_section():
                                             ui.item_label(m.title or "?")
-                                            ui.item_label(f"{controller.source_label(m.provider)} · {authors}{year}").props("caption")
-                                            rt = _fmt_runtime_delta(m.runtime_ms, b.duration_ms)
-                                            if rt or m.abridged is not None:
-                                                with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                                                    if rt:
-                                                        ui.item_label(rt).props("caption").classes("colophon-mono")
-                                                    if m.abridged is not None:
-                                                        ui.badge("Abridged" if m.abridged else "Unabridged").props("color=grey-6 outline")
+                                            _candidate_meta(
+                                                m, b, source_label=controller.source_label(m.provider)
+                                            )
 
                     def show_picker(result) -> None:
                         body.clear()
@@ -1212,30 +1243,35 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         checks: dict[str, ui.checkbox] = {}
                         with body:
                             with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                                with ui.list().props("dense").classes("w-full"):
+                                with ui.column().classes("w-full gap-0"):
                                     for p in proposals:
-                                        with ui.item():
-                                            with ui.item_section().props("avatar"):
-                                                if p.best is not None:
-                                                    checks[p.book.id] = ui.checkbox(
-                                                        value=p.confidence >= threshold
-                                                    )
-                                                else:
-                                                    ui.icon("block").classes("text-grey-5")
-                                            with ui.item_section():
-                                                cur = p.book.title or "(untitled)"
-                                                if p.best is not None:
-                                                    prov = controller.source_label(p.best.provider)
-                                                    ui.item_label(f"{cur} → {p.best.title or '?'}")
-                                                    ui.item_label(prov).props("caption")
-                                                else:
-                                                    ui.item_label(cur)
-                                                    ui.item_label("no match").props("caption")
-                                            if p.best is not None:
-                                                with ui.item_section().props("side"):
+                                        cur = p.book.title or "(untitled)"
+                                        if p.best is None:
+                                            with ui.row().classes("w-full items-center no-wrap q-py-xs"):
+                                                ui.icon("block").classes("text-grey-5 q-mr-sm")
+                                                with ui.column().classes("gap-0"):
+                                                    ui.label(cur)
+                                                    ui.label("no match").classes("text-caption text-grey-6")
+                                            continue
+                                        with ui.row().classes("w-full items-center no-wrap"):
+                                            checks[p.book.id] = ui.checkbox(value=p.confidence >= threshold)
+                                            exp = ui.expansion().classes("w-full")
+                                            with exp.add_slot("header"):
+                                                with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
+                                                    with ui.column().classes("gap-0"):
+                                                        ui.label(f"{cur} → {p.best.title or '?'}")
+                                                        ui.label(
+                                                            controller.source_label(p.best.provider)
+                                                        ).classes("text-caption text-grey-6")
+                                                    ui.space()
                                                     ui.badge(f"{p.confidence:.0f}").props(
                                                         f"color={_confidence_color(p.confidence)}"
                                                     )
+                                            with exp:
+                                                _candidate_meta(
+                                                    p.best, p.book,
+                                                    source_label=controller.source_label(p.best.provider),
+                                                )
                             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                                 ui.button("Cancel", on_click=dialog.close).props("flat")
 
