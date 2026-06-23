@@ -125,7 +125,7 @@ def score_identification(
             score += -15
             signals.append(ConfidenceSignal(name="format_mismatch", points=-15, detail="abridged flag differs"))
 
-    if authority and score_for[id(best)] >= _AGREEMENT_THRESHOLD:
+    if authority and best_score >= _AGREEMENT_THRESHOLD:
         rank = authority.get(best.provider, len(authority))
         maxrank = max(authority.values())
         bonus = round(10 * (1 - rank / maxrank)) if maxrank > 0 else 10

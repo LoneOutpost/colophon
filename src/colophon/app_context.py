@@ -24,7 +24,9 @@ from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
 from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
-from colophon.core.sources import MetadataSource
+from colophon.core.sources import MetadataSource, arrange_sources
+
+__all__ = ["AppContext", "arrange_sources", "build_all_sources", "default_db_path"]
 
 
 def default_db_path() -> Path:
@@ -38,18 +40,6 @@ def build_all_sources(config: Config) -> list[MetadataSource]:
     ]
     sources.extend(discover_providers(config.abs_agg_url))
     return sources
-
-
-def arrange_sources(
-    all_sources: list[MetadataSource], *, order: list[str], disabled: list[str]
-) -> list[MetadataSource]:
-    """Order `all_sources` by `order` (known names first, in that order; names not
-    in `order` keep their incoming order, appended after); then drop any whose name
-    is in `disabled`. Stale `order`/`disabled` names with no live source are ignored."""
-    rank = {name: i for i, name in enumerate(order)}
-    fallback = len(order)
-    ordered = sorted(all_sources, key=lambda s: rank.get(s.name, fallback))
-    return [s for s in ordered if s.name not in set(disabled)]
 
 
 @dataclass

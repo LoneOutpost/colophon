@@ -12,12 +12,7 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
-from colophon.app_context import (
-    AppContext,
-    arrange_sources,
-    build_all_sources,
-    default_db_path,
-)
+from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.chapters import runtime_mismatch
 from colophon.core.confidence import IdentificationOutcome, score_identification
@@ -47,7 +42,7 @@ from colophon.core.quickmatch import (
     QuickMatchProposal,
     QuickMatchSummary,
 )
-from colophon.core.sources import SourceQuery, SourceResult
+from colophon.core.sources import MetadataSource, SourceQuery, SourceResult, arrange_sources
 from colophon.services import files as file_ops
 from colophon.services.acquire import (
     AcquireCandidate,
@@ -119,6 +114,13 @@ _SOURCE_LABELS = {
     "hardcover": "Hardcover",
     "internetarchive": "Internet Archive",
 }
+
+
+def _label_for(source: MetadataSource) -> str:
+    """Human-facing label for a metadata source: its own `label` if set, else the
+    known mapping, else a title-cased form of its name."""
+    name = source.name
+    return getattr(source, "label", None) or _SOURCE_LABELS.get(name, name.replace("_", " ").title())
 
 
 class ChapterApplyResult(_Base):
@@ -880,20 +882,16 @@ class AppController:
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority
         order, so the search dialog can list exactly the available services."""
-        return [(s.name, getattr(s, "label", None) or _SOURCE_LABELS.get(s.name, s.name.title()))
-                for s in self.ctx.sources]
+        return [(s.name, _label_for(s)) for s in self.ctx.sources]
 
     def source_settings(self) -> list[tuple[str, str, bool]]:
         """(name, label, enabled) for every currently-known source: enabled ones in
         authority order first, then known-but-disabled providers. Re-discovers
         abs-agg so newly-available providers appear and stale ones drop."""
-        def label_of(s: object) -> str:
-            return getattr(s, "label", None) or _SOURCE_LABELS.get(s.name, s.name.replace("_", " ").title())
-
         enabled_names = {s.name for s in self.ctx.sources}
-        rows = [(s.name, label_of(s), True) for s in self.ctx.sources]
+        rows = [(s.name, _label_for(s), True) for s in self.ctx.sources]
         rows += [
-            (s.name, label_of(s), False)
+            (s.name, _label_for(s), False)
             for s in build_all_sources(self.ctx.config)
             if s.name not in enabled_names
         ]
@@ -902,9 +900,9 @@ class AppController:
     def source_label(self, name: str) -> str:
         """Human-facing label for a source/provenance name (e.g. 'audnexus' -> 'Audible')."""
         for s in self.ctx.sources:
-            if s.name == name and getattr(s, "label", None):
-                return s.label
-        return _SOURCE_LABELS.get(name, name.title())
+            if s.name == name:
+                return _label_for(s)
+        return _SOURCE_LABELS.get(name, name.replace("_", " ").title())
 
     def review_threshold(self) -> float:
         """The confidence threshold above which a match is auto-checked / a book is Ready."""
