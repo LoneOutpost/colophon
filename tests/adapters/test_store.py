@@ -181,3 +181,36 @@ def test_latest_batch_id_and_mark_reverted(tmp_path: Path):
     assert repo.latest_batch_id() == "b2"
     repo.mark_reverted("b2")
     assert repo.latest_batch_id() == "b1"
+
+
+def test_list_all_cache_reflects_upsert_and_delete(tmp_path: Path):
+    repo = _repo(tmp_path)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "First"
+    repo.upsert(b)
+    assert [x.title for x in repo.list_all()] == ["First"]
+
+    b.title = "Edited"
+    repo.upsert(b)  # must invalidate the cache
+    assert [x.title for x in repo.list_all()] == ["Edited"]
+
+    repo.delete(b.id)  # must invalidate the cache
+    assert repo.list_all() == []
+
+
+def test_list_all_returns_independent_list(tmp_path: Path):
+    repo = _repo(tmp_path)
+    repo.upsert(BookUnit.new(source_folder=tmp_path / "x"))
+    got = repo.list_all()
+    got.append("garbage")  # mutating the returned list must not corrupt the cache
+    assert len(repo.list_all()) == 1
+
+
+def test_list_all_second_call_is_cached(tmp_path: Path):
+    repo = _repo(tmp_path)
+    repo.upsert(BookUnit.new(source_folder=tmp_path / "x"))
+    repo.list_all()  # populate cache
+    # Write directly to the DB, bypassing the repo so the cache is NOT invalidated.
+    repo.conn.execute("DELETE FROM book_units")
+    repo.conn.commit()
+    assert len(repo.list_all()) == 1  # served from the cache, not re-read from SQL
