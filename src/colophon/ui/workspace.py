@@ -68,6 +68,7 @@ _STATE_BADGE: dict[BookState, tuple[str, str]] = {
     BookState.NEEDS_REVIEW: ("Review", "warning"),
     BookState.READY: ("Ready", "positive"),
     BookState.ENCODING: ("Encoding", "info"),
+    BookState.ENCODED: ("Encoded", "info"),
     BookState.ORGANIZED: ("Organized", "info"),
     BookState.FAILED: ("Failed", "negative"),
     BookState.SKIPPED: ("Skipped", "grey-6"),
