@@ -39,3 +39,23 @@ def test_documented_tradeoff_multiword_surname_last_first_is_split():
     # Known auto-mode limitation: a lone "Multi Word Surname, First" is wrongly
     # split because both parts contain whitespace. Mitigated by a provider hint.
     assert split_people("Le Guin, Ursula K.") == ["Le Guin", "Ursula K."]
+
+
+def test_hint_semicolon_keeps_last_first_names():
+    assert split_people("Herbert, Frank; King, Stephen", separators=[";"]) == [
+        "Herbert, Frank", "King, Stephen",
+    ]
+
+
+def test_hint_comma_splits_unconditionally():
+    assert split_people("Brandon Sanderson, Janci Patterson", separators=[","]) == [
+        "Brandon Sanderson", "Janci Patterson",
+    ]
+
+
+def test_hint_separator_absent_returns_single_element():
+    assert split_people("Frank Herbert", separators=[","]) == ["Frank Herbert"]
+
+
+def test_hint_multiple_separators():
+    assert split_people("A; B & C", separators=[";", "&"]) == ["A", "B", "C"]
