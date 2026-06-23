@@ -49,6 +49,7 @@ from colophon.services.acquire import (
     AcquireResult,
     download_torrent,
     list_candidates,
+    sanitize_name,
 )
 from colophon.services.catalog import apply_catalog_mapping
 from colophon.services.cover import ensure_cached_cover
@@ -1100,6 +1101,58 @@ class AppController:
     # --- encode + organize ---
     def ready_books(self) -> list[BookUnit]:
         return self.ctx.books.list_by_state(BookState.READY)
+
+    def _encode_target(self, book: BookUnit) -> Path:
+        """In-place output path for an encode: <source_folder>/<sanitized title>.m4b
+        (falls back to the book id when there's no usable title)."""
+        stem = sanitize_name(book.title or book.id) or book.id
+        return book.source_folder / f"{stem}.m4b"
+
+    def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
+        """Run the selected operations for one book: encode (in place, untagged) ->
+        organize (move) -> tag once at the resting path -> optional source delete."""
+        if options.encode:
+            target = self._encode_target(book)
+            if target.exists() and target != book.output_path:
+                return BookProcessResult(book_id=book.id, status="failed", detail="output name collision")
+            book.state = BookState.ENCODING
+            self.ctx.books.upsert(book)
+            enc = encode_book(
+                book, target, bitrate=self.ctx.config.transcode_bitrate,
+                delete_sources=options.delete_sources, confirm_delete=options.delete_sources,
+                chapters=book.chapters or None,
+            )
+            if not enc.verified or enc.output_path is None:
+                book.state = BookState.FAILED
+                self.ctx.books.upsert(book)
+                return BookProcessResult(book_id=book.id, status="failed", detail=enc.error)
+            book.output_path = enc.output_path
+            book.state = BookState.ENCODED
+            book.touch()
+            self.ctx.books.upsert(book)
+        elif book.output_path is None or not book.output_path.exists():
+            return BookProcessResult(book_id=book.id, status="skipped", detail="not encoded")
+
+        if options.organize:
+            library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
+            org = organize_book(self.ctx.books, book, book.output_path, root=library_root, patterns=self.ctx.patterns)
+            if not org.moved or org.target_path is None:
+                book.state = BookState.FAILED
+                book.touch()
+                self.ctx.books.upsert(book)
+                return BookProcessResult(
+                    book_id=book.id, status="failed",
+                    detail=("collision" if org.collision else org.error),
+                )
+
+        batch_id = new_batch_id()
+        resting = book.output_path
+        self.ctx.operations.record(OperationRecord(
+            batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
+            target=str(resting), before=None, outcome="ok",
+        ))
+        tag_file(resting, book, operations=self.ctx.operations, batch_id=batch_id)
+        return BookProcessResult(book_id=book.id, status="done")
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
         library_root = self.ctx.config.library_root or (default_db_path().parent / "library")

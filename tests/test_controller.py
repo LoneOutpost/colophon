@@ -2096,3 +2096,63 @@ def test_encode_job_types_defaults():
     assert tok.cancelled is False
     tok.cancel()
     assert tok.cancelled is True
+
+
+def test_process_book_encode_only_in_place_sets_encoded(tmp_path, make_audio):
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=True, organize=False))
+    assert result.status == "done"
+    persisted = ctx.books.get(book.id)
+    assert persisted.state == BookState.ENCODED
+    assert persisted.output_path is not None
+    assert persisted.output_path.parent == a.parent  # in-place, beside the sources
+    assert persisted.output_path.exists()
+    ctx.close()
+
+
+def test_process_book_organize_only_requires_encoded(tmp_path):
+    from colophon.controller import EncodeJobOptions
+
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "Dune")
+    book.title = "Dune"
+    book.state = BookState.READY
+    ctx.books.upsert(book)  # no output_path -> nothing encoded to organize
+
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=False, organize=True))
+    assert result.status == "skipped"
+    ctx.close()
+
+
+def test_process_book_full_pipeline_tags_once(tmp_path, make_audio):
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=True, organize=True))
+    assert result.status == "done"
+    persisted = ctx.books.get(book.id)
+    assert persisted.state == BookState.ORGANIZED
+    assert persisted.output_path is not None and persisted.output_path.exists()
+    ops = ctx.operations.list_batch(ctx.operations.latest_batch_id())
+    assert any(op.op_type == "tag_write" and op.book_id == book.id for op in ops)
+    ctx.close()
