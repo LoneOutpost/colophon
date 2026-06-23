@@ -935,6 +935,18 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
                                 ).props("caption")
 
+    def _clear_selection() -> None:
+        """Clear the ENTIRE selection across every view and collapse the bulk
+        panel. The single canonical 'clear everything' used by the footer button,
+        the bulk Clear selection button, the navigator Deselect all, and after a
+        bulk operation runs on the selection."""
+        selected_ids.clear()
+        refresh_nav()
+        refresh_list()
+        refresh_status()
+        _update_count()
+        show_detail("")
+
     # --- bulk editor (shown when 2+ books are selected) ---
     def show_bulk() -> None:
         if _guard_nav(None, show_bulk):
@@ -1008,9 +1020,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.notify("No changes")
                     return
                 ui.notify(f"Updated {n} field(s) on {len(books)} books")
-                refresh_list()
-                refresh_status()
-                show_bulk()
+                _clear_selection()
 
             async def _bulk_tag_dialog() -> None:
                 _apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
@@ -1059,8 +1069,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ),
                             ).props("flat")
                             ui.button("Close", on_click=dialog.close).props("flat")
-                        refresh_list()
-                        refresh_status()
+                        _clear_selection()
 
                     commit_btn.on_click(_commit)
                 dialog.open()
@@ -1087,13 +1096,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             {
                                 "label": "Undo",
                                 "color": "white",
-                                "handler": lambda b=batch: (controller.undo(b), show_bulk()),
+                                "handler": lambda b=batch: (controller.undo(b), refresh_list(), refresh_status()),
                             }
                         ],
                     )
-                    refresh_list()
-                    refresh_status()
-                    show_bulk()
+                    _clear_selection()
 
                 ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
 
@@ -1217,9 +1224,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                     def _close() -> None:
                         dialog.close()
-                        refresh_nav()
-                        refresh_list()
-                        refresh_status()
+                        _clear_selection()
 
                     show_config()
                 dialog.open()
@@ -1231,14 +1236,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
                 ui.button("Write tags", icon="sell", on_click=_bulk_tag_dialog).props("outline")
                 ui.button(
-                    "Clear selection",
-                    icon="clear",
-                    on_click=lambda: (
-                        selected_ids.clear(),
-                        refresh_list(),
-                        refresh_status(),
-                        show_detail(""),
-                    ),
+                    "Clear selection", icon="clear", on_click=_clear_selection,
                 ).props("flat")
 
     # --- book list ---
@@ -1260,6 +1258,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _update_count()
         _after_select()
         _persist_view()
+        _clear_selection()
 
     def _select_visible() -> None:
         # Books-header "Select all": additive over the filtered, visible books.
@@ -1914,8 +1913,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                     ui.button("Select all", icon="done_all", on_click=_select_visible) \
                         .props("flat dense no-caps").tooltip("Select all books matching the filter")
-                    ui.button("Deselect all", icon="remove_done", on_click=_deselect_visible) \
-                        .props("flat dense no-caps").tooltip("Deselect the books matching the filter")
+                    ui.button("Deselect visible", icon="remove_done", on_click=_deselect_visible) \
+                        .props("flat dense no-caps").tooltip("Deselect only the books matching the current filter")
                     ui.space()
                     ui.button("Parse", icon="auto_fix_high", on_click=_parse_dialog) \
                         .props("flat dense no-caps").tooltip(
@@ -2025,6 +2024,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             ui.space()
             if selected_ids:
                 ui.label(f"{len(selected_ids)} selected").classes("text-caption text-grey-7")
+                ui.button(
+                    "Clear all selected", icon="clear_all", on_click=_clear_selection,
+                ).props("flat dense").tooltip("Deselect every book, including any outside the current view")
             ui.button("Undo", icon="undo", on_click=_undo).props("flat dense")
 
     def _refresh_all() -> None:
@@ -2095,7 +2097,47 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         dialog.open()
 
     async def _identify() -> None:
-        await controller.identify_pending()
+        identify_btn.props("loading=true")  # the preview queries every source; show progress
+        try:
+            plan = await controller.identify_preview()
+        finally:
+            identify_btn.props(remove="loading")
+        if not plan.proposals:
+            ui.notify("Nothing to identify")
+            return
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label("Identify results").classes("text-subtitle1")
+            ui.label(f"{plan.to_apply} books auto-matched (fields filled)")
+            ui.label(f"{plan.to_review} routed to Needs review")
+            if plan.skipped:
+                ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
+                    "text-caption text-grey-7"
+                )
+            ui.label(
+                "Only empty fields are filled; covers, edits, and confirmed books are preserved."
+            ).classes("text-caption text-grey-7")
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                async def _apply() -> None:
+                    dialog.close()
+                    summary = await asyncio.to_thread(controller.apply_identify, plan)
+                    _refresh_all()
+                    actions = (
+                        [{
+                            "label": "Undo", "color": "white",
+                            "handler": lambda b=summary.batch_id: (controller.undo(b), _refresh_all()),
+                        }]
+                        if summary.batch_id else None
+                    )
+                    ui.notify(
+                        f"Identified {summary.auto_matched} book(s); "
+                        f"{summary.routed_to_review} need review",
+                        actions=actions,
+                    )
+
+                ui.button("Identify", icon="travel_explore", on_click=_apply)
+        dialog.open()
 
     async def _process() -> None:
         books = _selected_books() or controller.ready_books()
@@ -2199,7 +2241,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         ).props("flat round").tooltip("Reset column widths")
 
     scan_btn.on_click(_scan)  # manages its own preview dialog + refresh
-    identify_btn.on_click(lambda: _run(identify_btn, _identify, "Identification complete"))
+    identify_btn.on_click(_identify)  # manages its own preview dialog + refresh
     process_btn.on_click(_process)  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
