@@ -1238,30 +1238,35 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         checks: dict[str, ui.checkbox] = {}
                         with body:
                             with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                                with ui.list().props("dense").classes("w-full"):
+                                with ui.column().classes("w-full gap-0"):
                                     for p in proposals:
-                                        with ui.item():
-                                            with ui.item_section().props("avatar"):
-                                                if p.best is not None:
-                                                    checks[p.book.id] = ui.checkbox(
-                                                        value=p.confidence >= threshold
-                                                    )
-                                                else:
-                                                    ui.icon("block").classes("text-grey-5")
-                                            with ui.item_section():
-                                                cur = p.book.title or "(untitled)"
-                                                if p.best is not None:
-                                                    prov = controller.source_label(p.best.provider)
-                                                    ui.item_label(f"{cur} → {p.best.title or '?'}")
-                                                    ui.item_label(prov).props("caption")
-                                                else:
-                                                    ui.item_label(cur)
-                                                    ui.item_label("no match").props("caption")
-                                            if p.best is not None:
-                                                with ui.item_section().props("side"):
+                                        cur = p.book.title or "(untitled)"
+                                        if p.best is None:
+                                            with ui.row().classes("w-full items-center no-wrap q-py-xs"):
+                                                ui.icon("block").classes("text-grey-5 q-mr-sm")
+                                                with ui.column().classes("gap-0"):
+                                                    ui.label(cur)
+                                                    ui.label("no match").classes("text-caption text-grey-6")
+                                            continue
+                                        with ui.row().classes("w-full items-center no-wrap"):
+                                            checks[p.book.id] = ui.checkbox(value=p.confidence >= threshold)
+                                            exp = ui.expansion().classes("w-full")
+                                            with exp.add_slot("header"):
+                                                with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
+                                                    with ui.column().classes("gap-0"):
+                                                        ui.label(f"{cur} → {p.best.title or '?'}")
+                                                        ui.label(
+                                                            controller.source_label(p.best.provider)
+                                                        ).classes("text-caption text-grey-6")
+                                                    ui.space()
                                                     ui.badge(f"{p.confidence:.0f}").props(
                                                         f"color={_confidence_color(p.confidence)}"
                                                     )
+                                            with exp:
+                                                _candidate_meta(
+                                                    p.best, p.book,
+                                                    source_label=controller.source_label(p.best.provider),
+                                                )
                             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                                 ui.button("Cancel", on_click=dialog.close).props("flat")
 
