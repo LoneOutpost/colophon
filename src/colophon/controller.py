@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
+from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
@@ -27,6 +27,7 @@ from colophon.core.models import (
     OperationRecord,
     Provenance,
     _Base,
+    new_batch_id,
 )
 from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
@@ -84,10 +85,6 @@ from colophon.services.undo import undo_batch
 logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
-
-
-def _cover_mime(path: Path) -> str:
-    return "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
 
 
 class CoverSetResult(_Base):
@@ -201,12 +198,12 @@ class AppController:
         if book is None:
             return None
         if book.cover_path and book.cover_path.exists():
-            return book.cover_path.read_bytes(), _cover_mime(book.cover_path)
+            return book.cover_path.read_bytes(), mime_for_suffix(book.cover_path)
         if book.cover_url:
             path = await ensure_cached_cover(book, dest_dir=book.source_folder)
             if path is not None:
                 self.ctx.books.upsert(book)  # remember the cache location
-                return path.read_bytes(), _cover_mime(path)
+                return path.read_bytes(), mime_for_suffix(path)
         return None
     async def ensure_cover_cached(self, book: BookUnit) -> None:
         """Cache the book's cover_url into cover_path (if not already cached) so a
@@ -602,7 +599,7 @@ class AppController:
                 directory_scheme=self.ctx.config.directory_scheme,
             )
             if not self._has_direct_audio(parent):
-                self.ctx.books.delete(BookUnit.new(source_folder=parent).id)
+                self.ctx.books.delete(BookUnit.id_for(parent))
         return results
 
     @staticmethod
@@ -623,7 +620,7 @@ class AppController:
         for r in results:
             if not r.ok or r.destination is None:
                 continue
-            book_id = BookUnit.new(source_folder=r.destination.parent).id
+            book_id = BookUnit.id_for(r.destination.parent)
             book = self.ctx.books.get(book_id)
             if book is None:
                 logger.warning(f"restructure: no book found at {r.destination.parent}")
@@ -678,7 +675,7 @@ class AppController:
         one batch id, so a single undo reverts the whole selection. `progress`, when
         given, is called after each book as (done_count, book, result) so the UI can
         show per-book status."""
-        batch_id = uuid.uuid4().hex
+        batch_id = new_batch_id()
         results: list[TagCommitResult] = []
         for book in books:
             await ensure_cached_cover(book, dest_dir=book.source_folder)
@@ -1104,7 +1101,7 @@ class AppController:
 
         # Embed tags into the M4B at its final location so the audit record's path
         # is truthful and any later revert targets the real file (FR-5.3 / FR-8.4).
-        batch_id = uuid.uuid4().hex
+        batch_id = new_batch_id()
         self.ctx.operations.record(OperationRecord(
             batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
             target=str(org.target_path), before=str(enc.output_path), outcome="ok",

@@ -12,8 +12,8 @@ import re
 from typing import Any
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from colophon.adapters.http import HTTP_RETRY
 from colophon.core.sources import SourceQuery, SourceResult
 
 # Collections that are reliably audiobooks/spoken word (precision over recall).
@@ -27,12 +27,6 @@ _NARRATOR_RE = re.compile(
     re.IGNORECASE,
 )
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 def _quote(value: str) -> str:
@@ -112,7 +106,7 @@ class InternetArchiveSource:
             results.append(self._to_result(doc, meta))
         return results
 
-    @_RETRY
+    @HTTP_RETRY
     async def _search(self, params: dict[str, object]) -> httpx.Response:
         return await self._client.get("/advancedsearch.php", params=params)
 

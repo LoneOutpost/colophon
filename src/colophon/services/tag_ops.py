@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.repository.store import OperationRepo
 from colophon.adapters.tags import embed_cover, read_embedded_tags, write_embedded_tags
 from colophon.core.errors import TagWriteError
@@ -69,8 +70,7 @@ class TagCommitResult(_Base):
 def _load_cover(book: BookUnit) -> tuple[bytes, str] | None:
     if book.cover_path is None or not book.cover_path.exists():
         return None
-    mime = "image/png" if book.cover_path.suffix.lower() == ".png" else "image/jpeg"
-    return book.cover_path.read_bytes(), mime
+    return book.cover_path.read_bytes(), mime_for_suffix(book.cover_path)
 
 
 def write_output_metadata(book: BookUnit, path: Path) -> bool:

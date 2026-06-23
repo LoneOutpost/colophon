@@ -12,20 +12,15 @@ import asyncio
 from typing import Any
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from colophon.adapters.http import HTTP_RETRY
+from colophon.core.coerce import to_float, year_or_none
 from colophon.core.models import Chapter, _Base
 from colophon.core.sources import SourceQuery, SourceResult
 
 _AUDNEX_BASE = "https://api.audnex.us"
 _AUDIBLE_BASE = "https://api.audible.com/1.0"
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 class ChapterFetch(_Base):
@@ -88,7 +83,7 @@ class AudnexusSource:
             return None
         return resp.json() or None
 
-    @_RETRY
+    @HTTP_RETRY
     async def _book_get(self, asin: str) -> httpx.Response:
         return await self._client.get(
             f"{_AUDNEX_BASE}/books/{asin}", params={"region": self._region}
@@ -122,13 +117,13 @@ class AudnexusSource:
             chapters=chapters, runtime_ms=runtime if isinstance(runtime, int) else 0
         )
 
-    @_RETRY
+    @HTTP_RETRY
     async def _chapters_get(self, asin: str) -> httpx.Response:
         return await self._client.get(
             f"{_AUDNEX_BASE}/books/{asin}/chapters", params={"region": self._region}
         )
 
-    @_RETRY
+    @HTTP_RETRY
     async def _catalog_get(self, keywords: str) -> httpx.Response:
         return await self._client.get(
             f"{_AUDIBLE_BASE}/catalog/products",
@@ -153,8 +148,8 @@ class AudnexusSource:
             authors=[a["name"] for a in book.get("authors") or [] if a.get("name")],
             narrators=[n["name"] for n in book.get("narrators") or [] if n.get("name")],
             series_name=series.get("name"),
-            series_sequence=_pos_to_float(series.get("position")),
-            publish_year=_year(book.get("releaseDate")),
+            series_sequence=to_float(series.get("position")),
+            publish_year=year_or_none(book.get("releaseDate")),
             asin=book.get("asin"),
             cover_url=book.get("image"),
             description=book.get("summary"),
@@ -166,14 +161,3 @@ class AudnexusSource:
         )
 
 
-def _pos_to_float(value: str | int | float | None) -> float | None:
-    try:
-        return float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _year(release_date: str | None) -> int | None:
-    if isinstance(release_date, str) and len(release_date) >= 4 and release_date[:4].isdigit():
-        return int(release_date[:4])
-    return None

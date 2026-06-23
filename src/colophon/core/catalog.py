@@ -11,6 +11,7 @@ from collections import Counter
 
 from colophon.core.fields import get_field
 from colophon.core.models import BookUnit, _Base
+from colophon.core.textlist import dedupe_preserving, split_list
 
 CATALOG_KINDS = ("author", "narrator", "series", "genre", "tag", "publisher", "language")
 
@@ -20,19 +21,9 @@ class CatalogEntry(_Base):
     count: int
 
 
-def _split(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [p.strip() for p in value.split(";") if p.strip()]
-
-
 def entry_names(book: BookUnit, kind: str) -> list[str]:
     """The distinct catalog values of `kind` on a single book, in order."""
-    seen: list[str] = []
-    for n in _split(get_field(book, kind)):
-        if n not in seen:
-            seen.append(n)
-    return seen
+    return dedupe_preserving(split_list(get_field(book, kind)))
 
 
 def list_entries(books: list[BookUnit], kind: str) -> list[CatalogEntry]:
@@ -48,11 +39,5 @@ def list_entries(books: list[BookUnit], kind: str) -> list[CatalogEntry]:
 def remap_names(names: list[str], mapping: dict[str, str | None]) -> list[str]:
     """Apply `mapping` (old -> new, or old -> None to drop) to `names`, deduping and
     preserving order."""
-    out: list[str] = []
-    for n in names:
-        new = mapping[n] if n in mapping else n
-        if new is None:
-            continue
-        if new not in out:
-            out.append(new)
-    return out
+    mapped = (mapping[n] if n in mapping else n for n in names)
+    return dedupe_preserving([n for n in mapped if n is not None])

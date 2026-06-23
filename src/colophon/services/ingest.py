@@ -50,8 +50,7 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
     scheme = parse_scheme(directory_scheme)
     plan = ScanPlan()
     for unit in group_book_units(root):
-        book_id = BookUnit.new(source_folder=unit.folder).id
-        existing = repo.get(book_id)
+        existing = repo.get(BookUnit.id_for(unit.folder))
         book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
 
         prior_paths = {sf.path for sf in book.source_files}

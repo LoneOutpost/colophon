@@ -9,20 +9,14 @@ import logging
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from colophon.adapters.http import HTTP_RETRY
 from colophon.core.models import _Base
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.real-debrid.com/rest/1.0"
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 class RdTorrent(_Base):
@@ -91,11 +85,11 @@ class RealDebridClient:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
 
-    @_RETRY
+    @HTTP_RETRY
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
         return await self._client.get(f"{self._base}{path}", params=params, headers=self._headers)
 
-    @_RETRY
+    @HTTP_RETRY
     async def _post(self, path: str, data: dict[str, str]) -> httpx.Response:
         return await self._client.post(f"{self._base}{path}", data=data, headers=self._headers)
 

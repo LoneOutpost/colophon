@@ -12,20 +12,14 @@ import logging
 from typing import Any
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from colophon.core.coerce import year_or_none
+from colophon.adapters.http import HTTP_RETRY
+from colophon.core.coerce import to_float, year_or_none
 from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
 
 logger = logging.getLogger(__name__)
 
-_RETRY = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=0.5, max=4),
-    retry=retry_if_exception_type(httpx.TransportError),
-    reraise=True,
-)
 
 
 def _first_str(value: Any) -> list[str]:
@@ -34,13 +28,6 @@ def _first_str(value: Any) -> list[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
-
-
-def _sequence_to_float(value: Any) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 class AbsAggSource:
@@ -67,7 +54,7 @@ class AbsAggSource:
         matches = (resp.json() or {}).get("matches") or []
         return [self._to_result(m) for m in matches]
 
-    @_RETRY
+    @HTTP_RETRY
     async def _get(self, params: dict[str, object]) -> httpx.Response:
         return await self._client.get(f"/{self.name}/search", params=params)
 
@@ -82,7 +69,7 @@ class AbsAggSource:
             authors=_first_str(m.get("author")),
             narrators=_first_str(m.get("narrator")),
             series_name=first.get("series"),
-            series_sequence=_sequence_to_float(first.get("sequence")),
+            series_sequence=to_float(first.get("sequence")),
             publish_year=year_or_none(m.get("publishedYear")),
             asin=m.get("asin"),
             isbn=normalize_isbn(m.get("isbn")),
