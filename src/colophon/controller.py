@@ -669,20 +669,26 @@ class AppController:
         (result,) = await self.write_tags_books([book])
         return result
 
-    async def write_tags_books(self, books: list[BookUnit]) -> list[TagCommitResult]:
+    async def write_tags_books(
+        self, books: list[BookUnit],
+        progress: Callable[[int, BookUnit, TagCommitResult], None] | None = None,
+    ) -> list[TagCommitResult]:
         """Fetch+cache each book's cover (best effort), then write tags into its
         files on a worker thread, logging every write for recovery. All books share
-        one batch id, so a single undo reverts the whole selection."""
+        one batch id, so a single undo reverts the whole selection. `progress`, when
+        given, is called after each book as (done_count, book, result) so the UI can
+        show per-book status."""
         batch_id = uuid.uuid4().hex
         results: list[TagCommitResult] = []
         for book in books:
             await ensure_cached_cover(book, dest_dir=book.source_folder)
             self.ctx.books.upsert(book)
-            results.append(
-                await asyncio.to_thread(
-                    commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
-                )
+            result = await asyncio.to_thread(
+                commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
             )
+            results.append(result)
+            if progress is not None:
+                progress(len(results), book, result)
         return results
 
     def undo_tag_batch(self) -> bool:

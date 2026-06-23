@@ -301,15 +301,28 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     _VIEW_KEY = "workspace_view"
 
+    def _tab_storage():
+        """app.storage.tab, or None when the client is not connected (e.g. a
+        reconnect race or a background callback). View persistence is best-effort:
+        a transient no-connection must never raise and 500 the page."""
+        try:
+            return app.storage.tab
+        except RuntimeError:
+            return None
+
     def _persist_view() -> None:
-        app.storage.tab[_VIEW_KEY] = view_to_snapshot(
+        store = _tab_storage()
+        if store is None:
+            return
+        store[_VIEW_KEY] = view_to_snapshot(
             scope=scope, folder_filter=folder_filter, view=view,
             filter_text=book_filter["text"], selected_ids=selected_ids,
             open_book_id=editor_state["book_id"],
         )
 
+    _tab = _tab_storage()
     _restored = snapshot_to_view(
-        app.storage.tab.get(_VIEW_KEY),
+        _tab.get(_VIEW_KEY) if _tab is not None else None,
         known_book_ids={b.id for b in controller.books_all()},
         known_authors=set(controller.known_authors()),
         known_series=set(controller.known_series()),
@@ -1036,6 +1049,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.label(f"Write tags to {len(books)} books ({total_files} files)").classes(
                         "text-subtitle1"
                     )
+                    statuses: dict[str, ui.item_label] = {}
                     with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
                         with ui.list().props("dense").classes("w-full"):
                             for b, plan in plans:
@@ -1046,15 +1060,27 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                             f" · {len(plan.warnings)} warning(s)" if plan.warnings else ""
                                         )
                                         ui.item_label(note).props("caption")
+                                    with ui.item_section().props("side"):
+                                        statuses[b.id] = ui.item_label("queued").props("caption")
                     actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
                     with actions:
+                        progress_label = ui.label().classes(
+                            "text-caption text-grey-7 q-mr-auto self-center"
+                        )
                         ui.button("Cancel", on_click=dialog.close).props("flat")
                         commit_btn = ui.button("Write tags", icon="sell")
 
                     async def _commit() -> None:
+                        def _on_progress(done: int, book, result) -> None:
+                            statuses[book.id].set_text(
+                                f"written ({result.written})" if not result.failed
+                                else f"failed: {result.failed} file(s)"
+                            )
+                            progress_label.set_text(f"{done} / {len(books)} books")
+
                         commit_btn.props("loading=true")
                         try:
-                            results = await controller.write_tags_books(books)
+                            results = await controller.write_tags_books(books, progress=_on_progress)
                         finally:
                             commit_btn.props(remove="loading")
                         wrote = sum(r.written for r in results)
@@ -1072,10 +1098,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     controller.undo_tag_batch(),
                                     ui.notify("Reverted tag write (embedded covers kept)"),
                                     dialog.close(),
+                                    _clear_selection(),
                                 ),
                             ).props("flat")
-                            ui.button("Close", on_click=dialog.close).props("flat")
-                        _clear_selection()
+                            ui.button(
+                                "Close", on_click=lambda: (dialog.close(), _clear_selection())
+                            ).props("flat")
+                        # Selection is cleared when the results dialog is dismissed (above),
+                        # not here, so the per-book progress + summary stay visible meanwhile.
 
                     commit_btn.on_click(_commit)
                 dialog.open()
