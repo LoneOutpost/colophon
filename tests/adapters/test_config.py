@@ -171,3 +171,22 @@ def test_genre_policy_fields_round_trip(tmp_path):
 def test_storage_secret_defaults_none():
     from colophon.adapters.config import Config
     assert Config().storage_secret is None
+
+
+def test_source_prefs_round_trip(tmp_path):
+    from colophon.adapters.config import Config, load_config, save_config
+
+    cfg = Config(source_order=["audnexus", "hardcover"], disabled_sources=["googlebooks"])
+    path = tmp_path / "c.toml"
+    save_config(cfg, path)
+    loaded = load_config(path)
+    assert loaded.source_order == ["audnexus", "hardcover"]
+    assert loaded.disabled_sources == ["googlebooks"]
+
+
+def test_source_prefs_default_empty():
+    from colophon.adapters.config import Config
+
+    cfg = Config()
+    assert cfg.source_order == []
+    assert cfg.disabled_sources == []

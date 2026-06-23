@@ -37,6 +37,8 @@ class Config(BaseModel):
     accepted_genres: list[str] = []
     genre_whitelist_enabled: bool = False
     normalize_on_match: list[str] = []
+    source_order: list[str] = []  # provider names, highest authority first; [] = default order
+    disabled_sources: list[str] = []  # provider names excluded from matching
 
 
 def default_config_path() -> Path:
