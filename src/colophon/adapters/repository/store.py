@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,13 +13,79 @@ from colophon.core.models import BookState, BookUnit, EditChange, OperationRecor
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
+class _Rows:
+    """Materialized statement result that mimics the slice of the sqlite3.Cursor
+    API the repos use (`fetchone`/`fetchall`), so callers keep working unchanged
+    while `_LockedConnection.execute` reads every row under the lock."""
+
+    def __init__(self, rows: list[sqlite3.Row]) -> None:
+        self._rows = rows
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def fetchone(self) -> sqlite3.Row | None:
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self) -> list[sqlite3.Row]:
+        return self._rows
+
+
+class _LockedConnection:
+    """Serializes statement execution and commits across threads.
+
+    The connection is opened with `check_same_thread=False` so worker threads
+    (e.g. the encode/organize job's `asyncio.to_thread` pool) may share it, but
+    SQLite gives no isolation between an `execute` on one thread and a `commit`
+    on another. This proxy guards `execute`/`executemany`/`executescript`/`commit`
+    with a single reentrant lock, executing each statement and materializing its
+    rows while the lock is held so a statement and its `fetch*` stay atomic.
+    Unguarded attributes (`row_factory`, `close`, ...) pass straight through.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._lock = threading.RLock()
+
+    def execute(self, sql: str, parameters: tuple = ()) -> _Rows:
+        with self._lock:
+            return _Rows(self._conn.execute(sql, parameters).fetchall())
+
+    def executemany(self, sql: str, seq_of_parameters: object) -> None:
+        with self._lock:
+            self._conn.executemany(sql, seq_of_parameters)
+
+    def executescript(self, sql_script: str) -> None:
+        with self._lock:
+            self._conn.executescript(sql_script)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._conn.commit()
+
+    def __enter__(self) -> sqlite3.Connection:
+        # `with conn:` opens an all-or-nothing transaction; hold the lock for its
+        # whole span so a concurrent worker can't interleave or commit mid-way.
+        self._lock.acquire()
+        return self._conn.__enter__()
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        try:
+            return self._conn.__exit__(exc_type, exc, tb)
+        finally:
+            self._lock.release()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    return _LockedConnection(conn)
 
 
 def _ensure_version_table(conn: sqlite3.Connection) -> None:

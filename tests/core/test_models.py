@@ -124,6 +124,7 @@ def test_book_state_has_full_pipeline_lifecycle():
         "needs_review",
         "ready",
         "encoding",
+        "encoded",
         "organized",
         "failed",
         "skipped",
@@ -214,3 +215,12 @@ def test_book_unit_manually_confirmed_defaults_false(tmp_path):
     from colophon.core.models import BookUnit
     b = BookUnit.new(source_folder=tmp_path / "x")
     assert b.manually_confirmed is False
+
+
+def test_book_state_has_encoded_between_ready_and_organized():
+    from colophon.core.models import BookState
+
+    assert BookState.ENCODED.value == "encoded"
+    members = list(BookState)
+    assert members.index(BookState.ENCODED) > members.index(BookState.READY)
+    assert members.index(BookState.ENCODED) < members.index(BookState.ORGANIZED)

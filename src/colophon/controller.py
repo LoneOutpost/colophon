@@ -49,6 +49,7 @@ from colophon.services.acquire import (
     AcquireResult,
     download_torrent,
     list_candidates,
+    sanitize_name,
 )
 from colophon.services.catalog import apply_catalog_mapping
 from colophon.services.cover import ensure_cached_cover
@@ -143,6 +144,38 @@ class ProcessResult(_Base):
     encoded: bool = False
     organized: bool = False
     detail: str | None = None
+
+
+class EncodeJobOptions(_Base):
+    encode: bool = True
+    organize: bool = True
+    delete_sources: bool = False
+    concurrency: int = 2
+
+
+class BookProcessResult(_Base):
+    book_id: str
+    status: str = "queued"  # done / failed / cancelled / skipped
+    detail: str | None = None
+
+
+class EncodeJobResult(_Base):
+    results: list[BookProcessResult] = []  # noqa: RUF012 - pydantic default, copied per instance
+
+
+class CancelToken:
+    """A cooperative cancel flag checked between books (graceful: in-flight work
+    finishes; queued work is skipped)."""
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
 
 class AppController:
@@ -1069,43 +1102,105 @@ class AppController:
     def ready_books(self) -> list[BookUnit]:
         return self.ctx.books.list_by_state(BookState.READY)
 
-    def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
-        library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
-        staging = library_root / ".staging"
-        staging.mkdir(parents=True, exist_ok=True)
+    def _encode_target(self, book: BookUnit) -> Path:
+        """In-place output path for an encode: <source_folder>/<sanitized title>.m4b
+        (falls back to the book id when there's no usable title)."""
+        stem = sanitize_name(book.title or book.id) or book.id
+        return book.source_folder / f"{stem}.m4b"
 
-        book.state = BookState.ENCODING
-        self.ctx.books.upsert(book)
-        enc = encode_book(
-            book, staging / f"{book.id}.m4b",
-            bitrate=self.ctx.config.transcode_bitrate,
-            delete_sources=confirm_delete, confirm_delete=confirm_delete,
-            chapters=book.chapters or None,
-        )
-        if not enc.verified or enc.output_path is None:
-            book.state = BookState.FAILED
+    def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
+        """Run the selected operations for one book: encode (in place, untagged) ->
+        organize (move) -> tag once at the resting path -> optional source delete."""
+        if options.encode:
+            target = self._encode_target(book)
+            if target.exists() and target != book.output_path:
+                return BookProcessResult(book_id=book.id, status="failed", detail="output name collision")
+            book.state = BookState.ENCODING
             self.ctx.books.upsert(book)
-            return ProcessResult(book_id=book.id, encoded=False, detail=enc.error)
-
-        org = organize_book(self.ctx.books, book, enc.output_path, root=library_root, patterns=self.ctx.patterns)
-        if not org.moved or org.target_path is None:
-            book.state = BookState.FAILED
+            enc = encode_book(
+                book, target, bitrate=self.ctx.config.transcode_bitrate,
+                delete_sources=options.delete_sources, confirm_delete=options.delete_sources,
+                chapters=book.chapters or None,
+            )
+            if not enc.verified or enc.output_path is None:
+                book.state = BookState.FAILED
+                self.ctx.books.upsert(book)
+                return BookProcessResult(book_id=book.id, status="failed", detail=enc.error)
+            book.output_path = enc.output_path
+            book.state = BookState.ENCODED
             book.touch()
             self.ctx.books.upsert(book)
-            return ProcessResult(
-                book_id=book.id, encoded=True, organized=False,
-                detail=("collision" if org.collision else org.error),
-            )
+        elif book.output_path is None or not book.output_path.exists():
+            return BookProcessResult(book_id=book.id, status="skipped", detail="not encoded")
 
-        # Embed tags into the M4B at its final location so the audit record's path
-        # is truthful and any later revert targets the real file (FR-5.3 / FR-8.4).
+        if options.organize:
+            library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
+            org = organize_book(self.ctx.books, book, book.output_path, root=library_root, patterns=self.ctx.patterns)
+            if not org.moved or org.target_path is None:
+                book.state = BookState.FAILED
+                book.touch()
+                self.ctx.books.upsert(book)
+                return BookProcessResult(
+                    book_id=book.id, status="failed",
+                    detail=("collision" if org.collision else org.error),
+                )
+
         batch_id = new_batch_id()
+        resting = book.output_path
         self.ctx.operations.record(OperationRecord(
             batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
-            target=str(org.target_path), before=str(enc.output_path), outcome="ok",
+            target=str(resting), before=None, outcome="ok",
         ))
-        tag_file(org.target_path, book, operations=self.ctx.operations, batch_id=batch_id)
-        return ProcessResult(book_id=book.id, encoded=True, organized=True)
+        tag_file(resting, book, operations=self.ctx.operations, batch_id=batch_id)
+        return BookProcessResult(book_id=book.id, status="done")
+
+    async def run_encode_job(
+        self,
+        books: list[BookUnit],
+        options: EncodeJobOptions,
+        *,
+        progress: Callable[[str, str], None] | None = None,
+        cancel: CancelToken | None = None,
+    ) -> EncodeJobResult:
+        """Run the selected encode/organize/delete operations across `books` with
+        bounded concurrency. Graceful cancel: a book not yet started after the token
+        is set is reported 'cancelled'; in-flight books finish. `progress(book_id,
+        status)` is called as each book moves through its steps."""
+        sem = asyncio.Semaphore(max(1, options.concurrency))
+
+        def _emit(book_id: str, status: str) -> None:
+            if progress is not None:
+                progress(book_id, status)
+
+        async def _one(book: BookUnit) -> BookProcessResult:
+            if cancel is not None and cancel.cancelled:
+                _emit(book.id, "cancelled")
+                return BookProcessResult(book_id=book.id, status="cancelled")
+            async with sem:
+                if cancel is not None and cancel.cancelled:
+                    _emit(book.id, "cancelled")
+                    return BookProcessResult(book_id=book.id, status="cancelled")
+                _emit(book.id, "encoding" if options.encode else "organizing")
+                result = await asyncio.to_thread(self._process_book, book, options)
+                _emit(book.id, result.status)
+                return result
+
+        results = await asyncio.gather(*(_one(b) for b in books))
+        return EncodeJobResult(results=list(results))
+
+    def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
+        """Encode + organize a single book (delegates to the unified worker, which
+        handles encode-in-place, single-tag, and optional source delete)."""
+        res = self._process_book(
+            book, EncodeJobOptions(encode=True, organize=True, delete_sources=confirm_delete),
+        )
+        organized = res.status == "done" and book.state == BookState.ORGANIZED
+        return ProcessResult(
+            book_id=book.id,
+            encoded=book.state in (BookState.ENCODED, BookState.ORGANIZED),
+            organized=organized,
+            detail=res.detail,
+        )
 
     def process_ready(
         self,

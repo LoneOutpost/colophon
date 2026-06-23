@@ -2083,3 +2083,132 @@ def test_save_settings_applies_disable(tmp_path):
     assert any(s.name == "googlebooks" for s in ctx.sources)
     ctrl.save_settings(Config(db_path=tmp_path / "db.sqlite", disabled_sources=["googlebooks"]))
     assert all(s.name != "googlebooks" for s in ctrl.ctx.sources)
+
+
+def test_encode_job_types_defaults():
+    from colophon.controller import CancelToken, EncodeJobOptions
+
+    opts = EncodeJobOptions()
+    assert opts.encode is True and opts.organize is True
+    assert opts.delete_sources is False and opts.concurrency == 2
+
+    tok = CancelToken()
+    assert tok.cancelled is False
+    tok.cancel()
+    assert tok.cancelled is True
+
+
+def test_process_book_encode_only_in_place_sets_encoded(tmp_path, make_audio):
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=True, organize=False))
+    assert result.status == "done"
+    persisted = ctx.books.get(book.id)
+    assert persisted.state == BookState.ENCODED
+    assert persisted.output_path is not None
+    assert persisted.output_path.parent == a.parent  # in-place, beside the sources
+    assert persisted.output_path.exists()
+    ctx.close()
+
+
+def test_process_book_organize_only_requires_encoded(tmp_path):
+    from colophon.controller import EncodeJobOptions
+
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "Dune")
+    book.title = "Dune"
+    book.state = BookState.READY
+    ctx.books.upsert(book)  # no output_path -> nothing encoded to organize
+
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=False, organize=True))
+    assert result.status == "skipped"
+    ctx.close()
+
+
+def test_process_book_full_pipeline_tags_once(tmp_path, make_audio):
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=True, organize=True))
+    assert result.status == "done"
+    persisted = ctx.books.get(book.id)
+    assert persisted.state == BookState.ORGANIZED
+    assert persisted.output_path is not None and persisted.output_path.exists()
+    ops = ctx.operations.list_batch(ctx.operations.latest_batch_id())
+    assert any(op.op_type == "tag_write" and op.book_id == book.id for op in ops)
+    ctx.close()
+
+
+async def test_run_encode_job_reports_progress_and_results(tmp_path, make_audio):
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    books = []
+    for i in range(2):
+        a = make_audio(f"Book{i}/01.mp3", seconds=1)
+        book = BookUnit.new(source_folder=a.parent)
+        book.title = f"Book {i}"
+        book.authors = ["Frank Herbert"]
+        book.state = BookState.READY
+        book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+        ctx.books.upsert(book)
+        books.append(book)
+
+    seen: list[tuple[str, str]] = []
+    result = await AppController(ctx).run_encode_job(
+        books,
+        EncodeJobOptions(encode=True, organize=True),
+        progress=lambda bid, status: seen.append((bid, status)),
+    )
+    assert [r.status for r in result.results] == ["done", "done"]
+    statuses = {status for _, status in seen}
+    assert "encoding" in statuses
+    assert "done" in statuses
+    ctx.close()
+
+
+async def test_run_encode_job_graceful_cancel_skips_queued(tmp_path, make_audio):
+    from colophon.controller import CancelToken, EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    books = []
+    for i in range(3):
+        a = make_audio(f"Book{i}/01.mp3", seconds=1)
+        book = BookUnit.new(source_folder=a.parent)
+        book.title = f"Book {i}"
+        book.authors = ["Frank Herbert"]
+        book.state = BookState.READY
+        book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+        ctx.books.upsert(book)
+        books.append(book)
+
+    tok = CancelToken()
+    tok.cancel()
+    result = await AppController(ctx).run_encode_job(
+        books,
+        EncodeJobOptions(encode=True, organize=False, concurrency=1),
+        cancel=tok,
+    )
+    assert [r.status for r in result.results] == ["cancelled", "cancelled", "cancelled"]
+    ctx.close()

@@ -73,23 +73,6 @@ def _load_cover(book: BookUnit) -> tuple[bytes, str] | None:
     return book.cover_path.read_bytes(), mime_for_suffix(book.cover_path)
 
 
-def write_output_metadata(book: BookUnit, path: Path) -> bool:
-    """Write the book's projected tags (+ cover when available) into `path`.
-    Best-effort: logs and returns False on a tag-write failure, True on success.
-    Unlike commit_tag, it records no operation -- the output is a generated
-    artifact, not a tracked source edit."""
-    target = project_tags(book)
-    cover = _load_cover(book)
-    try:
-        write_embedded_tags(path, target)
-        if cover is not None:
-            embed_cover(path, cover[0], cover[1])
-    except (TagWriteError, OSError) as e:
-        logger.warning(f"tagging output {path} failed: {e}")
-        return False
-    return True
-
-
 def _tag_and_log(
     path: Path, target: EmbeddedTags, cover: tuple[bytes, str] | None,
     *, operations: OperationRepo, book_id: str, batch_id: str,

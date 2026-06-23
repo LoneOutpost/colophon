@@ -72,6 +72,7 @@ class BookState(StrEnum):
     NEEDS_REVIEW = "needs_review"
     READY = "ready"
     ENCODING = "encoding"
+    ENCODED = "encoded"
     ORGANIZED = "organized"
     FAILED = "failed"
     SKIPPED = "skipped"
