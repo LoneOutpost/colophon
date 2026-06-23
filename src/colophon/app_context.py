@@ -24,11 +24,22 @@ from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
 from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
-from colophon.core.sources import MetadataSource
+from colophon.core.sources import MetadataSource, arrange_sources
+
+__all__ = ["AppContext", "arrange_sources", "build_all_sources", "default_db_path"]
 
 
 def default_db_path() -> Path:
     return user_data_path("colophon") / "colophon.db"
+
+
+def build_all_sources(config: Config) -> list[MetadataSource]:
+    """The full available set: the four built-ins plus discovered abs-agg providers."""
+    sources: list[MetadataSource] = [
+        AudnexusSource(), OpenLibrarySource(), GoogleBooksSource(), InternetArchiveSource()
+    ]
+    sources.extend(discover_providers(config.abs_agg_url))
+    return sources
 
 
 @dataclass
@@ -54,10 +65,11 @@ class AppContext:
             if config.lazylibrarian_config_ini
             else AudiobookPatterns()
         )
-        sources: list[MetadataSource] = [
-            AudnexusSource(), OpenLibrarySource(), GoogleBooksSource(), InternetArchiveSource()
-        ]
-        sources.extend(discover_providers(config.abs_agg_url))
+        sources = arrange_sources(
+            build_all_sources(config),
+            order=config.source_order,
+            disabled=config.disabled_sources,
+        )
         abs_client = (
             AbsClient(base_url=config.audiobookshelf_url, token=config.audiobookshelf_token)
             if config.audiobookshelf_url and config.audiobookshelf_token

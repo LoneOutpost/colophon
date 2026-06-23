@@ -12,6 +12,7 @@ from colophon.core.models import BookUnit, ConfidenceSignal, _Base
 from colophon.core.sources import SourceResult
 
 _AGREEMENT_THRESHOLD = 0.85  # title/author blend above this "agrees" with candidate
+_AUTHORITY_MARGIN = 0.05  # fuzzy-score window within which authority decides "best"
 
 
 class IdentificationOutcome(_Base):
@@ -25,7 +26,9 @@ def _result_score(book: BookUnit, result: SourceResult) -> float:
     return title_author_score(book.title, book.authors, result.title, result.authors)
 
 
-def score_identification(book: BookUnit, results: list[SourceResult]) -> IdentificationOutcome:
+def score_identification(
+    book: BookUnit, results: list[SourceResult], *, authority: dict[str, int] | None = None
+) -> IdentificationOutcome:
     signals: list[ConfidenceSignal] = []
     score = 0.0
 
@@ -50,6 +53,18 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
 
     ranked = sorted(results, key=_rank_key, reverse=True)
     best = ranked[0]
+
+    if authority:
+        top = score_for[id(best)]
+        comparable = [
+            r for r in results
+            if score_for[id(r)] >= _AGREEMENT_THRESHOLD and score_for[id(r)] >= top - _AUTHORITY_MARGIN
+        ]
+        if comparable:
+            best = min(
+                comparable,
+                key=lambda r: (authority.get(r.provider, len(authority)), -score_for[id(r)]),
+            )
 
     # ASIN exact match — strongest single signal.
     asin_hit = book.asin and any(r.asin and r.asin == book.asin for r in results)
@@ -109,6 +124,17 @@ def score_identification(book: BookUnit, results: list[SourceResult]) -> Identif
         else:
             score += -15
             signals.append(ConfidenceSignal(name="format_mismatch", points=-15, detail="abridged flag differs"))
+
+    if authority and best_score >= _AGREEMENT_THRESHOLD:
+        rank = authority.get(best.provider, len(authority))
+        maxrank = max(authority.values())
+        bonus = round(10 * (1 - rank / maxrank)) if maxrank > 0 else 10
+        if bonus > 0:
+            score += bonus
+            signals.append(ConfidenceSignal(
+                name="source_authority", points=bonus,
+                detail=f"{best.provider} (authority #{rank + 1})",
+            ))
 
     confidence = max(0.0, min(100.0, score))
     return IdentificationOutcome(confidence=confidence, signals=signals, ranked=ranked, best=best)

@@ -180,6 +180,50 @@ def render_settings(controller: AppController) -> None:
                     label="Auto-normalize on match",
                 ).props("use-chips dense").classes("w-full")
 
+            # --- Match sources (enable/disable + authority order) ---
+            source_rows = [
+                {"name": name, "label": label, "enabled": enabled}
+                for name, label, enabled in controller.source_settings()
+            ]
+
+            def _set_enabled(row: dict, value: bool) -> None:
+                row["enabled"] = value
+
+            def _render_sources() -> None:
+                sources_box.clear()
+                with sources_box:
+                    for i, row in enumerate(source_rows):
+                        with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
+                            cb = ui.checkbox(value=row["enabled"]).props("dense")
+                            cb.on_value_change(
+                                lambda e, r=row: _set_enabled(r, e.value)
+                            )
+                            ui.label(row["label"]).classes("col")
+                            ui.button(
+                                icon="keyboard_arrow_up",
+                                on_click=lambda _e, idx=i: _move(idx, -1),
+                            ).props("flat dense round").set_enabled(i > 0)
+                            ui.button(
+                                icon="keyboard_arrow_down",
+                                on_click=lambda _e, idx=i: _move(idx, 1),
+                            ).props("flat dense round").set_enabled(
+                                i < len(source_rows) - 1
+                            )
+
+            def _move(idx: int, delta: int) -> None:
+                j = idx + delta
+                if 0 <= j < len(source_rows):
+                    source_rows[idx], source_rows[j] = source_rows[j], source_rows[idx]
+                    _render_sources()
+
+            with _section(
+                "Match sources",
+                "Enable/disable providers and order them by authority "
+                "(top = most trusted).",
+            ):
+                sources_box = ui.column().classes("w-full gap-1")
+                _render_sources()
+
             def do_save() -> None:
                 try:
                     new = Config(
@@ -210,6 +254,10 @@ def render_settings(controller: AppController) -> None:
                         },
                         normalize_on_match=[
                             f for f in (normalize_on_match.value or []) if f
+                        ],
+                        source_order=[r["name"] for r in source_rows],
+                        disabled_sources=[
+                            r["name"] for r in source_rows if not r["enabled"]
                         ],
                     )
                     controller.save_settings(new)

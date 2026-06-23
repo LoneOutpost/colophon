@@ -184,3 +184,46 @@ def test_abridged_mismatch_penalty(tmp_path):
     r = SourceResult(provider="a", title="Dune", authors=["Frank Herbert"], abridged=True)
     out = score_identification(b, [r])
     assert any(s.name == "format_mismatch" for s in out.signals)
+
+
+def _auth_book():
+    b = BookUnit.new(source_folder=__import__("pathlib").Path("/x"))
+    b.title = "The Way of Kings"
+    b.authors = ["Brandon Sanderson"]
+    return b
+
+
+def _auth_res(provider, title="The Way of Kings", authors=("Brandon Sanderson",)):
+    return SourceResult(provider=provider, title=title, authors=list(authors))
+
+
+def test_authority_picks_best_among_comparable_strong_matches():
+    out = score_identification(_auth_book(), [_auth_res("hardcover"), _auth_res("audnexus")],
+                               authority={"audnexus": 0, "hardcover": 1})
+    assert out.best.provider == "audnexus"
+
+
+def test_clearly_stronger_low_authority_match_still_wins():
+    book = _auth_book()
+    strong = _auth_res("hardcover")
+    weak = _auth_res("audnexus", title="Totally Different Book", authors=("Someone Else",))
+    out = score_identification(book, [weak, strong], authority={"audnexus": 0, "hardcover": 1})
+    assert out.best.provider == "hardcover"
+
+
+def test_authority_bonus_only_on_strong_best_and_is_a_signal():
+    out = score_identification(_auth_book(), [_auth_res("audnexus")], authority={"audnexus": 0})
+    names = {s.name: s.points for s in out.signals}
+    assert names.get("source_authority") == 10
+
+
+def test_no_authority_bonus_when_best_is_weak():
+    book = _auth_book()
+    weak = _auth_res("audnexus", title="Nope", authors=("X",))
+    out = score_identification(book, [weak], authority={"audnexus": 0})
+    assert all(s.name != "source_authority" for s in out.signals)
+
+
+def test_authority_none_is_unchanged_behavior():
+    out = score_identification(_auth_book(), [_auth_res("audnexus"), _auth_res("hardcover")])
+    assert all(s.name != "source_authority" for s in out.signals)

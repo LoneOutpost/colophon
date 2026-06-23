@@ -46,3 +46,16 @@ class MetadataSource(Protocol):
     name: str
 
     async def search(self, query: SourceQuery) -> list[SourceResult]: ...
+
+
+def arrange_sources(
+    all_sources: list[MetadataSource], *, order: list[str], disabled: list[str]
+) -> list[MetadataSource]:
+    """Order `all_sources` by `order` (known names first, in that order; names not
+    in `order` keep their incoming order, appended after); then drop any whose name
+    is in `disabled`. Stale `order`/`disabled` names with no live source are ignored."""
+    rank = {name: i for i, name in enumerate(order)}
+    fallback = len(order)
+    disabled_set = set(disabled)
+    ordered = sorted(all_sources, key=lambda s: rank.get(s.name, fallback))
+    return [s for s in ordered if s.name not in disabled_set]
