@@ -2083,3 +2083,16 @@ def test_save_settings_applies_disable(tmp_path):
     assert any(s.name == "googlebooks" for s in ctx.sources)
     ctrl.save_settings(Config(db_path=tmp_path / "db.sqlite", disabled_sources=["googlebooks"]))
     assert all(s.name != "googlebooks" for s in ctrl.ctx.sources)
+
+
+def test_encode_job_types_defaults():
+    from colophon.controller import CancelToken, EncodeJobOptions
+
+    opts = EncodeJobOptions()
+    assert opts.encode is True and opts.organize is True
+    assert opts.delete_sources is False and opts.concurrency == 2
+
+    tok = CancelToken()
+    assert tok.cancelled is False
+    tok.cancel()
+    assert tok.cancelled is True

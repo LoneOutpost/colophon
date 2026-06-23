@@ -145,6 +145,38 @@ class ProcessResult(_Base):
     detail: str | None = None
 
 
+class EncodeJobOptions(_Base):
+    encode: bool = True
+    organize: bool = True
+    delete_sources: bool = False
+    concurrency: int = 2
+
+
+class BookProcessResult(_Base):
+    book_id: str
+    status: str = "queued"  # done / failed / cancelled / skipped
+    detail: str | None = None
+
+
+class EncodeJobResult(_Base):
+    results: list[BookProcessResult] = []  # noqa: RUF012 - pydantic default, copied per instance
+
+
+class CancelToken:
+    """A cooperative cancel flag checked between books (graceful: in-flight work
+    finishes; queued work is skipped)."""
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
