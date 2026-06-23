@@ -124,6 +124,7 @@ def test_book_state_has_full_pipeline_lifecycle():
         "needs_review",
         "ready",
         "encoding",
+        "encoded",
         "organized",
         "failed",
         "skipped",
