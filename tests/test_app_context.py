@@ -45,9 +45,12 @@ def test_clients_built_when_configured(tmp_path):
 
 def test_abs_agg_sources_discovered_when_url_set(tmp_path, monkeypatch):
     import colophon.app_context as appctx
+    class _FakeProvider:
+        name = "absagg-provider"
+
     monkeypatch.setattr(
         appctx, "discover_providers",
-        lambda url: [object()] if url else [],
+        lambda url: [_FakeProvider()] if url else [],
     )
     base = AppContext.create(Config(db_path=tmp_path / "a.db"))
     base_count = len(base.sources)
@@ -70,3 +73,30 @@ def test_config_path_override(tmp_path):
     ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"), config_path=cfg_path)
     assert ctx.config_path == cfg_path
     ctx.close()
+
+
+def test_arrange_sources_orders_filters_and_appends_new():
+    from colophon.app_context import arrange_sources
+
+    class S:
+        def __init__(self, name): self.name = name
+        def __repr__(self): return f"S({self.name})"
+
+    a, b, c, d = S("audnexus"), S("googlebooks"), S("openlibrary"), S("hardcover")
+    arranged = arrange_sources(
+        [a, b, c, d],
+        order=["openlibrary", "audnexus"],   # known order; b & d unlisted
+        disabled=["googlebooks"],            # b filtered out
+    )
+    assert [s.name for s in arranged] == ["openlibrary", "audnexus", "hardcover"]
+
+
+def test_arrange_sources_ignores_stale_order_and_disabled():
+    from colophon.app_context import arrange_sources
+
+    class S:
+        def __init__(self, name): self.name = name
+
+    a = S("audnexus")
+    arranged = arrange_sources([a], order=["ghost", "audnexus"], disabled=["alsogone"])
+    assert [s.name for s in arranged] == ["audnexus"]

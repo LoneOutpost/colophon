@@ -31,6 +31,27 @@ def default_db_path() -> Path:
     return user_data_path("colophon") / "colophon.db"
 
 
+def build_all_sources(config: Config) -> list[MetadataSource]:
+    """The full available set: the four built-ins plus discovered abs-agg providers."""
+    sources: list[MetadataSource] = [
+        AudnexusSource(), OpenLibrarySource(), GoogleBooksSource(), InternetArchiveSource()
+    ]
+    sources.extend(discover_providers(config.abs_agg_url))
+    return sources
+
+
+def arrange_sources(
+    all_sources: list[MetadataSource], *, order: list[str], disabled: list[str]
+) -> list[MetadataSource]:
+    """Order `all_sources` by `order` (known names first, in that order; names not
+    in `order` keep their incoming order, appended after); then drop any whose name
+    is in `disabled`. Stale `order`/`disabled` names with no live source are ignored."""
+    rank = {name: i for i, name in enumerate(order)}
+    fallback = len(order)
+    ordered = sorted(all_sources, key=lambda s: rank.get(s.name, fallback))
+    return [s for s in ordered if s.name not in set(disabled)]
+
+
 @dataclass
 class AppContext:
     config: Config
@@ -54,10 +75,11 @@ class AppContext:
             if config.lazylibrarian_config_ini
             else AudiobookPatterns()
         )
-        sources: list[MetadataSource] = [
-            AudnexusSource(), OpenLibrarySource(), GoogleBooksSource(), InternetArchiveSource()
-        ]
-        sources.extend(discover_providers(config.abs_agg_url))
+        sources = arrange_sources(
+            build_all_sources(config),
+            order=config.source_order,
+            disabled=config.disabled_sources,
+        )
         abs_client = (
             AbsClient(base_url=config.audiobookshelf_url, token=config.audiobookshelf_token)
             if config.audiobookshelf_url and config.audiobookshelf_token
