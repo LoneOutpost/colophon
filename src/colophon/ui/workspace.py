@@ -59,6 +59,8 @@ def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
 
 
 # Short state label + Quasar color for the per-row state badge.
+_PAGE = 100  # book rows rendered per chunk (windowed list)
+
 _STATE_BADGE: dict[BookState, tuple[str, str]] = {
     BookState.DETECTED: ("Detected", "grey-6"),
     BookState.IDENTIFIED: ("Identified", "grey-6"),
@@ -292,6 +294,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     view: dict[str, object] = {
         "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
     }
+    _list_view: dict[str, object] = {"books": [], "rendered": 0}
+    _list_el: dict[str, object] = {"el": None}      # the ui.list() holding rows
+    _list_footer: dict[str, object] = {"el": None}  # the "Showing X of Y" caption
+    list_scroll = None                              # assigned at the layout site
 
     _VIEW_KEY = "workspace_view"
 
@@ -1292,10 +1298,99 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _after_select()
         _persist_view()
 
+    def _build_row(book) -> None:
+        # Every book is always individually selectable. The leading checkbox
+        # toggles selection; clicking the title section opens the detail view.
+        # Rows are keyboard-navigable; the focused row is tinted.
+        item = ui.item()
+        row_elements[book.id] = item
+        if book.id == focus["id"]:
+            item.classes("book-row-focused")
+        with item:
+            with ui.item_section().props("avatar"):
+                ui.checkbox(
+                    value=book.id in selected_ids,
+                    on_change=lambda e, bid=book.id: _toggle_book(bid, e.value),
+                ).props("dense")
+            with ui.item_section().props("avatar"):
+                _render_cover(book, width=36, height=54)
+            with ui.item_section().classes("cursor-pointer").on(
+                "click", lambda bid=book.id: _set_focus(bid)
+            ):
+                # Line 1: title (ellipsized) with confidence + state badges
+                # pinned right, so the badges never clip on a narrow pane.
+                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                    ui.label(book.title or "(untitled)").classes(
+                        "colophon-book-title col ellipsis"
+                    )
+                    total = sum(sf.duration_seconds for sf in book.source_files)
+                    if book.source_files:
+                        ui.label(_fmt_duration(total)).classes(
+                            "text-caption text-grey-6 colophon-mono"
+                        )
+                    ui.badge(f"{book.confidence:.0f}").props(
+                        f"color={_confidence_color(book.confidence)}"
+                    ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
+                    _slabel, _scolor = _STATE_BADGE.get(
+                        book.state, (book.state.value, "grey-6")
+                    )
+                    ui.badge(_slabel).props(f"color={_scolor} outline")
+                series = book.series[0].name if book.series else ""
+                author = ", ".join(book.authors) or "unknown author"
+                line2 = f"{author} · {series}" if series else author
+                ui.item_label(line2).props("caption")
+                chip_labels = book.genres + book.tags
+                if chip_labels:
+                    with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
+                        for label in chip_labels[:4]:
+                            ui.chip(label).props(
+                                "dense square size=sm clickable"
+                            ).on(
+                                "click.stop", lambda lbl=label: _filter_to(lbl)
+                            )
+
+    def _update_list_footer() -> None:
+        el = _list_footer["el"]
+        if el is None:
+            return
+        n, total = _list_view["rendered"], len(_list_view["books"])
+        if n < total:
+            el.set_text(f"Showing {n} of {total}; scroll for more")
+            el.set_visibility(True)
+        else:
+            el.set_visibility(False)
+
+    def _render_more() -> None:
+        books = _list_view["books"]
+        start = _list_view["rendered"]
+        end = min(start + _PAGE, len(books))
+        if start >= end or _list_el["el"] is None:
+            return
+        with _list_el["el"]:
+            for book in books[start:end]:
+                _build_row(book)
+        _list_view["rendered"] = end
+        _update_list_footer()
+
+    def _ensure_rendered(book_id: str) -> None:
+        """Render forward until book_id's row exists (focus/open beyond page 1)."""
+        ids = [b.id for b in _list_view["books"]]
+        if book_id not in ids:
+            return
+        idx = ids.index(book_id)
+        while _list_view["rendered"] <= idx and _list_view["rendered"] < len(_list_view["books"]):
+            _render_more()
+
+    def _on_list_scroll(e) -> None:
+        if e.vertical_percentage > 0.85 and _list_view["rendered"] < len(_list_view["books"]):
+            _render_more()
+
     def refresh_list() -> None:
         list_container.clear()
         row_elements.clear()
         books = _visible_books()
+        _list_view["books"] = books
+        _list_view["rendered"] = 0
         with list_container:
             if not books:
                 msg = (
@@ -1303,62 +1398,19 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     else "No books in this view"
                 )
                 ui.label(msg).classes("text-grey-6 q-pa-md")
+                _list_el["el"] = None
+                _list_footer["el"] = None
                 return
-            # Every book is always individually selectable. The leading checkbox
-            # toggles selection; clicking the title section opens the detail view.
-            # Rows are keyboard-navigable; the focused row is tinted.
-            with ui.list().props("separator dense").classes("w-full"):
-                for book in books:
-                    item = ui.item()
-                    row_elements[book.id] = item
-                    if book.id == focus["id"]:
-                        item.classes("book-row-focused")
-                    with item:
-                        with ui.item_section().props("avatar"):
-                            ui.checkbox(
-                                value=book.id in selected_ids,
-                                on_change=lambda e, bid=book.id: _toggle_book(bid, e.value),
-                            ).props("dense")
-                        with ui.item_section().props("avatar"):
-                            _render_cover(book, width=36, height=54)
-                        with ui.item_section().classes("cursor-pointer").on(
-                            "click", lambda bid=book.id: _set_focus(bid)
-                        ):
-                            # Line 1: title (ellipsized) with confidence + state badges
-                            # pinned right, so the badges never clip on a narrow pane.
-                            with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
-                                ui.label(book.title or "(untitled)").classes(
-                                    "colophon-book-title col ellipsis"
-                                )
-                                total = sum(sf.duration_seconds for sf in book.source_files)
-                                if book.source_files:
-                                    ui.label(_fmt_duration(total)).classes(
-                                        "text-caption text-grey-6 colophon-mono"
-                                    )
-                                ui.badge(f"{book.confidence:.0f}").props(
-                                    f"color={_confidence_color(book.confidence)}"
-                                ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
-                                _slabel, _scolor = _STATE_BADGE.get(
-                                    book.state, (book.state.value, "grey-6")
-                                )
-                                ui.badge(_slabel).props(f"color={_scolor} outline")
-                            series = book.series[0].name if book.series else ""
-                            author = ", ".join(book.authors) or "unknown author"
-                            line2 = f"{author} · {series}" if series else author
-                            ui.item_label(line2).props("caption")
-                            chip_labels = book.genres + book.tags
-                            if chip_labels:
-                                with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
-                                    for label in chip_labels[:4]:
-                                        ui.chip(label).props(
-                                            "dense square size=sm clickable"
-                                        ).on(
-                                            "click.stop", lambda lbl=label: _filter_to(lbl)
-                                        )
+            _list_el["el"] = ui.list().props("separator dense").classes("w-full")
+            _list_footer["el"] = ui.label().classes("text-caption text-grey-6 q-pa-sm")
+        _render_more()
+        if list_scroll is not None:
+            list_scroll.scroll_to(percent=0.0)
 
     # --- keyboard navigation ---
     def _set_focus(book_id: str) -> None:
         """Focus a book row: tint it, open it in Details, and scroll it into view."""
+        _ensure_rendered(book_id)
         old = focus["id"]
         focus["id"] = book_id
         if old in row_elements:
@@ -2269,7 +2321,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 middle_count = ui.label("").classes("text-caption text-grey-7")
             middle_toolbar = ui.column().classes("w-full gap-1 q-mt-xs")
             ui.separator().classes("q-mt-xs")
-            with ui.scroll_area().classes("col"):
+            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col")
+            with list_scroll:
                 list_container = ui.column().classes("w-full gap-0")
         ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
         with ui.card().classes("col column"):
@@ -2283,6 +2336,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     _refresh_all()
     if _restored.open_book_id is not None:
+        _ensure_rendered(_restored.open_book_id)
         show_detail(_restored.open_book_id)  # reopen the book remembered for this tab
     else:
         show_detail("")  # initial empty-state in the detail pane
