@@ -210,8 +210,13 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         ".colophon-resizer:hover::after{width:2px}"
         ".colophon-resizer:hover::after{background:var(--q-primary)}"
         "</style>"
-        "<script>"
+    )
+    # Run via run_javascript (not a <script> in add_head_html): on the async index
+    # page the head HTML is injected after load, and browsers do not execute script
+    # tags inserted that way. The IIFE guards against re-running on reconnect.
+    ui.run_javascript(
         "(function(){"
+        "if(window.__colophonResizerReady)return;window.__colophonResizerReady=true;"
         "var MIN={nav:200,mid:320},MAX={nav:520,mid:960};"
         "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'};"
         "var KEY={nav:'colophon.navW',mid:'colophon.midW'};"
@@ -237,7 +242,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "localStorage.removeItem(KEY[k]);"
         "document.documentElement.style.removeProperty(VAR[k]);});};"
         "})();"
-        "</script>"
     )
     dark = setup_dark_mode()
     selected_ids: set[str] = set()
@@ -2296,16 +2300,20 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             editor_state["save"]()
 
     ui.keyboard(on_key=_on_save_key, ignore=[])
-    ui.add_head_html(
-        "<script>"
-        "document.addEventListener('keydown', e => {"
+    # Run via run_javascript (not a <script> in add_head_html): on the async index
+    # page the head HTML is injected after load, and browsers do not execute script
+    # tags inserted that way. The guard keeps it idempotent across reconnects.
+    ui.run_javascript(
+        "(function(){"
+        "if(window.__colophonKeyguardReady)return;window.__colophonKeyguardReady=true;"
+        "document.addEventListener('keydown', function(e){"
         " if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) e.preventDefault();"
         "}, true);"
         "window.__colophon_dirty = false;"
-        "window.addEventListener('beforeunload', e => {"
+        "window.addEventListener('beforeunload', function(e){"
         " if (window.__colophon_dirty) { e.preventDefault(); e.returnValue = ''; }"
         "});"
-        "</script>"
+        "})();"
     )
 
     with ui.header(elevated=True).classes("items-center q-px-md"):
