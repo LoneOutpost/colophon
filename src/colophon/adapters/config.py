@@ -30,6 +30,7 @@ class Config(BaseModel):
     lazylibrarian_api_key: str | None = None
     hardcover_api_token: str | None = None
     abs_agg_url: str | None = None  # base URL of a self-hosted abs-agg, e.g. http://host:3000
+    storage_secret: str | None = None  # generated on first run; signs NiceGUI tab storage
     real_debrid_token: str | None = None
     real_debrid_download_dir: Path | None = None  # None => <data dir>/downloads
     genre_mapping: dict[str, str] = {}

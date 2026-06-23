@@ -166,3 +166,8 @@ def test_genre_policy_fields_round_trip(tmp_path):
     assert loaded.genre_mapping == {"scifi": "Science Fiction"}
     assert loaded.accepted_genres == ["Science Fiction", "Fantasy"]
     assert loaded.genre_whitelist_enabled is True
+
+
+def test_storage_secret_defaults_none():
+    from colophon.adapters.config import Config
+    assert Config().storage_secret is None

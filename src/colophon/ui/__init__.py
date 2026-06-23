@@ -27,7 +27,8 @@ def create_app(controller: AppController) -> None:
         return Response(content=data, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
 
     @ui.page("/")
-    def index(filter: str = "") -> None:  # the URL query-param name is "filter"
+    async def index(filter: str = "") -> None:  # the URL query-param name is "filter"
+        await ui.context.client.connected()
         render_workspace(controller, initial_filter=filter)
 
     @ui.page("/manage")
