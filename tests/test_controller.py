@@ -2156,3 +2156,59 @@ def test_process_book_full_pipeline_tags_once(tmp_path, make_audio):
     ops = ctx.operations.list_batch(ctx.operations.latest_batch_id())
     assert any(op.op_type == "tag_write" and op.book_id == book.id for op in ops)
     ctx.close()
+
+
+async def test_run_encode_job_reports_progress_and_results(tmp_path, make_audio):
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    books = []
+    for i in range(2):
+        a = make_audio(f"Book{i}/01.mp3", seconds=1)
+        book = BookUnit.new(source_folder=a.parent)
+        book.title = f"Book {i}"
+        book.authors = ["Frank Herbert"]
+        book.state = BookState.READY
+        book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+        ctx.books.upsert(book)
+        books.append(book)
+
+    seen: list[tuple[str, str]] = []
+    result = await AppController(ctx).run_encode_job(
+        books,
+        EncodeJobOptions(encode=True, organize=True),
+        progress=lambda bid, status: seen.append((bid, status)),
+    )
+    assert [r.status for r in result.results] == ["done", "done"]
+    statuses = {status for _, status in seen}
+    assert "encoding" in statuses
+    assert "done" in statuses
+    ctx.close()
+
+
+async def test_run_encode_job_graceful_cancel_skips_queued(tmp_path, make_audio):
+    from colophon.controller import CancelToken, EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    books = []
+    for i in range(3):
+        a = make_audio(f"Book{i}/01.mp3", seconds=1)
+        book = BookUnit.new(source_folder=a.parent)
+        book.title = f"Book {i}"
+        book.authors = ["Frank Herbert"]
+        book.state = BookState.READY
+        book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+        ctx.books.upsert(book)
+        books.append(book)
+
+    tok = CancelToken()
+    tok.cancel()
+    result = await AppController(ctx).run_encode_job(
+        books,
+        EncodeJobOptions(encode=True, organize=False, concurrency=1),
+        cancel=tok,
+    )
+    assert [r.status for r in result.results] == ["cancelled", "cancelled", "cancelled"]
+    ctx.close()
