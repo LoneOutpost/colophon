@@ -2402,9 +2402,15 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         app_tabs(controller, "library")
         ui.space()
-        scan_btn = ui.button("Scan", icon="search").props("flat")
-        identify_btn = ui.button("Identify", icon="travel_explore").props("flat")
-        process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated")
+        scan_btn = ui.button("Scan", icon="search").props("flat").tooltip(
+            "Find audiobooks in your scan paths and preview changes before applying."
+        )
+        identify_btn = ui.button("Identify", icon="travel_explore").props("flat").tooltip(
+            "Look up metadata from your sources and preview matches before applying."
+        )
+        process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated").tooltip(
+            "Encode selected/ready books to M4B and/or move them into your library. Choose options first."
+        )
         dark_mode_button(dark)
         ui.button(
             icon="view_column",
