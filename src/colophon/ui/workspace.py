@@ -658,19 +658,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ui.label("No matches found").classes("text-grey-6 q-pa-sm")
                             with ui.list().props("dense").classes("w-full"):
                                 for m in matches[:10]:
-                                    authors = ", ".join(m.authors) or "unknown"
-                                    year = f" ({m.publish_year})" if m.publish_year else ""
                                     with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
                                         with ui.item_section():
                                             ui.item_label(m.title or "?")
-                                            ui.item_label(f"{controller.source_label(m.provider)} · {authors}{year}").props("caption")
-                                            rt = _fmt_runtime_delta(m.runtime_ms, b.duration_ms)
-                                            if rt or m.abridged is not None:
-                                                with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                                                    if rt:
-                                                        ui.item_label(rt).props("caption").classes("colophon-mono")
-                                                    if m.abridged is not None:
-                                                        ui.badge("Abridged" if m.abridged else "Unabridged").props("color=grey-6 outline")
+                                            _candidate_meta(
+                                                m, b, source_label=controller.source_label(m.provider)
+                                            )
 
                     def show_picker(result) -> None:
                         body.clear()
