@@ -102,6 +102,17 @@ def _fmt_runtime_delta(candidate_ms: int | None, book_ms: int) -> str:
     return f"{base} · {sign}{_fmt_duration(abs(delta_s))}"
 
 
+def _fmt_series_label(name: str | None, sequence: float | None) -> str:
+    """'Stormlight #1' / 'Stormlight #2.5' / 'Stormlight' (no seq) / '' (no name).
+    The sequence drops a trailing '.0' so whole numbers read as integers."""
+    if not name:
+        return ""
+    if sequence is None:
+        return name
+    seq = int(sequence) if sequence == int(sequence) else sequence
+    return f"{name} #{seq}"
+
+
 def _confidence_color(value: float) -> str:
     if value >= 75:
         return "positive"
