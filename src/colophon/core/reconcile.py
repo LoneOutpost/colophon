@@ -12,17 +12,13 @@ from colophon.adapters.sidecar import SidecarMetadata
 from colophon.core.coerce import to_float, to_int
 from colophon.core.isbn import normalize_isbn
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
+from colophon.core.people import split_people
 
 
 def _split_people(value: str) -> list[str]:
-    """Split a comma-joined people string into individual names.
-
-    Accepts the comma-separated form some taggers use for multiple
-    authors/narrators in a single ID3 frame (e.g. "Terry Jones, Douglas Adams").
-    Known tradeoff: a single name legitimately containing a comma (rare for
-    audiobook authors) would be over-split.
-    """
-    return [part.strip() for part in value.split(",") if part.strip()]
+    """Split a delimited people string from an ID3 frame into individual names.
+    Delegates to the shared, conservative splitter (keeps 'Last, First')."""
+    return split_people(value)
 
 
 def reconcile(

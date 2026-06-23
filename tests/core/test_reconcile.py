@@ -178,3 +178,18 @@ def test_reconcile_fills_only_empty_fields_on_existing_book(tmp_path):
     assert book.title == "My Edited Title"
     assert book.authors == ["Edited Author"]
     assert book.asin == "B0TAG"
+
+
+def test_embedded_artist_last_first_kept_as_one_author():
+    book = BookUnit.new(source_folder=Path("/ingest/x"))
+    reconcile(book, embedded=EmbeddedTags(artist="Herbert, Frank"),
+              dir_title=None, filename_fields={})
+    # Auto heuristic keeps "Last, First" as one author (was naively split before).
+    assert book.authors == ["Herbert, Frank"]
+
+
+def test_embedded_artist_two_full_names_still_splits():
+    book = BookUnit.new(source_folder=Path("/ingest/y"))
+    reconcile(book, embedded=EmbeddedTags(artist="Terry Jones, Douglas Adams"),
+              dir_title=None, filename_fields={})
+    assert book.authors == ["Terry Jones", "Douglas Adams"]
