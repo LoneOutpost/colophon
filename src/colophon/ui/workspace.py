@@ -23,6 +23,7 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
+from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
@@ -111,6 +112,32 @@ def _fmt_series_label(name: str | None, sequence: float | None) -> str:
         return name
     seq = int(sequence) if sequence == int(sequence) else sequence
     return f"{name} #{seq}"
+
+
+def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
+    """Render a candidate's metadata block (captions + runtime/abridged row),
+    comparing runtime against `book`. Emits NiceGUI elements into the current
+    layout context; the caller owns any surrounding row/checkbox/expansion.
+    Empty fields are omitted."""
+    authors = ", ".join(result.authors) or "unknown"
+    year = f" ({result.publish_year})" if result.publish_year else ""
+    ui.item_label(f"{source_label} · {authors}{year}").props("caption")
+
+    if result.narrators:
+        ui.item_label(f"Narr: {', '.join(result.narrators)}").props("caption")
+
+    series = _fmt_series_label(result.series_name, result.series_sequence)
+    pub_bits = [bit for bit in (series, result.publisher) if bit]
+    if pub_bits:
+        ui.item_label(" · ".join(pub_bits)).props("caption")
+
+    rt = _fmt_runtime_delta(result.runtime_ms, book.duration_ms)
+    if rt or result.abridged is not None:
+        with ui.row().classes("items-center no-wrap q-gutter-xs"):
+            if rt:
+                ui.item_label(rt).props("caption").classes("colophon-mono")
+            if result.abridged is not None:
+                ui.badge("Abridged" if result.abridged else "Unabridged").props("color=grey-6 outline")
 
 
 def _confidence_color(value: float) -> str:
