@@ -556,7 +556,7 @@ def test_save_settings_persists_and_updates_live_config(tmp_path):
 
 
 def test_save_settings_rediscovers_abs_agg_sources(tmp_path, monkeypatch):
-    import colophon.controller as ctrlmod
+    import colophon.app_context as ctxmod
     from colophon.adapters.config import Config as _Config
     from colophon.adapters.sources.abs_agg import AbsAggSource
 
@@ -565,7 +565,7 @@ def test_save_settings_rediscovers_abs_agg_sources(tmp_path, monkeypatch):
     base_count = len(ctx.sources)  # built-ins only; abs_agg_url unset at startup
 
     monkeypatch.setattr(
-        ctrlmod, "discover_providers",
+        ctxmod, "discover_providers",
         lambda url: [AbsAggSource(provider="goodreads", label="Goodreads", base_url=url)] if url else [],
     )
 
@@ -2055,3 +2055,31 @@ async def test_apply_identify_routes_low_confidence_and_skips_confirmed(tmp_path
     after = ctx.books.get(confirmed.id)
     assert after.manually_confirmed is True and after.title == "Keep Me" and after.confidence == 100.0
     ctx.close()
+
+
+def test_source_settings_lists_enabled_then_disabled(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite",
+                                   disabled_sources=["googlebooks"]))
+    ctrl = AppController(ctx)
+    rows = ctrl.source_settings()
+    names = [name for name, _label, _enabled in rows]
+    enabled = {name: en for name, _l, en in rows}
+    assert "googlebooks" in names
+    assert enabled["googlebooks"] is False
+    assert enabled["audnexus"] is True
+
+
+def test_save_settings_applies_disable(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"))
+    ctrl = AppController(ctx)
+    assert any(s.name == "googlebooks" for s in ctx.sources)
+    ctrl.save_settings(Config(db_path=tmp_path / "db.sqlite", disabled_sources=["googlebooks"]))
+    assert all(s.name != "googlebooks" for s in ctrl.ctx.sources)

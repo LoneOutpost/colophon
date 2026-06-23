@@ -12,11 +12,15 @@ from colophon.adapters.config import Config, save_config
 from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
-from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
-from colophon.app_context import AppContext, default_db_path
+from colophon.app_context import (
+    AppContext,
+    arrange_sources,
+    build_all_sources,
+    default_db_path,
+)
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.chapters import runtime_mismatch
-from colophon.core.confidence import score_identification
+from colophon.core.confidence import IdentificationOutcome, score_identification
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
@@ -144,19 +148,17 @@ class AppController:
         self.ctx = ctx
 
     def save_settings(self, config: Config) -> None:
-        """Persist `config` to the config file and update the live context.
-
-        When `abs_agg_url` changes, the abs-agg sources are re-discovered in place
-        so a new (or cleared) endpoint takes effect without a restart.
-
-        Note: db_path changes take effect on next launch (the live DB
-        connection is not rebuilt here)."""
-        old_abs_agg_url = self.ctx.config.abs_agg_url
+        """Persist `config` and update the live context. The source list is rebuilt
+        from the full available set (re-discovering abs-agg) and arranged per the
+        saved order/disabled prefs, so reorders, enable/disable, and abs-agg URL
+        changes all take effect without a restart. (db_path changes need a restart.)"""
         save_config(config, self.ctx.config_path)
         self.ctx.config = config
-        if config.abs_agg_url != old_abs_agg_url:
-            self.ctx.sources = [s for s in self.ctx.sources if not isinstance(s, AbsAggSource)]
-            self.ctx.sources.extend(discover_providers(config.abs_agg_url))
+        self.ctx.sources = arrange_sources(
+            build_all_sources(config),
+            order=config.source_order,
+            disabled=config.disabled_sources,
+        )
 
     # --- scanning / identification ---
     def scan_preview(self, roots: list[Path] | None = None) -> ScanPlan:
@@ -740,7 +742,7 @@ class AppController:
     async def get_matches(self, book: BookUnit) -> list[SourceResult]:
         """Re-query all sources for `book` and return candidate matches, best first."""
         results = await gather_matches(self.ctx.sources, query_for_book(book))
-        return score_identification(book, results).ranked
+        return self._score(book, results).ranked
 
     def identify_candidates(self) -> list[BookUnit]:
         """Books eligible for Identify: not manually confirmed and not organized."""
@@ -803,7 +805,7 @@ class AppController:
 
         async def _scan(book: BookUnit) -> QuickMatchProposal:
             results = await gather_matches(chosen, query_for_book(book, search_fields))
-            outcome = score_identification(book, results)
+            outcome = self._score(book, results)
             return QuickMatchProposal(
                 book=book, best=outcome.best, results=results, confidence=outcome.confidence
             )
@@ -858,7 +860,7 @@ class AppController:
         state (Ready when confident and it has an identity). Returns True if it is
         now Ready. Confidence/state are persisted by the caller (not part of the
         undoable field batch)."""
-        outcome = score_identification(book, results)
+        outcome = self._score(book, results)
         book.confidence = outcome.confidence
         book.confidence_signals = outcome.signals
         book.manually_confirmed = False
@@ -867,11 +869,35 @@ class AppController:
         book.state = BookState.READY if ready else BookState.NEEDS_REVIEW
         return ready
 
+    def _authority_map(self) -> dict[str, int]:
+        """provider name -> authority rank (0 = most authoritative), from the
+        enabled sources in their arranged order."""
+        return {s.name: i for i, s in enumerate(self.ctx.sources)}
+
+    def _score(self, book: BookUnit, results: list[SourceResult]) -> IdentificationOutcome:
+        return score_identification(book, results, authority=self._authority_map())
+
     def available_sources(self) -> list[tuple[str, str]]:
         """The configured metadata sources as (name, display label), in priority
         order, so the search dialog can list exactly the available services."""
         return [(s.name, getattr(s, "label", None) or _SOURCE_LABELS.get(s.name, s.name.title()))
                 for s in self.ctx.sources]
+
+    def source_settings(self) -> list[tuple[str, str, bool]]:
+        """(name, label, enabled) for every currently-known source: enabled ones in
+        authority order first, then known-but-disabled providers. Re-discovers
+        abs-agg so newly-available providers appear and stale ones drop."""
+        def label_of(s: object) -> str:
+            return getattr(s, "label", None) or _SOURCE_LABELS.get(s.name, s.name.replace("_", " ").title())
+
+        enabled_names = {s.name for s in self.ctx.sources}
+        rows = [(s.name, label_of(s), True) for s in self.ctx.sources]
+        rows += [
+            (s.name, label_of(s), False)
+            for s in build_all_sources(self.ctx.config)
+            if s.name not in enabled_names
+        ]
+        return rows
 
     def source_label(self, name: str) -> str:
         """Human-facing label for a source/provenance name (e.g. 'audnexus' -> 'Audible')."""
@@ -914,7 +940,7 @@ class AppController:
         except Exception as e:  # a source failing must not crash the search (BLE001 intentional)
             logger.warning(f"source {source_name} failed in search_matches: {e}")
             return []
-        return score_identification(book, results).ranked
+        return self._score(book, results).ranked
 
     @staticmethod
     def match_field_values(result: SourceResult) -> dict[str, str | None]:
