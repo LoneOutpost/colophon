@@ -5,7 +5,22 @@ from __future__ import annotations
 from colophon.core.filename_parser import strip_ext
 from colophon.core.models import Chapter
 
-__all__ = ["Chapter", "file_boundary_chapters", "to_ffmetadata"]
+__all__ = [
+    "RUNTIME_MISMATCH_MS",
+    "Chapter",
+    "file_boundary_chapters",
+    "runtime_mismatch",
+    "to_ffmetadata",
+]
+
+# Tolerance before a fetched (e.g. Audible) runtime is flagged as not matching the
+# summed source-file duration; chapter offsets drifting by more than this are suspect.
+RUNTIME_MISMATCH_MS = 60_000
+
+
+def runtime_mismatch(source_ms: int, candidate_ms: int) -> bool:
+    """Whether two runtimes differ by more than RUNTIME_MISMATCH_MS."""
+    return abs(candidate_ms - source_ms) > RUNTIME_MISMATCH_MS
 
 
 def file_boundary_chapters(files: list[tuple[str, float]]) -> list[Chapter]:

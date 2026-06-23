@@ -15,6 +15,7 @@ from colophon.adapters.sidecar import write_sidecar
 from colophon.adapters.sources.abs_agg import AbsAggSource, discover_providers
 from colophon.app_context import AppContext, default_db_path
 from colophon.core.catalog import CatalogEntry, list_entries
+from colophon.core.chapters import runtime_mismatch
 from colophon.core.confidence import score_identification
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
@@ -29,7 +30,12 @@ from colophon.core.models import (
     _Base,
     new_batch_id,
 )
-from colophon.core.navigator import AuthorNode, DirectoryListing, DirEntry, LibraryTree, SeriesNode
+from colophon.core.navigator import (
+    DirectoryListing,
+    DirEntry,
+    LibraryTree,
+    build_library_tree,
+)
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.quickmatch import (
     IdentifyPlan,
@@ -328,47 +334,7 @@ class AppController:
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into Author -> Series/standalone, plus a needs-id list."""
-        books = self.ctx.books.list_all()
-        needs_id = sorted(
-            (b for b in books if not b.authors and not b.series),
-            key=lambda b: b.confidence,
-        )
-        identified = [b for b in books if b.authors or b.series]
-
-        by_author: dict[str, list[BookUnit]] = {}
-        for b in identified:
-            author = b.authors[0] if b.authors else b.series[0].name
-            by_author.setdefault(author, []).append(b)
-
-        authors: list[AuthorNode] = []
-        for author in sorted(by_author):
-            in_series: dict[str, list[BookUnit]] = {}
-            standalone: list[BookUnit] = []
-            for b in by_author[author]:
-                if b.series:
-                    in_series.setdefault(b.series[0].name, []).append(b)
-                else:
-                    standalone.append(b)
-            series_nodes = [
-                SeriesNode(
-                    name=name,
-                    books=sorted(
-                        items,
-                        key=lambda b: (
-                            b.series[0].sequence if b.series and b.series[0].sequence is not None else 0.0
-                        ),
-                    ),
-                )
-                for name, items in sorted(in_series.items())
-            ]
-            authors.append(
-                AuthorNode(
-                    name=author,
-                    series=series_nodes,
-                    standalone=sorted(standalone, key=lambda b: b.title or ""),
-                )
-            )
-        return LibraryTree(needs_id=needs_id, authors=authors)
+        return build_library_tree(self.ctx.books.list_all())
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
@@ -1055,14 +1021,13 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
         self._sync_sidecar(book)
-        source_runtime_ms = round(sum(sf.duration_seconds for sf in book.source_files) * 1000)
-        mismatch = abs(fetch.runtime_ms - source_runtime_ms) > 60_000
+        source_runtime_ms = book.duration_ms
         return ChapterApplyResult(
             ok=True,
             count=len(fetch.chapters),
             audible_runtime_ms=fetch.runtime_ms,
             source_runtime_ms=source_runtime_ms,
-            mismatch=mismatch,
+            mismatch=runtime_mismatch(source_runtime_ms, fetch.runtime_ms),
         )
 
     def reset_chapters(self, book: BookUnit) -> None:
