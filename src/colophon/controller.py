@@ -901,6 +901,20 @@ class AppController:
             to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,
         )
 
+    async def retry_identify(
+        self, plan: IdentifyPlan, book_ids: list[str],
+        *, progress: Callable[[str, str], None] | None = None,
+    ) -> IdentifyPlan:
+        """Re-query the books in `book_ids`, replace their proposals in `plan`, and recompute
+        the partition. Books not in `book_ids` keep their existing proposals."""
+        wanted = set(book_ids)
+        targets = [p.book for p in plan.proposals if p.book.id in wanted]
+        source_names = [s.name for s in self.ctx.sources]
+        fresh = await self.quick_match_scan(targets, source_names, progress=progress)
+        fresh_by_id = {p.book.id: p for p in fresh}
+        merged = [fresh_by_id.get(p.book.id, p) for p in plan.proposals]
+        return self._identify_plan(merged, plan.skipped)
+
     def apply_identify(self, plan: IdentifyPlan) -> IdentifySummary:
         """Fill-empty apply the confident proposals (Ready) and re-score the rest
         (Needs review), in one undo batch. Manually-confirmed and organized books

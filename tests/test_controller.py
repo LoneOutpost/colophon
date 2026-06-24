@@ -2451,3 +2451,27 @@ async def test_quick_match_scan_emits_progress_ok_and_fail(tmp_path):
     )
     assert events2 == [(miss.id, "fail")]
     ctx2.close()
+
+
+async def test_retry_identify_requeries_only_given_ids_and_merges(tmp_path):
+    # First scan: a source that returns nothing -> both books are no-match.
+    ctx = _ctx(tmp_path, sources=[_StubSource("audnexus", [])])
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.title = "Dune"
+    ctx.books.upsert(a)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.title = "Hyperion"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    plan = await ctrl.identify_preview()
+    assert all(p.best is None for p in plan.proposals)  # both no-match
+
+    # Now the source can find a candidate; retry only book a.
+    ctx.sources = [_StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["x"])])]
+    merged = await ctrl.retry_identify(plan, [a.id])
+
+    by_id = {p.book.id: p for p in merged.proposals}
+    assert by_id[a.id].best is not None  # a re-queried and matched
+    assert by_id[b.id].best is None      # b untouched
+    assert len(merged.proposals) == 2
+    ctx.close()
