@@ -10,7 +10,6 @@ action, no dead controls, and a consistent spacing scale.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from pathlib import Path
@@ -23,8 +22,19 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
-from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
+from colophon.ui.dialogs import (
+    bulk_tag_dialog,
+    compare_dialog,
+    cover_dialog,
+    identify_dialog,
+    process_dialog,
+    quick_match_dialog,
+    remap_dialog,
+    rename_dialog,
+    scan_dialog,
+    tag_dialog,
+)
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -90,55 +100,6 @@ def _fmt_duration(seconds: float) -> str:
     hours, mins = divmod(minutes, 60)
     return f"{hours}h {mins}m" if hours else f"{mins}m"
 
-
-def _fmt_runtime_delta(candidate_ms: int | None, book_ms: int) -> str:
-    """'8h 12m · +6m' (delta vs the book) or '8h 12m' when the book length is
-    unknown; '' when the candidate has no runtime."""
-    if not candidate_ms:
-        return ""
-    base = _fmt_duration(candidate_ms / 1000)
-    if not book_ms:
-        return base
-    delta_s = (candidate_ms - book_ms) / 1000
-    sign = "+" if delta_s >= 0 else "-"
-    return f"{base} · {sign}{_fmt_duration(abs(delta_s))}"
-
-
-def _fmt_series_label(name: str | None, sequence: float | None) -> str:
-    """'Stormlight #1' / 'Stormlight #2.5' / 'Stormlight' (no seq) / '' (no name).
-    The sequence drops a trailing '.0' so whole numbers read as integers."""
-    if not name:
-        return ""
-    if sequence is None:
-        return name
-    seq = int(sequence) if sequence == int(sequence) else sequence
-    return f"{name} #{seq}"
-
-
-def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
-    """Render a candidate's metadata block (captions + runtime/abridged row),
-    comparing runtime against `book`. Emits NiceGUI elements into the current
-    layout context; the caller owns any surrounding row/checkbox/expansion.
-    Empty fields are omitted."""
-    authors = ", ".join(result.authors) or "unknown"
-    year = f" ({result.publish_year})" if result.publish_year else ""
-    ui.item_label(f"{source_label} · {authors}{year}").props("caption")
-
-    if result.narrators:
-        ui.item_label(f"Narr: {', '.join(result.narrators)}").props("caption")
-
-    series = _fmt_series_label(result.series_name, result.series_sequence)
-    pub_bits = [bit for bit in (series, result.publisher) if bit]
-    if pub_bits:
-        ui.item_label(" · ".join(pub_bits)).props("caption")
-
-    rt = _fmt_runtime_delta(result.runtime_ms, book.duration_ms)
-    if rt or result.abridged is not None:
-        with ui.row().classes("items-center no-wrap q-gutter-xs"):
-            if rt:
-                ui.item_label(rt).props("caption").classes("colophon-mono")
-            if result.abridged is not None:
-                ui.badge("Abridged" if result.abridged else "Unabridged").props("color=grey-6 outline")
 
 
 def _confidence_color(value: float) -> str:
@@ -441,73 +402,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.label("Select a book to see its details").classes("text-grey-6")
                 return
 
-            def _cover_dialog(b=book) -> None:
-                with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
-                    ui.label("Change cover").classes("text-subtitle1")
-
-                    url_in = ui.input("Image URL").props("dense clearable").classes("w-full")
-
-                    def _set_url() -> None:
-                        value = (url_in.value or "").strip()
-                        if not value:
-                            ui.notify("Enter a URL")
-                            return
-                        controller.set_cover_url(b, value)
-                        dialog.close()
-                        ui.notify("Cover set")
-                        show_detail(b.id)
-
-                    ui.button("Set from URL", icon="link", on_click=_set_url).props("flat dense no-caps")
-                    ui.separator()
-
-                    async def _on_upload(e) -> None:
-                        data = await e.file.read()
-                        res = controller.set_cover_upload(b, data, e.file.name)
-                        if not res.ok:
-                            ui.notify(res.error or "Upload failed", type="warning")
-                            return
-                        dialog.close()
-                        ui.notify("Cover uploaded")
-                        show_detail(b.id)
-
-                    ui.upload(on_upload=_on_upload, auto_upload=True).props(
-                        'accept="image/*" flat'
-                    ).classes("w-full")
-                    ui.separator()
-
-                    grid = ui.row().classes("w-full q-gutter-xs q-mt-sm")
-
-                    async def _search() -> None:
-                        grid.clear()
-                        with grid:
-                            ui.spinner()
-                        cands = await controller.cover_candidates(b)
-                        grid.clear()
-                        if not cands:
-                            with grid:
-                                ui.label("No covers found").classes("text-grey-6")
-                            return
-                        with grid:
-                            for url in cands[:12]:
-                                ui.image(url).classes("cursor-pointer rounded").style(
-                                    "width:80px;height:120px;object-fit:contain"
-                                ).on(
-                                    "click",
-                                    lambda u=url: (
-                                        controller.set_cover_url(b, u),
-                                        dialog.close(),
-                                        ui.notify("Cover set"),
-                                        show_detail(b.id),
-                                    ),
-                                )
-
-                    ui.button("Search Audible and others", icon="search", on_click=_search).props(
-                        "flat dense no-caps"
-                    )
-                    with ui.row().classes("w-full justify-end q-mt-sm"):
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                dialog.open()
-
             # editable fields, each prefilled with its value + provenance badge
             inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, str] = {}
@@ -579,218 +473,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     inp.set_value(fn(_editor_text(inp)))
                 ui.notify("Normalized fields")
 
-            def _compare(b=book) -> None:
-                field_labels = {
-                    "title": "Title", "author": "Author", "narrator": "Narrator",
-                    "series": "Series", "sequence": "Sequence", "year": "Year",
-                    "asin": "ASIN", "isbn": "ISBN", "description": "Description",
-                }
-                services = controller.available_sources()  # [(name, label), ...]
-                service_label = dict(services)
-                state = {
-                    "title": get_field(b, "title") or "",
-                    "author": get_field(b, "author") or "",
-                    "series": get_field(b, "series") or "",
-                    "asin": get_field(b, "asin") or "",
-                    "isbn": get_field(b, "isbn") or "",
-                    "service": services[0][0] if services else None,
-                }
-                matches: list = []
 
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label(f"Find matches for {b.title or '(untitled)'}").classes("text-subtitle1")
-                    body = ui.column().classes("w-full")
 
-                    def show_form() -> None:
-                        body.clear()
-                        with body:
-                            if not services:
-                                ui.label("No metadata sources configured.").classes("text-grey-6")
-                                ui.button("Close", on_click=dialog.close).props("flat")
-                                return
-                            title_in = ui.input("Title", value=state["title"]).props("dense").classes("w-full")
-                            author_in = ui.input("Author", value=state["author"]).props("dense").classes("w-full")
-                            series_in = ui.input("Series", value=state["series"]).props("dense").classes("w-full")
-                            asin_in = ui.input("ASIN", value=state["asin"]).props("dense").classes("w-full")
-                            isbn_in = ui.input("ISBN", value=state["isbn"]).props("dense").classes("w-full")
-                            ui.label("Search with").classes("text-caption text-grey-7 q-mt-sm")
-                            service_radio = ui.radio(dict(services), value=state["service"]).props("dense")
-
-                            async def _go() -> None:
-                                state.update(
-                                    title=title_in.value, author=author_in.value,
-                                    series=series_in.value, asin=asin_in.value,
-                                    isbn=isbn_in.value, service=service_radio.value,
-                                )
-                                await run_search()
-
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-                                ui.button("Search", icon="search", on_click=_go)
-
-                    def show_searching() -> None:
-                        body.clear()
-                        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
-                            ui.spinner()
-                            ui.label(f"Searching {service_label.get(state['service'], '')}…")
-
-                    async def run_search() -> None:
-                        show_searching()
-                        try:
-                            results = await controller.search_matches(
-                                b, title=state["title"], author=state["author"],
-                                series=state["series"], asin=state["asin"],
-                                isbn=state["isbn"], source_name=state["service"],
-                            )
-                        except Exception:
-                            logger.exception("search_matches failed")
-                            results = []
-                        matches.clear()
-                        matches.extend(results)
-                        show_candidates()
-
-                    def show_candidates() -> None:
-                        body.clear()
-                        with body:
-                            with ui.row().classes("items-center w-full no-wrap"):
-                                ui.button(
-                                    "Back to search", icon="arrow_back", on_click=show_form
-                                ).props("flat dense no-caps")
-                                ui.space()
-                                ui.label(service_label.get(state["service"], "")).classes(
-                                    "text-caption text-grey-6"
-                                )
-                            if not matches:
-                                ui.label("No matches found").classes("text-grey-6 q-pa-sm")
-                            with ui.list().props("dense").classes("w-full"):
-                                for m in matches[:10]:
-                                    with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
-                                        with ui.item_section():
-                                            ui.item_label(m.title or "?")
-                                            _candidate_meta(
-                                                m, b, source_label=controller.source_label(m.provider)
-                                            )
-
-                    def show_picker(result) -> None:
-                        body.clear()
-                        checks: dict[str, ui.checkbox] = {}
-                        with body:
-                            ui.button("Back to matches", icon="arrow_back", on_click=show_candidates).props(
-                                "flat dense no-caps"
-                            )
-                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                                with ui.list().props("dense").classes("w-full"):
-                                    for key, source in controller.match_field_values(result).items():
-                                        current = get_field(b, key)
-                                        with ui.item():
-                                            with ui.item_section().props("avatar"):
-                                                checks[key] = ui.checkbox(value=(source != (current or None)))
-                                            with ui.item_section():
-                                                ui.item_label(f"{field_labels.get(key, key)}: {source}")
-                                                ui.item_label(f"current: {current or '(none)'}").props("caption")
-                                    if result.cover_url:
-                                        with ui.item():
-                                            with ui.item_section().props("avatar"):
-                                                checks["cover"] = ui.checkbox(value=(result.cover_url != b.cover_url))
-                                            with ui.item_section():
-                                                ui.item_label("Cover art")
-                                                ui.item_label(result.cover_url).props("caption")
-
-                            def _apply(res=result) -> None:
-                                selected = {k for k, c in checks.items() if c.value}
-                                if not selected:
-                                    ui.notify("No fields selected")
-                                    return
-                                controller.apply_match_fields(b, res, selected)
-                                dialog.close()
-                                ui.notify(f"Applied {len(selected)} field(s) from {controller.source_label(res.provider)}")
-                                refresh_list()
-                                show_detail(b.id)
-
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-                                ui.button("Apply selected", icon="done_all", on_click=_apply)
-
-                    show_form()
-                dialog.open()
-
-            async def _tag_dialog(b=book) -> None:
-                _save_pending(b)  # "Write" encompasses Save: persist editor edits first
-                plan = controller.tag_plan(b)
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")
-                    for warning in plan.warnings:
-                        with ui.row().classes("items-center no-wrap"):
-                            ui.icon("warning", color="warning")
-                            ui.label(warning).classes("text-caption text-warning")
-                    if plan.embed_cover:
-                        ui.label("Cover art will be embedded.").classes("text-caption text-grey-7")
-                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
-                        with ui.list().props("dense").classes("w-full"):
-                            for fp in plan.files:
-                                with ui.item():
-                                    with ui.item_section():
-                                        ui.item_label(fp.path.name)
-                                        ui.item_label(", ".join(fp.changed_fields) or "no changes").props(
-                                            "caption"
-                                        )
-                    actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
-                    with actions:
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                        commit_btn = ui.button("Write tags", icon="sell")
-
-                    async def _commit() -> None:
-                        commit_btn.props("loading=true")
-                        try:
-                            result = await controller.write_tags(b)
-                        finally:
-                            commit_btn.props(remove="loading")
-                        actions.clear()
-                        with actions:
-                            note = f"Wrote {result.written} file(s)" + (
-                                f", {result.failed} failed" if result.failed else ""
-                            )
-                            ui.label(note).classes("text-caption q-mr-auto self-center")
-                            ui.button(
-                                "Undo",
-                                icon="undo",
-                                on_click=lambda: (
-                                    controller.undo_tag_batch(),
-                                    ui.notify("Reverted tag write (embedded cover kept)"),
-                                    dialog.close(),
-                                ),
-                            ).props("flat")
-                            ui.button("Close", on_click=dialog.close).props("flat")
-                        refresh_list()
-                        refresh_status()
-
-                    commit_btn.on_click(_commit)
-                dialog.open()
-
-            def _remap_dialog(b=book) -> None:
-                with ui.dialog() as dialog, ui.card().classes("w-80"):
-                    ui.label("Remap a field").classes("text-subtitle1")
-                    ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
-                        "text-caption text-grey-6"
-                    )
-                    src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
-                    dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
-                    clear = ui.checkbox("Clear the source field after moving", value=True)
-
-                    def _apply() -> None:
-                        if src.value == dst.value:
-                            ui.notify("Pick two different fields")
-                            return
-                        controller.remap(b, src=src.value, dst=dst.value, clear_source=clear.value)
-                        dialog.close()
-                        ui.notify(f"Remapped {src.value} to {dst.value}")
-                        refresh_list()
-                        show_detail(b.id)
-
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                        ui.button("Remap", icon="swap_horiz", on_click=_apply)
-                dialog.open()
 
             async def _fetch_chapters(b=book, asin=None) -> None:
                 res = await controller.apply_audnexus_chapters(b, asin=asin)
@@ -861,9 +545,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         with ui.element("div").classes("colophon-toolgroup col"):
                             ui.label("Fetch from sources").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
-                                ui.button("Matches", icon="search", on_click=_compare).props("flat dense no-caps").tooltip("Find and apply metadata matches")
+                                ui.button("Matches", icon="search", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
                                 ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
-                                ui.button("Cover", icon="image", on_click=_cover_dialog).props("flat dense no-caps").tooltip("Search or set the cover")
+                                ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
                         with ui.element("div").classes("colophon-toolgroup"):
                             ui.label("Confidence").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
@@ -890,7 +574,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             ui.label("Clean up").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
                                 ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
-                                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat dense no-caps").tooltip("Move one field's value to another")
+                                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
 
                     # --- grouped fields ---
                     ui.label("Identity").classes("colophon-seccap")
@@ -917,7 +601,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
                 ui.button("Save", icon="save", on_click=_save).props("unelevated")
-                ui.button("Write tags", icon="sell", on_click=lambda b=book: _tag_dialog(b)).props("outline")
+                ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
                 ui.space()
                 ui.button(
                     "Mark ready", icon="check",
@@ -926,7 +610,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             editor_state.update(
                 book_id=book_id, is_dirty=_is_dirty,
-                save_pending=_save_pending, save=_save, write=lambda b=book: _tag_dialog(b),
+                save_pending=_save_pending, save=_save,
+                write=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b)),
             )
             _set_dirty(False)
             _persist_view()
@@ -934,24 +619,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             if book.source_files:
                 ui.separator().classes("q-my-sm")
                 ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
-
-                def _rename_dialog(sf_path: Path, b: BookUnit = book) -> None:
-                    with ui.dialog() as dialog, ui.card():
-                        ui.label("Rename file").classes("text-subtitle1")
-                        name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
-
-                        def _do_rename() -> None:
-                            if controller.rename_file(b, sf_path, name_input.value.strip()):
-                                ui.notify("Renamed")
-                            else:
-                                ui.notify("Rename failed (name in use?)", type="negative")
-                            dialog.close()
-                            show_detail(b.id)
-
-                        with ui.row():
-                            ui.button("Rename", on_click=_do_rename)
-                            ui.button("Cancel", on_click=dialog.close).props("flat")
-                    dialog.open()
 
                 with ui.list().props("dense bordered").classes("w-full"):
                     for idx, sf in enumerate(book.source_files):
@@ -963,7 +630,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 with ui.row().classes("q-gutter-xs no-wrap"):
                                     ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props("flat dense round").set_enabled(idx > 0)
                                     ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props("flat dense round").set_enabled(idx < len(book.source_files) - 1)
-                                    ui.button(icon="edit", on_click=lambda p=sf.path: _rename_dialog(p)).props("flat dense round")
+                                    ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props("flat dense round")
                                     ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props("flat dense round color=negative")
 
                 # chapters: applied named chapters (book.chapters) or file-boundary default
@@ -1082,74 +749,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.notify(f"Updated {n} field(s) on {len(books)} books")
                 _clear_selection()
 
-            async def _bulk_tag_dialog() -> None:
-                _apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
-                plans = [(b, controller.tag_plan(b)) for b in books]
-                total_files = sum(len(p.files) for _, p in plans)
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label(f"Write tags to {len(books)} books ({total_files} files)").classes(
-                        "text-subtitle1"
-                    )
-                    statuses: dict[str, ui.item_label] = {}
-                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
-                        with ui.list().props("dense").classes("w-full"):
-                            for b, plan in plans:
-                                with ui.item():
-                                    with ui.item_section():
-                                        ui.item_label(b.title or "(untitled)")
-                                        note = f"{len(plan.files)} file(s)" + (
-                                            f" · {len(plan.warnings)} warning(s)" if plan.warnings else ""
-                                        )
-                                        ui.item_label(note).props("caption")
-                                    with ui.item_section().props("side"):
-                                        statuses[b.id] = ui.item_label("queued").props("caption")
-                    actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
-                    with actions:
-                        progress_label = ui.label().classes(
-                            "text-caption text-grey-7 q-mr-auto self-center"
-                        )
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                        commit_btn = ui.button("Write tags", icon="sell")
-
-                    async def _commit() -> None:
-                        def _on_progress(done: int, book, result) -> None:
-                            statuses[book.id].set_text(
-                                f"written ({result.written})" if not result.failed
-                                else f"failed: {result.failed} file(s)"
-                            )
-                            progress_label.set_text(f"{done} / {len(books)} books")
-
-                        commit_btn.props("loading=true")
-                        try:
-                            results = await controller.write_tags_books(books, progress=_on_progress)
-                        finally:
-                            commit_btn.props(remove="loading")
-                        wrote = sum(r.written for r in results)
-                        failed = sum(r.failed for r in results)
-                        actions.clear()
-                        with actions:
-                            note = f"Wrote {wrote} file(s) across {len(books)} books" + (
-                                f", {failed} failed" if failed else ""
-                            )
-                            ui.label(note).classes("text-caption q-mr-auto self-center")
-                            ui.button(
-                                "Undo",
-                                icon="undo",
-                                on_click=lambda: (
-                                    controller.undo_tag_batch(),
-                                    ui.notify("Reverted tag write (embedded covers kept)"),
-                                    dialog.close(),
-                                    _clear_selection(),
-                                ),
-                            ).props("flat")
-                            ui.button(
-                                "Close", on_click=lambda: (dialog.close(), _clear_selection())
-                            ).props("flat")
-                        # Selection is cleared when the results dialog is dismissed (above),
-                        # not here, so the per-book progress + summary stay visible meanwhile.
-
-                    commit_btn.on_click(_commit)
-                dialog.open()
 
             ui.separator().classes("q-my-sm")
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
@@ -1181,142 +780,13 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                 ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
 
-            async def _quick_match() -> None:
-                sources = controller.available_sources()  # [(name, label), ...]
-                with ui.dialog() as dialog, ui.card().classes("w-[32rem]"):
-                    title = ui.label(f"Quick Match {len(books)} books").classes("text-subtitle1")
-                    body = ui.column().classes("w-full")
-                    proposals: list = []
-
-                    def show_config() -> None:
-                        body.clear()
-                        title.set_text(f"Quick Match {len(books)} books")
-                        checks: dict[str, ui.checkbox] = {}
-                        field_checks: dict[str, ui.checkbox] = {}
-                        with body:
-                            ui.label("Search these sources").classes("text-caption text-grey-7")
-                            for name, label in sources:
-                                checks[name] = ui.checkbox(label, value=True).props("dense")
-                            ui.label("Match using these fields").classes(
-                                "text-caption text-grey-7 q-mt-sm"
-                            )
-                            for key, flabel in (
-                                ("title", "Title"),
-                                ("author", "Author"),
-                                ("series", "Series"),
-                                ("asin", "ASIN"),
-                                ("isbn", "ISBN"),
-                            ):
-                                field_checks[key] = ui.checkbox(flabel, value=True).props("dense")
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                                async def _search() -> None:
-                                    chosen = [n for n, c in checks.items() if c.value]
-                                    if not chosen:
-                                        ui.notify("Select at least one source")
-                                        return
-                                    fields = {k for k, c in field_checks.items() if c.value}
-                                    if not fields:
-                                        ui.notify("Select at least one field to match on")
-                                        return
-                                    await run_search(chosen, fields)
-
-                                ui.button("Search", icon="search", on_click=_search)
-
-                    def show_searching() -> None:
-                        body.clear()
-                        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
-                            ui.spinner()
-                            ui.label(f"Searching {len(books)} books…")
-
-                    async def run_search(source_names: list[str], search_fields: set[str]) -> None:
-                        show_searching()
-                        found = await controller.quick_match_scan(books, source_names, search_fields)
-                        proposals.clear()
-                        proposals.extend(found)
-                        show_preview()
-
-                    def show_preview() -> None:
-                        body.clear()
-                        title.set_text(f"Quick Match {len(books)} books")
-                        threshold = controller.review_threshold()
-                        checks: dict[str, ui.checkbox] = {}
-                        with body:
-                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                                with ui.column().classes("w-full gap-0"):
-                                    for p in proposals:
-                                        cur = p.book.title or "(untitled)"
-                                        if p.best is None:
-                                            with ui.row().classes("w-full items-center no-wrap q-py-xs"):
-                                                ui.icon("block").classes("text-grey-5 q-mr-sm")
-                                                with ui.column().classes("gap-0"):
-                                                    ui.label(cur)
-                                                    ui.label("no match").classes("text-caption text-grey-6")
-                                            continue
-                                        with ui.row().classes("w-full items-center no-wrap"):
-                                            checks[p.book.id] = ui.checkbox(value=p.confidence >= threshold)
-                                            exp = ui.expansion().classes("w-full")
-                                            with exp.add_slot("header"):
-                                                with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
-                                                    with ui.column().classes("gap-0"):
-                                                        ui.label(f"{cur} → {p.best.title or '?'}")
-                                                        ui.label(
-                                                            controller.source_label(p.best.provider)
-                                                        ).classes("text-caption text-grey-6")
-                                                    ui.space()
-                                                    ui.badge(f"{p.confidence:.0f}").props(
-                                                        f"color={_confidence_color(p.confidence)}"
-                                                    )
-                                            with exp:
-                                                _candidate_meta(
-                                                    p.best, p.book,
-                                                    source_label=controller.source_label(p.best.provider),
-                                                )
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                                def _apply() -> None:
-                                    keep_ids = {bid for bid, c in checks.items() if c.value}
-                                    chosen = [p for p in proposals if p.book.id in keep_ids]
-                                    if not chosen:
-                                        ui.notify("Nothing selected")
-                                        return
-                                    summary = controller.quick_match_apply(chosen)
-                                    show_summary(summary)
-
-                                ui.button("Apply selected", icon="done_all", on_click=_apply)
-
-                    def show_summary(summary) -> None:
-                        body.clear()
-                        with body:
-                            note = f"Applied {summary.applied_count} book(s), {summary.now_ready_count} now Ready"
-                            ui.label(note).classes("text-body2 q-pa-sm")
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                if summary.batch_id:
-                                    ui.button(
-                                        "Undo", icon="undo",
-                                        on_click=lambda b=summary.batch_id: (
-                                            controller.undo(b),
-                                            ui.notify("Reverted Quick Match"),
-                                            _close(),
-                                        ),
-                                    ).props("flat")
-                                ui.button("Close", on_click=_close)
-
-                    def _close() -> None:
-                        dialog.close()
-                        _clear_selection()
-
-                    show_config()
-                dialog.open()
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Quick Match", icon="auto_awesome", on_click=_quick_match).props("outline")
+                ui.button("Quick Match", icon="auto_awesome", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
-                ui.button("Write tags", icon="sell", on_click=_bulk_tag_dialog).props("outline")
+                ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
                 ui.button(
                     "Clear selection", icon="clear", on_click=_clear_selection,
                 ).props("flat")
@@ -2193,177 +1663,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         )
         _ui_safe(_refresh_all)
 
-    async def _scan() -> None:
-        plan = await asyncio.to_thread(controller.scan_preview)
-        if plan.new_books == 0 and plan.existing_books == 0:
-            ui.notify("Nothing to scan")
-            return
-
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
-            ui.label("Scan results").classes("text-subtitle1")
-            ui.label(f"{plan.new_books} new books")
-            ui.label(f"{plan.existing_books} existing books (preserved)")
-            ui.label(f"{plan.fields_filled} empty fields filled")
-            ui.label(f"{plan.files_added} new files added")
-            ui.label("Existing covers, edits, and review status are preserved.").classes(
-                "text-caption text-grey-7"
-            )
-            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                async def _apply() -> None:
-                    dialog.close()
-                    written = await asyncio.to_thread(controller.apply_scan, plan)
-                    _refresh_all()
-                    ui.notify(f"Scan complete ({written} books)")
-
-                ui.button("Scan", icon="search", on_click=_apply)
-        dialog.open()
-
-    async def _identify() -> None:
-        identify_btn.props("loading=true")  # the preview queries every source; show progress
-        try:
-            plan = await controller.identify_preview()
-        finally:
-            identify_btn.props(remove="loading")
-        if not plan.proposals:
-            ui.notify("Nothing to identify")
-            return
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
-            ui.label("Identify results").classes("text-subtitle1")
-            ui.label(f"{plan.to_apply} books auto-matched (fields filled)")
-            ui.label(f"{plan.to_review} routed to Needs review")
-            if plan.skipped:
-                ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
-                    "text-caption text-grey-7"
-                )
-            ui.label(
-                "Only empty fields are filled; covers, edits, and confirmed books are preserved."
-            ).classes("text-caption text-grey-7")
-            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                async def _apply() -> None:
-                    dialog.close()
-                    summary = await asyncio.to_thread(controller.apply_identify, plan)
-                    _refresh_all()
-                    actions = (
-                        [{
-                            "label": "Undo", "color": "white",
-                            "handler": lambda b=summary.batch_id: (controller.undo(b), _refresh_all()),
-                        }]
-                        if summary.batch_id else None
-                    )
-                    ui.notify(
-                        f"Identified {summary.auto_matched} book(s); "
-                        f"{summary.routed_to_review} need review",
-                        actions=actions,
-                    )
-
-                ui.button("Identify", icon="travel_explore", on_click=_apply)
-        dialog.open()
-
-    async def _process() -> None:
-        from colophon.controller import CancelToken, EncodeJobOptions
-        from colophon.core.models import BookState
-
-        books = _selected_books() or controller.ready_books()
-        if not books:
-            ui.notify("Nothing selected or ready")
-            return
-
-        with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
-            body = ui.column().classes("w-full")
-
-            def _close() -> None:
-                # Refresh the underlying views only on close — _render_middle rebuilds
-                # the list panel, so refreshing while the dialog is open could disturb it.
-                dialog.close()
-                refresh_nav()
-                _render_middle()
-                refresh_status()
-
-            def show_options() -> None:
-                body.clear()
-                n_encode = sum(1 for b in books if b.source_files)
-                n_organize = sum(1 for b in books if b.state == BookState.ENCODED and b.output_path)
-                with body:
-                    ui.label(f"Encode + organize {len(books)} book(s)").classes("text-subtitle1")
-                    enc = ui.checkbox("Encode to M4B", value=True).props("dense")
-                    org = ui.checkbox("Organize into library", value=True).props("dense")
-                    dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
-                    conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
-                    ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
-                        "text-caption text-grey-6"
-                    )
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                        async def _run() -> None:
-                            if not enc.value and not org.value:
-                                ui.notify("Select Encode and/or Organize")
-                                return
-                            if dele.value and not enc.value:
-                                ui.notify("Delete sources requires Encode")
-                                return
-                            options = EncodeJobOptions(
-                                encode=bool(enc.value), organize=bool(org.value),
-                                delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
-                            )
-                            await show_progress(options)
-
-                        ui.button("Run", icon="play_arrow", on_click=_run).props("unelevated")
-
-            async def show_progress(options) -> None:
-                body.clear()
-                statuses: dict[str, ui.item_label] = {}
-                token = CancelToken()
-                with body:
-                    ui.label(f"Processing {len(books)} book(s)").classes("text-subtitle1")
-                    with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
-                        with ui.list().props("dense").classes("w-full"):
-                            for b in books:
-                                with ui.item(), ui.item_section():
-                                    ui.item_label(b.title or "(untitled)")
-                                    statuses[b.id] = ui.item_label("queued").props("caption")
-                    actions = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
-                    with actions:
-                        ui.button("Cancel", icon="stop", on_click=token.cancel).props("flat")
-
-                def _progress(book_id: str, status: str) -> None:
-                    if book_id in statuses:
-                        statuses[book_id].set_text(status)
-
-                result = await controller.run_encode_job(books, options, progress=_progress, cancel=token)
-                selected_ids.clear()
-                await controller.trigger_abs_scan()  # best-effort library rescan
-
-                failed = [r for r in result.results if r.status == "failed"]
-                done = sum(1 for r in result.results if r.status == "done")
-                cancelled = sum(1 for r in result.results if r.status == "cancelled")
-                actions.clear()
-                with actions:
-                    note = f"{done} done"
-                    if failed:
-                        note += f", {len(failed)} failed"
-                    if cancelled:
-                        note += f", {cancelled} cancelled"
-                    ui.label(note).classes("text-body2 q-mr-auto self-center")
-                    if failed:
-                        failed_ids = {r.book_id for r in failed}
-                        retry = [b for b in books if b.id in failed_ids]
-                        ui.button("Retry failed", icon="replay",
-                                  on_click=lambda r=retry, o=options: _retry(r, o))
-                    ui.button("Close", on_click=_close).props("flat")
-
-            async def _retry(retry_books: list, options) -> None:
-                nonlocal books
-                books = retry_books
-                await show_progress(options)
-
-            dialog.open()
-            show_options()
-
     # --- application shell ---
     # Keyboard navigation for the Books list (ignored while typing in a field).
     ui.keyboard(on_key=_on_key)
@@ -2417,9 +1716,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
 
-    scan_btn.on_click(_scan)  # manages its own preview dialog + refresh
-    identify_btn.on_click(_identify)  # manages its own preview dialog + refresh
-    process_btn.on_click(_process)  # manages its own progress dialog + refresh
+    scan_btn.on_click(lambda: scan_dialog(controller, refresh_all=_refresh_all))  # manages its own preview dialog + refresh
+    identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all, button=identify_btn))  # manages its own preview dialog + refresh
+    process_btn.on_click(lambda: process_dialog(controller, _selected_books() or controller.ready_books(), refresh_all=_refresh_all, clear_selection=selected_ids.clear))  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)
