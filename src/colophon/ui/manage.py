@@ -10,8 +10,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from colophon.controller import AppController
-from colophon.ui.tabs import app_tabs
-from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
+from colophon.ui.chrome import page_header
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,6 @@ _KIND_LABELS = {
 
 
 def render_manage(controller: AppController) -> None:
-    apply_theme()
-    dark = setup_dark_mode()
-
     state: dict[str, object] = {
         "kind": "author",
         "filter": "",
@@ -37,12 +33,8 @@ def render_manage(controller: AppController) -> None:
         "last_batch": None,
     }
 
-    with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon("category", color="primary").classes("text-h5")
-        ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
-        app_tabs(controller, "manage")
-        ui.space()
-        dark_mode_button(dark)
+    with page_header(controller, "manage", icon="category"):
+        pass
 
     def _selected() -> set[str]:
         return state["selected"]  # type: ignore[return-value]

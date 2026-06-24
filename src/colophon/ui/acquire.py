@@ -7,8 +7,7 @@ import logging
 from nicegui import ui
 
 from colophon.controller import AppController
-from colophon.ui.tabs import app_tabs
-from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
+from colophon.ui.chrome import page_header
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +22,8 @@ def _fmt_size(num_bytes: int) -> str:
 
 
 def render_acquire(controller: AppController) -> None:
-    apply_theme()
-    dark = setup_dark_mode()
-    with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon("cloud_download", color="primary").classes("text-h5")
-        ui.label("Acquire").classes("text-h6 q-ml-sm text-weight-medium")
-        app_tabs(controller, "acquire")
-        ui.space()
-        dark_mode_button(dark)
+    with page_header(controller, "acquire", icon="cloud_download", label="Acquire"):
+        pass
 
     if not controller.rd_configured():
         with ui.card().classes("q-ma-md"):
