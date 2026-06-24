@@ -20,6 +20,7 @@ from colophon.controller import AppController
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
 from colophon.core.sources import SourceResult
+from colophon.ui.batch_log import BatchItem, BatchLog
 
 logger = logging.getLogger(__name__)
 
@@ -706,27 +707,37 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
 
 
 async def identify_dialog(
-    controller: AppController, *, refresh_all: Callable[[], None], button: ui.button
+    controller: AppController, *, refresh_all: Callable[[], None]
 ) -> None:
-    """Preview source matches for unidentified books and apply (fill empties, route review)."""
-    with busy(button):  # the preview queries every source; show progress
-        plan = await controller.identify_preview()
-    if not plan.proposals:
+    """Preview source matches for unidentified books with a live per-book log, then apply
+    (fill empties, route review) or retry the books that found no match."""
+    candidates = controller.identify_candidates()
+    if not candidates:
         ui.notify("Nothing to identify")
         return
-    with ui.dialog() as dialog, ui.card().classes("w-96"):
-        ui.label("Identify results").classes("text-subtitle1")
-        ui.label(f"{plan.to_apply} books auto-matched (fields filled)")
-        ui.label(f"{plan.to_review} routed to Needs review")
-        if plan.skipped:
-            ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
-                "text-caption colophon-muted"
-            )
-        ui.label(
-            "Only empty fields are filled; covers, edits, and confirmed books are preserved."
-        ).classes("text-caption colophon-muted")
 
-        async def _apply() -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+        ui.label(f"Identifying {len(candidates)} book(s)").classes("text-subtitle1")
+        log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in candidates])
+        state = {"cancelled": False}
+
+        def _cancel() -> None:
+            state["cancelled"] = True
+            dialog.close()
+
+        def _progress(book_id: str, kind: str) -> None:
+            log.update(book_id, "match found" if kind == "ok" else "no match", kind=kind)
+
+        def _summary(plan) -> str:
+            no_match = sum(1 for p in plan.proposals if p.best is None)
+            parts = [f"{plan.to_apply} auto-matched", f"{plan.to_review} review"]
+            if no_match:
+                parts.append(f"{no_match} no match")
+            if plan.skipped:
+                parts.append(f"{plan.skipped} skipped")
+            return "  ·  ".join(parts)
+
+        async def _apply(plan) -> None:
             dialog.close()
             summary = await asyncio.to_thread(controller.apply_identify, plan)
             refresh_all()
@@ -743,8 +754,24 @@ async def identify_dialog(
                 actions=actions,
             )
 
-        dialog_actions(dialog, confirm_label="Identify", confirm_icon="travel_explore", on_confirm=_apply, confirm_props="")
-    dialog.open()
+        async def _retry(plan, ids: list[str]) -> None:
+            new_plan = await controller.retry_identify(plan, ids, progress=_progress)
+            _finish(new_plan)
+
+        def _finish(plan) -> None:
+            log.finish(
+                _summary(plan),
+                on_close=dialog.close,
+                on_retry=lambda ids, p=plan: _retry(p, ids),
+                extra=[("Apply", "done_all", lambda p=plan: _apply(p))],
+            )
+
+        dialog.open()
+        log.cancel_action(_cancel)
+        plan = await controller.identify_preview(progress=_progress)
+        if state["cancelled"]:
+            return
+        _finish(plan)
 
 
 async def process_dialog(

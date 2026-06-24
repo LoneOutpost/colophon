@@ -1718,7 +1718,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         ).props("flat round").tooltip("Reset column widths")
 
     scan_btn.on_click(lambda: scan_dialog(controller, refresh_all=_refresh_all))  # manages its own preview dialog + refresh
-    identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all, button=identify_btn))  # manages its own preview dialog + refresh
+    identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all))  # streams its own preview dialog + refresh
     process_btn.on_click(lambda: process_dialog(controller, _selected_books() or controller.ready_books(), refresh_all=_refresh_all, clear_selection=selected_ids.clear))  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
