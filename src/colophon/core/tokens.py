@@ -14,6 +14,7 @@ class Token:
     parses: bool         # may appear in a filename_template (parse) pattern
     builds: bool         # may appear in an organize (build) pattern
     description: str      # human help, rendered in Settings
+    hidden: bool = False  # still renders, but omitted from the Settings token reference
 
 
 # Display order in Settings. The build-only names below must exactly equal the keys
@@ -28,7 +29,7 @@ TOKENS: list[Token] = [
     Token("Skip", None, True, False, "Parse only: match and discard a run of text."),
     Token("SortAuthor", None, False, True, "Build only: author as 'Last, First'."),
     Token("SortTitle", None, False, True, "Build only: title with a leading article dropped."),
-    Token("SerName", None, False, True, "Build only: alias of $Series."),
+    Token("SerName", None, False, True, "LazyLibrarian's name for $Series.", hidden=True),
     Token("PadNum", None, False, True, "Build only: $SerNum zero-padded to two digits."),
     Token("Part", None, False, True, "Build only: multi-part index (currently empty)."),
     Token("Total", None, False, True, "Build only: multi-part total (currently empty)."),
@@ -67,3 +68,22 @@ def migrate_filename_template(template: str) -> str:
         else m.group(0),
         template,
     )
+
+
+_BARE_DIR_FIELD = {"author": "Author", "series": "Series", "title": "Title"}
+
+
+def migrate_directory_scheme(spec: str) -> str:
+    """Convert a legacy bare directory scheme ('Author/Series/Title') to $Token form.
+    A bare known field becomes its token; any other bare level becomes $Skip (ignore that
+    level). A scheme already containing '$' is returned unchanged (idempotent)."""
+    if not spec or "$" in spec:
+        return spec
+    out: list[str] = []
+    for level in spec.split("/"):
+        name = level.strip()
+        if not name:
+            continue
+        tok = _BARE_DIR_FIELD.get(name.lower())
+        out.append(f"${tok}" if tok else "$Skip")
+    return "/".join(out)
