@@ -13,6 +13,7 @@ from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
+from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.chapters import runtime_mismatch
 from colophon.core.confidence import IdentificationOutcome, score_identification
@@ -161,21 +162,6 @@ class BookProcessResult(_Base):
 
 class EncodeJobResult(_Base):
     results: list[BookProcessResult] = []  # noqa: RUF012 - pydantic default, copied per instance
-
-
-class CancelToken:
-    """A cooperative cancel flag checked between books (graceful: in-flight work
-    finishes; queued work is skipped)."""
-
-    def __init__(self) -> None:
-        self._cancelled = False
-
-    @property
-    def cancelled(self) -> bool:
-        return self._cancelled
-
-    def cancel(self) -> None:
-        self._cancelled = True
 
 
 class AppController:
