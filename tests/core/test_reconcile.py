@@ -20,6 +20,16 @@ def test_embedded_tags_take_precedence_over_filename():
     assert book.provenance["authors"] == "tag"
 
 
+def test_embedded_album_fills_title_below_embedded_title():
+    # title ladder: embedded.title -> embedded.album -> ... ; album is the fallback
+    # when there's no embedded title.
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(album="Album As Title"), dir_title="Folder Title",
+              filename_fields={"title": "Filename Title"})
+    assert book.title == "Album As Title"
+    assert book.provenance["title"] == "tag"
+
+
 def test_directory_fills_title_when_tags_absent():
     book = _unit()
     reconcile(book, embedded=EmbeddedTags(), dir_title="Folder Title", filename_fields={})
