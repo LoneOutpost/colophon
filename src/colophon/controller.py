@@ -181,6 +181,7 @@ class AppController:
         self.ctx = ctx
         self._downloads: dict[str, DownloadEntry] = {}
         self._download_cancels: dict[str, CancelToken] = {}
+        self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -467,6 +468,7 @@ class AppController:
         for key in [k for k, e in self._downloads.items() if e.status in ("done", "failed")]:
             self._downloads.pop(key, None)
             self._download_cancels.pop(key, None)
+            self._download_folders.pop(key, None)
 
     def cancel_download(self, key: str) -> None:
         """Signal a cancel for the in-flight download `key` (no-op if unknown)."""
@@ -494,10 +496,13 @@ class AppController:
             info = await client.torrent_info(torrent_id)
             result = await download_torrent(
                 client, info, self._rd_download_dir(),
+                folder=self._download_folders.get(torrent_id),
                 progress=progress, byte_progress=_byte_progress, cancel=token,
             )
         finally:
             await client.aclose()
+        # remember the folder so a later resume reuses it (and finds the retained .part)
+        self._download_folders[torrent_id] = result.folder
 
         cancelled = any((f.error == "cancelled") for f in result.files)
         book_ids: list[str] = []
