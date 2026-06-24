@@ -244,3 +244,28 @@ def test_downloads_scan_prompt_flag_defaults_false():
     from colophon.adapters.config import Config
 
     assert Config().downloads_scan_prompt_seen is False
+
+
+def test_settings_save_preserves_non_form_fields():
+    """Guard for #111: the Settings page builds the saved config with
+    cfg.model_copy(update={form fields}), so fields the form does not edit must
+    survive a save instead of resetting to defaults."""
+    from colophon.adapters.config import Config
+
+    cfg = Config(
+        storage_secret="secret-xyz",
+        saved_filename_patterns=["$Series #$SerNum - $Title"],
+        downloads_scan_prompt_seen=True,
+        hardcover_api_token="hc-token",
+        filename_template="$Author - $Title",
+    )
+    # the form edits only its own fields (mirrors settings.do_save)
+    saved = cfg.model_copy(update={"filename_template": "$Title", "port": 9000})
+
+    assert saved.filename_template == "$Title"  # form field changed
+    assert saved.port == 9000
+    # non-form fields preserved, not reset to defaults
+    assert saved.storage_secret == "secret-xyz"
+    assert saved.saved_filename_patterns == ["$Series #$SerNum - $Title"]
+    assert saved.downloads_scan_prompt_seen is True
+    assert saved.hardcover_api_token == "hc-token"
