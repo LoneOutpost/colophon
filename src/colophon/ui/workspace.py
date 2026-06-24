@@ -10,7 +10,6 @@ action, no dead controls, and a consistent spacing scale.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from pathlib import Path
@@ -28,9 +27,12 @@ from colophon.ui.dialogs import (
     bulk_tag_dialog,
     compare_dialog,
     cover_dialog,
+    identify_dialog,
+    process_dialog,
     quick_match_dialog,
     remap_dialog,
     rename_dialog,
+    scan_dialog,
     tag_dialog,
 )
 from colophon.ui.tabs import app_tabs
@@ -1661,177 +1663,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         )
         _ui_safe(_refresh_all)
 
-    async def _scan() -> None:
-        plan = await asyncio.to_thread(controller.scan_preview)
-        if plan.new_books == 0 and plan.existing_books == 0:
-            ui.notify("Nothing to scan")
-            return
-
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
-            ui.label("Scan results").classes("text-subtitle1")
-            ui.label(f"{plan.new_books} new books")
-            ui.label(f"{plan.existing_books} existing books (preserved)")
-            ui.label(f"{plan.fields_filled} empty fields filled")
-            ui.label(f"{plan.files_added} new files added")
-            ui.label("Existing covers, edits, and review status are preserved.").classes(
-                "text-caption text-grey-7"
-            )
-            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                async def _apply() -> None:
-                    dialog.close()
-                    written = await asyncio.to_thread(controller.apply_scan, plan)
-                    _refresh_all()
-                    ui.notify(f"Scan complete ({written} books)")
-
-                ui.button("Scan", icon="search", on_click=_apply)
-        dialog.open()
-
-    async def _identify() -> None:
-        identify_btn.props("loading=true")  # the preview queries every source; show progress
-        try:
-            plan = await controller.identify_preview()
-        finally:
-            identify_btn.props(remove="loading")
-        if not plan.proposals:
-            ui.notify("Nothing to identify")
-            return
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
-            ui.label("Identify results").classes("text-subtitle1")
-            ui.label(f"{plan.to_apply} books auto-matched (fields filled)")
-            ui.label(f"{plan.to_review} routed to Needs review")
-            if plan.skipped:
-                ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
-                    "text-caption text-grey-7"
-                )
-            ui.label(
-                "Only empty fields are filled; covers, edits, and confirmed books are preserved."
-            ).classes("text-caption text-grey-7")
-            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                async def _apply() -> None:
-                    dialog.close()
-                    summary = await asyncio.to_thread(controller.apply_identify, plan)
-                    _refresh_all()
-                    actions = (
-                        [{
-                            "label": "Undo", "color": "white",
-                            "handler": lambda b=summary.batch_id: (controller.undo(b), _refresh_all()),
-                        }]
-                        if summary.batch_id else None
-                    )
-                    ui.notify(
-                        f"Identified {summary.auto_matched} book(s); "
-                        f"{summary.routed_to_review} need review",
-                        actions=actions,
-                    )
-
-                ui.button("Identify", icon="travel_explore", on_click=_apply)
-        dialog.open()
-
-    async def _process() -> None:
-        from colophon.controller import CancelToken, EncodeJobOptions
-        from colophon.core.models import BookState
-
-        books = _selected_books() or controller.ready_books()
-        if not books:
-            ui.notify("Nothing selected or ready")
-            return
-
-        with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
-            body = ui.column().classes("w-full")
-
-            def _close() -> None:
-                # Refresh the underlying views only on close — _render_middle rebuilds
-                # the list panel, so refreshing while the dialog is open could disturb it.
-                dialog.close()
-                refresh_nav()
-                _render_middle()
-                refresh_status()
-
-            def show_options() -> None:
-                body.clear()
-                n_encode = sum(1 for b in books if b.source_files)
-                n_organize = sum(1 for b in books if b.state == BookState.ENCODED and b.output_path)
-                with body:
-                    ui.label(f"Encode + organize {len(books)} book(s)").classes("text-subtitle1")
-                    enc = ui.checkbox("Encode to M4B", value=True).props("dense")
-                    org = ui.checkbox("Organize into library", value=True).props("dense")
-                    dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
-                    conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
-                    ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
-                        "text-caption text-grey-6"
-                    )
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                        async def _run() -> None:
-                            if not enc.value and not org.value:
-                                ui.notify("Select Encode and/or Organize")
-                                return
-                            if dele.value and not enc.value:
-                                ui.notify("Delete sources requires Encode")
-                                return
-                            options = EncodeJobOptions(
-                                encode=bool(enc.value), organize=bool(org.value),
-                                delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
-                            )
-                            await show_progress(options)
-
-                        ui.button("Run", icon="play_arrow", on_click=_run).props("unelevated")
-
-            async def show_progress(options) -> None:
-                body.clear()
-                statuses: dict[str, ui.item_label] = {}
-                token = CancelToken()
-                with body:
-                    ui.label(f"Processing {len(books)} book(s)").classes("text-subtitle1")
-                    with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
-                        with ui.list().props("dense").classes("w-full"):
-                            for b in books:
-                                with ui.item(), ui.item_section():
-                                    ui.item_label(b.title or "(untitled)")
-                                    statuses[b.id] = ui.item_label("queued").props("caption")
-                    actions = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
-                    with actions:
-                        ui.button("Cancel", icon="stop", on_click=token.cancel).props("flat")
-
-                def _progress(book_id: str, status: str) -> None:
-                    if book_id in statuses:
-                        statuses[book_id].set_text(status)
-
-                result = await controller.run_encode_job(books, options, progress=_progress, cancel=token)
-                selected_ids.clear()
-                await controller.trigger_abs_scan()  # best-effort library rescan
-
-                failed = [r for r in result.results if r.status == "failed"]
-                done = sum(1 for r in result.results if r.status == "done")
-                cancelled = sum(1 for r in result.results if r.status == "cancelled")
-                actions.clear()
-                with actions:
-                    note = f"{done} done"
-                    if failed:
-                        note += f", {len(failed)} failed"
-                    if cancelled:
-                        note += f", {cancelled} cancelled"
-                    ui.label(note).classes("text-body2 q-mr-auto self-center")
-                    if failed:
-                        failed_ids = {r.book_id for r in failed}
-                        retry = [b for b in books if b.id in failed_ids]
-                        ui.button("Retry failed", icon="replay",
-                                  on_click=lambda r=retry, o=options: _retry(r, o))
-                    ui.button("Close", on_click=_close).props("flat")
-
-            async def _retry(retry_books: list, options) -> None:
-                nonlocal books
-                books = retry_books
-                await show_progress(options)
-
-            dialog.open()
-            show_options()
-
     # --- application shell ---
     # Keyboard navigation for the Books list (ignored while typing in a field).
     ui.keyboard(on_key=_on_key)
@@ -1885,9 +1716,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
 
-    scan_btn.on_click(_scan)  # manages its own preview dialog + refresh
-    identify_btn.on_click(_identify)  # manages its own preview dialog + refresh
-    process_btn.on_click(_process)  # manages its own progress dialog + refresh
+    scan_btn.on_click(lambda: scan_dialog(controller, refresh_all=_refresh_all))  # manages its own preview dialog + refresh
+    identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all, button=identify_btn))  # manages its own preview dialog + refresh
+    process_btn.on_click(lambda: process_dialog(controller, _selected_books() or controller.ready_books(), refresh_all=_refresh_all, clear_selection=selected_ids.clear))  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)

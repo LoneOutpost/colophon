@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from colophon.core.models import BookUnit
-from colophon.ui.workspace import _editor_text, _fmt_series_label, book_haystack
+from colophon.ui.dialogs import _fmt_series_label
+from colophon.ui.workspace import _editor_text, book_haystack
 
 
 def test_fmt_series_label_drops_trailing_zero():
