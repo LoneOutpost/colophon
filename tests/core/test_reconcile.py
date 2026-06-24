@@ -203,3 +203,18 @@ def test_embedded_artist_two_full_names_still_splits():
     reconcile(book, embedded=EmbeddedTags(artist="Terry Jones, Douglas Adams"),
               dir_title=None, filename_fields={})
     assert book.authors == ["Terry Jones", "Douglas Adams"]
+
+
+def test_directory_tier_supplies_series_sequence_and_narrator_and_year():
+    book = BookUnit.new(source_folder=Path("/x"))
+    reconcile(
+        book,
+        embedded=EmbeddedTags(),
+        dir_title=None,
+        filename_fields={},
+        directory_fields={"series": "Stormlight", "sequence": "1", "narrator": "Kramer", "year": "2010"},
+    )
+    assert book.series[0].name == "Stormlight"
+    assert book.series[0].sequence == 1.0   # was hardcoded None before
+    assert book.narrators == ["Kramer"]     # new directory tier
+    assert book.publish_year == 2010        # new directory tier
