@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import logging
 
-from nicegui import ui
+from nicegui import background_tasks, ui
 
 from colophon.controller import AppController
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
+
+# status -> (Quasar colour, icon) for a download row
+_STATUS_META = {
+    "active": ("primary", "downloading"),
+    "paused": ("orange", "pause_circle"),
+    "done": ("positive", "check_circle"),
+    "failed": ("negative", "error"),
+}
 
 
 def _fmt_size(num_bytes: int) -> str:
@@ -46,8 +54,14 @@ def render_acquire(controller: AppController) -> None:
     selected: set[str] = set()
     show_all = {"value": False}
     candidates: list = []
+    scan_prompt = {"shown": False}
 
     with ui.column().classes("w-full q-pa-md gap-2"):
+        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+            magnet_input = (
+                ui.input(placeholder="Paste a magnet link").props("dense clearable").classes("col")
+            )
+            add_btn = ui.button("Add", icon="add")
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             load_btn = ui.button("Load torrents", icon="refresh")
             ui.switch("Show all (not just audiobooks)", on_change=lambda e: _set_show_all(e.value))
@@ -55,8 +69,33 @@ def render_acquire(controller: AppController) -> None:
             download_btn = ui.button("Download selected", icon="download")
             download_btn.set_enabled(False)
         list_box = ui.column().classes("w-full gap-0")
-        progress_box = ui.column().classes("w-full gap-1 q-mt-sm")
+        with ui.row().classes("items-center w-full q-mt-md"):
+            ui.label("Downloads").classes("text-subtitle1 text-weight-medium")
+            ui.space()
+            ui.button("Clear finished", icon="clear_all", on_click=lambda: _clear_finished()).props(
+                "flat dense"
+            )
+        downloads_box = ui.column().classes("w-full gap-0")
 
+    # --- magnet ---
+    async def _add_magnet() -> None:
+        magnet = (magnet_input.value or "").strip()
+        if not magnet:
+            ui.notify("Paste a magnet link first", type="warning")
+            return
+        add_btn.props("loading=true")
+        try:
+            await controller.rd_add_magnet(magnet)
+        except Exception as e:  # surface add failure to the operator (BLE001 intentional)
+            logger.warning(f"RD add magnet failed: {e}")
+            ui.notify("Could not add magnet (see logs)", type="negative")
+            return
+        finally:
+            add_btn.props(remove="loading")
+        magnet_input.set_value("")
+        ui.notify("Added. It will appear here once Real-Debrid finishes preparing it.")
+
+    # --- candidate list ---
     def _set_show_all(value: bool) -> None:
         show_all["value"] = value
         _render_list()
@@ -117,42 +156,105 @@ def render_acquire(controller: AppController) -> None:
         download_btn.set_enabled(False)
         _render_list()
 
-    async def _download() -> None:
+    # --- downloads (registry-driven, polled) ---
+    def _render_downloads() -> None:
+        downloads_box.clear()
+        entries = controller.active_downloads()
+        with downloads_box:
+            if not entries:
+                ui.label("No downloads yet").classes("text-grey-6 q-pa-md")
+                return
+            with ui.list().props("separator dense").classes("w-full"):
+                for entry in entries:
+                    color, icon = _STATUS_META.get(entry.status, ("grey-6", "help"))
+                    with ui.item():
+                        with ui.item_section().props("avatar"):
+                            ui.icon(icon, color=color)
+                        with ui.item_section():
+                            ui.item_label(entry.name or "(unnamed)")
+                            detail = f"{entry.status} · {entry.detail}" if entry.detail else entry.status
+                            ui.item_label(detail).props("caption")
+                        if entry.status in ("active", "paused"):
+                            with ui.item_section().props("side"):
+                                if entry.status == "active":
+                                    ui.button(
+                                        icon="close",
+                                        on_click=lambda _e, k=entry.key: controller.cancel_download(k),
+                                    ).props("flat dense round").tooltip("Cancel")
+                                else:
+                                    ui.button(
+                                        icon="play_arrow",
+                                        on_click=lambda _e, k=entry.key: _resume(k),
+                                    ).props("flat dense round").tooltip("Resume")
+
+    def _clear_finished() -> None:
+        controller.clear_finished_downloads()
+        _render_downloads()
+
+    async def _run_one(tid: str, name: str) -> None:
+        try:
+            await controller.rd_download(tid, name=name)
+        except Exception as e:  # isolate one torrent's failure (BLE001 intentional)
+            logger.warning(f"RD download failed for {tid}: {e}")
+
+    async def _resume_one(key: str) -> None:
+        try:
+            await controller.resume_download(key)
+        except Exception as e:  # isolate one resume failure (BLE001 intentional)
+            logger.warning(f"RD resume failed for {key}: {e}")
+
+    def _resume(key: str) -> None:
+        background_tasks.create(_resume_one(key))
+        _render_downloads()
+
+    def _download() -> None:
         targets = list(selected)
         if not targets:
             return
-        download_btn.props("loading=true")
-        progress_box.clear()
-        statuses: dict[str, ui.item_label] = {}
-        with progress_box, ui.list().props("dense").classes("w-full"):
-            for tid in targets:
-                name = next((c.torrent.filename for c in candidates if c.torrent.id == tid), tid)
-                with ui.item(), ui.item_section():
-                    ui.item_label(name)
-                    statuses[tid] = ui.item_label("waiting").props("caption")
-        try:
-            for tid in targets:
-                statuses[tid].set_text("downloading...")
+        for tid in targets:
+            name = next((c.torrent.filename for c in candidates if c.torrent.id == tid), tid)
+            background_tasks.create(_run_one(tid, name))
+        selected.clear()
+        download_btn.set_enabled(False)
+        _render_list()
+        _render_downloads()
+        ui.notify("Downloading. Progress appears under Downloads below.")
 
-                def _on_progress(done: int, total: int, name: str, label=statuses[tid]) -> None:
-                    label.set_text(f"downloading {done}/{total}: {name}")
+    # --- one-time scan-path prompt (after a download completes) ---
+    def _maybe_prompt_scan() -> None:
+        if scan_prompt["shown"] or not controller.should_prompt_downloads_scan():
+            return
+        if not any(e.status == "done" for e in controller.active_downloads()):
+            return
+        scan_prompt["shown"] = True
+        with ui.dialog() as dialog, ui.card().classes("w-96"):
+            ui.label("Add the downloads folder to your scan paths?").classes("text-subtitle1")
+            ui.label(
+                "New downloads will then be picked up the next time you scan your library."
+            ).classes("text-caption text-grey-7")
 
-                try:
-                    result, book_ids = await controller.rd_download(tid, progress=_on_progress)
-                    ok = sum(1 for f in result.files if f.ok)
-                    if result.any_ok:
-                        statuses[tid].set_text(
-                            f"downloaded {ok} file(s), ingested {len(book_ids)} book(s)"
-                        )
-                    else:
-                        statuses[tid].set_text("failed: no files downloaded")
-                except Exception as e:  # isolate one torrent's failure (BLE001 intentional)
-                    logger.warning(f"RD download failed for {tid}: {e}")
-                    statuses[tid].set_text("failed (see logs)")
-        finally:
-            download_btn.props(remove="loading")
-        ui.notify("Acquisition complete. New books are in the Library.")
+            def _not_now() -> None:
+                controller.mark_downloads_scan_prompt_seen()
+                dialog.close()
 
+            def _add() -> None:
+                controller.add_downloads_to_scan_paths()
+                dialog.close()
+                ui.notify("Added the downloads folder to your scan paths.")
+
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                ui.button("Not now", on_click=_not_now).props("flat")
+                ui.button("Add", icon="add", on_click=_add).props("unelevated")
+        dialog.open()
+
+    def _tick() -> None:
+        _render_downloads()
+        _maybe_prompt_scan()
+
+    add_btn.on_click(_add_magnet)
+    magnet_input.on("keydown.enter", _add_magnet)
     load_btn.on_click(_load)
     download_btn.on_click(_download)
     _render_list()
+    _render_downloads()
+    ui.timer(1.0, _tick)
