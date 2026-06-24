@@ -207,7 +207,7 @@ def test_organize_patterns_round_trip(tmp_path):
     assert load_config(path) == cfg
 
 
-def test_legacy_lazylibrarian_config_ini_key_is_ignored(tmp_path):
+def test_legacy_lazylibrarian_keys_are_ignored(tmp_path):
     from colophon.adapters.config import load_config
 
     path = tmp_path / "c.toml"
@@ -216,7 +216,7 @@ def test_legacy_lazylibrarian_config_ini_key_is_ignored(tmp_path):
         'lazylibrarian_api_key = "k"\n'
         'lazylibrarian_config_ini = "/x/config.ini"\n'
     )
-    cfg = load_config(path)  # must not raise on the dropped config_ini key
-    assert not hasattr(cfg, "lazylibrarian_config_ini")  # replaced by organize patterns + importer
-    assert cfg.lazylibrarian_url == "http://old"  # url/key remain live for status lookups
-    assert cfg.lazylibrarian_api_key == "k"
+    cfg = load_config(path)  # must not raise; the dead LazyLibrarian keys are dropped
+    assert not hasattr(cfg, "lazylibrarian_url")
+    assert not hasattr(cfg, "lazylibrarian_api_key")
+    assert not hasattr(cfg, "lazylibrarian_config_ini")

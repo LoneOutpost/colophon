@@ -27,8 +27,6 @@ class Config(BaseModel):
     audiobookshelf_url: str | None = None
     audiobookshelf_token: str | None = None
     audiobookshelf_library_id: str | None = None
-    lazylibrarian_url: str | None = None  # read-only LazyLibrarian status lookups
-    lazylibrarian_api_key: str | None = None
     hardcover_api_token: str | None = None
     abs_agg_url: str | None = None  # base URL of a self-hosted abs-agg, e.g. http://host:3000
     storage_secret: str | None = None  # generated on first run; signs NiceGUI tab storage

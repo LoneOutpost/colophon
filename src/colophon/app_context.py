@@ -11,7 +11,6 @@ from platformdirs import user_data_path
 from colophon.adapters.audiobookshelf import AbsClient
 from colophon.adapters.config import Config, default_config_path
 from colophon.adapters.lazylibrarian import AudiobookPatterns
-from colophon.adapters.lazylibrarian_api import LazyLibrarianClient
 from colophon.adapters.repository.store import (
     BookUnitRepo,
     HistoryRepo,
@@ -52,7 +51,6 @@ class AppContext:
     sources: list[MetadataSource]
     patterns: AudiobookPatterns
     abs_client: AbsClient | None
-    ll_client: LazyLibrarianClient | None
     config_path: Path
 
     @classmethod
@@ -74,11 +72,6 @@ class AppContext:
             if config.audiobookshelf_url and config.audiobookshelf_token
             else None
         )
-        ll_client = (
-            LazyLibrarianClient(base_url=config.lazylibrarian_url, api_key=config.lazylibrarian_api_key)
-            if config.lazylibrarian_url and config.lazylibrarian_api_key
-            else None
-        )
         return cls(
             config=config,
             conn=conn,
@@ -88,7 +81,6 @@ class AppContext:
             sources=sources,
             patterns=patterns,
             abs_client=abs_client,
-            ll_client=ll_client,
             config_path=config_path or default_config_path(),
         )
 

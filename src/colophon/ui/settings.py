@@ -100,14 +100,6 @@ def render_settings(controller: AppController) -> None:
                     "Library id", value=cfg.audiobookshelf_library_id or ""
                 ).props(field).classes("w-full")
 
-            with _section("LazyLibrarian", "Read-only status lookups."):
-                ll_url = ui.input("Server URL", value=cfg.lazylibrarian_url or "").props(
-                    field
-                ).classes("w-full")
-                ll_key = ui.input(
-                    "API key", value=cfg.lazylibrarian_api_key or "", password=True
-                ).props(field).classes("w-full")
-
             with _section("abs-agg", "Audiobook metadata aggregator. Set its base URL to enable its providers."):
                 abs_agg_url = ui.input(
                     "Base URL", value=cfg.abs_agg_url or ""
@@ -236,8 +228,6 @@ def render_settings(controller: AppController) -> None:
                         audiobookshelf_url=_opt_str(abs_url.value),
                         audiobookshelf_token=_opt_str(abs_token.value),
                         audiobookshelf_library_id=_opt_str(abs_lib.value),
-                        lazylibrarian_url=_opt_str(ll_url.value),
-                        lazylibrarian_api_key=_opt_str(ll_key.value),
                         abs_agg_url=_opt_str(abs_agg_url.value),
                         real_debrid_token=_opt_str(rd_token.value),
                         real_debrid_download_dir=_opt_path(rd_dir.value),

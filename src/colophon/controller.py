@@ -1245,14 +1245,3 @@ class AppController:
             raise FileNotFoundError(config_ini)
         pats = read_audiobook_patterns(config_ini)
         return pats.folder, (pats.single_file or "$Title")
-
-    async def ll_lookup(self, term: str) -> list[dict]:
-        """Read-only LazyLibrarian lookup; [] if unconfigured or unreachable."""
-        client = self.ctx.ll_client
-        if client is None:
-            return []
-        try:
-            return await client.find_book(term)
-        except Exception as e:  # never let an integration failure crash the caller
-            logger.warning(f"LazyLibrarian lookup failed: {e}")
-            return []

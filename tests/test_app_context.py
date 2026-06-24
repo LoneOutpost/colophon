@@ -26,7 +26,7 @@ def test_create_uses_default_db_when_unset(tmp_path, monkeypatch):
 def test_clients_none_when_unconfigured(tmp_path):
     ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"))
     assert ctx.abs_client is None
-    assert ctx.ll_client is None
+    assert not hasattr(ctx, "ll_client")
     ctx.close()
 
 
@@ -34,12 +34,21 @@ def test_clients_built_when_configured(tmp_path):
     ctx = AppContext.create(Config(
         db_path=tmp_path / "db.sqlite",
         audiobookshelf_url="http://abs.local", audiobookshelf_token="t",
-        lazylibrarian_url="http://ll.local", lazylibrarian_api_key="k",
     ))
     from colophon.adapters.audiobookshelf import AbsClient
-    from colophon.adapters.lazylibrarian_api import LazyLibrarianClient
     assert isinstance(ctx.abs_client, AbsClient)
-    assert isinstance(ctx.ll_client, LazyLibrarianClient)
+    assert not hasattr(ctx, "ll_client")
+    ctx.close()
+
+
+def test_patterns_built_from_config_fields(tmp_path):
+    ctx = AppContext.create(Config(
+        db_path=tmp_path / "db.sqlite",
+        organize_folder_pattern="$SortAuthor/$Title",
+        organize_file_pattern="$Title",
+    ))
+    assert ctx.patterns.folder == "$SortAuthor/$Title"
+    assert ctx.patterns.single_file == "$Title"
     ctx.close()
 
 
