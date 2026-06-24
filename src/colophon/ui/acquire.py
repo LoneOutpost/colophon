@@ -80,7 +80,7 @@ def render_acquire(controller: AppController) -> None:
     with ui.column().classes("w-full q-pa-md gap-2"):
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             magnet_input = (
-                ui.input(placeholder="Paste a magnet link").props("dense clearable").classes("col")
+                ui.input(placeholder="Paste a magnet link").props('dense clearable aria-label="Magnet link"').classes("col")
             )
             add_btn = ui.button("Add", icon="add")
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
@@ -307,12 +307,12 @@ def render_acquire(controller: AppController) -> None:
                                     ui.button(
                                         icon="close",
                                         on_click=lambda _e, k=entry.key: controller.cancel_download(k),
-                                    ).props("flat dense round").tooltip("Cancel")
+                                    ).props('flat dense round aria-label="Cancel download"').tooltip("Cancel")
                                 else:
                                     ui.button(
                                         icon="play_arrow",
                                         on_click=lambda _e, k=entry.key: _resume(k),
-                                    ).props("flat dense round").tooltip("Resume")
+                                    ).props('flat dense round aria-label="Resume download"').tooltip("Resume")
 
     def _clear_finished() -> None:
         controller.clear_finished_downloads()

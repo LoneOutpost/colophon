@@ -630,10 +630,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
                             with ui.item_section().props("side"):
                                 with ui.row().classes("q-gutter-xs no-wrap"):
-                                    ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props("flat dense round").set_enabled(idx > 0)
-                                    ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props("flat dense round").set_enabled(idx < len(book.source_files) - 1)
-                                    ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props("flat dense round")
-                                    ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props("flat dense round color=negative")
+                                    ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').set_enabled(idx > 0)
+                                    ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').set_enabled(idx < len(book.source_files) - 1)
+                                    ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"')
+                                    ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"')
 
                 # chapters: applied named chapters (book.chapters) or file-boundary default
                 applied = bool(book.chapters)
@@ -1482,7 +1482,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     "text-caption text-primary ellipsis"
                 ).tooltip(str(folder))
                 ui.button(icon="close", on_click=_clear_folder_filter).props(
-                    "flat dense round size=sm color=primary"
+                    'flat dense round size=sm color=primary aria-label="Clear folder filter"'
                 ).tooltip("Clear folder filter")
         # Books toolbar: free-text filter + selection controls (Library mode only).
         middle_toolbar.clear()

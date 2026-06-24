@@ -169,7 +169,7 @@ def render_manage(controller: AppController) -> None:
                 "no-caps"
             ).classes("colophon-seg")
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                ui.input(placeholder="Filter").props("dense clearable outlined").classes(
+                ui.input(placeholder="Filter").props('dense clearable outlined aria-label="Filter folders"').classes(
                     "col"
                 ).on_value_change(lambda e: _on_filter(e.value))
                 merge_btn = ui.button(
@@ -221,17 +221,17 @@ def render_manage(controller: AppController) -> None:
                                         on_click=lambda n=entry.name: ui.navigate.to(
                                             f"/?filter={quote(n)}"
                                         ),
-                                    ).props("flat dense round").tooltip("Show books in the Library")
+                                    ).props('flat dense round aria-label="Show in Library"').tooltip("Show books in the Library")
                                     ui.button(
                                         icon="edit",
                                         on_click=lambda n=entry.name: _edit_dialog(n),
-                                    ).props("flat dense round").tooltip("Rename")
+                                    ).props('flat dense round aria-label="Rename"').tooltip("Rename")
                                     ui.button(
                                         icon="delete",
                                         on_click=lambda n=entry.name, c=entry.count: _delete_dialog(
                                             n, c
                                         ),
-                                    ).props("flat dense round color=negative").tooltip(
+                                    ).props('flat dense round color=negative aria-label="Remove from all books"').tooltip(
                                         "Remove from all books"
                                     )
         _sync_buttons()
