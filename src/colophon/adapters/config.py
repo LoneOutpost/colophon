@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 class Config(BaseModel):
     scan_paths: list[Path] = []
-    lazylibrarian_config_ini: Path | None = None
     review_threshold: float = 75.0
     transcode_bitrate: str = "64k"
     worker_pool_size: int | None = None  # None => default to cpu_count - 1
@@ -22,12 +21,12 @@ class Config(BaseModel):
     filename_template: str = "%author% - %title%"
     saved_filename_patterns: list[str] = []  # reusable patterns offered in the parse-from-filename modal
     directory_scheme: str = ""  # e.g. "Author/Series/Title"; "" disables directory inference
+    organize_folder_pattern: str = "$Author/$Title"  # LazyLibrarian-style $Token folder grammar
+    organize_file_pattern: str = "$Title"  # the M4B file name pattern (no extension)
     library_root: Path | None = None        # destination root for organized M4Bs
     audiobookshelf_url: str | None = None
     audiobookshelf_token: str | None = None
     audiobookshelf_library_id: str | None = None
-    lazylibrarian_url: str | None = None
-    lazylibrarian_api_key: str | None = None
     hardcover_api_token: str | None = None
     abs_agg_url: str | None = None  # base URL of a self-hosted abs-agg, e.g. http://host:3000
     storage_secret: str | None = None  # generated on first run; signs NiceGUI tab storage
@@ -77,16 +76,18 @@ scan_paths = []
 # Where organized M4B files are written. Required before encoding/organizing.
 # library_root = "/path/to/audiobooks/library"
 
-# Path to your LazyLibrarian config.ini. Colophon reads the audiobook folder
-# and file naming patterns from it so output matches your LazyLibrarian layout.
-# lazylibrarian_config_ini = "/path/to/lazylibrarian/config.ini"
-
 # Template used to parse metadata from filenames when embedded tags are missing.
 filename_template = "%author% - %title%"
 
 # Infer author/series/title from the folder hierarchy when a book folder's depth
 # under a scan path matches this scheme. Empty disables it. Example:
 # directory_scheme = "Author/Series/Title"
+
+# Organize naming. LazyLibrarian-style $Token patterns used when organizing M4Bs
+# into the library, so the layout matches a LazyLibrarian library. Tokens include
+# $Author $SortAuthor $Title $SortTitle $Series $SerNum $PadNum $PubYear $Narrator.
+# organize_folder_pattern = "$Author/$Title"
+# organize_file_pattern = "$Title"
 
 # Confidence score (0-100) at or above which a book is marked ready
 # automatically. Below it, the book is routed to review.
@@ -113,10 +114,6 @@ root_path = ""
 # audiobookshelf_url = "http://localhost:13378"
 # audiobookshelf_token = "your-abs-api-token"
 # audiobookshelf_library_id = "your-library-id"
-
-# LazyLibrarian integration. Read-only status lookups.
-# lazylibrarian_url = "http://localhost:5299"
-# lazylibrarian_api_key = "your-ll-api-key"
 
 # Hardcover is now provided through abs-agg (set HARDCOVER_TOKEN on the abs-agg
 # side); the legacy hardcover_api_token below is unused.

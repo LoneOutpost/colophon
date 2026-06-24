@@ -13,6 +13,7 @@ from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.downloader import (
     DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
 )
+from colophon.adapters.lazylibrarian import read_audiobook_patterns
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
@@ -1312,13 +1313,13 @@ class AppController:
             logger.warning(f"ABS scan failed: {e}")
             return False
 
-    async def ll_lookup(self, term: str) -> list[dict]:
-        """Read-only LazyLibrarian lookup; [] if unconfigured or unreachable."""
-        client = self.ctx.ll_client
-        if client is None:
-            return []
-        try:
-            return await client.find_book(term)
-        except Exception as e:  # never let an integration failure crash the caller
-            logger.warning(f"LazyLibrarian lookup failed: {e}")
-            return []
+    def import_ll_patterns(self, config_ini: Path) -> tuple[str, str]:
+        """Read folder + single-file organize patterns from a LazyLibrarian
+        config.ini, for the Settings importer. Returns (folder, file); raises
+        FileNotFoundError when the path does not exist. The file pattern falls back
+        to "$Title" (LazyLibrarian's multi-part audiobook_dest_file uses $Part/$Total,
+        which are degenerate for Colophon's single-M4B output)."""
+        if not config_ini.exists():
+            raise FileNotFoundError(config_ini)
+        pats = read_audiobook_patterns(config_ini)
+        return pats.folder, (pats.single_file or "$Title")
