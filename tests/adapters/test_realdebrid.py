@@ -84,3 +84,27 @@ async def test_api_error_raises_realdebrid_error():
     with pytest.raises(RealDebridError) as exc:
         await client.user()
     assert exc.value.status_code == 401
+
+
+async def test_add_magnet_returns_id():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/torrents/addMagnet")
+        assert b"magnet" in request.content
+        return httpx.Response(201, json={"id": "ABC123", "uri": "x"})
+
+    client = _client(handler)
+    assert await client.add_magnet("magnet:?xt=urn:btih:deadbeef") == "ABC123"
+
+
+async def test_select_files_posts_ids():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["path"] = request.url.path
+        captured["body"] = request.content.decode()
+        return httpx.Response(204)
+
+    client = _client(handler)
+    await client.select_files("ABC123", "1,3")
+    assert captured["path"].endswith("/torrents/selectFiles/ABC123")
+    assert "files=1%2C3" in captured["body"] or "files=1,3" in captured["body"]

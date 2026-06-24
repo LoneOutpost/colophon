@@ -33,6 +33,7 @@ class Config(BaseModel):
     storage_secret: str | None = None  # generated on first run; signs NiceGUI tab storage
     real_debrid_token: str | None = None
     real_debrid_download_dir: Path | None = None  # None => <data dir>/downloads
+    downloads_scan_prompt_seen: bool = False  # have we offered to add the downloads dir to scan paths
     genre_mapping: dict[str, str] = {}
     accepted_genres: list[str] = []
     genre_whitelist_enabled: bool = False

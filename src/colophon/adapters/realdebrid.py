@@ -68,6 +68,8 @@ class RealDebridSource(Protocol):
     async def list_torrents(self, limit: int = 100) -> list[RdTorrent]: ...
     async def torrent_info(self, torrent_id: str) -> RdTorrentInfo: ...
     async def unrestrict_link(self, link: str) -> RdUnrestrictedLink: ...
+    async def add_magnet(self, magnet: str) -> str: ...
+    async def select_files(self, torrent_id: str, file_ids: str) -> None: ...
 
 
 class RealDebridClient:
@@ -117,6 +119,15 @@ class RealDebridClient:
         resp = await self._post("/unrestrict/link", {"link": link})
         self._raise_for_status(resp)
         return RdUnrestrictedLink.model_validate(resp.json())
+
+    async def add_magnet(self, magnet: str) -> str:
+        resp = await self._post("/torrents/addMagnet", {"magnet": magnet})
+        self._raise_for_status(resp)
+        return str((resp.json() or {}).get("id", ""))
+
+    async def select_files(self, torrent_id: str, file_ids: str) -> None:
+        resp = await self._post(f"/torrents/selectFiles/{torrent_id}", {"files": file_ids})
+        self._raise_for_status(resp)
 
     async def aclose(self) -> None:
         """Close the underlying httpx client. Closes whatever client this adapter
