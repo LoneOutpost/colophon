@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from nicegui import ui
 
@@ -72,4 +73,28 @@ def remap_dialog(
             show_detail(book.id)
 
         dialog_actions(dialog, confirm_label="Remap", confirm_icon="swap_horiz", on_confirm=_apply)
+    dialog.open()
+
+
+def rename_dialog(
+    controller: AppController,
+    book: BookUnit,
+    sf_path: Path,
+    *,
+    show_detail: Callable[[str], None],
+) -> None:
+    """Rename a single source file of the book."""
+    with ui.dialog() as dialog, ui.card():
+        ui.label("Rename file").classes("text-subtitle1")
+        name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
+
+        def _do_rename() -> None:
+            if controller.rename_file(book, sf_path, name_input.value.strip()):
+                ui.notify("Renamed")
+            else:
+                ui.notify("Rename failed (name in use?)", type="negative")
+            dialog.close()
+            show_detail(book.id)
+
+        dialog_actions(dialog, confirm_label="Rename", confirm_icon="edit", on_confirm=_do_rename)
     dialog.open()

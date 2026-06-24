@@ -25,7 +25,7 @@ from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
-from colophon.ui.dialogs import remap_dialog
+from colophon.ui.dialogs import remap_dialog, rename_dialog
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -912,24 +912,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.separator().classes("q-my-sm")
                 ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
 
-                def _rename_dialog(sf_path: Path, b: BookUnit = book) -> None:
-                    with ui.dialog() as dialog, ui.card():
-                        ui.label("Rename file").classes("text-subtitle1")
-                        name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
-
-                        def _do_rename() -> None:
-                            if controller.rename_file(b, sf_path, name_input.value.strip()):
-                                ui.notify("Renamed")
-                            else:
-                                ui.notify("Rename failed (name in use?)", type="negative")
-                            dialog.close()
-                            show_detail(b.id)
-
-                        with ui.row():
-                            ui.button("Rename", on_click=_do_rename)
-                            ui.button("Cancel", on_click=dialog.close).props("flat")
-                    dialog.open()
-
                 with ui.list().props("dense bordered").classes("w-full"):
                     for idx, sf in enumerate(book.source_files):
                         with ui.item():
@@ -940,7 +922,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 with ui.row().classes("q-gutter-xs no-wrap"):
                                     ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props("flat dense round").set_enabled(idx > 0)
                                     ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props("flat dense round").set_enabled(idx < len(book.source_files) - 1)
-                                    ui.button(icon="edit", on_click=lambda p=sf.path: _rename_dialog(p)).props("flat dense round")
+                                    ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props("flat dense round")
                                     ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props("flat dense round color=negative")
 
                 # chapters: applied named chapters (book.chapters) or file-boundary default
