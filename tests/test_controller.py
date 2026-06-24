@@ -307,7 +307,7 @@ def test_book_filename_falls_back_to_folder_name(tmp_path):
 def test_preview_filename_parse_returns_fields(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
-    parsed = AppController(ctx).preview_filename_parse(book, "%author% - %title%")
+    parsed = AppController(ctx).preview_filename_parse(book, "$Author - $Title")
     assert parsed == {"author": "Brandon Sanderson", "title": "Mistborn"}
     ctx.close()
 
@@ -315,7 +315,7 @@ def test_preview_filename_parse_returns_fields(tmp_path):
 def test_preview_filename_parse_returns_empty_on_no_match(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "nomatch.mp3")
-    parsed = AppController(ctx).preview_filename_parse(book, "%author% - %title%")
+    parsed = AppController(ctx).preview_filename_parse(book, "$Author - $Title")
     assert parsed == {}
     ctx.close()
 
@@ -326,14 +326,14 @@ def test_preview_filename_parse_raises_on_bad_template(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "x.mp3")
     with pytest.raises(ValueError):
-        AppController(ctx).preview_filename_parse(book, "%bogus%")
+        AppController(ctx).preview_filename_parse(book, "$Bogus")
     ctx.close()
 
 
 def test_apply_filename_parse_writes_selected_fields(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
-    n = AppController(ctx).apply_filename_parse([book], "%author% - %title%", {"author", "title"})
+    n = AppController(ctx).apply_filename_parse([book], "$Author - $Title", {"author", "title"})
     assert n == 1
     got = ctx.books.get(book.id)
     assert got.title == "Mistborn"
@@ -346,7 +346,7 @@ def test_apply_filename_parse_writes_selected_fields(tmp_path):
 def test_apply_filename_parse_honours_field_selection(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
-    AppController(ctx).apply_filename_parse([book], "%author% - %title%", {"title"})
+    AppController(ctx).apply_filename_parse([book], "$Author - $Title", {"title"})
     got = ctx.books.get(book.id)
     assert got.title == "Mistborn"
     assert got.authors == []  # author parsed but not selected, so not written
@@ -356,7 +356,7 @@ def test_apply_filename_parse_honours_field_selection(tmp_path):
 def test_apply_filename_parse_sets_series_before_sequence(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
-    AppController(ctx).apply_filename_parse([book], "%series% #%sequence%", {"series", "sequence"})
+    AppController(ctx).apply_filename_parse([book], "$Series #$SerNum", {"series", "sequence"})
     got = ctx.books.get(book.id)
     assert got.series and got.series[0].name == "Mistborn"
     assert got.series[0].sequence == 1.0  # sequence applied because series was set first
@@ -374,7 +374,7 @@ def test_apply_filename_parse_skips_non_matching_books(tmp_path):
     bad = BookUnit.new(source_folder=bad_folder)
     bad.source_files = [SourceFile(path=bp, size=1, duration_seconds=60.0, ext="mp3")]
     ctx.books.upsert(bad)
-    n = AppController(ctx).apply_filename_parse([ok, bad], "%author% - %title%", {"author", "title"})
+    n = AppController(ctx).apply_filename_parse([ok, bad], "$Author - $Title", {"author", "title"})
     assert n == 1  # only the matching book counted
     assert ctx.books.get(bad.id).title is None
     ctx.close()
@@ -386,7 +386,7 @@ def test_apply_filename_parse_drops_sequence_without_series(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
     ctrl = AppController(ctx)
-    n = ctrl.apply_filename_parse([book], "%title% #%sequence%", {"title", "sequence"})
+    n = ctrl.apply_filename_parse([book], "$Title #$SerNum", {"title", "sequence"})
     assert n == 1  # title was written
     got = ctx.books.get(book.id)
     assert got.title == "Mistborn"
@@ -403,7 +403,7 @@ def test_apply_filename_parse_skips_book_when_only_noop_fields(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
     ctrl = AppController(ctx)
-    n = ctrl.apply_filename_parse([book], "%title% #%sequence%", {"sequence"})
+    n = ctrl.apply_filename_parse([book], "$Title #$SerNum", {"sequence"})
     assert n == 0
     ctx.close()
 
@@ -412,7 +412,7 @@ def test_filename_parse_updates_matches_apply(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Mistborn #1.mp3")
     updates = AppController(ctx).filename_parse_updates(
-        book, "%title% #%sequence%", {"title", "sequence"}
+        book, "$Title #$SerNum", {"title", "sequence"}
     )
     assert updates == {"title": "Mistborn"}  # sequence dropped, no series
     ctx.close()
@@ -422,7 +422,7 @@ def test_apply_filename_parse_is_undoable(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
     ctrl = AppController(ctx)
-    ctrl.apply_filename_parse([book], "%author% - %title%", {"title"})
+    ctrl.apply_filename_parse([book], "$Author - $Title", {"title"})
     assert ctrl.undo_last() is True
     assert ctx.books.get(book.id).title is None
     ctx.close()
@@ -434,15 +434,15 @@ def test_save_and_remove_filename_pattern_persist(tmp_path):
     cfg_path = tmp_path / "c.toml"
     ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"), config_path=cfg_path)
     ctrl = AppController(ctx)
-    ctrl.save_filename_pattern("%author% - %title%")
-    ctrl.save_filename_pattern("%author% - %title%")  # dedup: no second copy
-    ctrl.save_filename_pattern("%series% #%sequence% - %title%")
+    ctrl.save_filename_pattern("$Author - $Title")
+    ctrl.save_filename_pattern("$Author - $Title")  # dedup: no second copy
+    ctrl.save_filename_pattern("$Series #$SerNum - $Title")
     assert load_config(cfg_path).saved_filename_patterns == [
-        "%author% - %title%",
-        "%series% #%sequence% - %title%",
+        "$Author - $Title",
+        "$Series #$SerNum - $Title",
     ]
-    ctrl.remove_filename_pattern("%author% - %title%")
-    assert load_config(cfg_path).saved_filename_patterns == ["%series% #%sequence% - %title%"]
+    ctrl.remove_filename_pattern("$Author - $Title")
+    assert load_config(cfg_path).saved_filename_patterns == ["$Series #$SerNum - $Title"]
     ctx.close()
 
 
@@ -452,7 +452,7 @@ def test_save_filename_pattern_rejects_bad_template(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
     with pytest.raises(ValueError):
-        ctrl.save_filename_pattern("%nope%")
+        ctrl.save_filename_pattern("$Nope")
     assert ctx.config.saved_filename_patterns == []
     ctx.close()
 
