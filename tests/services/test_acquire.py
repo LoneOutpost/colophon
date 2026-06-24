@@ -70,7 +70,7 @@ async def test_download_torrent_keeps_audio_and_cover_skips_other(tmp_path, monk
     }
     downloaded = []
 
-    async def fake_stream(url, dest, *, progress=None, client=None):
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
         Path(dest).write_bytes(b"data")
         downloaded.append(url)
 
@@ -91,7 +91,7 @@ async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch)
         "L2": RdUnrestrictedLink(filename="02.mp3", download="http://dl/02.mp3"),
     }
 
-    async def fake_stream(url, dest, *, progress=None, client=None):
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
         if url.endswith("02.mp3"):
             raise RuntimeError("boom")
         Path(dest).write_bytes(b"ok")
@@ -109,7 +109,7 @@ async def test_download_torrent_removes_empty_folder_on_total_failure(tmp_path, 
     torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1"])
     links = {"L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
 
-    async def fake_stream(url, dest, *, progress=None, client=None):
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
@@ -127,3 +127,43 @@ def test_sanitize_name_clamps_length_and_keeps_extension():
     out = sanitize_name("x" * 500 + ".mp3")
     assert len(out) <= 200
     assert out.endswith(".mp3")
+
+
+async def test_add_torrent_selects_audio_files_only():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import add_torrent
+
+    selected = {}
+
+    class FakeRd:
+        async def add_magnet(self, magnet):
+            return "TID"
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id="TID", files=[
+                RdTorrentFile(id=1, path="book.mp3"),
+                RdTorrentFile(id=2, path="cover.jpg"),
+                RdTorrentFile(id=3, path="part2.m4b"),
+            ])
+        async def select_files(self, tid, file_ids):
+            selected["ids"] = file_ids
+
+    assert await add_torrent(FakeRd(), "magnet:?x") == "TID"
+    assert selected["ids"] == "1,3"  # only the audio files
+
+
+async def test_add_torrent_falls_back_to_all_when_no_audio():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import add_torrent
+
+    selected = {}
+
+    class FakeRd:
+        async def add_magnet(self, magnet):
+            return "TID"
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id="TID", files=[RdTorrentFile(id=1, path="readme.txt")])
+        async def select_files(self, tid, file_ids):
+            selected["ids"] = file_ids
+
+    await add_torrent(FakeRd(), "magnet:?x")
+    assert selected["ids"] == "all"
