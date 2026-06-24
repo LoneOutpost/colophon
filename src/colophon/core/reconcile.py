@@ -21,6 +21,22 @@ def _split_people(value: str) -> list[str]:
     return split_people(value)
 
 
+def _first[T](candidates: list[tuple[T, Provenance]]) -> tuple[T, str] | None:
+    """The first `(value, provenance)` whose value is truthy — the list order is the
+    precedence ladder — returned with provenance as its stored string value; `None`
+    when every candidate is empty.
+
+    Only for fields whose per-tier value is truthy exactly when its source is present.
+    Fields with a transform that can null a present source (`authors`/`narrators` via
+    `_split_people`, `isbn` via `normalize_isbn`) or with non-truthy emptiness
+    (`publish_year` uses `is None`, so year 0 counts as present) keep their explicit
+    ladders below, so this never silently changes their precedence."""
+    for value, prov in candidates:
+        if value:
+            return value, prov.value
+    return None
+
+
 def reconcile(
     book: BookUnit,
     *,
@@ -36,17 +52,15 @@ def reconcile(
 
     # title: embedded.title -> embedded.album -> sidecar -> directory -> filename
     if not book.title:
-        if embedded.title:
-            book.title, book.provenance["title"] = embedded.title, Provenance.TAG.value
-        elif embedded.album:
-            book.title, book.provenance["title"] = embedded.album, Provenance.TAG.value
-        elif sc and sc.title:
-            book.title, book.provenance["title"] = sc.title, Provenance.SIDECAR.value
-        elif dir_title:
-            book.title, book.provenance["title"] = dir_title, Provenance.DIRECTORY.value
-        elif filename_fields.get("title"):
-            book.title = filename_fields["title"]
-            book.provenance["title"] = Provenance.FILENAME.value
+        picked = _first([
+            (embedded.title, Provenance.TAG),
+            (embedded.album, Provenance.TAG),
+            (sc.title if sc else None, Provenance.SIDECAR),
+            (dir_title, Provenance.DIRECTORY),
+            (filename_fields.get("title"), Provenance.FILENAME),
+        ])
+        if picked:
+            book.title, book.provenance["title"] = picked
 
     # subtitle: embedded has none -> sidecar
     if not book.subtitle and sc and sc.subtitle:
@@ -74,20 +88,22 @@ def reconcile(
             book.narrators = [filename_fields["narrator"]]
             book.provenance["narrators"] = Provenance.FILENAME.value
 
-    # series: embedded -> sidecar -> filename
+    # series: embedded -> sidecar -> directory -> filename (each tier builds a
+    # non-empty [SeriesRef], so a present source always yields a truthy value)
     if not book.series:
-        if embedded.series:
-            book.series = [SeriesRef(name=embedded.series, sequence=embedded.sequence)]
-            book.provenance["series"] = Provenance.TAG.value
-        elif sc and sc.series_name:
-            book.series = [SeriesRef(name=sc.series_name, sequence=sc.series_sequence)]
-            book.provenance["series"] = Provenance.SIDECAR.value
-        elif dirf.get("series"):
-            book.series = [SeriesRef(name=dirf["series"], sequence=None)]
-            book.provenance["series"] = Provenance.DIRECTORY.value
-        elif filename_fields.get("series"):
-            book.series = [SeriesRef(name=filename_fields["series"], sequence=to_float(filename_fields.get("sequence")))]
-            book.provenance["series"] = Provenance.FILENAME.value
+        picked = _first([
+            ([SeriesRef(name=embedded.series, sequence=embedded.sequence)]
+             if embedded.series else None, Provenance.TAG),
+            ([SeriesRef(name=sc.series_name, sequence=sc.series_sequence)]
+             if sc and sc.series_name else None, Provenance.SIDECAR),
+            ([SeriesRef(name=dirf["series"], sequence=None)]
+             if dirf.get("series") else None, Provenance.DIRECTORY),
+            ([SeriesRef(name=filename_fields["series"],
+                        sequence=to_float(filename_fields.get("sequence")))]
+             if filename_fields.get("series") else None, Provenance.FILENAME),
+        ])
+        if picked:
+            book.series, book.provenance["series"] = picked
 
     # publish_year: embedded -> sidecar -> filename
     if book.publish_year is None:
@@ -107,17 +123,21 @@ def reconcile(
 
     # description: embedded -> sidecar
     if not book.description:
-        if embedded.description:
-            book.description, book.provenance["description"] = embedded.description, Provenance.TAG.value
-        elif sc and sc.description:
-            book.description, book.provenance["description"] = sc.description, Provenance.SIDECAR.value
+        picked = _first([
+            (embedded.description, Provenance.TAG),
+            (sc.description if sc else None, Provenance.SIDECAR),
+        ])
+        if picked:
+            book.description, book.provenance["description"] = picked
 
     # asin: embedded -> sidecar
     if not book.asin:
-        if embedded.asin:
-            book.asin, book.provenance["asin"] = embedded.asin, Provenance.TAG.value
-        elif sc and sc.asin:
-            book.asin, book.provenance["asin"] = sc.asin, Provenance.SIDECAR.value
+        picked = _first([
+            (embedded.asin, Provenance.TAG),
+            (sc.asin if sc else None, Provenance.SIDECAR),
+        ])
+        if picked:
+            book.asin, book.provenance["asin"] = picked
 
     # isbn: embedded -> sidecar (normalized)
     if not book.isbn:
