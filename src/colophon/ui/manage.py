@@ -105,7 +105,7 @@ def render_manage(controller: AppController) -> None:
         with ui.dialog() as dialog, ui.card().classes("w-96"):
             ui.label(f"Delete {kind}").classes("text-subtitle1")
             ui.label(f"Used by {count} books. Remove from all?").classes(
-                "text-caption text-grey-7"
+                "text-caption colophon-muted"
             )
             write_tags = _write_tags_checkbox()
 
@@ -133,7 +133,7 @@ def render_manage(controller: AppController) -> None:
             return
         with ui.dialog() as dialog, ui.card().classes("w-96"):
             ui.label(f"Merge {len(sources)} {kind} entries").classes("text-subtitle1")
-            ui.label("; ".join(sources)).classes("text-caption text-grey-7")
+            ui.label("; ".join(sources)).classes("text-caption colophon-muted")
             target_in = ui.select(
                 options=sources,
                 label="Merge into",
@@ -169,7 +169,7 @@ def render_manage(controller: AppController) -> None:
                 "no-caps"
             ).classes("colophon-seg")
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                ui.input(placeholder="Filter").props("dense clearable outlined").classes(
+                ui.input(placeholder="Filter").props('dense clearable outlined aria-label="Filter folders"').classes(
                     "col"
                 ).on_value_change(lambda e: _on_filter(e.value))
                 merge_btn = ui.button(
@@ -200,7 +200,7 @@ def render_manage(controller: AppController) -> None:
         with list_box:
             if not entries:
                 ui.label("No entries match" if needle else "No entries").classes(
-                    "text-grey-6 q-pa-md"
+                    "colophon-muted q-pa-md"
                 )
             else:
                 with ui.list().props("separator dense").classes("w-full"):
@@ -215,23 +215,23 @@ def render_manage(controller: AppController) -> None:
                                 ui.item_label(entry.name)
                             with ui.item_section().props("side"):
                                 with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                                    ui.badge(str(entry.count)).props("color=grey-6 outline")
+                                    ui.badge(str(entry.count)).props("outline").classes("colophon-chip")
                                     ui.button(
                                         icon="arrow_outward",
                                         on_click=lambda n=entry.name: ui.navigate.to(
                                             f"/?filter={quote(n)}"
                                         ),
-                                    ).props("flat dense round").tooltip("Show books in the Library")
+                                    ).props('flat dense round aria-label="Show in Library"').tooltip("Show books in the Library")
                                     ui.button(
                                         icon="edit",
                                         on_click=lambda n=entry.name: _edit_dialog(n),
-                                    ).props("flat dense round").tooltip("Rename")
+                                    ).props('flat dense round aria-label="Rename"').tooltip("Rename")
                                     ui.button(
                                         icon="delete",
                                         on_click=lambda n=entry.name, c=entry.count: _delete_dialog(
                                             n, c
                                         ),
-                                    ).props("flat dense round color=negative").tooltip(
+                                    ).props('flat dense round color=negative aria-label="Remove from all books"').tooltip(
                                         "Remove from all books"
                                     )
         _sync_buttons()
