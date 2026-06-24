@@ -9,6 +9,8 @@ import tomli_w
 from platformdirs import user_config_path
 from pydantic import BaseModel
 
+from colophon.core.tokens import migrate_filename_template
+
 
 class Config(BaseModel):
     scan_paths: list[Path] = []
@@ -18,7 +20,7 @@ class Config(BaseModel):
     port: int = 8080
     root_path: str = ""  # URL base path behind a reverse proxy; "" serves at "/"
     db_path: Path | None = None             # None => default user-data location
-    filename_template: str = "%author% - %title%"
+    filename_template: str = "$Author - $Title"
     saved_filename_patterns: list[str] = []  # reusable patterns offered in the parse-from-filename modal
     directory_scheme: str = ""  # e.g. "Author/Series/Title"; "" disables directory inference
     organize_folder_pattern: str = "$Author/$Title"  # LazyLibrarian-style $Token folder grammar
@@ -51,7 +53,13 @@ def load_config(path: Path | None = None) -> Config:
         return Config()
     with path.open("rb") as f:
         data = tomllib.load(f)
-    return Config.model_validate(data)
+    cfg = Config.model_validate(data)
+    # Migrate legacy %placeholder% parse templates to the unified $Token grammar.
+    cfg.filename_template = migrate_filename_template(cfg.filename_template)
+    cfg.saved_filename_patterns = [
+        migrate_filename_template(p) for p in cfg.saved_filename_patterns
+    ]
+    return cfg
 
 
 def save_config(config: Config, path: Path | None = None) -> None:
@@ -77,7 +85,8 @@ scan_paths = []
 # library_root = "/path/to/audiobooks/library"
 
 # Template used to parse metadata from filenames when embedded tags are missing.
-filename_template = "%author% - %title%"
+# Uses $Token markup (see the Settings page for the full list of parseable tokens).
+filename_template = "$Author - $Title"
 
 # Infer author/series/title from the folder hierarchy when a book folder's depth
 # under a scan path matches this scheme. Empty disables it. Example:

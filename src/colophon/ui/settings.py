@@ -13,6 +13,7 @@ from colophon.adapters.config import Config
 from colophon.controller import AppController
 from colophon.core.normalize import NORMALIZABLE_FIELDS
 from colophon.core.pathscheme import sample_target
+from colophon.core.tokens import TOKENS
 from colophon.ui.chrome import page_header
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,25 @@ def _section(title: str, subtitle: str | None = None) -> Iterator[None]:
             yield
 
 
+def _token_reference() -> None:
+    """One help block listing every $Token with its parse/build tag, from core/tokens."""
+    def line(tok) -> str:
+        if tok.parses and tok.builds:
+            tag = "parse + build"
+        elif tok.builds:
+            tag = "build only"
+        else:
+            tag = "parse only"
+        return f"`${tok.name}` ({tag}) {tok.description}"
+
+    ui.markdown(
+        "**Tokens** (shared by the scan and organize patterns):\n\n"
+        + "\n".join(f"- {line(t)}" for t in TOKENS)
+        + "\n\nUse `$$` for a literal `$`. Unknown tokens and missing values render empty; "
+        "`$Skip` matches and discards a run when parsing."
+    ).classes("text-caption text-grey")
+
+
 def render_settings(controller: AppController) -> None:
     cfg = controller.ctx.config
 
@@ -56,24 +76,34 @@ def render_settings(controller: AppController) -> None:
     field = "outlined dense"
     with ui.column().classes("w-full items-center q-pa-md"):
         with ui.column().classes("w-full gap-4").style("max-width: 760px"):
-            with _section("Library", "Where books are scanned from and organized to."):
+            with _section(
+                "Scanning (read metadata in)",
+                "Folders to scan, and how to read fields out of existing filenames and "
+                "folder names. These do not write anything.",
+            ):
                 scan_paths = ui.textarea(
                     "Scan paths (one per line)", value=_paths_to_text(cfg.scan_paths)
                 ).props(field).classes("w-full")
-                library_root = ui.input(
-                    "Library root", value=str(cfg.library_root or "")
-                ).props(field).classes("w-full")
                 template = ui.input(
-                    "Filename template", value=cfg.filename_template
+                    "Filename template (parses fields out of a filename)",
+                    value=cfg.filename_template,
+                ).props(field).classes("w-full")
+                scheme = ui.input(
+                    "Directory scheme (infers fields from folder names, e.g. "
+                    "Author/Series/Title; blank disables)",
+                    value=cfg.directory_scheme,
                 ).props(field).classes("w-full")
 
             with _section(
-                "Organize naming (LazyLibrarian parity)",
-                "Patterns for where organized M4Bs are written, using "
-                "LazyLibrarian-style $Token markup. Match these to your "
-                "LazyLibrarian layout so you can copy the organized files "
-                "straight into your LazyLibrarian library.",
+                "Organizing (write files out)",
+                "Where organized M4Bs are written and how they are named, using "
+                "LazyLibrarian-style $Token markup so the layout matches a "
+                "LazyLibrarian library.",
             ):
+                library_root = ui.input(
+                    "Library root (destination for organized M4Bs)",
+                    value=str(cfg.library_root or ""),
+                ).props(field).classes("w-full")
                 folder_pat = ui.input(
                     "Folder pattern", value=cfg.organize_folder_pattern
                 ).props(field).classes("w-full")
@@ -81,15 +111,7 @@ def render_settings(controller: AppController) -> None:
                     "File name pattern (no extension)", value=cfg.organize_file_pattern
                 ).props(field).classes("w-full")
 
-                ui.markdown(
-                    "**Tokens:** `$Author` `$SortAuthor` (Last, First) `$Title` "
-                    "`$SortTitle` (no leading article) `$Series` `$SerNum` `$PadNum` "
-                    "(zero-padded) `$PubYear` `$Narrator` `$Abridged` "
-                    "(Abridged/Unabridged). Use `$$` for a literal $. Unknown tokens "
-                    "and missing values render empty.\n\n"
-                    "**Examples:** `$Author/$Series #$PadNum - $Title` &middot; "
-                    "`$SortAuthor/$Title ($PubYear)`"
-                ).classes("text-caption text-grey")
+                _token_reference()
 
                 preview = ui.label("").classes("text-caption text-weight-medium")
 
@@ -295,7 +317,8 @@ def render_settings(controller: AppController) -> None:
                         library_root=_opt_path(library_root.value),
                         organize_folder_pattern=folder_pat.value or "$Author/$Title",
                         organize_file_pattern=file_pat.value or "$Title",
-                        filename_template=template.value or "%author% - %title%",
+                        filename_template=template.value or "$Author - $Title",
+                        directory_scheme=scheme.value,
                         review_threshold=float(threshold.value),
                         transcode_bitrate=bitrate.value or "64k",
                         worker_pool_size=cfg.worker_pool_size,

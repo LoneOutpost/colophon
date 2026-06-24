@@ -34,7 +34,7 @@ def test_save_creates_parent_directories(tmp_path: Path):
 def test_new_config_fields_have_defaults(tmp_path):
     cfg = load_config(tmp_path / "c.toml")
     assert cfg.db_path is None
-    assert cfg.filename_template == "%author% - %title%"
+    assert cfg.filename_template == "$Author - $Title"
     assert cfg.library_root is None
 
 
@@ -44,11 +44,20 @@ def test_new_config_fields_round_trip(tmp_path):
     path = tmp_path / "c.toml"
     cfg = Config(
         db_path=Path("/data/colophon.db"),
-        filename_template="%title%",
+        filename_template="$Title",
         library_root=Path("/library"),
     )
     save_config(cfg, path)
     assert load_config(path) == cfg
+
+
+def test_load_migrates_legacy_percent_template(tmp_path):
+    path = tmp_path / "c.toml"
+    save_config(Config(filename_template="%author% - %title%",
+                       saved_filename_patterns=["%series% #%sequence%"]), path)
+    cfg = load_config(path)
+    assert cfg.filename_template == "$Author - $Title"
+    assert cfg.saved_filename_patterns == ["$Series #$SerNum"]
 
 
 def test_ensure_config_file_creates_when_absent(tmp_path):

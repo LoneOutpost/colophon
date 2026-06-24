@@ -19,9 +19,10 @@ from nicegui import app, ui
 from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
-from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
+from colophon.core.filename_parser import compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
+from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.dialogs import (
     bulk_tag_dialog,
@@ -43,15 +44,16 @@ logger = logging.getLogger(__name__)
 # Sentinel marking a bulk-edit field whose selected books hold differing values.
 _MIXED = object()
 
-_PLACEHOLDER_RE = re.compile(r"%(\w+)%")
+_TOKEN_RE = re.compile(r"\$(\w+)")
 
 
 def _placeholder_fields(template: str) -> list[str]:
-    """Placeholder names in `template`, in order, excluding %skip% and duplicates."""
+    """Parse field names a $Token template can produce, in order, no dupes or $Skip."""
     seen: list[str] = []
-    for name in _PLACEHOLDER_RE.findall(template):
-        if name != "skip" and name not in seen:
-            seen.append(name)
+    for name in _TOKEN_RE.findall(template):
+        field = parse_field_for(name)
+        if field and field not in seen:
+            seen.append(field)
     return seen
 
 
@@ -1013,7 +1015,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if not books:
             ui.notify("Select one or more books first")
             return
-        initial_pattern = controller.ctx.config.filename_template or "%author% - %title%"
+        initial_pattern = controller.ctx.config.filename_template or "$Author - $Title"
         chosen: dict[str, bool] = {}
 
         with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
@@ -1022,14 +1024,13 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 "text-caption text-grey-7"
             )
 
-            # Field key: the placeholders that can appear in a pattern.
+            # Field key: the $Tokens that can appear in a parse pattern.
             with ui.row().classes("items-center q-gutter-xs q-mt-xs"):
                 ui.label("Fields:").classes("text-caption text-grey-7")
-                for name in sorted(VALID_FILENAME_FIELDS):
-                    ui.badge(f"%{name}%").props("color=grey-7 outline")
-                ui.badge("%skip%").props("color=grey-5 outline").tooltip(
-                    "Matches and discards a segment"
-                )
+                for tok in PARSE_TOKENS:
+                    badge = ui.badge(f"${tok.name}").props("color=grey-7 outline")
+                    if tok.field is None:  # $Skip
+                        badge.props("color=grey-5").tooltip("Matches and discards a run")
 
             pattern_input = ui.input("Pattern", value=initial_pattern).props(
                 "dense clearable"
@@ -1098,10 +1099,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         ui.label(f"Invalid pattern: {e}").classes("text-caption text-negative")
                     _render_fields([])
                     return
-                # Fields the pattern can produce (in pattern order), intersected with valid ones.
-                present = [
-                    n for n in _placeholder_fields(pat) if n in VALID_FILENAME_FIELDS
-                ]
+                # Fields the pattern can produce, in pattern order ($Skip excluded).
+                present = _placeholder_fields(pat)
                 _render_fields(present)
                 apply_btn.set_enabled(bool(present))
                 matched = 0

@@ -120,3 +120,13 @@ def test_sample_target_falls_back_on_empty_patterns():
 
     out = sample_target("", "")
     assert out == "Brandon Sanderson/The Way of Kings/The Way of Kings.m4b"
+
+
+def test_renderer_keys_match_build_tokens():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit
+    from colophon.core.pathscheme import _token_values
+    from colophon.core.tokens import BUILD_TOKENS
+    keys = set(_token_values(BookUnit.new(source_folder=Path("/x"))))
+    assert keys == {t.name for t in BUILD_TOKENS}

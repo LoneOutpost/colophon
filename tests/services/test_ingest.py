@@ -25,7 +25,7 @@ def test_scan_ingest_persists_book_units(tmp_path: Path):
     id3.save(f)
 
     repo = _repo(tmp_path)
-    units = scan_ingest(repo, ingest, template="%author% - %title%")
+    units = scan_ingest(repo, ingest, template="$Author - $Title")
 
     assert len(units) == 1
     book = units[0]
@@ -47,7 +47,7 @@ def test_first_file_drives_metadata_with_numeric_sort(tmp_path: Path):
     (book_dir / "10.mp3").write_bytes(b"")
 
     repo = _repo(tmp_path)
-    units = scan_ingest(repo, ingest, template="%author% - %title%")
+    units = scan_ingest(repo, ingest, template="$Author - $Title")
 
     assert len(units) == 1
     book = units[0]
@@ -63,7 +63,7 @@ def test_non_matching_filename_falls_back_to_dir_and_tags(tmp_path: Path):
     (dune / "weird_name_no_delimiters.mp3").write_bytes(b"")
 
     repo = _repo(tmp_path)
-    units = scan_ingest(repo, ingest, template="%author% - %title%")
+    units = scan_ingest(repo, ingest, template="$Author - $Title")
 
     assert len(units) == 1
     book = units[0]
@@ -76,8 +76,8 @@ def test_scan_ingest_is_idempotent(tmp_path: Path):
     (ingest / "Dune" / "01.mp3").write_bytes(b"")
 
     repo = _repo(tmp_path)
-    scan_ingest(repo, ingest, template="%author% - %title%")
-    scan_ingest(repo, ingest, template="%author% - %title%")
+    scan_ingest(repo, ingest, template="$Author - $Title")
+    scan_ingest(repo, ingest, template="$Author - $Title")
     assert len(repo.list_all()) == 1  # same folder -> same id -> upsert
 
 
@@ -92,7 +92,7 @@ def test_scan_ingest_uses_sidecar_for_series(tmp_path):
     }))
 
     repo = _repo(tmp_path)
-    units = scan_ingest(repo, ingest, template="%author% - %title%")
+    units = scan_ingest(repo, ingest, template="$Author - $Title")
     book = units[0]
     assert book.series[0].name == "Dirk Gently"
     assert book.series[0].sequence == 1.0
@@ -108,7 +108,7 @@ def test_scan_infers_author_from_directory_scheme(tmp_path: Path):
     (folder / "01.mp3").write_bytes(b"")
 
     repo = _repo(tmp_path)
-    units = scan_ingest(repo, ingest, template="%title%", directory_scheme="Author/Title")
+    units = scan_ingest(repo, ingest, template="$Title", directory_scheme="Author/Title")
     assert len(units) == 1
     book = units[0]
     assert book.authors == ["Brandon Sanderson"]
@@ -129,7 +129,7 @@ def test_rescan_preserves_app_state_and_fills_empty(tmp_path):
     id3.save(f)
 
     repo = _repo(tmp_path)
-    commit_scan(repo, plan_scan(repo, ingest, template="%author% - %title%"))
+    commit_scan(repo, plan_scan(repo, ingest, template="$Author - $Title"))
     book = repo.list_all()[0]
     book.cover_path = tmp_path / "cover.jpg"
     book.confidence = 100.0
@@ -138,7 +138,7 @@ def test_rescan_preserves_app_state_and_fills_empty(tmp_path):
     book.title = "User Edited Title"
     repo.upsert(book)
 
-    plan = plan_scan(repo, ingest, template="%author% - %title%")
+    plan = plan_scan(repo, ingest, template="$Author - $Title")
     assert plan.new_books == 0
     assert plan.existing_books == 1
     commit_scan(repo, plan)
@@ -164,6 +164,6 @@ def test_plan_scan_does_not_persist(tmp_path):
     id3.save(f)
 
     repo = _repo(tmp_path)
-    plan = plan_scan(repo, ingest, template="%author% - %title%")
+    plan = plan_scan(repo, ingest, template="$Author - $Title")
     assert plan.new_books == 1
     assert repo.list_all() == []
