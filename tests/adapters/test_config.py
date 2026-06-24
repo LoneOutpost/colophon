@@ -269,3 +269,10 @@ def test_settings_save_preserves_non_form_fields():
     assert saved.saved_filename_patterns == ["$Series #$SerNum - $Title"]
     assert saved.downloads_scan_prompt_seen is True
     assert saved.hardcover_api_token == "hc-token"
+
+
+def test_load_migrates_legacy_directory_scheme(tmp_path):
+    from colophon.adapters.config import Config, load_config, save_config
+    path = tmp_path / "c.toml"
+    save_config(Config(directory_scheme="Author/Series/Title"), path)
+    assert load_config(path).directory_scheme == "$Author/$Series/$Title"
