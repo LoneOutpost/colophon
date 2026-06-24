@@ -98,6 +98,27 @@ def test_normalize_genres_titlecases_and_dedupes():
     assert out == ["Fantasy", "Epic Fantasy", "Science Fiction"]
 
 
+def test_normalize_genres_matches_empty_genre_policy():
+    # normalize_genres and an empty GenrePolicy.canonicalize share one core, so
+    # they must agree for the same input (no mapping, no whitelist).
+    from colophon.core.genre_policy import GenrePolicy
+    from colophon.core.normalize import normalize_genres
+
+    raw = ["fantasy", "  ", "Epic Fantasy", "FANTASY", "science_fiction"]
+    assert normalize_genres(raw) == GenrePolicy().canonicalize(raw)
+
+
+def test_dedupe_normalized_applies_transform_and_keep():
+    from colophon.core.normalize import dedupe_normalized
+
+    out = dedupe_normalized(
+        ["scifi", "dragons", "SCIFI"],
+        transform=lambda r: {"scifi": "Science Fiction"}.get(r, r),
+        keep=lambda fold: fold == "science fiction",
+    )
+    assert out == ["Science Fiction"]
+
+
 def test_field_normalizers_has_genre_not_tag():
     from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
     assert "genre" in FIELD_NORMALIZERS
