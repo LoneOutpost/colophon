@@ -4,7 +4,7 @@ whitelist. A pure value-object applied where genres are normalized."""
 from __future__ import annotations
 
 from colophon.core.models import _Base
-from colophon.core.normalize import normalize_text
+from colophon.core.normalize import dedupe_normalized
 
 
 class GenrePolicy(_Base):
@@ -23,18 +23,11 @@ class GenrePolicy(_Base):
         lower_map = {k.strip().casefold(): v for k, v in self.mapping.items()}
         accepted_fold = {a.strip().casefold() for a in self.accepted if a.strip()}
         filtering = self.whitelist_enabled and bool(accepted_fold)
-        out: list[str] = []
-        seen: set[str] = set()
-        for raw in genres:
-            mapped = lower_map.get((raw or "").strip().casefold(), raw)
-            name = normalize_text(mapped or "").strip()
-            if not name:
-                continue
-            fold = name.casefold()
-            if filtering and fold not in accepted_fold:
-                continue
-            if fold in seen:
-                continue
-            seen.add(fold)
-            out.append(name)
-        return out
+
+        def _mapped(raw: str) -> str:
+            return lower_map.get((raw or "").strip().casefold(), raw)
+
+        def _accepted(fold: str) -> bool:
+            return fold in accepted_fold
+
+        return dedupe_normalized(genres, transform=_mapped, keep=_accepted if filtering else None)

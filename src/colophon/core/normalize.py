@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import re
+from collections.abc import Callable
 
 # Words kept lowercase in title case (except as the first/last word or after a colon):
 # articles, coordinating conjunctions, and short prepositions.
@@ -90,24 +91,38 @@ def normalize_description(value: str) -> str:
     return s.strip()
 
 
-def normalize_genres(values: list[str]) -> list[str]:
-    """Title-case each genre via normalize_text, dropping blanks, and dedupe
-    case-insensitively while preserving first-seen order.
-
-    The seam for a future genre whitelist / mapping (LazyLibrarian-style): apply
-    the mapping here before the dedupe."""
+def dedupe_normalized(
+    values: list[str],
+    *,
+    transform: Callable[[str], str] | None = None,
+    keep: Callable[[str], bool] | None = None,
+) -> list[str]:
+    """Title-case each value via normalize_text (after an optional `transform`),
+    drop blanks, optionally keep only values whose casefold passes `keep`, and dedupe
+    case-insensitively preserving first-seen order. Shared by `normalize_genres` and
+    `GenrePolicy.canonicalize` (mapping = `transform`, whitelist = `keep`)."""
     out: list[str] = []
     seen: set[str] = set()
     for raw in values:
-        name = normalize_text(raw or "").strip()
+        item = transform(raw) if transform is not None else raw
+        name = normalize_text(item or "").strip()
         if not name:
             continue
-        key = name.casefold()
-        if key in seen:
+        fold = name.casefold()
+        if keep is not None and not keep(fold):
             continue
-        seen.add(key)
+        if fold in seen:
+            continue
+        seen.add(fold)
         out.append(name)
     return out
+
+
+def normalize_genres(values: list[str]) -> list[str]:
+    """Title-case each genre via normalize_text, dropping blanks, and dedupe
+    case-insensitively while preserving first-seen order. For synonym mapping and an
+    optional accepted-genres whitelist on top of this, see GenrePolicy.canonicalize."""
+    return dedupe_normalized(values)
 
 
 def merge_preserve(existing: list[str], new: list[str]) -> list[str]:
