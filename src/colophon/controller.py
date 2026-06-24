@@ -13,7 +13,7 @@ from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.downloader import (
     DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
 )
-from colophon.adapters.lazylibrarian import read_audiobook_patterns
+from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
@@ -41,6 +41,7 @@ from colophon.core.navigator import (
     build_library_tree,
 )
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
+from colophon.core.pathscheme import build_target_path
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -165,6 +166,7 @@ class EncodeJobOptions(_Base):
     organize: bool = True
     delete_sources: bool = False
     concurrency: int = 2
+    patterns: AudiobookPatterns | None = None  # per-run organize override; None = ctx.patterns
 
 
 class BookProcessResult(_Base):
@@ -198,16 +200,22 @@ class AppController:
         )
 
     # --- scanning / identification ---
-    def scan_preview(self, roots: list[Path] | None = None) -> ScanPlan:
-        """Compute, without persisting, what a scan of `roots` (default: the
-        configured scan paths) would do across all roots."""
+    def scan_preview(
+        self, roots: list[Path] | None = None,
+        *, template: str | None = None, directory_scheme: str | None = None,
+    ) -> ScanPlan:
+        """Compute, without persisting, what a scan of `roots` (default: the configured
+        scan paths) would do across all roots. `template`/`directory_scheme` override the
+        saved defaults for this run (None = use config)."""
         roots = roots or self.ctx.config.scan_paths
+        template = template if template is not None else self.ctx.config.filename_template
+        directory_scheme = (
+            directory_scheme if directory_scheme is not None else self.ctx.config.directory_scheme
+        )
         combined = ScanPlan()
         for root in roots:
             plan = plan_scan(
-                self.ctx.books, root,
-                template=self.ctx.config.filename_template,
-                directory_scheme=self.ctx.config.directory_scheme,
+                self.ctx.books, root, template=template, directory_scheme=directory_scheme,
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -1228,6 +1236,15 @@ class AppController:
         stem = sanitize_name(book.title or book.id) or book.id
         return book.source_folder / f"{stem}.m4b"
 
+    def organize_targets(
+        self, books: list[BookUnit], *, patterns: AudiobookPatterns | None = None
+    ) -> list[tuple[str, Path]]:
+        """Pure dry-run: the (book_id, target_path) each book would organize to, computed
+        from `patterns` (or the saved patterns). Encodes/moves nothing."""
+        pats = patterns or self.ctx.patterns
+        root = self.ctx.config.library_root or (default_db_path().parent / "library")
+        return [(b.id, build_target_path(root, pats, b)) for b in books]
+
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->
         organize (move) -> tag once at the resting path -> optional source delete."""
@@ -1255,7 +1272,10 @@ class AppController:
 
         if options.organize:
             library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
-            org = organize_book(self.ctx.books, book, book.output_path, root=library_root, patterns=self.ctx.patterns)
+            org = organize_book(
+                self.ctx.books, book, book.output_path, root=library_root,
+                patterns=options.patterns or self.ctx.patterns,
+            )
             if not org.moved or org.target_path is None:
                 book.state = BookState.FAILED
                 book.touch()
