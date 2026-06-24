@@ -372,3 +372,62 @@ def compare_dialog(
 
         show_form()
     dialog.open()
+
+
+async def tag_dialog(
+    controller: AppController,
+    book: BookUnit,
+    *,
+    refresh_list: Callable[[], None],
+    refresh_status: Callable[[], None],
+    save_pending: Callable[[], bool],
+) -> None:
+    """Preview and write metadata tags to the book's files."""
+    save_pending()  # "Write" encompasses Save: persist editor edits first
+    plan = controller.tag_plan(book)
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")
+        for warning in plan.warnings:
+            with ui.row().classes("items-center no-wrap"):
+                ui.icon("warning", color="warning")
+                ui.label(warning).classes("text-caption text-warning")
+        if plan.embed_cover:
+            ui.label("Cover art will be embedded.").classes("text-caption text-grey-7")
+        with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
+            with ui.list().props("dense").classes("w-full"):
+                for fp in plan.files:
+                    with ui.item():
+                        with ui.item_section():
+                            ui.item_label(fp.path.name)
+                            ui.item_label(", ".join(fp.changed_fields) or "no changes").props(
+                                "caption"
+                            )
+        actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
+        with actions:
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+            commit_btn = ui.button("Write tags", icon="sell")
+
+        async def _commit() -> None:
+            with busy(commit_btn):
+                result = await controller.write_tags(book)
+            actions.clear()
+            with actions:
+                note = f"Wrote {result.written} file(s)" + (
+                    f", {result.failed} failed" if result.failed else ""
+                )
+                ui.label(note).classes("text-caption q-mr-auto self-center")
+                ui.button(
+                    "Undo",
+                    icon="undo",
+                    on_click=lambda: (
+                        controller.undo_tag_batch(),
+                        ui.notify("Reverted tag write (embedded cover kept)"),
+                        dialog.close(),
+                    ),
+                ).props("flat")
+                ui.button("Close", on_click=dialog.close).props("flat")
+            refresh_list()
+            refresh_status()
+
+        commit_btn.on_click(_commit)
+    dialog.open()
