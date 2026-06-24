@@ -108,7 +108,7 @@ def test_scan_infers_author_from_directory_scheme(tmp_path: Path):
     (folder / "01.mp3").write_bytes(b"")
 
     repo = _repo(tmp_path)
-    units = scan_ingest(repo, ingest, template="$Title", directory_scheme="Author/Title")
+    units = scan_ingest(repo, ingest, template="$Title", directory_scheme="$Author/$Title")
     assert len(units) == 1
     book = units[0]
     assert book.authors == ["Brandon Sanderson"]
