@@ -2475,3 +2475,39 @@ async def test_retry_identify_requeries_only_given_ids_and_merges(tmp_path):
     assert by_id[b.id].best is None      # b untouched
     assert len(merged.proposals) == 2
     ctx.close()
+
+
+def test_organize_targets_uses_overridden_patterns(tmp_path):
+    from colophon.adapters.lazylibrarian import AudiobookPatterns
+    ctx = _ctx(tmp_path)
+    ctx.config.library_root = tmp_path / "lib"
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    targets = AppController(ctx).organize_targets(
+        [book], patterns=AudiobookPatterns(folder="$Author", single_file="$Title")
+    )
+    bid, target = targets[0]
+    assert bid == book.id
+    assert target == (tmp_path / "lib" / "Frank Herbert" / "Dune.m4b")
+    ctx.close()
+
+
+async def test_scan_preview_honors_template_override(tmp_path, monkeypatch):
+    import colophon.controller as ctrl_mod
+    from colophon.services.ingest import ScanPlan
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path]
+    captured = {}
+
+    def fake_plan_scan(repo, root, *, template, directory_scheme=""):
+        captured["template"] = template
+        captured["scheme"] = directory_scheme
+        return ScanPlan()
+
+    monkeypatch.setattr(ctrl_mod, "plan_scan", fake_plan_scan)
+    AppController(ctx).scan_preview(template="$Title", directory_scheme="$Author")
+    assert captured["template"] == "$Title"
+    assert captured["scheme"] == "$Author"
+    ctx.close()

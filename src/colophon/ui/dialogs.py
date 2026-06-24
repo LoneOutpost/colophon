@@ -16,9 +16,11 @@ from pathlib import Path
 
 from nicegui import ui
 
+from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.controller import AppController
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
+from colophon.core.pathscheme import sample_target
 from colophon.core.sources import SourceResult
 from colophon.ui.batch_log import BatchItem, BatchLog
 
@@ -680,30 +682,83 @@ async def quick_match_dialog(
 
 
 async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], None]) -> None:
-    """Preview a filesystem scan and apply it (merge new books/files, fill empties)."""
-    plan = await asyncio.to_thread(controller.scan_preview)
-    if plan.new_books == 0 and plan.existing_books == 0:
-        ui.notify("Nothing to scan")
-        return
+    """Preview a filesystem scan with per-run pattern overrides and an optional dry run,
+    then apply it (merge new books/files, fill empties)."""
+    cfg = controller.ctx.config
+    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+        body = ui.column().classes("w-full")
 
-    with ui.dialog() as dialog, ui.card().classes("w-96"):
-        ui.label("Scan results").classes("text-subtitle1")
-        ui.label(f"{plan.new_books} new books")
-        ui.label(f"{plan.existing_books} existing books (preserved)")
-        ui.label(f"{plan.fields_filled} empty fields filled")
-        ui.label(f"{plan.files_added} new files added")
-        ui.label("Existing covers, edits, and review status are preserved.").classes(
-            "text-caption colophon-muted"
-        )
+        def show_options() -> None:
+            body.clear()
+            with body:
+                ui.label("Scan library").classes("text-subtitle1")
+                template = ui.input("Filename template", value=cfg.filename_template).props(
+                    "outlined dense"
+                ).classes("w-full")
+                scheme = ui.input(
+                    "Directory scheme (blank disables)", value=cfg.directory_scheme
+                ).props("outlined dense").classes("w-full")
+                dry = ui.checkbox("Dry run (show what would be parsed, change nothing)", value=False)
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Cancel", on_click=dialog.close).props("flat")
 
-        async def _apply() -> None:
-            dialog.close()
-            written = await asyncio.to_thread(controller.apply_scan, plan)
-            refresh_all()
-            ui.notify(f"Scan complete ({written} books)")
+                    async def _preview() -> None:
+                        try:
+                            plan = await asyncio.to_thread(
+                                controller.scan_preview,
+                                template=template.value or cfg.filename_template,
+                                directory_scheme=scheme.value,
+                            )
+                        except ValueError as e:
+                            ui.notify(f"Invalid pattern: {e}", type="negative")
+                            return
+                        show_results(plan, dry.value)
 
-        dialog_actions(dialog, confirm_label="Scan", confirm_icon="search", on_confirm=_apply, confirm_props="")
-    dialog.open()
+                    ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
+
+        def show_results(plan, dry: bool) -> None:
+            body.clear()
+            with body:
+                if plan.new_books == 0 and plan.existing_books == 0:
+                    ui.label("Nothing to scan").classes("text-subtitle1")
+                    with ui.row().classes("w-full justify-end q-mt-sm"):
+                        ui.button("Back", on_click=show_options).props("flat")
+                        ui.button("Close", on_click=dialog.close).props("flat")
+                    return
+                ui.label("Scan preview").classes("text-subtitle1")
+                ui.label(
+                    f"{plan.new_books} new · {plan.existing_books} existing (preserved) · "
+                    f"{plan.fields_filled} fields filled · {plan.files_added} files added"
+                ).classes("text-caption colophon-muted")
+                if dry:
+                    with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
+                            ui.list().props("dense").classes("w-full"):
+                        for b in plan.units:
+                            with ui.item(), ui.item_section():
+                                ui.item_label(str(b.source_folder))
+                                parsed = " · ".join(filter(None, [
+                                    b.authors[0] if b.authors else "",
+                                    (b.series[0].name if b.series else ""),
+                                    b.title or "",
+                                ])) or "(no fields parsed)"
+                                ui.item_label(parsed).props("caption").classes("colophon-muted")
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Back", on_click=show_options).props("flat")
+                        ui.button("Close", on_click=dialog.close).props("flat")
+                    return
+
+                async def _apply() -> None:
+                    dialog.close()
+                    written = await asyncio.to_thread(controller.apply_scan, plan)
+                    refresh_all()
+                    ui.notify(f"Scan complete ({written} books)")
+
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Back", on_click=show_options).props("flat")
+                    ui.button("Scan", icon="search", on_click=_apply).props("unelevated")
+
+        dialog.open()
+        show_options()
 
 
 async def identify_dialog(
@@ -800,6 +855,7 @@ async def process_dialog(
 
         def show_options() -> None:
             body.clear()
+            cfg = controller.ctx.config
             n_encode = sum(1 for b in books if b.source_files)
             n_organize = sum(1 for b in books if b.state == BookState.ENCODED and b.output_path)
             with body:
@@ -808,13 +864,57 @@ async def process_dialog(
                 org = ui.checkbox("Organize into library", value=True).props("dense")
                 dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
                 conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
+                folder_pat = ui.input("Folder pattern", value=cfg.organize_folder_pattern).props(
+                    "outlined dense"
+                ).classes("w-full")
+                file_pat = ui.input("File name pattern", value=cfg.organize_file_pattern).props(
+                    "outlined dense"
+                ).classes("w-full")
+                preview = ui.label("").classes("text-caption colophon-muted")
+
+                def _preview() -> None:
+                    preview.set_text("Structure: " + sample_target(folder_pat.value, file_pat.value))
+
+                folder_pat.on_value_change(lambda _e: _preview())
+                file_pat.on_value_change(lambda _e: _preview())
+                _preview()
+                dry = ui.checkbox("Dry run (show destinations, change nothing)", value=False)
                 ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
                     "text-caption colophon-muted"
                 )
+
+                def _patterns() -> AudiobookPatterns:
+                    return AudiobookPatterns(
+                        folder=folder_pat.value or cfg.organize_folder_pattern,
+                        single_file=file_pat.value or cfg.organize_file_pattern,
+                    )
+
+                def _show_dry() -> None:
+                    body.clear()
+                    targets = controller.organize_targets(books, patterns=_patterns())
+                    by_id = {b.id: b for b in books}
+                    with body:
+                        ui.label("Dry run — destinations").classes("text-subtitle1")
+                        with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
+                                ui.list().props("dense").classes("w-full"):
+                            for bid, target in targets:
+                                b = by_id[bid]
+                                with ui.item(), ui.item_section():
+                                    ui.item_label(str(b.output_path or b.source_folder))
+                                    ui.item_label("-> " + str(target)).props("caption").classes(
+                                        "colophon-muted"
+                                    )
+                        with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                            ui.button("Back", on_click=show_options).props("flat")
+                            ui.button("Close", on_click=dialog.close).props("flat")
+
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _run() -> None:
+                        if dry.value:
+                            _show_dry()
+                            return
                         if not enc.value and not org.value:
                             ui.notify("Select Encode and/or Organize")
                             return
@@ -824,6 +924,7 @@ async def process_dialog(
                         options = EncodeJobOptions(
                             encode=bool(enc.value), organize=bool(org.value),
                             delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
+                            patterns=_patterns(),
                         )
                         await show_progress(options)
 
