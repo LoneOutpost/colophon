@@ -8,6 +8,7 @@ Cancel/confirm action row and the loading-button pattern.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,8 +16,11 @@ from pathlib import Path
 from nicegui import ui
 
 from colophon.controller import AppController
-from colophon.core.fields import EDITABLE_FIELDS
+from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
+from colophon.core.sources import SourceResult
+
+logger = logging.getLogger(__name__)
 
 
 def dialog_actions(
@@ -43,6 +47,63 @@ def busy(button: ui.button) -> Iterator[None]:
         yield
     finally:
         button.props(remove="loading")
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a file length as hours and minutes, e.g. '1h 2m' or '47m'."""
+    minutes = round(seconds / 60)
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h {mins}m" if hours else f"{mins}m"
+
+
+def _fmt_runtime_delta(candidate_ms: int | None, book_ms: int) -> str:
+    """'8h 12m · +6m' (delta vs the book) or '8h 12m' when the book length is
+    unknown; '' when the candidate has no runtime."""
+    if not candidate_ms:
+        return ""
+    base = _fmt_duration(candidate_ms / 1000)
+    if not book_ms:
+        return base
+    delta_s = (candidate_ms - book_ms) / 1000
+    sign = "+" if delta_s >= 0 else "-"
+    return f"{base} · {sign}{_fmt_duration(abs(delta_s))}"
+
+
+def _fmt_series_label(name: str | None, sequence: float | None) -> str:
+    """'Stormlight #1' / 'Stormlight #2.5' / 'Stormlight' (no seq) / '' (no name).
+    The sequence drops a trailing '.0' so whole numbers read as integers."""
+    if not name:
+        return ""
+    if sequence is None:
+        return name
+    seq = int(sequence) if sequence == int(sequence) else sequence
+    return f"{name} #{seq}"
+
+
+def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
+    """Render a candidate's metadata block (captions + runtime/abridged row),
+    comparing runtime against `book`. Emits NiceGUI elements into the current
+    layout context; the caller owns any surrounding row/checkbox/expansion.
+    Empty fields are omitted."""
+    authors = ", ".join(result.authors) or "unknown"
+    year = f" ({result.publish_year})" if result.publish_year else ""
+    ui.item_label(f"{source_label} · {authors}{year}").props("caption")
+
+    if result.narrators:
+        ui.item_label(f"Narr: {', '.join(result.narrators)}").props("caption")
+
+    series = _fmt_series_label(result.series_name, result.series_sequence)
+    pub_bits = [bit for bit in (series, result.publisher) if bit]
+    if pub_bits:
+        ui.item_label(" · ".join(pub_bits)).props("caption")
+
+    rt = _fmt_runtime_delta(result.runtime_ms, book.duration_ms)
+    if rt or result.abridged is not None:
+        with ui.row().classes("items-center no-wrap q-gutter-xs"):
+            if rt:
+                ui.item_label(rt).props("caption").classes("colophon-mono")
+            if result.abridged is not None:
+                ui.badge("Abridged" if result.abridged else "Unabridged").props("color=grey-6 outline")
 
 
 def remap_dialog(
@@ -171,4 +232,143 @@ def cover_dialog(
         )
         with ui.row().classes("w-full justify-end q-mt-sm"):
             ui.button("Cancel", on_click=dialog.close).props("flat")
+    dialog.open()
+
+
+def compare_dialog(
+    controller: AppController,
+    book: BookUnit,
+    *,
+    show_detail: Callable[[str], None],
+    refresh_list: Callable[[], None],
+) -> None:
+    """Search metadata sources for the book and apply selected fields from a match."""
+    field_labels = {
+        "title": "Title", "author": "Author", "narrator": "Narrator",
+        "series": "Series", "sequence": "Sequence", "year": "Year",
+        "asin": "ASIN", "isbn": "ISBN", "description": "Description",
+    }
+    services = controller.available_sources()  # [(name, label), ...]
+    service_label = dict(services)
+    state = {
+        "title": get_field(book, "title") or "",
+        "author": get_field(book, "author") or "",
+        "series": get_field(book, "series") or "",
+        "asin": get_field(book, "asin") or "",
+        "isbn": get_field(book, "isbn") or "",
+        "service": services[0][0] if services else None,
+    }
+    matches: list = []
+
+    with ui.dialog() as dialog, ui.card().classes("w-96"):
+        ui.label(f"Find matches for {book.title or '(untitled)'}").classes("text-subtitle1")
+        body = ui.column().classes("w-full")
+
+        def show_form() -> None:
+            body.clear()
+            with body:
+                if not services:
+                    ui.label("No metadata sources configured.").classes("text-grey-6")
+                    ui.button("Close", on_click=dialog.close).props("flat")
+                    return
+                title_in = ui.input("Title", value=state["title"]).props("dense").classes("w-full")
+                author_in = ui.input("Author", value=state["author"]).props("dense").classes("w-full")
+                series_in = ui.input("Series", value=state["series"]).props("dense").classes("w-full")
+                asin_in = ui.input("ASIN", value=state["asin"]).props("dense").classes("w-full")
+                isbn_in = ui.input("ISBN", value=state["isbn"]).props("dense").classes("w-full")
+                ui.label("Search with").classes("text-caption text-grey-7 q-mt-sm")
+                service_radio = ui.radio(dict(services), value=state["service"]).props("dense")
+
+                async def _go() -> None:
+                    state.update(
+                        title=title_in.value, author=author_in.value,
+                        series=series_in.value, asin=asin_in.value,
+                        isbn=isbn_in.value, service=service_radio.value,
+                    )
+                    await run_search()
+
+                dialog_actions(dialog, confirm_label="Search", confirm_icon="search", on_confirm=_go, confirm_props="")
+
+        def show_searching() -> None:
+            body.clear()
+            with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
+                ui.spinner()
+                ui.label(f"Searching {service_label.get(state['service'], '')}…")
+
+        async def run_search() -> None:
+            show_searching()
+            try:
+                results = await controller.search_matches(
+                    book, title=state["title"], author=state["author"],
+                    series=state["series"], asin=state["asin"],
+                    isbn=state["isbn"], source_name=state["service"],
+                )
+            except Exception:
+                logger.exception("search_matches failed")
+                results = []
+            matches.clear()
+            matches.extend(results)
+            show_candidates()
+
+        def show_candidates() -> None:
+            body.clear()
+            with body:
+                with ui.row().classes("items-center w-full no-wrap"):
+                    ui.button(
+                        "Back to search", icon="arrow_back", on_click=show_form
+                    ).props("flat dense no-caps")
+                    ui.space()
+                    ui.label(service_label.get(state["service"], "")).classes(
+                        "text-caption text-grey-6"
+                    )
+                if not matches:
+                    ui.label("No matches found").classes("text-grey-6 q-pa-sm")
+                with ui.list().props("dense").classes("w-full"):
+                    for m in matches[:10]:
+                        with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
+                            with ui.item_section():
+                                ui.item_label(m.title or "?")
+                                _candidate_meta(
+                                    m, book, source_label=controller.source_label(m.provider)
+                                )
+
+        def show_picker(result) -> None:
+            body.clear()
+            checks: dict[str, ui.checkbox] = {}
+            with body:
+                ui.button("Back to matches", icon="arrow_back", on_click=show_candidates).props(
+                    "flat dense no-caps"
+                )
+                with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
+                    with ui.list().props("dense").classes("w-full"):
+                        for key, source in controller.match_field_values(result).items():
+                            current = get_field(book, key)
+                            with ui.item():
+                                with ui.item_section().props("avatar"):
+                                    checks[key] = ui.checkbox(value=(source != (current or None)))
+                                with ui.item_section():
+                                    ui.item_label(f"{field_labels.get(key, key)}: {source}")
+                                    ui.item_label(f"current: {current or '(none)'}").props("caption")
+                        if result.cover_url:
+                            with ui.item():
+                                with ui.item_section().props("avatar"):
+                                    checks["cover"] = ui.checkbox(value=(result.cover_url != book.cover_url))
+                                with ui.item_section():
+                                    ui.item_label("Cover art")
+                                    ui.item_label(result.cover_url).props("caption")
+
+                def _apply(res=result) -> None:
+                    selected = {k for k, c in checks.items() if c.value}
+                    if not selected:
+                        ui.notify("No fields selected")
+                        return
+                    controller.apply_match_fields(book, res, selected)
+                    dialog.close()
+                    ui.notify(f"Applied {len(selected)} field(s) from {controller.source_label(res.provider)}")
+                    refresh_list()
+                    show_detail(book.id)
+
+                dialog_actions(dialog, confirm_label="Apply selected", confirm_icon="done_all", on_confirm=_apply, confirm_props="")
+
+        show_form()
     dialog.open()

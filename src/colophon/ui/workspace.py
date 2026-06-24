@@ -25,7 +25,7 @@ from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
-from colophon.ui.dialogs import cover_dialog, remap_dialog, rename_dialog
+from colophon.ui.dialogs import compare_dialog, cover_dialog, remap_dialog, rename_dialog
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -513,140 +513,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     inp.set_value(fn(_editor_text(inp)))
                 ui.notify("Normalized fields")
 
-            def _compare(b=book) -> None:
-                field_labels = {
-                    "title": "Title", "author": "Author", "narrator": "Narrator",
-                    "series": "Series", "sequence": "Sequence", "year": "Year",
-                    "asin": "ASIN", "isbn": "ISBN", "description": "Description",
-                }
-                services = controller.available_sources()  # [(name, label), ...]
-                service_label = dict(services)
-                state = {
-                    "title": get_field(b, "title") or "",
-                    "author": get_field(b, "author") or "",
-                    "series": get_field(b, "series") or "",
-                    "asin": get_field(b, "asin") or "",
-                    "isbn": get_field(b, "isbn") or "",
-                    "service": services[0][0] if services else None,
-                }
-                matches: list = []
-
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label(f"Find matches for {b.title or '(untitled)'}").classes("text-subtitle1")
-                    body = ui.column().classes("w-full")
-
-                    def show_form() -> None:
-                        body.clear()
-                        with body:
-                            if not services:
-                                ui.label("No metadata sources configured.").classes("text-grey-6")
-                                ui.button("Close", on_click=dialog.close).props("flat")
-                                return
-                            title_in = ui.input("Title", value=state["title"]).props("dense").classes("w-full")
-                            author_in = ui.input("Author", value=state["author"]).props("dense").classes("w-full")
-                            series_in = ui.input("Series", value=state["series"]).props("dense").classes("w-full")
-                            asin_in = ui.input("ASIN", value=state["asin"]).props("dense").classes("w-full")
-                            isbn_in = ui.input("ISBN", value=state["isbn"]).props("dense").classes("w-full")
-                            ui.label("Search with").classes("text-caption text-grey-7 q-mt-sm")
-                            service_radio = ui.radio(dict(services), value=state["service"]).props("dense")
-
-                            async def _go() -> None:
-                                state.update(
-                                    title=title_in.value, author=author_in.value,
-                                    series=series_in.value, asin=asin_in.value,
-                                    isbn=isbn_in.value, service=service_radio.value,
-                                )
-                                await run_search()
-
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-                                ui.button("Search", icon="search", on_click=_go)
-
-                    def show_searching() -> None:
-                        body.clear()
-                        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
-                            ui.spinner()
-                            ui.label(f"Searching {service_label.get(state['service'], '')}…")
-
-                    async def run_search() -> None:
-                        show_searching()
-                        try:
-                            results = await controller.search_matches(
-                                b, title=state["title"], author=state["author"],
-                                series=state["series"], asin=state["asin"],
-                                isbn=state["isbn"], source_name=state["service"],
-                            )
-                        except Exception:
-                            logger.exception("search_matches failed")
-                            results = []
-                        matches.clear()
-                        matches.extend(results)
-                        show_candidates()
-
-                    def show_candidates() -> None:
-                        body.clear()
-                        with body:
-                            with ui.row().classes("items-center w-full no-wrap"):
-                                ui.button(
-                                    "Back to search", icon="arrow_back", on_click=show_form
-                                ).props("flat dense no-caps")
-                                ui.space()
-                                ui.label(service_label.get(state["service"], "")).classes(
-                                    "text-caption text-grey-6"
-                                )
-                            if not matches:
-                                ui.label("No matches found").classes("text-grey-6 q-pa-sm")
-                            with ui.list().props("dense").classes("w-full"):
-                                for m in matches[:10]:
-                                    with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
-                                        with ui.item_section():
-                                            ui.item_label(m.title or "?")
-                                            _candidate_meta(
-                                                m, b, source_label=controller.source_label(m.provider)
-                                            )
-
-                    def show_picker(result) -> None:
-                        body.clear()
-                        checks: dict[str, ui.checkbox] = {}
-                        with body:
-                            ui.button("Back to matches", icon="arrow_back", on_click=show_candidates).props(
-                                "flat dense no-caps"
-                            )
-                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                                with ui.list().props("dense").classes("w-full"):
-                                    for key, source in controller.match_field_values(result).items():
-                                        current = get_field(b, key)
-                                        with ui.item():
-                                            with ui.item_section().props("avatar"):
-                                                checks[key] = ui.checkbox(value=(source != (current or None)))
-                                            with ui.item_section():
-                                                ui.item_label(f"{field_labels.get(key, key)}: {source}")
-                                                ui.item_label(f"current: {current or '(none)'}").props("caption")
-                                    if result.cover_url:
-                                        with ui.item():
-                                            with ui.item_section().props("avatar"):
-                                                checks["cover"] = ui.checkbox(value=(result.cover_url != b.cover_url))
-                                            with ui.item_section():
-                                                ui.item_label("Cover art")
-                                                ui.item_label(result.cover_url).props("caption")
-
-                            def _apply(res=result) -> None:
-                                selected = {k for k, c in checks.items() if c.value}
-                                if not selected:
-                                    ui.notify("No fields selected")
-                                    return
-                                controller.apply_match_fields(b, res, selected)
-                                dialog.close()
-                                ui.notify(f"Applied {len(selected)} field(s) from {controller.source_label(res.provider)}")
-                                refresh_list()
-                                show_detail(b.id)
-
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-                                ui.button("Apply selected", icon="done_all", on_click=_apply)
-
-                    show_form()
-                dialog.open()
 
             async def _tag_dialog(b=book) -> None:
                 _save_pending(b)  # "Write" encompasses Save: persist editor edits first
@@ -771,7 +637,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         with ui.element("div").classes("colophon-toolgroup col"):
                             ui.label("Fetch from sources").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
-                                ui.button("Matches", icon="search", on_click=_compare).props("flat dense no-caps").tooltip("Find and apply metadata matches")
+                                ui.button("Matches", icon="search", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
                                 ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
                                 ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
                         with ui.element("div").classes("colophon-toolgroup"):
