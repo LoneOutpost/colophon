@@ -23,12 +23,12 @@ from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import VALID_FILENAME_FIELDS, compile_template
 from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
-from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.dialogs import (
     bulk_tag_dialog,
     compare_dialog,
     cover_dialog,
+    quick_match_dialog,
     remap_dialog,
     rename_dialog,
     tag_dialog,
@@ -98,55 +98,6 @@ def _fmt_duration(seconds: float) -> str:
     hours, mins = divmod(minutes, 60)
     return f"{hours}h {mins}m" if hours else f"{mins}m"
 
-
-def _fmt_runtime_delta(candidate_ms: int | None, book_ms: int) -> str:
-    """'8h 12m · +6m' (delta vs the book) or '8h 12m' when the book length is
-    unknown; '' when the candidate has no runtime."""
-    if not candidate_ms:
-        return ""
-    base = _fmt_duration(candidate_ms / 1000)
-    if not book_ms:
-        return base
-    delta_s = (candidate_ms - book_ms) / 1000
-    sign = "+" if delta_s >= 0 else "-"
-    return f"{base} · {sign}{_fmt_duration(abs(delta_s))}"
-
-
-def _fmt_series_label(name: str | None, sequence: float | None) -> str:
-    """'Stormlight #1' / 'Stormlight #2.5' / 'Stormlight' (no seq) / '' (no name).
-    The sequence drops a trailing '.0' so whole numbers read as integers."""
-    if not name:
-        return ""
-    if sequence is None:
-        return name
-    seq = int(sequence) if sequence == int(sequence) else sequence
-    return f"{name} #{seq}"
-
-
-def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
-    """Render a candidate's metadata block (captions + runtime/abridged row),
-    comparing runtime against `book`. Emits NiceGUI elements into the current
-    layout context; the caller owns any surrounding row/checkbox/expansion.
-    Empty fields are omitted."""
-    authors = ", ".join(result.authors) or "unknown"
-    year = f" ({result.publish_year})" if result.publish_year else ""
-    ui.item_label(f"{source_label} · {authors}{year}").props("caption")
-
-    if result.narrators:
-        ui.item_label(f"Narr: {', '.join(result.narrators)}").props("caption")
-
-    series = _fmt_series_label(result.series_name, result.series_sequence)
-    pub_bits = [bit for bit in (series, result.publisher) if bit]
-    if pub_bits:
-        ui.item_label(" · ".join(pub_bits)).props("caption")
-
-    rt = _fmt_runtime_delta(result.runtime_ms, book.duration_ms)
-    if rt or result.abridged is not None:
-        with ui.row().classes("items-center no-wrap q-gutter-xs"):
-            if rt:
-                ui.item_label(rt).props("caption").classes("colophon-mono")
-            if result.abridged is not None:
-                ui.badge("Abridged" if result.abridged else "Unabridged").props("color=grey-6 outline")
 
 
 def _confidence_color(value: float) -> str:
@@ -827,138 +778,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                 ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
 
-            async def _quick_match() -> None:
-                sources = controller.available_sources()  # [(name, label), ...]
-                with ui.dialog() as dialog, ui.card().classes("w-[32rem]"):
-                    title = ui.label(f"Quick Match {len(books)} books").classes("text-subtitle1")
-                    body = ui.column().classes("w-full")
-                    proposals: list = []
-
-                    def show_config() -> None:
-                        body.clear()
-                        title.set_text(f"Quick Match {len(books)} books")
-                        checks: dict[str, ui.checkbox] = {}
-                        field_checks: dict[str, ui.checkbox] = {}
-                        with body:
-                            ui.label("Search these sources").classes("text-caption text-grey-7")
-                            for name, label in sources:
-                                checks[name] = ui.checkbox(label, value=True).props("dense")
-                            ui.label("Match using these fields").classes(
-                                "text-caption text-grey-7 q-mt-sm"
-                            )
-                            for key, flabel in (
-                                ("title", "Title"),
-                                ("author", "Author"),
-                                ("series", "Series"),
-                                ("asin", "ASIN"),
-                                ("isbn", "ISBN"),
-                            ):
-                                field_checks[key] = ui.checkbox(flabel, value=True).props("dense")
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                                async def _search() -> None:
-                                    chosen = [n for n, c in checks.items() if c.value]
-                                    if not chosen:
-                                        ui.notify("Select at least one source")
-                                        return
-                                    fields = {k for k, c in field_checks.items() if c.value}
-                                    if not fields:
-                                        ui.notify("Select at least one field to match on")
-                                        return
-                                    await run_search(chosen, fields)
-
-                                ui.button("Search", icon="search", on_click=_search)
-
-                    def show_searching() -> None:
-                        body.clear()
-                        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
-                            ui.spinner()
-                            ui.label(f"Searching {len(books)} books…")
-
-                    async def run_search(source_names: list[str], search_fields: set[str]) -> None:
-                        show_searching()
-                        found = await controller.quick_match_scan(books, source_names, search_fields)
-                        proposals.clear()
-                        proposals.extend(found)
-                        show_preview()
-
-                    def show_preview() -> None:
-                        body.clear()
-                        title.set_text(f"Quick Match {len(books)} books")
-                        threshold = controller.review_threshold()
-                        checks: dict[str, ui.checkbox] = {}
-                        with body:
-                            with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                                with ui.column().classes("w-full gap-0"):
-                                    for p in proposals:
-                                        cur = p.book.title or "(untitled)"
-                                        if p.best is None:
-                                            with ui.row().classes("w-full items-center no-wrap q-py-xs"):
-                                                ui.icon("block").classes("text-grey-5 q-mr-sm")
-                                                with ui.column().classes("gap-0"):
-                                                    ui.label(cur)
-                                                    ui.label("no match").classes("text-caption text-grey-6")
-                                            continue
-                                        with ui.row().classes("w-full items-center no-wrap"):
-                                            checks[p.book.id] = ui.checkbox(value=p.confidence >= threshold)
-                                            exp = ui.expansion().classes("w-full")
-                                            with exp.add_slot("header"):
-                                                with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
-                                                    with ui.column().classes("gap-0"):
-                                                        ui.label(f"{cur} → {p.best.title or '?'}")
-                                                        ui.label(
-                                                            controller.source_label(p.best.provider)
-                                                        ).classes("text-caption text-grey-6")
-                                                    ui.space()
-                                                    ui.badge(f"{p.confidence:.0f}").props(
-                                                        f"color={_confidence_color(p.confidence)}"
-                                                    )
-                                            with exp:
-                                                _candidate_meta(
-                                                    p.best, p.book,
-                                                    source_label=controller.source_label(p.best.provider),
-                                                )
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                ui.button("Cancel", on_click=dialog.close).props("flat")
-
-                                def _apply() -> None:
-                                    keep_ids = {bid for bid, c in checks.items() if c.value}
-                                    chosen = [p for p in proposals if p.book.id in keep_ids]
-                                    if not chosen:
-                                        ui.notify("Nothing selected")
-                                        return
-                                    summary = controller.quick_match_apply(chosen)
-                                    show_summary(summary)
-
-                                ui.button("Apply selected", icon="done_all", on_click=_apply)
-
-                    def show_summary(summary) -> None:
-                        body.clear()
-                        with body:
-                            note = f"Applied {summary.applied_count} book(s), {summary.now_ready_count} now Ready"
-                            ui.label(note).classes("text-body2 q-pa-sm")
-                            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                                if summary.batch_id:
-                                    ui.button(
-                                        "Undo", icon="undo",
-                                        on_click=lambda b=summary.batch_id: (
-                                            controller.undo(b),
-                                            ui.notify("Reverted Quick Match"),
-                                            _close(),
-                                        ),
-                                    ).props("flat")
-                                ui.button("Close", on_click=_close)
-
-                    def _close() -> None:
-                        dialog.close()
-                        _clear_selection()
-
-                    show_config()
-                dialog.open()
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Quick Match", icon="auto_awesome", on_click=_quick_match).props("outline")
+                ui.button("Quick Match", icon="auto_awesome", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
