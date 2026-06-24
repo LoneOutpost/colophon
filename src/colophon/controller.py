@@ -10,6 +10,9 @@ from pathlib import Path
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import Config, save_config
 from colophon.adapters.cover import mime_for_suffix
+from colophon.adapters.downloader import (
+    DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
+)
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
@@ -48,6 +51,7 @@ from colophon.services import files as file_ops
 from colophon.services.acquire import (
     AcquireCandidate,
     AcquireResult,
+    add_torrent,
     download_torrent,
     list_candidates,
     sanitize_name,
@@ -147,6 +151,13 @@ class ProcessResult(_Base):
     detail: str | None = None
 
 
+class DownloadEntry(_Base):
+    key: str
+    name: str
+    status: str = "active"  # active / paused / done / failed
+    detail: str = ""
+
+
 class EncodeJobOptions(_Base):
     encode: bool = True
     organize: bool = True
@@ -167,6 +178,8 @@ class EncodeJobResult(_Base):
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
+        self._downloads: dict[str, DownloadEntry] = {}
+        self._download_cancels: dict[str, CancelToken] = {}
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -436,17 +449,56 @@ class AppController:
         finally:
             await client.aclose()
 
-    async def rd_download(
-        self, torrent_id: str, *, progress: Callable[[int, int, str], None] | None = None,
+    async def rd_add_magnet(self, magnet: str) -> str:
+        """Add a magnet to Real-Debrid and select its files. Returns the torrent id."""
+        client = self.rd_client()
+        try:
+            return await add_torrent(client, magnet)
+        finally:
+            await client.aclose()
+
+    def active_downloads(self) -> list[DownloadEntry]:
+        """Every tracked download (active / paused / done / failed)."""
+        return list(self._downloads.values())
+
+    def clear_finished_downloads(self) -> None:
+        """Drop the done/failed entries (and their cancel tokens) from the registry."""
+        for key in [k for k, e in self._downloads.items() if e.status in ("done", "failed")]:
+            self._downloads.pop(key, None)
+            self._download_cancels.pop(key, None)
+
+    def cancel_download(self, key: str) -> None:
+        """Signal a cancel for the in-flight download `key` (no-op if unknown)."""
+        token = self._download_cancels.get(key)
+        if token is not None:
+            token.cancel()
+
+    async def _run_download(
+        self, torrent_id: str, name: str,
+        *, progress: Callable[[int, int, str], None] | None = None,
     ) -> tuple[AcquireResult, list[str]]:
-        """Download a torrent's audio/cover files, then ingest the folder. Returns
-        the download result and the ids of any newly registered books."""
+        """Download one torrent and ingest its folder, tracking progress/status in
+        the registry. A cancel leaves the entry 'paused' (its .part files retained
+        for resume); otherwise it ends 'done' or 'failed'."""
+        entry = DownloadEntry(key=torrent_id, name=name, status="active")
+        self._downloads[torrent_id] = entry
+        token = CancelToken()
+        self._download_cancels[torrent_id] = token
+
+        def _byte_progress(done: int, total: int) -> None:
+            entry.detail = f"{done * 100 // total}%" if total else f"{done} bytes"
+
         client = self.rd_client()
         try:
             info = await client.torrent_info(torrent_id)
-            result = await download_torrent(client, info, self._rd_download_dir(), progress=progress)
+            result = await download_torrent(
+                client, info, self._rd_download_dir(),
+                progress=progress, byte_progress=_byte_progress, cancel=token,
+            )
         finally:
             await client.aclose()
+
+        cancelled = any((f.error == "cancelled") for f in result.files)
         book_ids: list[str] = []
         if result.any_ok:
             books = scan_ingest(
@@ -455,7 +507,47 @@ class AppController:
                 directory_scheme=self.ctx.config.directory_scheme,
             )
             book_ids = [b.id for b in books]
+        entry.status = "paused" if cancelled else ("done" if result.any_ok else "failed")
         return result, book_ids
+
+    async def rd_download(
+        self, torrent_id: str, *, name: str | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
+    ) -> tuple[AcquireResult, list[str]]:
+        """Download a torrent's audio/cover files, then ingest the folder, tracked
+        in the registry. Returns the download result and the ids of any newly
+        registered books. `name` is the display label for the Downloads section
+        (defaults to the torrent id); `progress(idx, total, filename)` is the
+        existing per-file callback (kept so the current Acquire UI keeps working)."""
+        return await self._run_download(torrent_id, name or torrent_id, progress=progress)
+
+    async def resume_download(self, key: str) -> tuple[AcquireResult, list[str]]:
+        """Re-run a tracked (e.g. paused) download from its retained .part files."""
+        name = self._downloads[key].name if key in self._downloads else key
+        return await self._run_download(key, name)
+
+    def _rd_download_dir_in_scan_paths(self) -> bool:
+        return self._rd_download_dir() in self.ctx.config.scan_paths
+
+    def should_prompt_downloads_scan(self) -> bool:
+        """Whether to offer adding the downloads dir to the scan paths: only when it
+        isn't already a scan path and the prompt hasn't been dismissed before."""
+        return not self.ctx.config.downloads_scan_prompt_seen and not self._rd_download_dir_in_scan_paths()
+
+    def add_downloads_to_scan_paths(self) -> None:
+        """Add the downloads dir to the scan paths (deduped), dismiss the prompt, and persist."""
+        cfg = self.ctx.config
+        d = self._rd_download_dir()
+        if d not in cfg.scan_paths:
+            cfg.scan_paths = [*cfg.scan_paths, d]
+        cfg.downloads_scan_prompt_seen = True
+        self.save_settings(cfg)
+
+    def mark_downloads_scan_prompt_seen(self) -> None:
+        """Dismiss the downloads-scan prompt (without adding the dir) and persist."""
+        cfg = self.ctx.config
+        cfg.downloads_scan_prompt_seen = True
+        self.save_settings(cfg)
 
     # --- filename parsing (interactive, FR-1.x) ---
     def book_filename(self, book: BookUnit) -> str:
