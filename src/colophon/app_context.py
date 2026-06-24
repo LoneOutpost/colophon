@@ -10,7 +10,7 @@ from platformdirs import user_data_path
 
 from colophon.adapters.audiobookshelf import AbsClient
 from colophon.adapters.config import Config, default_config_path
-from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
+from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.lazylibrarian_api import LazyLibrarianClient
 from colophon.adapters.repository.store import (
     BookUnitRepo,
@@ -60,10 +60,9 @@ class AppContext:
         db = config.db_path or default_db_path()
         conn = connect(db)
         migrate(conn)
-        patterns = (
-            read_audiobook_patterns(config.lazylibrarian_config_ini)
-            if config.lazylibrarian_config_ini
-            else AudiobookPatterns()
+        patterns = AudiobookPatterns(
+            folder=config.organize_folder_pattern,
+            single_file=config.organize_file_pattern,
         )
         sources = arrange_sources(
             build_all_sources(config),

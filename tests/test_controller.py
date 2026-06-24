@@ -2240,3 +2240,36 @@ async def test_run_encode_job_caches_cover_before_encode(tmp_path, make_audio, m
     monkeypatch.setattr(ctrl, "ensure_cover_cached", _fake_cache)
     await ctrl.run_encode_job([book], EncodeJobOptions(encode=True, organize=False))
     assert cached == [book.id]
+
+
+def test_import_ll_patterns_reads_folder_and_single_file(tmp_path):
+    ini = tmp_path / "config.ini"
+    ini.write_text(
+        "[POSTPROCESS]\n"
+        "audiobook_dest_folder = $Author/$Series/$Title\n"
+        "audiobook_single_file = $Title ($PubYear)\n"
+    )
+    ctx = _ctx(tmp_path)
+    folder, file = AppController(ctx).import_ll_patterns(ini)
+    assert folder == "$Author/$Series/$Title"
+    assert file == "$Title ($PubYear)"
+    ctx.close()
+
+
+def test_import_ll_patterns_defaults_file_to_title(tmp_path):
+    ini = tmp_path / "config.ini"
+    ini.write_text("[POSTPROCESS]\naudiobook_dest_folder = $Author/$Title\n")
+    ctx = _ctx(tmp_path)
+    folder, file = AppController(ctx).import_ll_patterns(ini)
+    assert folder == "$Author/$Title"
+    assert file == "$Title"  # no audiobook_single_file -> sensible single-file default
+    ctx.close()
+
+
+def test_import_ll_patterns_missing_file_raises(tmp_path):
+    import pytest
+
+    ctx = _ctx(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        AppController(ctx).import_ll_patterns(tmp_path / "absent.ini")
+    ctx.close()

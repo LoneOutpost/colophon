@@ -100,10 +100,7 @@ def render_settings(controller: AppController) -> None:
                     "Library id", value=cfg.audiobookshelf_library_id or ""
                 ).props(field).classes("w-full")
 
-            with _section("LazyLibrarian", "Read-only status lookups and path patterns."):
-                ll_ini = ui.input(
-                    "config.ini path", value=str(cfg.lazylibrarian_config_ini or "")
-                ).props(field).classes("w-full")
+            with _section("LazyLibrarian", "Read-only status lookups."):
                 ll_url = ui.input("Server URL", value=cfg.lazylibrarian_url or "").props(
                     field
                 ).classes("w-full")
@@ -230,7 +227,6 @@ def render_settings(controller: AppController) -> None:
                         db_path=cfg.db_path,  # unchanged here; db path edits need a restart
                         scan_paths=_text_to_paths(scan_paths.value),
                         library_root=_opt_path(library_root.value),
-                        lazylibrarian_config_ini=_opt_path(ll_ini.value),
                         filename_template=template.value or "%author% - %title%",
                         review_threshold=float(threshold.value),
                         transcode_bitrate=bitrate.value or "64k",
