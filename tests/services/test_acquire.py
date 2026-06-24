@@ -118,6 +118,22 @@ async def test_download_torrent_removes_empty_folder_on_total_failure(tmp_path, 
     assert not result.folder.exists()  # empty staging dir cleaned up
 
 
+async def test_download_torrent_reuses_pinned_folder_for_resume(tmp_path, monkeypatch):
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded", links=["L1"])
+    links = {"L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+
+    pinned = tmp_path / "existing-folder"
+    pinned.mkdir()
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, folder=pinned)
+    assert result.folder == pinned  # no new deduped dir; the .part of an interrupted run resumes here
+    assert (pinned / "01.mp3").exists()
+
+
 def test_sanitize_name_strips_separators():
     assert sanitize_name("a/b:c?.mp3") == "a_b_c_.mp3"
     assert sanitize_name("   ...   ") == "download"
@@ -167,3 +183,67 @@ async def test_add_torrent_falls_back_to_all_when_no_audio():
 
     await add_torrent(FakeRd(), "magnet:?x")
     assert selected["ids"] == "all"
+
+
+async def test_file_ids_downloads_only_chosen_by_index(tmp_path, monkeypatch):
+    torrent = RdTorrentInfo(
+        id="a", filename="Bundle", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/A/01.mp3", selected=True),
+            RdTorrentFile(id=2, path="/B/01.mp3", selected=True),
+            RdTorrentFile(id=3, path="/C/01.mp3", selected=True),
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/A"),
+        "L2": RdUnrestrictedLink(filename="01.mp3", download="http://dl/B"),
+        "L3": RdUnrestrictedLink(filename="01.mp3", download="http://dl/C"),
+    }
+    got = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"ok")
+        got.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={2})
+    assert got == ["http://dl/B"]  # id 2 -> selected[1] -> L2
+    assert result.any_ok is True
+
+
+async def test_file_ids_includes_non_audio(tmp_path, monkeypatch):
+    torrent = RdTorrentInfo(
+        id="a", filename="X", status="downloaded", links=["L1"],
+        files=[RdTorrentFile(id=1, path="/A/notes.pdf", selected=True)],
+    )
+    links = {"L1": RdUnrestrictedLink(filename="notes.pdf", download="http://dl/pdf")}
+    got = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"ok")
+        got.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={1})
+    assert got == ["http://dl/pdf"]  # explicit pick bypasses the audio-only filter
+
+
+async def test_file_ids_count_mismatch_falls_back_to_filename(tmp_path, monkeypatch):
+    # 1 link but 2 selected files -> index map can't be trusted; fall back to name match
+    torrent = RdTorrentInfo(
+        id="a", filename="X", status="downloaded", links=["L1"],
+        files=[
+            RdTorrentFile(id=1, path="/A/keep.mp3", selected=True),
+            RdTorrentFile(id=2, path="/A/skip.mp3", selected=True),
+        ],
+    )
+    links = {"L1": RdUnrestrictedLink(filename="keep.mp3", download="http://dl/keep")}
+    got = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"ok")
+        got.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={1})
+    assert got == ["http://dl/keep"]  # fetched all links, kept only keep.mp3 by name

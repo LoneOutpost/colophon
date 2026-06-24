@@ -119,32 +119,63 @@ async def add_torrent(client: RealDebridSource, magnet: str) -> str:
     return torrent_id
 
 
+def _plan_links(torrent: RdTorrent, file_ids: set[int] | None) -> tuple[list[str], set[str] | None]:
+    """Choose which links to fetch for a per-file download.
+
+    Returns (links, keep_basenames). `file_ids=None` -> all links, keep_basenames None
+    (caller applies the audio+cover `_keep_file` filter). Otherwise map the chosen file
+    ids to links by their index among the RD-selected files; if the link/selected-file
+    counts disagree, fall back to fetching all links and keeping only those whose
+    basename matches a chosen file (keep_basenames set)."""
+    if file_ids is None:
+        return list(torrent.links), None
+    files = list(getattr(torrent, "files", []))
+    selected = [f for f in files if f.selected]
+    if len(selected) == len(torrent.links):
+        return [torrent.links[i] for i, f in enumerate(selected) if f.id in file_ids], None
+    logger.warning(
+        f"download_torrent: links/selected-files count mismatch "
+        f"({len(torrent.links)} vs {len(selected)}); falling back to filename match"
+    )
+    keep = {Path(f.path).name for f in files if f.id in file_ids}
+    return list(torrent.links), keep
+
+
 async def download_torrent(
     client: RealDebridSource,
     torrent: RdTorrent,
     dest_root: Path,
     *,
+    folder: Path | None = None,
+    file_ids: set[int] | None = None,
     progress: Callable[[int, int, str], None] | None = None,
     byte_progress: Callable[[int, int], None] | None = None,
     cancel: CancelToken | None = None,
 ) -> AcquireResult:
     """Unrestrict each of `torrent`'s links and stream the audio/cover files into a
-    fresh subfolder of `dest_root`. Per-file failures are isolated and reported.
+    subfolder of `dest_root`. Per-file failures are isolated and reported.
 
-    `progress(done, total, filename)` reports per-file granularity (file index of
-    total links), not per-byte; that is the granularity the acquire UI surfaces."""
-    folder = _unique_dir(dest_root, torrent.filename)
+    `folder` pins the destination: pass the folder from an interrupted attempt to
+    resume into it (so `stream_download` finds the retained `.part`); when omitted a
+    fresh deduped subfolder is allocated. `progress(done, total, filename)` reports
+    per-file granularity (file index of total links), not per-byte; that is the
+    granularity the acquire UI surfaces."""
+    folder = folder or _unique_dir(dest_root, torrent.filename)
     folder.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=folder)
-    total = len(torrent.links)
-    for idx, link in enumerate(torrent.links, start=1):
+    links, keep_names = _plan_links(torrent, file_ids)
+    total = len(links)
+    for idx, link in enumerate(links, start=1):
         try:
             unr = await client.unrestrict_link(link)
         except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
             logger.warning(f"unrestrict failed: {e}")
             result.files.append(AcquiredFile(filename=link, path=None, ok=False, error=str(e)))
             continue
-        if not _keep_file(unr.filename):
+        if keep_names is not None:
+            if Path(unr.filename).name not in keep_names:
+                continue
+        elif file_ids is None and not _keep_file(unr.filename):
             continue
         if progress is not None:
             progress(idx, total, unr.filename)
