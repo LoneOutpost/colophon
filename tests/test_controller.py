@@ -2423,3 +2423,31 @@ def test_mark_downloads_scan_prompt_seen_suppresses(tmp_path):
     ctrl.mark_downloads_scan_prompt_seen()
     assert ctrl.ctx.config.downloads_scan_prompt_seen is True
     assert ctrl.should_prompt_downloads_scan() is False
+
+
+async def test_quick_match_scan_emits_progress_ok_and_fail(tmp_path):
+    # ok: a source returns a candidate.
+    ctx = _ctx(tmp_path / "ok", sources=[
+        _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["x"])])
+    ])
+    hit = BookUnit.new(source_folder=tmp_path / "hit")
+    hit.title = "Dune"
+    ctx.books.upsert(hit)
+    events: list[tuple[str, str]] = []
+    await AppController(ctx).quick_match_scan(
+        [hit], ["audnexus"], progress=lambda bid, kind: events.append((bid, kind))
+    )
+    assert events == [(hit.id, "ok")]
+    ctx.close()
+
+    # fail: the source returns nothing.
+    ctx2 = _ctx(tmp_path / "fail", sources=[_StubSource("audnexus", [])])
+    miss = BookUnit.new(source_folder=tmp_path / "miss")
+    miss.title = "Nonesuch"
+    ctx2.books.upsert(miss)
+    events2: list[tuple[str, str]] = []
+    await AppController(ctx2).quick_match_scan(
+        [miss], ["audnexus"], progress=lambda bid, kind: events2.append((bid, kind))
+    )
+    assert events2 == [(miss.id, "fail")]
+    ctx2.close()

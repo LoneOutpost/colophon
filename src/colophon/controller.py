@@ -881,16 +881,21 @@ class AppController:
             if not b.manually_confirmed and b.output_path is None
         ]
 
-    async def identify_preview(self) -> IdentifyPlan:
-        """Query all sources for every candidate and partition by the review
-        threshold, without persisting anything."""
-        all_books = self.ctx.books.list_all()
-        candidates = [b for b in all_books if not b.manually_confirmed and b.output_path is None]
+    async def identify_preview(
+        self, *, progress: Callable[[str, str], None] | None = None
+    ) -> IdentifyPlan:
+        """Query all sources for every candidate and partition by the review threshold,
+        without persisting anything. `progress(book_id, kind)` streams per-book outcomes."""
+        candidates = self.identify_candidates()
+        skipped = len(self.ctx.books.list_all()) - len(candidates)
         source_names = [s.name for s in self.ctx.sources]
-        proposals = await self.quick_match_scan(candidates, source_names)
+        proposals = await self.quick_match_scan(candidates, source_names, progress=progress)
+        return self._identify_plan(proposals, skipped)
+
+    def _identify_plan(self, proposals: list[QuickMatchProposal], skipped: int) -> IdentifyPlan:
+        """Partition scanned proposals into the IdentifyPlan counts (shared by preview/retry)."""
         threshold = self.ctx.config.review_threshold
         to_apply = sum(1 for p in proposals if p.best is not None and p.confidence >= threshold)
-        skipped = len(all_books) - len(candidates)
         return IdentifyPlan(
             proposals=proposals, threshold=threshold,
             to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,
@@ -926,16 +931,22 @@ class AppController:
         books: list[BookUnit],
         source_names: list[str],
         search_fields: set[str] | None = None,
+        *,
+        progress: Callable[[str, str], None] | None = None,
     ) -> list[QuickMatchProposal]:
         """For each book, query the chosen sources, score the candidates, and
         return a proposal carrying the best result, all gathered results (for
         later re-scoring), and the scan confidence. Books are scanned concurrently.
-        `search_fields` (when given) restricts which fields seed the query."""
+        `search_fields` (when given) restricts which fields seed the query.
+        `progress(book_id, kind)` fires once per book as it resolves, kind 'ok' when a
+        source returned a candidate else 'fail'."""
         chosen = [s for s in self.ctx.sources if s.name in source_names]
 
         async def _scan(book: BookUnit) -> QuickMatchProposal:
             results = await gather_matches(chosen, query_for_book(book, search_fields))
             outcome = self._score(book, results)
+            if progress is not None:
+                progress(book.id, "ok" if outcome.best is not None else "fail")
             return QuickMatchProposal(
                 book=book, best=outcome.best, results=results, confidence=outcome.confidence
             )
