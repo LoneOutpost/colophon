@@ -1195,7 +1195,7 @@ async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
 
-    async def fake_download(client, torrent, dest_root, *, progress=None):
+    async def fake_download(client, torrent, dest_root, *, progress=None, byte_progress=None, cancel=None):
         folder = dest_root / "Mistborn"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "01.mp3").write_bytes(b"")
@@ -2078,7 +2078,9 @@ def test_save_settings_applies_disable(tmp_path):
     from colophon.app_context import AppContext
     from colophon.controller import AppController
 
-    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"))
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite"), config_path=tmp_path / "c.toml"
+    )
     ctrl = AppController(ctx)
     assert any(s.name == "googlebooks" for s in ctx.sources)
     ctrl.save_settings(Config(db_path=tmp_path / "db.sqlite", disabled_sources=["googlebooks"]))
@@ -2273,3 +2275,39 @@ def test_import_ll_patterns_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         AppController(ctx).import_ll_patterns(tmp_path / "absent.ini")
     ctx.close()
+
+
+def test_rd_download_registry_and_scan_prompt(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+
+    dl = tmp_path / "dls"
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite", real_debrid_download_dir=dl),
+        config_path=tmp_path / "c.toml",
+    )
+    ctrl = AppController(ctx)
+
+    assert ctrl.active_downloads() == []
+    assert ctrl.should_prompt_downloads_scan() is True
+
+    ctrl.add_downloads_to_scan_paths()
+    assert dl in ctrl.ctx.config.scan_paths
+    assert ctrl.should_prompt_downloads_scan() is False
+
+
+def test_mark_downloads_scan_prompt_seen_suppresses(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite", real_debrid_download_dir=tmp_path / "dls"),
+        config_path=tmp_path / "c.toml",
+    )
+    ctrl = AppController(ctx)
+    assert ctrl.should_prompt_downloads_scan() is True
+    ctrl.mark_downloads_scan_prompt_seen()
+    assert ctrl.ctx.config.downloads_scan_prompt_seen is True
+    assert ctrl.should_prompt_downloads_scan() is False

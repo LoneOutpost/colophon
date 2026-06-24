@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from colophon.adapters.audio import is_audio_file
-from colophon.adapters.downloader import stream_download
+from colophon.adapters.downloader import DownloadCancelled, stream_download
 from colophon.adapters.realdebrid import RdTorrent, RdTorrentFile, RealDebridSource
+from colophon.core.cancel import CancelToken
 
 logger = logging.getLogger(__name__)
 
@@ -107,12 +108,25 @@ async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list
     return candidates
 
 
+async def add_torrent(client: RealDebridSource, magnet: str) -> str:
+    """Add a magnet to Real-Debrid and select its audio files (falling back to all
+    files when none are detected). Returns the new torrent id; RD downloads it
+    server-side and it surfaces in `list_candidates` once ready."""
+    torrent_id = await client.add_magnet(magnet)
+    info = await client.torrent_info(torrent_id)
+    audio_ids = [str(f.id) for f in info.files if is_audio_file(Path(f.path))]
+    await client.select_files(torrent_id, ",".join(audio_ids) if audio_ids else "all")
+    return torrent_id
+
+
 async def download_torrent(
     client: RealDebridSource,
     torrent: RdTorrent,
     dest_root: Path,
     *,
     progress: Callable[[int, int, str], None] | None = None,
+    byte_progress: Callable[[int, int], None] | None = None,
+    cancel: CancelToken | None = None,
 ) -> AcquireResult:
     """Unrestrict each of `torrent`'s links and stream the audio/cover files into a
     fresh subfolder of `dest_root`. Per-file failures are isolated and reported.
@@ -136,8 +150,13 @@ async def download_torrent(
             progress(idx, total, unr.filename)
         dest = folder / sanitize_name(unr.filename)
         try:
-            await stream_download(unr.download, dest)
+            await stream_download(unr.download, dest, progress=byte_progress, cancel=cancel)
             result.files.append(AcquiredFile(filename=unr.filename, path=dest, ok=True))
+        except DownloadCancelled:
+            result.files.append(
+                AcquiredFile(filename=unr.filename, path=None, ok=False, error="cancelled")
+            )
+            break  # stop the batch on cancel; the .part is retained for resume
         except Exception as e:  # isolate a single failed download (BLE001 intentional)
             logger.warning(f"download failed for {unr.filename}: {e}")
             result.files.append(AcquiredFile(filename=unr.filename, path=None, ok=False, error=str(e)))

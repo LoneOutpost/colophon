@@ -220,3 +220,18 @@ def test_legacy_lazylibrarian_keys_are_ignored(tmp_path):
     assert not hasattr(cfg, "lazylibrarian_url")
     assert not hasattr(cfg, "lazylibrarian_api_key")
     assert not hasattr(cfg, "lazylibrarian_config_ini")
+
+
+def test_downloads_scan_prompt_flag_round_trips(tmp_path):
+    from colophon.adapters.config import Config, load_config, save_config
+
+    cfg = Config(downloads_scan_prompt_seen=True)
+    path = tmp_path / "c.toml"
+    save_config(cfg, path)
+    assert load_config(path).downloads_scan_prompt_seen is True
+
+
+def test_downloads_scan_prompt_flag_defaults_false():
+    from colophon.adapters.config import Config
+
+    assert Config().downloads_scan_prompt_seen is False
