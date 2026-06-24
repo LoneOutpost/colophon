@@ -16,9 +16,11 @@ from pathlib import Path
 
 from nicegui import ui
 
+from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.controller import AppController
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
+from colophon.core.pathscheme import sample_target
 from colophon.core.sources import SourceResult
 from colophon.ui.batch_log import BatchItem, BatchLog
 
@@ -853,6 +855,7 @@ async def process_dialog(
 
         def show_options() -> None:
             body.clear()
+            cfg = controller.ctx.config
             n_encode = sum(1 for b in books if b.source_files)
             n_organize = sum(1 for b in books if b.state == BookState.ENCODED and b.output_path)
             with body:
@@ -861,13 +864,57 @@ async def process_dialog(
                 org = ui.checkbox("Organize into library", value=True).props("dense")
                 dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
                 conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
+                folder_pat = ui.input("Folder pattern", value=cfg.organize_folder_pattern).props(
+                    "outlined dense"
+                ).classes("w-full")
+                file_pat = ui.input("File name pattern", value=cfg.organize_file_pattern).props(
+                    "outlined dense"
+                ).classes("w-full")
+                preview = ui.label("").classes("text-caption colophon-muted")
+
+                def _preview() -> None:
+                    preview.set_text("Structure: " + sample_target(folder_pat.value, file_pat.value))
+
+                folder_pat.on_value_change(lambda _e: _preview())
+                file_pat.on_value_change(lambda _e: _preview())
+                _preview()
+                dry = ui.checkbox("Dry run (show destinations, change nothing)", value=False)
                 ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
                     "text-caption colophon-muted"
                 )
+
+                def _patterns() -> AudiobookPatterns:
+                    return AudiobookPatterns(
+                        folder=folder_pat.value or cfg.organize_folder_pattern,
+                        single_file=file_pat.value or cfg.organize_file_pattern,
+                    )
+
+                def _show_dry() -> None:
+                    body.clear()
+                    targets = controller.organize_targets(books, patterns=_patterns())
+                    by_id = {b.id: b for b in books}
+                    with body:
+                        ui.label("Dry run — destinations").classes("text-subtitle1")
+                        with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
+                                ui.list().props("dense").classes("w-full"):
+                            for bid, target in targets:
+                                b = by_id[bid]
+                                with ui.item(), ui.item_section():
+                                    ui.item_label(str(b.output_path or b.source_folder))
+                                    ui.item_label("-> " + str(target)).props("caption").classes(
+                                        "colophon-muted"
+                                    )
+                        with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                            ui.button("Back", on_click=show_options).props("flat")
+                            ui.button("Close", on_click=dialog.close).props("flat")
+
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _run() -> None:
+                        if dry.value:
+                            _show_dry()
+                            return
                         if not enc.value and not org.value:
                             ui.notify("Select Encode and/or Organize")
                             return
@@ -877,6 +924,7 @@ async def process_dialog(
                         options = EncodeJobOptions(
                             encode=bool(enc.value), organize=bool(org.value),
                             delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
+                            patterns=_patterns(),
                         )
                         await show_progress(options)
 
