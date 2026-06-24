@@ -157,6 +157,7 @@ class DownloadEntry(_Base):
     name: str
     status: str = "active"  # active / paused / done / failed
     detail: str = ""
+    file_ids: list[int] | None = None  # chosen file subset (None = default audio+cover)
 
 
 class EncodeJobOptions(_Base):
@@ -478,12 +479,15 @@ class AppController:
 
     async def _run_download(
         self, torrent_id: str, name: str,
-        *, progress: Callable[[int, int, str], None] | None = None,
+        *, file_ids: list[int] | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
     ) -> tuple[AcquireResult, list[str]]:
         """Download one torrent and ingest its folder, tracking progress/status in
         the registry. A cancel leaves the entry 'paused' (its .part files retained
-        for resume); otherwise it ends 'done' or 'failed'."""
-        entry = DownloadEntry(key=torrent_id, name=name, status="active")
+        for resume); otherwise it ends 'done' or 'failed'. `file_ids` restricts the
+        download to a chosen file subset (stored on the entry so a resume re-applies
+        it); None keeps the default audio+cover set."""
+        entry = DownloadEntry(key=torrent_id, name=name, status="active", file_ids=file_ids)
         self._downloads[torrent_id] = entry
         token = CancelToken()
         self._download_cancels[torrent_id] = token
@@ -497,6 +501,7 @@ class AppController:
             result = await download_torrent(
                 client, info, self._rd_download_dir(),
                 folder=self._download_folders.get(torrent_id),
+                file_ids=set(file_ids) if file_ids is not None else None,
                 progress=progress, byte_progress=_byte_progress, cancel=token,
             )
         finally:
@@ -518,19 +523,25 @@ class AppController:
 
     async def rd_download(
         self, torrent_id: str, *, name: str | None = None,
+        file_ids: list[int] | None = None,
         progress: Callable[[int, int, str], None] | None = None,
     ) -> tuple[AcquireResult, list[str]]:
-        """Download a torrent's audio/cover files, then ingest the folder, tracked
-        in the registry. Returns the download result and the ids of any newly
+        """Download a torrent (optionally only `file_ids`), then ingest the folder,
+        tracked in the registry. Returns the download result and the ids of any newly
         registered books. `name` is the display label for the Downloads section
-        (defaults to the torrent id); `progress(idx, total, filename)` is the
-        existing per-file callback (kept so the current Acquire UI keeps working)."""
-        return await self._run_download(torrent_id, name or torrent_id, progress=progress)
+        (defaults to the torrent id); `file_ids=None` keeps the default audio+cover
+        set; `progress(idx, total, filename)` is the existing per-file callback."""
+        return await self._run_download(
+            torrent_id, name or torrent_id, file_ids=file_ids, progress=progress
+        )
 
     async def resume_download(self, key: str) -> tuple[AcquireResult, list[str]]:
-        """Re-run a tracked (e.g. paused) download from its retained .part files."""
-        name = self._downloads[key].name if key in self._downloads else key
-        return await self._run_download(key, name)
+        """Re-run a tracked (e.g. paused) download from its retained .part files,
+        re-applying the file subset it was started with."""
+        entry = self._downloads.get(key)
+        name = entry.name if entry else key
+        file_ids = entry.file_ids if entry else None
+        return await self._run_download(key, name, file_ids=file_ids)
 
     def _rd_download_dir_in_scan_paths(self) -> bool:
         return self._rd_download_dir() in self.ctx.config.scan_paths
