@@ -124,16 +124,20 @@ async def download_torrent(
     torrent: RdTorrent,
     dest_root: Path,
     *,
+    folder: Path | None = None,
     progress: Callable[[int, int, str], None] | None = None,
     byte_progress: Callable[[int, int], None] | None = None,
     cancel: CancelToken | None = None,
 ) -> AcquireResult:
     """Unrestrict each of `torrent`'s links and stream the audio/cover files into a
-    fresh subfolder of `dest_root`. Per-file failures are isolated and reported.
+    subfolder of `dest_root`. Per-file failures are isolated and reported.
 
-    `progress(done, total, filename)` reports per-file granularity (file index of
-    total links), not per-byte; that is the granularity the acquire UI surfaces."""
-    folder = _unique_dir(dest_root, torrent.filename)
+    `folder` pins the destination: pass the folder from an interrupted attempt to
+    resume into it (so `stream_download` finds the retained `.part`); when omitted a
+    fresh deduped subfolder is allocated. `progress(done, total, filename)` reports
+    per-file granularity (file index of total links), not per-byte; that is the
+    granularity the acquire UI surfaces."""
+    folder = folder or _unique_dir(dest_root, torrent.filename)
     folder.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=folder)
     total = len(torrent.links)

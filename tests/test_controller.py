@@ -1195,8 +1195,9 @@ async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
 
-    async def fake_download(client, torrent, dest_root, *, progress=None, byte_progress=None, cancel=None):
-        folder = dest_root / "Mistborn"
+    async def fake_download(client, torrent, dest_root, *, folder=None, progress=None,
+                            byte_progress=None, cancel=None):
+        folder = folder or dest_root / "Mistborn"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "01.mp3").write_bytes(b"")
         return AcquireResult(folder=folder, files=[AcquiredFile("01.mp3", folder / "01.mp3", True)])
@@ -1207,6 +1208,49 @@ async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
     assert result.any_ok is True
     assert len(book_ids) == 1
     assert ctx.books.get(book_ids[0]) is not None
+    ctx.close()
+
+
+async def test_resume_download_reuses_the_interrupted_folder(tmp_path, monkeypatch):
+    from colophon.adapters.realdebrid import RdTorrentInfo
+    from colophon.services.acquire import AcquiredFile, AcquireResult
+
+    ctx = _ctx(tmp_path)
+    ctx.config.real_debrid_token = "t"
+    ctx.config.real_debrid_download_dir = tmp_path / "dl"
+    ctrl = AppController(ctx)
+
+    class FakeClient:
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id=tid, filename="Mistborn", status="downloaded", links=["L1"])
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
+
+    folders_seen: list = []
+
+    async def fake_download(client, torrent, dest_root, *, folder=None, progress=None,
+                            byte_progress=None, cancel=None):
+        folders_seen.append(folder)
+        used = folder or (dest_root / "Mistborn-7")  # a deduped name on the first call
+        used.mkdir(parents=True, exist_ok=True)
+        (used / "01.mp3").write_bytes(b"")
+        # the first call is cancelled (paused), so nothing ingests; the resume succeeds
+        ok = folder is not None
+        files = [AcquiredFile("01.mp3", used / "01.mp3", ok, None if ok else "cancelled")]
+        return AcquireResult(folder=used, files=files)
+
+    monkeypatch.setattr("colophon.controller.download_torrent", fake_download)
+
+    await ctrl.rd_download("tid", name="Mistborn")
+    assert ctrl.active_downloads()[0].status == "paused"
+    assert folders_seen[0] is None  # first attempt allocates a fresh folder
+
+    await ctrl.resume_download("tid")
+    # the resume must pass the SAME folder the first attempt used, so stream_download resumes its .part
+    assert folders_seen[1] == tmp_path / "dl" / "Mistborn-7"
+    assert ctrl.active_downloads()[0].status == "done"
     ctx.close()
 
 

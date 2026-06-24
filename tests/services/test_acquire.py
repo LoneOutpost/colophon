@@ -118,6 +118,22 @@ async def test_download_torrent_removes_empty_folder_on_total_failure(tmp_path, 
     assert not result.folder.exists()  # empty staging dir cleaned up
 
 
+async def test_download_torrent_reuses_pinned_folder_for_resume(tmp_path, monkeypatch):
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded", links=["L1"])
+    links = {"L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+
+    pinned = tmp_path / "existing-folder"
+    pinned.mkdir()
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, folder=pinned)
+    assert result.folder == pinned  # no new deduped dir; the .part of an interrupted run resumes here
+    assert (pinned / "01.mp3").exists()
+
+
 def test_sanitize_name_strips_separators():
     assert sanitize_name("a/b:c?.mp3") == "a_b_c_.mp3"
     assert sanitize_name("   ...   ") == "download"
