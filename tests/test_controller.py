@@ -2078,7 +2078,9 @@ def test_save_settings_applies_disable(tmp_path):
     from colophon.app_context import AppContext
     from colophon.controller import AppController
 
-    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"))
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite"), config_path=tmp_path / "c.toml"
+    )
     ctrl = AppController(ctx)
     assert any(s.name == "googlebooks" for s in ctx.sources)
     ctrl.save_settings(Config(db_path=tmp_path / "db.sqlite", disabled_sources=["googlebooks"]))
@@ -2248,7 +2250,10 @@ def test_rd_download_registry_and_scan_prompt(tmp_path):
     from colophon.controller import AppController
 
     dl = tmp_path / "dls"
-    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", real_debrid_download_dir=dl))
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite", real_debrid_download_dir=dl),
+        config_path=tmp_path / "c.toml",
+    )
     ctrl = AppController(ctx)
 
     assert ctrl.active_downloads() == []
@@ -2264,8 +2269,10 @@ def test_mark_downloads_scan_prompt_seen_suppresses(tmp_path):
     from colophon.app_context import AppContext
     from colophon.controller import AppController
 
-    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite",
-                                   real_debrid_download_dir=tmp_path / "dls"))
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite", real_debrid_download_dir=tmp_path / "dls"),
+        config_path=tmp_path / "c.toml",
+    )
     ctrl = AppController(ctx)
     assert ctrl.should_prompt_downloads_scan() is True
     ctrl.mark_downloads_scan_prompt_seen()
