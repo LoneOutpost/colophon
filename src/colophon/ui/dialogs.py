@@ -13,6 +13,10 @@ from contextlib import contextmanager
 
 from nicegui import ui
 
+from colophon.controller import AppController
+from colophon.core.fields import EDITABLE_FIELDS
+from colophon.core.models import BookUnit
+
 
 def dialog_actions(
     dialog: ui.dialog,
@@ -38,3 +42,34 @@ def busy(button: ui.button) -> Iterator[None]:
         yield
     finally:
         button.props(remove="loading")
+
+
+def remap_dialog(
+    controller: AppController,
+    book: BookUnit,
+    *,
+    refresh_list: Callable[[], None],
+    show_detail: Callable[[str], None],
+) -> None:
+    """Move one field's value into another field (fixes mis-tagging)."""
+    with ui.dialog() as dialog, ui.card().classes("w-80"):
+        ui.label("Remap a field").classes("text-subtitle1")
+        ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
+            "text-caption text-grey-6"
+        )
+        src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
+        dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
+        clear = ui.checkbox("Clear the source field after moving", value=True)
+
+        def _apply() -> None:
+            if src.value == dst.value:
+                ui.notify("Pick two different fields")
+                return
+            controller.remap(book, src=src.value, dst=dst.value, clear_source=clear.value)
+            dialog.close()
+            ui.notify(f"Remapped {src.value} to {dst.value}")
+            refresh_list()
+            show_detail(book.id)
+
+        dialog_actions(dialog, confirm_label="Remap", confirm_icon="swap_horiz", on_confirm=_apply)
+    dialog.open()

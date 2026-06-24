@@ -25,6 +25,7 @@ from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
+from colophon.ui.dialogs import remap_dialog
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -767,30 +768,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     commit_btn.on_click(_commit)
                 dialog.open()
 
-            def _remap_dialog(b=book) -> None:
-                with ui.dialog() as dialog, ui.card().classes("w-80"):
-                    ui.label("Remap a field").classes("text-subtitle1")
-                    ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
-                        "text-caption text-grey-6"
-                    )
-                    src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
-                    dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
-                    clear = ui.checkbox("Clear the source field after moving", value=True)
-
-                    def _apply() -> None:
-                        if src.value == dst.value:
-                            ui.notify("Pick two different fields")
-                            return
-                        controller.remap(b, src=src.value, dst=dst.value, clear_source=clear.value)
-                        dialog.close()
-                        ui.notify(f"Remapped {src.value} to {dst.value}")
-                        refresh_list()
-                        show_detail(b.id)
-
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                        ui.button("Remap", icon="swap_horiz", on_click=_apply)
-                dialog.open()
 
             async def _fetch_chapters(b=book, asin=None) -> None:
                 res = await controller.apply_audnexus_chapters(b, asin=asin)
@@ -890,7 +867,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             ui.label("Clean up").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
                                 ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
-                                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: _remap_dialog(b)).props("flat dense no-caps").tooltip("Move one field's value to another")
+                                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
 
                     # --- grouped fields ---
                     ui.label("Identity").classes("colophon-seccap")
