@@ -60,7 +60,7 @@ def render_acquire(controller: AppController) -> None:
         with ui.card().classes("q-ma-md"):
             ui.label("Real-Debrid is not configured.").classes("text-subtitle1")
             ui.label("Add a Real-Debrid token in Settings to use acquisition.").classes(
-                "text-caption text-grey-7"
+                "text-caption colophon-muted"
             )
             ui.button(
                 "Open Settings", icon="settings", on_click=lambda: ui.navigate.to("/settings")
@@ -228,7 +228,7 @@ def render_acquire(controller: AppController) -> None:
                     ui.label(cand.torrent.filename or "(unnamed)")
                     r["total"] = ui.label(_candidate_caption(cand, picks, tree)).props("caption")
                 if not cand.is_audiobook:
-                    ui.badge("no audio").props("color=grey-6 outline")
+                    ui.badge("no audio").props("outline").classes("colophon-chip")
                 ui.button("All", on_click=lambda _e, t=tid: _select_all(t, True)).props(
                     "flat dense"
                 ).on("click.stop")
@@ -255,7 +255,7 @@ def render_acquire(controller: AppController) -> None:
             if not visible:
                 ui.label(
                     "No torrents loaded yet" if not candidates else "No matching torrents"
-                ).classes("text-grey-6 q-pa-md")
+                ).classes("colophon-muted q-pa-md")
             else:
                 for cand in visible:
                     tid = cand.torrent.id
@@ -289,7 +289,7 @@ def render_acquire(controller: AppController) -> None:
         entries = controller.active_downloads()
         with downloads_box:
             if not entries:
-                ui.label("No downloads yet").classes("text-grey-6 q-pa-md")
+                ui.label("No downloads yet").classes("colophon-muted q-pa-md")
                 return
             with ui.list().props("separator dense").classes("w-full"):
                 for entry in entries:
@@ -356,7 +356,7 @@ def render_acquire(controller: AppController) -> None:
             ui.label("Add the downloads folder to your scan paths?").classes("text-subtitle1")
             ui.label(
                 "New downloads will then be picked up the next time you scan your library."
-            ).classes("text-caption text-grey-7")
+            ).classes("text-caption colophon-muted")
 
             def _not_now() -> None:
                 controller.mark_downloads_scan_prompt_seen()

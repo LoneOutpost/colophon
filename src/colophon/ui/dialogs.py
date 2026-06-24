@@ -112,7 +112,7 @@ def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) 
             if rt:
                 ui.item_label(rt).props("caption").classes("colophon-mono")
             if result.abridged is not None:
-                ui.badge("Abridged" if result.abridged else "Unabridged").props("color=grey-6 outline")
+                ui.badge("Abridged" if result.abridged else "Unabridged").props("outline").classes("colophon-chip")
 
 
 def remap_dialog(
@@ -126,7 +126,7 @@ def remap_dialog(
     with ui.dialog() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
         ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
-            "text-caption text-grey-6"
+            "text-caption colophon-muted"
         )
         src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
         dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
@@ -220,7 +220,7 @@ def cover_dialog(
             grid.clear()
             if not cands:
                 with grid:
-                    ui.label("No covers found").classes("text-grey-6")
+                    ui.label("No covers found").classes("colophon-muted")
                 return
             with grid:
                 for url in cands[:12]:
@@ -277,7 +277,7 @@ def compare_dialog(
             body.clear()
             with body:
                 if not services:
-                    ui.label("No metadata sources configured.").classes("text-grey-6")
+                    ui.label("No metadata sources configured.").classes("colophon-muted")
                     ui.button("Close", on_click=dialog.close).props("flat")
                     return
                 title_in = ui.input("Title", value=state["title"]).props("dense").classes("w-full")
@@ -285,7 +285,7 @@ def compare_dialog(
                 series_in = ui.input("Series", value=state["series"]).props("dense").classes("w-full")
                 asin_in = ui.input("ASIN", value=state["asin"]).props("dense").classes("w-full")
                 isbn_in = ui.input("ISBN", value=state["isbn"]).props("dense").classes("w-full")
-                ui.label("Search with").classes("text-caption text-grey-7 q-mt-sm")
+                ui.label("Search with").classes("text-caption colophon-muted q-mt-sm")
                 service_radio = ui.radio(dict(services), value=state["service"]).props("dense")
 
                 async def _go() -> None:
@@ -328,10 +328,10 @@ def compare_dialog(
                     ).props("flat dense no-caps")
                     ui.space()
                     ui.label(service_label.get(state["service"], "")).classes(
-                        "text-caption text-grey-6"
+                        "text-caption colophon-muted"
                     )
                 if not matches:
-                    ui.label("No matches found").classes("text-grey-6 q-pa-sm")
+                    ui.label("No matches found").classes("colophon-muted q-pa-sm")
                 with ui.list().props("dense").classes("w-full"):
                     for m in matches[:10]:
                         with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
@@ -401,7 +401,7 @@ async def tag_dialog(
                 ui.icon("warning", color="warning")
                 ui.label(warning).classes("text-caption text-warning")
         if plan.embed_cover:
-            ui.label("Cover art will be embedded.").classes("text-caption text-grey-7")
+            ui.label("Cover art will be embedded.").classes("text-caption colophon-muted")
         with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
             with ui.list().props("dense").classes("w-full"):
                 for fp in plan.files:
@@ -473,7 +473,7 @@ async def bulk_tag_dialog(
         actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
         with actions:
             progress_label = ui.label().classes(
-                "text-caption text-grey-7 q-mr-auto self-center"
+                "text-caption colophon-muted q-mr-auto self-center"
             )
             ui.button("Cancel", on_click=dialog.close).props("flat")
             commit_btn = ui.button("Write tags", icon="sell")
@@ -535,11 +535,11 @@ async def quick_match_dialog(
             checks: dict[str, ui.checkbox] = {}
             field_checks: dict[str, ui.checkbox] = {}
             with body:
-                ui.label("Search these sources").classes("text-caption text-grey-7")
+                ui.label("Search these sources").classes("text-caption colophon-muted")
                 for name, label in sources:
                     checks[name] = ui.checkbox(label, value=True).props("dense")
                 ui.label("Match using these fields").classes(
-                    "text-caption text-grey-7 q-mt-sm"
+                    "text-caption colophon-muted q-mt-sm"
                 )
                 for key, flabel in (
                     ("title", "Title"),
@@ -591,7 +591,7 @@ async def quick_match_dialog(
                                     ui.icon("block").classes("text-grey-5 q-mr-sm")
                                     with ui.column().classes("gap-0"):
                                         ui.label(cur)
-                                        ui.label("no match").classes("text-caption text-grey-6")
+                                        ui.label("no match").classes("text-caption colophon-muted")
                                 continue
                             with ui.row().classes("w-full items-center no-wrap"):
                                 checks[p.book.id] = ui.checkbox(value=p.confidence >= threshold)
@@ -602,7 +602,7 @@ async def quick_match_dialog(
                                             ui.label(f"{cur} → {p.best.title or '?'}")
                                             ui.label(
                                                 controller.source_label(p.best.provider)
-                                            ).classes("text-caption text-grey-6")
+                                            ).classes("text-caption colophon-muted")
                                         ui.space()
                                         ui.badge(f"{p.confidence:.0f}").props(
                                             f"color={_confidence_color(p.confidence)}"
@@ -663,7 +663,7 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
         ui.label(f"{plan.fields_filled} empty fields filled")
         ui.label(f"{plan.files_added} new files added")
         ui.label("Existing covers, edits, and review status are preserved.").classes(
-            "text-caption text-grey-7"
+            "text-caption colophon-muted"
         )
 
         async def _apply() -> None:
@@ -691,11 +691,11 @@ async def identify_dialog(
         ui.label(f"{plan.to_review} routed to Needs review")
         if plan.skipped:
             ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
-                "text-caption text-grey-7"
+                "text-caption colophon-muted"
             )
         ui.label(
             "Only empty fields are filled; covers, edits, and confirmed books are preserved."
-        ).classes("text-caption text-grey-7")
+        ).classes("text-caption colophon-muted")
 
         async def _apply() -> None:
             dialog.close()
@@ -753,7 +753,7 @@ async def process_dialog(
                 dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
                 conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
                 ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
-                    "text-caption text-grey-6"
+                    "text-caption colophon-muted"
                 )
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")

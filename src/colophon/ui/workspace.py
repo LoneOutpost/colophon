@@ -279,7 +279,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             return False
         with ui.dialog() as d, ui.card().classes("w-96"):
             ui.label("Unsaved changes").classes("text-subtitle1")
-            ui.label("This book has unsaved edits.").classes("text-caption text-grey-7")
+            ui.label("This book has unsaved edits.").classes("text-caption colophon-muted")
             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                 ui.button("Cancel", on_click=d.close).props("flat")
                 ui.button(
@@ -401,7 +401,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 _clear_editor_state()
                 with ui.column().classes("w-full items-center q-pa-lg"):
                     ui.icon("menu_book").classes("text-h3 text-grey-5")
-                    ui.label("Select a book to see its details").classes("text-grey-6")
+                    ui.label("Select a book to see its details").classes("colophon-muted")
                 return
 
             # editable fields, each prefilled with its value + provenance badge
@@ -425,7 +425,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         inputs[field] = inp
                         source = field_provenance(book, field)
                         if source:
-                            ui.badge(controller.source_label(source)).props("color=grey-6 outline").classes("self-center")
+                            ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
                         return
                     if field == "description":
                         inp = ui.textarea(field, value=value).props("dense").classes("col")
@@ -438,7 +438,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     inputs[field] = inp
                     source = field_provenance(book, field)
                     if source:
-                        ui.badge(controller.source_label(source)).props("color=grey-6 outline").classes("self-center")
+                        ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
 
             def _save_pending(b=book) -> bool:
                 """Persist any pending field edits silently, advancing the editor's
@@ -527,9 +527,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.badge(_slabel).props(f"color={_scolor} outline")
                     if book.source_folder is not None:
                         with ui.row().classes("items-center no-wrap q-gutter-xs").style("max-width:112px"):
-                            ui.icon("folder", size="14px").classes("text-grey-6")
+                            ui.icon("folder", size="14px").classes("colophon-muted")
                             ui.label(_short_location(book.source_folder)).classes(
-                                "text-caption text-grey-6 ellipsis"
+                                "text-caption colophon-muted ellipsis"
                             ).tooltip(str(book.source_folder))
                 # Main column: title, tools, grouped fields.
                 with ui.column().classes("col q-gutter-none"):
@@ -643,7 +643,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.row().classes("items-center w-full no-wrap q-mt-sm"):
                     ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2")
                     if applied:
-                        ui.badge("from Audible").props("color=grey-6 outline").classes("self-center")
+                        ui.badge("from Audible").props("outline").classes("colophon-chip").classes("self-center")
                     ui.space()
                     ui.button(
                         "Fetch from Audible", icon="cloud_download", on_click=_fetch_clicked
@@ -687,7 +687,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             with ui.row().classes("items-center w-full"):
                 ui.icon("edit_note").classes("text-h6")
                 ui.label(f"Editing {len(books)} books").classes("text-h6 q-ml-xs")
-            ui.label("Blank fields are left unchanged.").classes("text-caption text-grey-6")
+            ui.label("Blank fields are left unchanged.").classes("text-caption colophon-muted")
             ui.separator().classes("q-my-sm")
 
             inputs: dict[str, ui.input | ui.textarea] = {}
@@ -754,7 +754,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             ui.separator().classes("q-my-sm")
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                ui.label("Normalize").classes("text-caption text-grey-7")
+                ui.label("Normalize").classes("text-caption colophon-muted")
                 norm_options = {"__all__": "All text fields"} | {f: f for f in NORMALIZABLE_FIELDS}
                 norm_field = ui.select(
                     norm_options, value="__all__"
@@ -870,7 +870,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     total = sum(sf.duration_seconds for sf in book.source_files)
                     if book.source_files:
                         ui.label(_fmt_duration(total)).classes(
-                            "text-caption text-grey-6 colophon-mono"
+                            "text-caption colophon-muted colophon-mono"
                         )
                     ui.badge(f"{book.confidence:.0f}").props(
                         f"color={_confidence_color(book.confidence)}"
@@ -941,12 +941,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     "No books match the filter" if book_filter["text"].strip()
                     else "No books in this view"
                 )
-                ui.label(msg).classes("text-grey-6 q-pa-md")
+                ui.label(msg).classes("colophon-muted q-pa-md")
                 _list_el["el"] = None
                 _list_footer["el"] = None
                 return
             _list_el["el"] = ui.list().props("separator dense").classes("w-full")
-            _list_footer["el"] = ui.label().classes("text-caption text-grey-6 q-pa-sm")
+            _list_footer["el"] = ui.label().classes("text-caption colophon-muted q-pa-sm")
         _render_more()
         if list_scroll is not None:
             list_scroll.scroll_to(percent=0.0)
@@ -1021,12 +1021,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
             ui.label("Parse from filename").classes("text-h6")
             ui.label(f"Applies to {len(books)} selected book(s).").classes(
-                "text-caption text-grey-7"
+                "text-caption colophon-muted"
             )
 
             # Field key: the $Tokens that can appear in a parse pattern.
             with ui.row().classes("items-center q-gutter-xs q-mt-xs"):
-                ui.label("Fields:").classes("text-caption text-grey-7")
+                ui.label("Fields:").classes("text-caption colophon-muted")
                 for tok in PARSE_TOKENS:
                     badge = ui.badge(f"${tok.name}").props("color=grey-7 outline")
                     if tok.field is None:  # $Skip
@@ -1046,7 +1046,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 patterns = controller.ctx.config.saved_filename_patterns
                 with saved_row:
                     if not patterns:
-                        ui.label("No saved patterns yet").classes("text-caption text-grey-6")
+                        ui.label("No saved patterns yet").classes("text-caption colophon-muted")
                     for pat in patterns:
                         with ui.button(on_click=lambda p=pat: _load_pattern(p)).props(
                             "outline dense no-caps"
@@ -1081,7 +1081,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with fields_row:
                     if not present:
                         return
-                    ui.label("Write:").classes("text-caption text-grey-7 self-center")
+                    ui.label("Write:").classes("text-caption colophon-muted self-center")
                     for name in present:
                         chosen.setdefault(name, True)
                         ui.checkbox(name, value=chosen[name]).props("dense").on_value_change(
@@ -1119,7 +1119,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                         ui.item_label(controller.book_filename(b)).classes("ellipsis")
                                         if not parsed:
                                             ui.item_label("no match").props("caption").classes(
-                                                "text-grey-6"
+                                                "colophon-muted"
                                             )
                                         elif effective:
                                             shown = ", ".join(f"{k}={v}" for k, v in effective.items())
@@ -1127,9 +1127,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                         else:
                                             ui.item_label("(no fields to write)").props(
                                                 "caption"
-                                            ).classes("text-grey-6")
+                                            ).classes("colophon-muted")
                     ui.label(f"{matched} of {len(books)} filename(s) match").classes(
-                        "text-caption text-grey-7"
+                        "text-caption colophon-muted"
                     )
 
             def _on_pattern_change() -> None:
@@ -1190,7 +1190,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 "Each file moves into its own book folder, with author set from its "
                 "containing folder and title from the filename. Optionally write the "
                 "corrected tags into each file."
-            ).classes("text-caption text-grey-6")
+            ).classes("text-caption colophon-muted")
             override = ui.input("Override author for all", value="").props(
                 "dense clearable"
             ).classes("w-full")
@@ -1270,7 +1270,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         with list_container:
             if not roots:
                 ui.label("No scan paths configured. Set them in Settings.").classes(
-                    "text-grey-6 q-pa-md"
+                    "colophon-muted q-pa-md"
                 )
                 return
             if multi:
@@ -1295,13 +1295,13 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.column().classes("w-full items-center q-pa-lg q-gutter-sm"):
                     ui.icon("folder_open").classes("text-h4 text-grey-5")
                     ui.label("Pick a scan path above to browse its folders.").classes(
-                        "text-grey-6 text-center"
+                        "colophon-muted text-center"
                     )
                 return
             cwd = Path(str(cwd))
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
-                ui.icon("folder_open").classes("text-grey-7")
-                ui.label(str(cwd)).classes("text-caption text-grey-7 ellipsis col")
+                ui.icon("folder_open").classes("colophon-muted")
+                ui.label(str(cwd)).classes("text-caption colophon-muted ellipsis col")
                 ui.button(
                     "Organize into books", icon="subdirectory_arrow_right", on_click=_foster_dialog
                 ).props("color=primary").tooltip(
@@ -1322,7 +1322,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 if not listing.entries:
                     with ui.item():
                         with ui.item_section():
-                            ui.item_label("(empty)").classes("text-grey-6")
+                            ui.item_label("(empty)").classes("colophon-muted")
                 for entry in listing.entries:
                     if entry.is_dir:
                         with ui.item(on_click=lambda p=entry.path: _browse_to(p)).props("clickable"):
@@ -1377,7 +1377,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             if view["mode"] == "folders":
                 ui.label(
                     "Browse scan folders and foster loose files into their own subfolders."
-                ).classes("text-caption text-grey-6")
+                ).classes("text-caption colophon-muted")
                 return
             ui.switch(
                 "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
@@ -1608,7 +1608,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         status_container.clear()
         stats = controller.dashboard_stats()
         with status_container:
-            ui.icon("library_books").classes("text-grey-7")
+            ui.icon("library_books").classes("colophon-muted")
             ui.label(f"{stats.get('total', 0)} books").classes("text-caption")
             for state, label, color in _STATUS_BADGES:
                 count = stats.get(state, 0)
@@ -1616,7 +1616,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.badge(f"{label} {count}").props(f"color={color}")
             ui.space()
             if selected_ids:
-                ui.label(f"{len(selected_ids)} selected").classes("text-caption text-grey-7")
+                ui.label(f"{len(selected_ids)} selected").classes("text-caption colophon-muted")
                 ui.button(
                     "Clear all selected", icon="clear_all", on_click=_clear_selection,
                 ).props("flat dense").tooltip("Deselect every book, including any outside the current view")
@@ -1741,7 +1741,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 middle_title = ui.label("Books").classes("text-subtitle1")
                 middle_filter = ui.row().classes("items-center q-gutter-xs q-ml-sm no-wrap")
                 ui.space()
-                middle_count = ui.label("").classes("text-caption text-grey-7")
+                middle_count = ui.label("").classes("text-caption colophon-muted")
             middle_toolbar = ui.column().classes("w-full gap-1 q-mt-xs")
             ui.separator().classes("q-mt-xs")
             list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col")

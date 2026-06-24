@@ -105,7 +105,7 @@ def render_manage(controller: AppController) -> None:
         with ui.dialog() as dialog, ui.card().classes("w-96"):
             ui.label(f"Delete {kind}").classes("text-subtitle1")
             ui.label(f"Used by {count} books. Remove from all?").classes(
-                "text-caption text-grey-7"
+                "text-caption colophon-muted"
             )
             write_tags = _write_tags_checkbox()
 
@@ -133,7 +133,7 @@ def render_manage(controller: AppController) -> None:
             return
         with ui.dialog() as dialog, ui.card().classes("w-96"):
             ui.label(f"Merge {len(sources)} {kind} entries").classes("text-subtitle1")
-            ui.label("; ".join(sources)).classes("text-caption text-grey-7")
+            ui.label("; ".join(sources)).classes("text-caption colophon-muted")
             target_in = ui.select(
                 options=sources,
                 label="Merge into",
@@ -200,7 +200,7 @@ def render_manage(controller: AppController) -> None:
         with list_box:
             if not entries:
                 ui.label("No entries match" if needle else "No entries").classes(
-                    "text-grey-6 q-pa-md"
+                    "colophon-muted q-pa-md"
                 )
             else:
                 with ui.list().props("separator dense").classes("w-full"):
@@ -215,7 +215,7 @@ def render_manage(controller: AppController) -> None:
                                 ui.item_label(entry.name)
                             with ui.item_section().props("side"):
                                 with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                                    ui.badge(str(entry.count)).props("color=grey-6 outline")
+                                    ui.badge(str(entry.count)).props("outline").classes("colophon-chip")
                                     ui.button(
                                         icon="arrow_outward",
                                         on_click=lambda n=entry.name: ui.navigate.to(
