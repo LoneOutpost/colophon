@@ -20,6 +20,7 @@ from colophon.controller import AppController
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
 from colophon.core.sources import SourceResult
+from colophon.ui.batch_log import BatchItem, BatchLog
 
 logger = logging.getLogger(__name__)
 
@@ -706,27 +707,37 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
 
 
 async def identify_dialog(
-    controller: AppController, *, refresh_all: Callable[[], None], button: ui.button
+    controller: AppController, *, refresh_all: Callable[[], None]
 ) -> None:
-    """Preview source matches for unidentified books and apply (fill empties, route review)."""
-    with busy(button):  # the preview queries every source; show progress
-        plan = await controller.identify_preview()
-    if not plan.proposals:
+    """Preview source matches for unidentified books with a live per-book log, then apply
+    (fill empties, route review) or retry the books that found no match."""
+    candidates = controller.identify_candidates()
+    if not candidates:
         ui.notify("Nothing to identify")
         return
-    with ui.dialog() as dialog, ui.card().classes("w-96"):
-        ui.label("Identify results").classes("text-subtitle1")
-        ui.label(f"{plan.to_apply} books auto-matched (fields filled)")
-        ui.label(f"{plan.to_review} routed to Needs review")
-        if plan.skipped:
-            ui.label(f"{plan.skipped} skipped (confirmed or organized)").classes(
-                "text-caption colophon-muted"
-            )
-        ui.label(
-            "Only empty fields are filled; covers, edits, and confirmed books are preserved."
-        ).classes("text-caption colophon-muted")
 
-        async def _apply() -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+        ui.label(f"Identifying {len(candidates)} book(s)").classes("text-subtitle1")
+        log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in candidates])
+        state = {"cancelled": False}
+
+        def _cancel() -> None:
+            state["cancelled"] = True
+            dialog.close()
+
+        def _progress(book_id: str, kind: str) -> None:
+            log.update(book_id, "match found" if kind == "ok" else "no match", kind=kind)
+
+        def _summary(plan) -> str:
+            no_match = sum(1 for p in plan.proposals if p.best is None)
+            parts = [f"{plan.to_apply} auto-matched", f"{plan.to_review} review"]
+            if no_match:
+                parts.append(f"{no_match} no match")
+            if plan.skipped:
+                parts.append(f"{plan.skipped} skipped")
+            return "  ·  ".join(parts)
+
+        async def _apply(plan) -> None:
             dialog.close()
             summary = await asyncio.to_thread(controller.apply_identify, plan)
             refresh_all()
@@ -743,8 +754,24 @@ async def identify_dialog(
                 actions=actions,
             )
 
-        dialog_actions(dialog, confirm_label="Identify", confirm_icon="travel_explore", on_confirm=_apply, confirm_props="")
-    dialog.open()
+        async def _retry(plan, ids: list[str]) -> None:
+            new_plan = await controller.retry_identify(plan, ids, progress=_progress)
+            _finish(new_plan)
+
+        def _finish(plan) -> None:
+            log.finish(
+                _summary(plan),
+                on_close=dialog.close,
+                on_retry=lambda ids, p=plan: _retry(p, ids),
+                extra=[("Apply", "done_all", lambda p=plan: _apply(p))],
+            )
+
+        dialog.open()
+        log.cancel_action(_cancel)
+        plan = await controller.identify_preview(progress=_progress)
+        if state["cancelled"]:
+            return
+        _finish(plan)
 
 
 async def process_dialog(
@@ -804,50 +831,33 @@ async def process_dialog(
 
         async def show_progress(options) -> None:
             body.clear()
-            statuses: dict[str, ui.item_label] = {}
             token = CancelToken()
+            _KIND = {"done": "ok", "failed": "fail", "cancelled": "skip"}
             with body:
                 ui.label(f"Processing {len(books)} book(s)").classes("text-subtitle1")
-                with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
-                    with ui.list().props("dense").classes("w-full"):
-                        for b in books:
-                            with ui.item(), ui.item_section():
-                                ui.item_label(b.title or "(untitled)")
-                                statuses[b.id] = ui.item_label("queued").props("caption")
-                actions = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
-                with actions:
-                    ui.button("Cancel", icon="stop", on_click=token.cancel).props("flat")
+                log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in books])
+            log.cancel_action(token.cancel)
 
             def _progress(book_id: str, status: str) -> None:
-                if book_id in statuses:
-                    statuses[book_id].set_text(status)
+                log.update(book_id, status, kind=_KIND.get(status, "running"))
 
-            result = await controller.run_encode_job(books, options, progress=_progress, cancel=token)
+            await controller.run_encode_job(books, options, progress=_progress, cancel=token)
             clear_selection()
             await controller.trigger_abs_scan()  # best-effort library rescan
 
-            failed = [r for r in result.results if r.status == "failed"]
-            done = sum(1 for r in result.results if r.status == "done")
-            cancelled = sum(1 for r in result.results if r.status == "cancelled")
-            actions.clear()
-            with actions:
-                note = f"{done} done"
-                if failed:
-                    note += f", {len(failed)} failed"
-                if cancelled:
-                    note += f", {cancelled} cancelled"
-                ui.label(note).classes("text-body2 q-mr-auto self-center")
-                if failed:
-                    failed_ids = {r.book_id for r in failed}
-                    retry = [b for b in books if b.id in failed_ids]
-                    ui.button("Retry failed", icon="replay",
-                              on_click=lambda r=retry, o=options: _retry(r, o))
-                ui.button("Close", on_click=_close).props("flat")
+            c = log.counts()
+            note = f"{c.get('ok', 0)} done"
+            if c.get("fail"):
+                note += f", {c['fail']} failed"
+            if c.get("skip"):
+                note += f", {c['skip']} cancelled"
 
-        async def _retry(retry_books: list, options) -> None:
-            nonlocal books
-            books = retry_books
-            await show_progress(options)
+            async def _retry_failed(ids: list[str]) -> None:
+                nonlocal books
+                books = [b for b in books if b.id in set(ids)]
+                await show_progress(options)
+
+            log.finish(note, on_close=_close, on_retry=lambda ids: _retry_failed(ids))
 
         dialog.open()
         show_options()

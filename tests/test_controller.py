@@ -2423,3 +2423,55 @@ def test_mark_downloads_scan_prompt_seen_suppresses(tmp_path):
     ctrl.mark_downloads_scan_prompt_seen()
     assert ctrl.ctx.config.downloads_scan_prompt_seen is True
     assert ctrl.should_prompt_downloads_scan() is False
+
+
+async def test_quick_match_scan_emits_progress_ok_and_fail(tmp_path):
+    # ok: a source returns a candidate.
+    ctx = _ctx(tmp_path / "ok", sources=[
+        _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["x"])])
+    ])
+    hit = BookUnit.new(source_folder=tmp_path / "hit")
+    hit.title = "Dune"
+    ctx.books.upsert(hit)
+    events: list[tuple[str, str]] = []
+    await AppController(ctx).quick_match_scan(
+        [hit], ["audnexus"], progress=lambda bid, kind: events.append((bid, kind))
+    )
+    assert events == [(hit.id, "ok")]
+    ctx.close()
+
+    # fail: the source returns nothing.
+    ctx2 = _ctx(tmp_path / "fail", sources=[_StubSource("audnexus", [])])
+    miss = BookUnit.new(source_folder=tmp_path / "miss")
+    miss.title = "Nonesuch"
+    ctx2.books.upsert(miss)
+    events2: list[tuple[str, str]] = []
+    await AppController(ctx2).quick_match_scan(
+        [miss], ["audnexus"], progress=lambda bid, kind: events2.append((bid, kind))
+    )
+    assert events2 == [(miss.id, "fail")]
+    ctx2.close()
+
+
+async def test_retry_identify_requeries_only_given_ids_and_merges(tmp_path):
+    # First scan: a source that returns nothing -> both books are no-match.
+    ctx = _ctx(tmp_path, sources=[_StubSource("audnexus", [])])
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    a.title = "Dune"
+    ctx.books.upsert(a)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    b.title = "Hyperion"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    plan = await ctrl.identify_preview()
+    assert all(p.best is None for p in plan.proposals)  # both no-match
+
+    # Now the source can find a candidate; retry only book a.
+    ctx.sources = [_StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["x"])])]
+    merged = await ctrl.retry_identify(plan, [a.id])
+
+    by_id = {p.book.id: p for p in merged.proposals}
+    assert by_id[a.id].best is not None  # a re-queried and matched
+    assert by_id[b.id].best is None      # b untouched
+    assert len(merged.proposals) == 2
+    ctx.close()
