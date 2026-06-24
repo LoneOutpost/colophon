@@ -44,3 +44,17 @@ def test_migrate_filename_template():
 def test_migrate_is_idempotent_and_leaves_unknown():
     assert migrate_filename_template("$Author - $Title") == "$Author - $Title"
     assert migrate_filename_template("%bogus%") == "%bogus%"  # unknown left verbatim
+
+
+def test_sername_is_hidden_alias():
+    from colophon.core.tokens import token_by_name
+    t = token_by_name("SerName")
+    assert t is not None and t.builds and t.hidden  # still renders, but not advertised
+
+
+def test_migrate_directory_scheme():
+    from colophon.core.tokens import migrate_directory_scheme
+    assert migrate_directory_scheme("Author/Series/Title") == "$Author/$Series/$Title"
+    assert migrate_directory_scheme("Author/Foo/Title") == "$Author/$Skip/$Title"  # unknown -> skip
+    assert migrate_directory_scheme("") == ""
+    assert migrate_directory_scheme("$Author/$Series") == "$Author/$Series"  # idempotent

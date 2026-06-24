@@ -84,6 +84,9 @@ def reconcile(
             book.narrators, book.provenance["narrators"] = _split_people(embedded.narrator), Provenance.TAG.value
         elif sc and sc.narrators:
             book.narrators, book.provenance["narrators"] = list(sc.narrators), Provenance.SIDECAR.value
+        elif dirf.get("narrator"):
+            book.narrators = [dirf["narrator"]]
+            book.provenance["narrators"] = Provenance.DIRECTORY.value
         elif filename_fields.get("narrator"):
             book.narrators = [filename_fields["narrator"]]
             book.provenance["narrators"] = Provenance.FILENAME.value
@@ -96,7 +99,7 @@ def reconcile(
              if embedded.series else None, Provenance.TAG),
             ([SeriesRef(name=sc.series_name, sequence=sc.series_sequence)]
              if sc and sc.series_name else None, Provenance.SIDECAR),
-            ([SeriesRef(name=dirf["series"], sequence=None)]
+            ([SeriesRef(name=dirf["series"], sequence=to_float(dirf.get("sequence")))]
              if dirf.get("series") else None, Provenance.DIRECTORY),
             ([SeriesRef(name=filename_fields["series"],
                         sequence=to_float(filename_fields.get("sequence")))]
@@ -111,6 +114,11 @@ def reconcile(
             book.publish_year, book.provenance["publish_year"] = embedded.year, Provenance.TAG.value
         elif sc and sc.publish_year is not None:
             book.publish_year, book.provenance["publish_year"] = sc.publish_year, Provenance.SIDECAR.value
+        elif dirf.get("year"):
+            year = to_int(dirf["year"])
+            if year is not None:
+                book.publish_year = year
+                book.provenance["publish_year"] = Provenance.DIRECTORY.value
         elif filename_fields.get("year"):
             year = to_int(filename_fields["year"])
             if year is not None:

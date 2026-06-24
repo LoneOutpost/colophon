@@ -9,7 +9,7 @@ import tomli_w
 from platformdirs import user_config_path
 from pydantic import BaseModel
 
-from colophon.core.tokens import migrate_filename_template
+from colophon.core.tokens import migrate_directory_scheme, migrate_filename_template
 
 
 class Config(BaseModel):
@@ -59,6 +59,8 @@ def load_config(path: Path | None = None) -> Config:
     cfg.saved_filename_patterns = [
         migrate_filename_template(p) for p in cfg.saved_filename_patterns
     ]
+    # Migrate a legacy bare directory scheme ('Author/Series/Title') to $Token form.
+    cfg.directory_scheme = migrate_directory_scheme(cfg.directory_scheme)
     return cfg
 
 
@@ -88,9 +90,10 @@ scan_paths = []
 # Uses $Token markup (see the Settings page for the full list of parseable tokens).
 filename_template = "$Author - $Title"
 
-# Infer author/series/title from the folder hierarchy when a book folder's depth
-# under a scan path matches this scheme. Empty disables it. Example:
-# directory_scheme = "Author/Series/Title"
+# Infer fields from the folder hierarchy when a book folder's depth under a scan
+# path matches this scheme. Uses the same $Token markup as the filename template;
+# blank disables it. Example:
+# directory_scheme = "$Author/$Series/$Title"
 
 # Organize naming. LazyLibrarian-style $Token patterns used when organizing M4Bs
 # into the library, so the layout matches a LazyLibrarian library. Tokens include

@@ -60,7 +60,7 @@ def _token_reference() -> None:
 
     ui.markdown(
         "**Tokens** (shared by the scan and organize patterns):\n\n"
-        + "\n".join(f"- {line(t)}" for t in TOKENS)
+        + "\n".join(f"- {line(t)}" for t in TOKENS if not t.hidden)
         + "\n\nUse `$$` for a literal `$`. Unknown tokens and missing values render empty; "
         "`$Skip` matches and discards a run when parsing."
     ).classes("text-caption text-grey")
@@ -77,8 +77,8 @@ def render_settings(controller: AppController) -> None:
         with ui.column().classes("w-full gap-4").style("max-width: 760px"):
             with _section(
                 "Scanning (read metadata in)",
-                "Folders to scan, and how to read fields out of existing filenames and "
-                "folder names. These do not write anything.",
+                "Defaults for reading fields out of filenames and folder names. You can "
+                "override these per run in the Scan dialog. These do not write anything.",
             ):
                 scan_paths = ui.textarea(
                     "Scan paths (one per line)", value=_paths_to_text(cfg.scan_paths)
@@ -89,15 +89,15 @@ def render_settings(controller: AppController) -> None:
                 ).props(field).classes("w-full")
                 scheme = ui.input(
                     "Directory scheme (infers fields from folder names, e.g. "
-                    "Author/Series/Title; blank disables)",
+                    "$Author/$Series/$Title; blank disables)",
                     value=cfg.directory_scheme,
                 ).props(field).classes("w-full")
 
             with _section(
                 "Organizing (write files out)",
-                "Where organized M4Bs are written and how they are named, using "
-                "LazyLibrarian-style $Token markup so the layout matches a "
-                "LazyLibrarian library.",
+                "Defaults for where organized M4Bs are written and how they are named, "
+                "using LazyLibrarian-style $Token markup. You can override these per run "
+                "in the Encode + organize dialog.",
             ):
                 library_root = ui.input(
                     "Library root (destination for organized M4Bs)",
