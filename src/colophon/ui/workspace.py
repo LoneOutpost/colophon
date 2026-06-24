@@ -25,6 +25,7 @@ from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, norm
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.dialogs import (
+    bulk_remap_dialog,
     bulk_tag_dialog,
     compare_dialog,
     cover_dialog,
@@ -785,6 +786,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Quick Match", icon="auto_awesome", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
+                ui.button("Remap", icon="swap_horiz", on_click=lambda: bulk_remap_dialog(controller, books, clear_selection=_clear_selection)).props("outline").tooltip("Move one field's value to another across the selection")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)

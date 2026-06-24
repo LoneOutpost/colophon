@@ -146,6 +146,35 @@ def remap_dialog(
     dialog.open()
 
 
+def bulk_remap_dialog(
+    controller: AppController,
+    books: list[BookUnit],
+    *,
+    clear_selection: Callable[[], None],
+) -> None:
+    """Move one field's value into another across all selected books (fixes mis-tagging)."""
+    with ui.dialog() as dialog, ui.card().classes("w-80"):
+        ui.label("Remap a field").classes("text-subtitle1")
+        ui.label(
+            f"Move a field's value into another across {len(books)} selected book(s)."
+        ).classes("text-caption colophon-muted")
+        src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
+        dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
+        clear = ui.checkbox("Clear the source field after moving", value=True)
+
+        def _apply() -> None:
+            if src.value == dst.value:
+                ui.notify("Pick two different fields")
+                return
+            controller.bulk_remap(books, src=src.value, dst=dst.value, clear_source=clear.value)
+            dialog.close()
+            ui.notify(f"Remapped {src.value} to {dst.value} for {len(books)} book(s)")
+            clear_selection()
+
+        dialog_actions(dialog, confirm_label="Remap", confirm_icon="swap_horiz", on_confirm=_apply)
+    dialog.open()
+
+
 def rename_dialog(
     controller: AppController,
     book: BookUnit,
