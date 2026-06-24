@@ -7,6 +7,7 @@ from pathlib import Path
 
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.core.models import BookUnit, SeriesRef
+from colophon.core.tokens import BUILD_TOKENS
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # Match any $word token; \w+ captures the whole identifier so a dict lookup is
@@ -56,6 +57,7 @@ def _token_values(book: BookUnit) -> dict[str, str]:
 
 def expand_pattern(pattern: str, book: BookUnit) -> str:
     values = _token_values(book)
+    assert values.keys() == {t.name for t in BUILD_TOKENS}, "pathscheme/tokens drift"
     protected = pattern.replace("$$", _DOLLAR_SENTINEL)
     expanded = _TOKEN.sub(lambda m: values.get(m.group(1), ""), protected)
     return expanded.replace(_DOLLAR_SENTINEL, "$")
