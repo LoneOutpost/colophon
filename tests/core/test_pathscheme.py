@@ -79,3 +79,44 @@ def test_build_target_path_authorless_collapses_segment(tmp_path):
     target = build_target_path(tmp_path, pats, b)
     # the empty author segment collapses — Path swallows ""
     assert target == tmp_path / "Solo" / "Solo.m4b"
+
+
+def test_narrator_token_uses_first_narrator():
+    b = _book()
+    b.narrators = ["Michael Kramer", "Kate Reading"]
+    assert expand_pattern("$Narrator", b) == "Michael Kramer"  # first, mirroring $Author
+
+
+def test_narrator_empty_when_absent():
+    assert expand_pattern("$Narrator", _book()) == ""
+
+
+def test_abridged_token_renders_word():
+    b = _book()
+    b.abridged = True
+    assert expand_pattern("$Abridged", b) == "Abridged"
+    b.abridged = False
+    assert expand_pattern("$Abridged", b) == "Unabridged"
+
+
+def test_abridged_empty_when_unknown():
+    assert expand_pattern("$Abridged", _book()) == ""  # None by default
+
+
+def test_double_dollar_is_literal():
+    assert expand_pattern("$$Author", _book()) == "$Author"
+    assert expand_pattern("$$Title = $Title", _book()) == "$Title = The Way of Kings"
+
+
+def test_sample_target_renders_relative_path():
+    from colophon.core.pathscheme import sample_target
+
+    out = sample_target("$Author/$Series #$PadNum - $Title", "$Title")
+    assert out == "Brandon Sanderson/The Stormlight Archive #01 - The Way of Kings/The Way of Kings.m4b"
+
+
+def test_sample_target_falls_back_on_empty_patterns():
+    from colophon.core.pathscheme import sample_target
+
+    out = sample_target("", "")
+    assert out == "Brandon Sanderson/The Way of Kings/The Way of Kings.m4b"
