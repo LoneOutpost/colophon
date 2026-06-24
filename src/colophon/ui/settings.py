@@ -12,6 +12,7 @@ from nicegui import ui
 from colophon.adapters.config import Config
 from colophon.controller import AppController
 from colophon.core.normalize import NORMALIZABLE_FIELDS
+from colophon.core.pathscheme import sample_target
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -73,7 +74,71 @@ def render_settings(controller: AppController) -> None:
                     "Filename template", value=cfg.filename_template
                 ).props(field).classes("w-full")
 
-            with _section("Encoding & review"):
+            with _section(
+                "Organize naming (LazyLibrarian parity)",
+                "Patterns for where organized M4Bs are written, using "
+                "LazyLibrarian-style $Token markup. Match these to your "
+                "LazyLibrarian layout so you can copy the organized files "
+                "straight into your LazyLibrarian library.",
+            ):
+                folder_pat = ui.input(
+                    "Folder pattern", value=cfg.organize_folder_pattern
+                ).props(field).classes("w-full")
+                file_pat = ui.input(
+                    "File name pattern (no extension)", value=cfg.organize_file_pattern
+                ).props(field).classes("w-full")
+
+                ui.markdown(
+                    "**Tokens:** `$Author` `$SortAuthor` (Last, First) `$Title` "
+                    "`$SortTitle` (no leading article) `$Series` `$SerNum` `$PadNum` "
+                    "(zero-padded) `$PubYear` `$Narrator` `$Abridged` "
+                    "(Abridged/Unabridged). Use `$$` for a literal $. Unknown tokens "
+                    "and missing values render empty.\n\n"
+                    "**Examples:** `$Author/$Series #$PadNum - $Title` &middot; "
+                    "`$SortAuthor/$Title ($PubYear)`"
+                ).classes("text-caption text-grey")
+
+                preview = ui.label("").classes("text-caption text-weight-medium")
+
+                def _update_preview() -> None:
+                    preview.set_text(
+                        "Preview: " + sample_target(folder_pat.value, file_pat.value)
+                    )
+
+                folder_pat.on_value_change(lambda _e: _update_preview())
+                file_pat.on_value_change(lambda _e: _update_preview())
+                _update_preview()
+
+                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                    import_path = ui.input("LazyLibrarian config.ini path").props(
+                        field
+                    ).classes("col")
+
+                    def _import_ll() -> None:
+                        raw = import_path.value.strip()
+                        if not raw:
+                            ui.notify("Enter a config.ini path first", type="warning")
+                            return
+                        try:
+                            folder, file = controller.import_ll_patterns(Path(raw))
+                        except FileNotFoundError:
+                            ui.notify(
+                                "Couldn't read LazyLibrarian patterns from that path",
+                                type="negative",
+                            )
+                            return
+                        folder_pat.set_value(folder)
+                        file_pat.set_value(file)
+                        _update_preview()
+                        ui.notify("Imported patterns from LazyLibrarian config.ini")
+
+                    ui.button("Import", icon="download", on_click=_import_ll).props("flat")
+
+            with _section(
+                "Encoding & review",
+                "Transcode bitrate for MP3 sources, and the confidence score at or "
+                "above which a book is automatically marked ready.",
+            ):
                 bitrate = ui.input(
                     "Transcode bitrate", value=cfg.transcode_bitrate
                 ).props(field).classes("w-full")
@@ -89,7 +154,11 @@ def render_settings(controller: AppController) -> None:
                     "Root path (reverse-proxy base, e.g. /colophon)", value=cfg.root_path
                 ).props(field).classes("w-full")
 
-            with _section("AudiobookShelf", "Trigger a library rescan after organizing."):
+            with _section(
+                "AudiobookShelf",
+                "Trigger an AudiobookShelf library rescan after organizing. Server "
+                "URL, an API token, and the id of the library to rescan.",
+            ):
                 abs_url = ui.input("Server URL", value=cfg.audiobookshelf_url or "").props(
                     field
                 ).classes("w-full")
@@ -100,12 +169,20 @@ def render_settings(controller: AppController) -> None:
                     "Library id", value=cfg.audiobookshelf_library_id or ""
                 ).props(field).classes("w-full")
 
-            with _section("abs-agg", "Audiobook metadata aggregator. Set its base URL to enable its providers."):
+            with _section(
+                "abs-agg",
+                "Self-hosted audiobook metadata aggregator. Set its base URL to "
+                "auto-discover and enable its providers as match sources.",
+            ):
                 abs_agg_url = ui.input(
                     "Base URL", value=cfg.abs_agg_url or ""
                 ).props(field).classes("w-full")
 
-            with _section("Real-Debrid", "Browse and download audiobooks from your account."):
+            with _section(
+                "Real-Debrid",
+                "Browse and download audiobooks from your Real-Debrid account on the "
+                "Acquire page. Private API token, and where downloads land before ingest.",
+            ):
                 rd_token = ui.input(
                     "API token", value=cfg.real_debrid_token or "", password=True
                 ).props(field).classes("w-full")
@@ -134,7 +211,11 @@ def render_settings(controller: AppController) -> None:
                         "Test connection", icon="wifi_tethering", on_click=test_rd
                     ).props("flat").classes("q-ml-auto")
 
-            with _section("Genres", "Canonicalize and optionally restrict genres."):
+            with _section(
+                "Genres",
+                "Control which genres survive matching: an optional whitelist, the "
+                "accepted-genre list, and rename mappings applied on Normalize.",
+            ):
                 genre_whitelist = ui.switch(
                     "Enforce accepted-genres whitelist", value=cfg.genre_whitelist_enabled
                 )
@@ -219,6 +300,8 @@ def render_settings(controller: AppController) -> None:
                         db_path=cfg.db_path,  # unchanged here; db path edits need a restart
                         scan_paths=_text_to_paths(scan_paths.value),
                         library_root=_opt_path(library_root.value),
+                        organize_folder_pattern=folder_pat.value or "$Author/$Title",
+                        organize_file_pattern=file_pat.value or "$Title",
                         filename_template=template.value or "%author% - %title%",
                         review_threshold=float(threshold.value),
                         transcode_bitrate=bitrate.value or "64k",
