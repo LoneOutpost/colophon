@@ -142,7 +142,9 @@ body {
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }
 .colophon-chip { color: var(--colophon-muted); border-color: var(--colophon-border); }
-.body--dark .q-btn.bg-primary { color: #1c1916; }
+.body--dark .q-btn.bg-primary, .body--dark .q-btn.bg-primary .q-btn__content {
+  color: #1c1916 !important;  /* dark accent fails white-on-fill; beats Quasar .text-white */
+}
 .q-dialog .q-card { max-width: calc(100vw - 2rem); }
 """
 
