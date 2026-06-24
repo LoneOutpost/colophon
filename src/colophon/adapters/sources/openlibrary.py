@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from colophon.adapters.http import HTTP_RETRY
+from colophon.adapters.http import get_json_list
 from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
 
@@ -29,18 +29,8 @@ class OpenLibrarySource:
             params = {"title": query.title, "limit": 5, "fields": _FIELDS}
             if query.author:
                 params["author"] = query.author
-        try:
-            resp = await self._get(params)
-        except httpx.HTTPError:
-            return []
-        if resp.status_code >= 400:
-            return []
-        docs = (resp.json() or {}).get("docs") or []
+        docs = await get_json_list(self._client, "/search.json", params=params, key="docs")
         return [self._to_result(doc) for doc in docs]
-
-    @HTTP_RETRY
-    async def _get(self, params: dict[str, object]) -> httpx.Response:
-        return await self._client.get("/search.json", params=params)
 
     def _to_result(self, doc: dict[str, Any]) -> SourceResult:
         cover = doc.get("cover_i")

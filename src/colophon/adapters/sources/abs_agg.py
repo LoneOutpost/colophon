@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from colophon.adapters.http import HTTP_RETRY
+from colophon.adapters.http import get_json_list
 from colophon.core.coerce import to_float, year_or_none
 from colophon.core.isbn import normalize_isbn
 from colophon.core.people import split_people
@@ -53,18 +53,10 @@ class AbsAggSource:
         params: dict[str, object] = {"title": query.title}
         if query.author:
             params["author"] = query.author
-        try:
-            resp = await self._get(params)
-        except httpx.HTTPError:
-            return []
-        if resp.status_code >= 400:
-            return []
-        matches = (resp.json() or {}).get("matches") or []
+        matches = await get_json_list(
+            self._client, f"/{self.name}/search", params=params, key="matches"
+        )
         return [self._to_result(m) for m in matches]
-
-    @HTTP_RETRY
-    async def _get(self, params: dict[str, object]) -> httpx.Response:
-        return await self._client.get(f"/{self.name}/search", params=params)
 
     def _to_result(self, m: dict[str, Any]) -> SourceResult:
         series = m.get("series") or []

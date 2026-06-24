@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from colophon.adapters.http import HTTP_RETRY
+from colophon.adapters.http import get_json_list
 from colophon.core.coerce import year_or_none
 from colophon.core.isbn import normalize_isbn
 from colophon.core.sources import SourceQuery, SourceResult
@@ -20,10 +20,6 @@ class GoogleBooksSource:
             base_url="https://www.googleapis.com", timeout=15.0
         )
 
-    @HTTP_RETRY
-    async def _get(self, q: str) -> httpx.Response:
-        return await self._client.get("/books/v1/volumes", params={"q": q, "maxResults": 5})
-
     async def search(self, query: SourceQuery) -> list[SourceResult]:
         if not query.title and not query.isbn:
             return []
@@ -35,13 +31,9 @@ class GoogleBooksSource:
                 q += f"+inauthor:{query.author}"
             if query.series:
                 q += f"+{query.series}"  # additive free-text term to disambiguate within a series
-        try:
-            resp = await self._get(q)
-        except httpx.HTTPError:
-            return []
-        if resp.status_code >= 400:
-            return []
-        items = (resp.json() or {}).get("items") or []
+        items = await get_json_list(
+            self._client, "/books/v1/volumes", params={"q": q, "maxResults": 5}, key="items"
+        )
         return [self._to_result(item.get("volumeInfo") or {}) for item in items]
 
     def _to_result(self, vol: dict[str, Any]) -> SourceResult:

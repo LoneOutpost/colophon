@@ -74,7 +74,10 @@ async def test_retries_on_transport_error_then_gives_up(monkeypatch):
         raise httpx.ConnectError("boom")
 
     src = _source(handler)
-    # neutralize backoff so the test is instant (auto-restored by monkeypatch)
-    monkeypatch.setattr(src._get.__func__.retry, "wait", tenacity.wait_none())
+    # neutralize backoff so the test is instant (auto-restored by monkeypatch). The
+    # retry now lives on the shared http.get_json_list helper, not a per-source _get.
+    from colophon.adapters import http
+
+    monkeypatch.setattr(http._retried_get.retry, "wait", tenacity.wait_none())
     assert await src.search(SourceQuery(title="Dune")) == []
     assert calls["n"] == 3
