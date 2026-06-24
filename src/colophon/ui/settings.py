@@ -13,8 +13,7 @@ from colophon.adapters.config import Config
 from colophon.controller import AppController
 from colophon.core.normalize import NORMALIZABLE_FIELDS
 from colophon.core.pathscheme import sample_target
-from colophon.ui.tabs import app_tabs
-from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
+from colophon.ui.chrome import page_header
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +48,10 @@ def _section(title: str, subtitle: str | None = None) -> Iterator[None]:
 
 
 def render_settings(controller: AppController) -> None:
-    apply_theme()
-    dark = setup_dark_mode()
     cfg = controller.ctx.config
 
-    with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon("auto_stories", color="primary").classes("text-h5")
-        ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
-        app_tabs(controller, "settings")
-        ui.space()
-        dark_mode_button(dark)
+    with page_header(controller, "settings", icon="auto_stories"):
+        pass
 
     field = "outlined dense"
     with ui.column().classes("w-full items-center q-pa-md"):
