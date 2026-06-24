@@ -98,3 +98,77 @@ def rename_dialog(
 
         dialog_actions(dialog, confirm_label="Rename", confirm_icon="edit", on_confirm=_do_rename)
     dialog.open()
+
+
+def cover_dialog(
+    controller: AppController,
+    book: BookUnit,
+    *,
+    show_detail: Callable[[str], None],
+) -> None:
+    """Set the book's cover from a URL, an upload, or a source search result."""
+    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+        ui.label("Change cover").classes("text-subtitle1")
+
+        url_in = ui.input("Image URL").props("dense clearable").classes("w-full")
+
+        def _set_url() -> None:
+            value = (url_in.value or "").strip()
+            if not value:
+                ui.notify("Enter a URL")
+                return
+            controller.set_cover_url(book, value)
+            dialog.close()
+            ui.notify("Cover set")
+            show_detail(book.id)
+
+        ui.button("Set from URL", icon="link", on_click=_set_url).props("flat dense no-caps")
+        ui.separator()
+
+        async def _on_upload(e) -> None:
+            data = await e.file.read()
+            res = controller.set_cover_upload(book, data, e.file.name)
+            if not res.ok:
+                ui.notify(res.error or "Upload failed", type="warning")
+                return
+            dialog.close()
+            ui.notify("Cover uploaded")
+            show_detail(book.id)
+
+        ui.upload(on_upload=_on_upload, auto_upload=True).props(
+            'accept="image/*" flat'
+        ).classes("w-full")
+        ui.separator()
+
+        grid = ui.row().classes("w-full q-gutter-xs q-mt-sm")
+
+        async def _search() -> None:
+            grid.clear()
+            with grid:
+                ui.spinner()
+            cands = await controller.cover_candidates(book)
+            grid.clear()
+            if not cands:
+                with grid:
+                    ui.label("No covers found").classes("text-grey-6")
+                return
+            with grid:
+                for url in cands[:12]:
+                    ui.image(url).classes("cursor-pointer rounded").style(
+                        "width:80px;height:120px;object-fit:contain"
+                    ).on(
+                        "click",
+                        lambda u=url: (
+                            controller.set_cover_url(book, u),
+                            dialog.close(),
+                            ui.notify("Cover set"),
+                            show_detail(book.id),
+                        ),
+                    )
+
+        ui.button("Search Audible and others", icon="search", on_click=_search).props(
+            "flat dense no-caps"
+        )
+        with ui.row().classes("w-full justify-end q-mt-sm"):
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+    dialog.open()

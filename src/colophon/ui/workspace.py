@@ -25,7 +25,7 @@ from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
-from colophon.ui.dialogs import remap_dialog, rename_dialog
+from colophon.ui.dialogs import cover_dialog, remap_dialog, rename_dialog
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -442,73 +442,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.label("Select a book to see its details").classes("text-grey-6")
                 return
 
-            def _cover_dialog(b=book) -> None:
-                with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
-                    ui.label("Change cover").classes("text-subtitle1")
-
-                    url_in = ui.input("Image URL").props("dense clearable").classes("w-full")
-
-                    def _set_url() -> None:
-                        value = (url_in.value or "").strip()
-                        if not value:
-                            ui.notify("Enter a URL")
-                            return
-                        controller.set_cover_url(b, value)
-                        dialog.close()
-                        ui.notify("Cover set")
-                        show_detail(b.id)
-
-                    ui.button("Set from URL", icon="link", on_click=_set_url).props("flat dense no-caps")
-                    ui.separator()
-
-                    async def _on_upload(e) -> None:
-                        data = await e.file.read()
-                        res = controller.set_cover_upload(b, data, e.file.name)
-                        if not res.ok:
-                            ui.notify(res.error or "Upload failed", type="warning")
-                            return
-                        dialog.close()
-                        ui.notify("Cover uploaded")
-                        show_detail(b.id)
-
-                    ui.upload(on_upload=_on_upload, auto_upload=True).props(
-                        'accept="image/*" flat'
-                    ).classes("w-full")
-                    ui.separator()
-
-                    grid = ui.row().classes("w-full q-gutter-xs q-mt-sm")
-
-                    async def _search() -> None:
-                        grid.clear()
-                        with grid:
-                            ui.spinner()
-                        cands = await controller.cover_candidates(b)
-                        grid.clear()
-                        if not cands:
-                            with grid:
-                                ui.label("No covers found").classes("text-grey-6")
-                            return
-                        with grid:
-                            for url in cands[:12]:
-                                ui.image(url).classes("cursor-pointer rounded").style(
-                                    "width:80px;height:120px;object-fit:contain"
-                                ).on(
-                                    "click",
-                                    lambda u=url: (
-                                        controller.set_cover_url(b, u),
-                                        dialog.close(),
-                                        ui.notify("Cover set"),
-                                        show_detail(b.id),
-                                    ),
-                                )
-
-                    ui.button("Search Audible and others", icon="search", on_click=_search).props(
-                        "flat dense no-caps"
-                    )
-                    with ui.row().classes("w-full justify-end q-mt-sm"):
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                dialog.open()
-
             # editable fields, each prefilled with its value + provenance badge
             inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, str] = {}
@@ -840,7 +773,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             with ui.row().classes("q-gutter-xs"):
                                 ui.button("Matches", icon="search", on_click=_compare).props("flat dense no-caps").tooltip("Find and apply metadata matches")
                                 ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
-                                ui.button("Cover", icon="image", on_click=_cover_dialog).props("flat dense no-caps").tooltip("Search or set the cover")
+                                ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
                         with ui.element("div").classes("colophon-toolgroup"):
                             ui.label("Confidence").classes("colophon-seccap")
                             with ui.row().classes("q-gutter-xs"):
