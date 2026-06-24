@@ -179,7 +179,7 @@ def render_settings(controller: AppController) -> None:
                 ).classes("w-full")
                 abs_token = ui.input(
                     "API token", value=cfg.audiobookshelf_token or "", password=True
-                ).props(field).classes("w-full")
+                ).props(f"{field} autocomplete=off").classes("w-full")
                 abs_lib = ui.input(
                     "Library id", value=cfg.audiobookshelf_library_id or ""
                 ).props(field).classes("w-full")
@@ -200,7 +200,7 @@ def render_settings(controller: AppController) -> None:
             ):
                 rd_token = ui.input(
                     "API token", value=cfg.real_debrid_token or "", password=True
-                ).props(field).classes("w-full")
+                ).props(f"{field} autocomplete=off").classes("w-full")
                 rd_dir = ui.input(
                     "Download directory (blank = default)",
                     value=str(cfg.real_debrid_download_dir or ""),
