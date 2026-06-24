@@ -9,7 +9,6 @@ from pathlib import Path
 
 from nicegui import ui
 
-from colophon.adapters.config import Config
 from colophon.controller import AppController
 from colophon.core.normalize import NORMALIZABLE_FIELDS
 from colophon.core.pathscheme import sample_target
@@ -311,40 +310,39 @@ def render_settings(controller: AppController) -> None:
 
             def do_save() -> None:
                 try:
-                    new = Config(
-                        db_path=cfg.db_path,  # unchanged here; db path edits need a restart
-                        scan_paths=_text_to_paths(scan_paths.value),
-                        library_root=_opt_path(library_root.value),
-                        organize_folder_pattern=folder_pat.value or "$Author/$Title",
-                        organize_file_pattern=file_pat.value or "$Title",
-                        filename_template=template.value or "$Author - $Title",
-                        directory_scheme=scheme.value,
-                        review_threshold=float(threshold.value),
-                        transcode_bitrate=bitrate.value or "64k",
-                        worker_pool_size=cfg.worker_pool_size,
-                        port=int(port.value),
-                        root_path=root_path.value.strip(),
-                        audiobookshelf_url=_opt_str(abs_url.value),
-                        audiobookshelf_token=_opt_str(abs_token.value),
-                        audiobookshelf_library_id=_opt_str(abs_lib.value),
-                        abs_agg_url=_opt_str(abs_agg_url.value),
-                        real_debrid_token=_opt_str(rd_token.value),
-                        real_debrid_download_dir=_opt_path(rd_dir.value),
-                        genre_whitelist_enabled=bool(genre_whitelist.value),
-                        accepted_genres=[g for g in (accepted.value or []) if g and g.strip()],
-                        genre_mapping={
+                    # Copy from the live config so fields this form doesn't edit
+                    # (storage_secret, saved_filename_patterns, downloads_scan_prompt_seen,
+                    # db_path, worker_pool_size, ...) are preserved, not reset to defaults.
+                    new = cfg.model_copy(update={
+                        "scan_paths": _text_to_paths(scan_paths.value),
+                        "library_root": _opt_path(library_root.value),
+                        "organize_folder_pattern": folder_pat.value or "$Author/$Title",
+                        "organize_file_pattern": file_pat.value or "$Title",
+                        "filename_template": template.value or "$Author - $Title",
+                        "directory_scheme": scheme.value,
+                        "review_threshold": float(threshold.value),
+                        "transcode_bitrate": bitrate.value or "64k",
+                        "port": int(port.value),
+                        "root_path": root_path.value.strip(),
+                        "audiobookshelf_url": _opt_str(abs_url.value),
+                        "audiobookshelf_token": _opt_str(abs_token.value),
+                        "audiobookshelf_library_id": _opt_str(abs_lib.value),
+                        "abs_agg_url": _opt_str(abs_agg_url.value),
+                        "real_debrid_token": _opt_str(rd_token.value),
+                        "real_debrid_download_dir": _opt_path(rd_dir.value),
+                        "genre_whitelist_enabled": bool(genre_whitelist.value),
+                        "accepted_genres": [g for g in (accepted.value or []) if g and g.strip()],
+                        "genre_mapping": {
                             f.value.strip(): t.value.strip()
                             for f, t, _row in mapping_rows
                             if f.value and f.value.strip() and t.value and t.value.strip()
                         },
-                        normalize_on_match=[
-                            f for f in (normalize_on_match.value or []) if f
-                        ],
-                        source_order=[r["name"] for r in source_rows],
-                        disabled_sources=[
+                        "normalize_on_match": [f for f in (normalize_on_match.value or []) if f],
+                        "source_order": [r["name"] for r in source_rows],
+                        "disabled_sources": [
                             r["name"] for r in source_rows if not r["enabled"]
                         ],
-                    )
+                    })
                     controller.save_settings(new)
                     ui.notify("Settings saved")
                 except Exception:
