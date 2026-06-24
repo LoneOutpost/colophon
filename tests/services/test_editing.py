@@ -76,6 +76,21 @@ def test_bulk_set_field_one_batch_across_books(tmp_path):
     assert {c.book_id for c in changes} == {a.id, b.id}
 
 
+def test_bulk_set_field_skips_no_op_books(tmp_path):
+    # A book already at the target value is a no-op: no history entry and not
+    # re-persisted (shared dirty gate). Only the genuinely-changed book is recorded.
+    books, hist = _repos(tmp_path)
+    a = BookUnit.new(source_folder=Path("/ingest/a"))
+    a.publisher = "Tor"  # already the target
+    b = BookUnit.new(source_folder=Path("/ingest/b"))  # no publisher yet
+    books.upsert(a)
+    books.upsert(b)
+    batch = bulk_set_field(books, hist, [a, b], "publisher", "Tor")
+    assert a.publisher == "Tor" and b.publisher == "Tor"
+    changes = hist.list_batch(batch)
+    assert {c.book_id for c in changes} == {b.id}  # only b changed; a's no-op dropped
+
+
 def test_bulk_remap_across_books(tmp_path):
     books, hist = _repos(tmp_path)
     a = BookUnit.new(source_folder=Path("/ingest/a"))

@@ -6,6 +6,8 @@ affected field's provenance as 'manual'. No file writes — candidate records on
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
 from colophon.core.fields import EDITABLE_TO_PROVENANCE, get_field, set_field
 from colophon.core.genre_policy import GenrePolicy
@@ -33,6 +35,34 @@ def _commit(
     book.touch()
     books.upsert(book)
     hist.record(batch_id, changes)
+    return batch_id
+
+
+def _bulk_commit[T](
+    books: BookUnitRepo,
+    hist: HistoryRepo,
+    items: list[T],
+    change_fn: Callable[[T], tuple[BookUnit, list[EditChange]]],
+) -> str:
+    """Run `change_fn` for each item in one all-or-nothing transaction, persisting
+    only the books it actually changed (a change is `new_value != old_value`), and
+    record every collected EditChange as one undoable batch. Returns the batch id.
+
+    `change_fn(item)` returns `(book, changes)`. Only effective changes
+    (`new_value != old_value`) are recorded and only changed books are persisted, so
+    every bulk op skips no-op writes consistently (no spurious touch or history/undo
+    entry for an unchanged book)."""
+    batch_id = new_batch_id()
+    changes: list[EditChange] = []
+    with books.conn:  # one transaction: all-or-nothing
+        for item in items:
+            book, book_changes = change_fn(item)
+            effective = [c for c in book_changes if c.new_value != c.old_value]
+            changes.extend(effective)
+            if effective:
+                book.touch()
+                books.upsert(book, commit=False)
+        hist.record(batch_id, changes, commit=False)
     return batch_id
 
 
@@ -70,15 +100,7 @@ def swap_fields(
 def bulk_set_field(
     books: BookUnitRepo, hist: HistoryRepo, items: list[BookUnit], field: str, value: str | None
 ) -> str:
-    batch_id = new_batch_id()
-    changes: list[EditChange] = []
-    with books.conn:  # one transaction: all-or-nothing
-        for book in items:
-            changes.append(_apply(book, field, value))
-            book.touch()
-            books.upsert(book, commit=False)
-        hist.record(batch_id, changes, commit=False)
-    return batch_id
+    return _bulk_commit(books, hist, items, lambda book: (book, [_apply(book, field, value)]))
 
 
 def bulk_normalize(
@@ -99,28 +121,23 @@ def bulk_normalize(
         normalizers["genre"] = lambda v: "; ".join(
             genre_policy.canonicalize([p.strip() for p in v.split(";") if p.strip()])
         )
-    batch_id = new_batch_id()
-    changes: list[EditChange] = []
-    with books.conn:  # one transaction: all-or-nothing
-        for book in items:
-            book_changed = False
-            for field in fields:
-                normalizer = normalizers.get(field)
-                if normalizer is None:
-                    continue
-                current = get_field(book, field)
-                if not current:
-                    continue
-                normalized = normalizer(current)
-                if normalized == current:
-                    continue
-                changes.append(_apply(book, field, normalized))
-                book_changed = True
-            if book_changed:
-                book.touch()
-                books.upsert(book, commit=False)
-        hist.record(batch_id, changes, commit=False)
-    return batch_id
+
+    def _changes(book: BookUnit) -> tuple[BookUnit, list[EditChange]]:
+        out: list[EditChange] = []
+        for field in fields:
+            normalizer = normalizers.get(field)
+            if normalizer is None:
+                continue
+            current = get_field(book, field)
+            if not current:
+                continue
+            normalized = normalizer(current)
+            if normalized == current:
+                continue
+            out.append(_apply(book, field, normalized))
+        return book, out
+
+    return _bulk_commit(books, hist, items, _changes)
 
 
 def apply_fields(
@@ -146,21 +163,13 @@ def bulk_apply_fields(
     """Apply each (book, field_updates, provenance) in ONE undoable batch. The
     bulk sibling of apply_fields; each book's fields are stamped with its given
     provenance (e.g. the source provider). Returns the batch id."""
-    batch_id = new_batch_id()
-    changes: list[EditChange] = []
-    with books.conn:  # one transaction: all-or-nothing
-        for book, updates, provenance in items:
-            book_changed = False
-            for field, value in updates.items():
-                change = _apply(book, field, value, provenance=provenance)
-                changes.append(change)
-                if change.new_value != change.old_value:
-                    book_changed = True
-            if book_changed:
-                book.touch()
-                books.upsert(book, commit=False)
-        hist.record(batch_id, changes, commit=False)
-    return batch_id
+    def _changes(item: tuple[BookUnit, dict[str, str | None], str]) -> tuple[BookUnit, list[EditChange]]:
+        book, updates, provenance = item
+        return book, [
+            _apply(book, field, value, provenance=provenance) for field, value in updates.items()
+        ]
+
+    return _bulk_commit(books, hist, items, _changes)
 
 
 def bulk_remap(
@@ -172,15 +181,11 @@ def bulk_remap(
     dst: str,
     clear_source: bool,
 ) -> str:
-    batch_id = new_batch_id()
-    changes: list[EditChange] = []
-    with books.conn:  # one transaction: all-or-nothing
-        for book in items:
-            moved = get_field(book, src)
-            changes.append(_apply(book, dst, moved))
-            if clear_source:
-                changes.append(_apply(book, src, None))
-            book.touch()
-            books.upsert(book, commit=False)
-        hist.record(batch_id, changes, commit=False)
-    return batch_id
+    def _changes(book: BookUnit) -> tuple[BookUnit, list[EditChange]]:
+        moved = get_field(book, src)
+        out = [_apply(book, dst, moved)]
+        if clear_source:
+            out.append(_apply(book, src, None))
+        return book, out
+
+    return _bulk_commit(books, hist, items, _changes)
