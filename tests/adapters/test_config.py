@@ -15,7 +15,6 @@ def test_save_then_load_round_trips(tmp_path: Path):
     path = tmp_path / "config.toml"
     cfg = Config(
         scan_paths=[Path("/ingest/audiobooks")],
-        lazylibrarian_config_ini=Path("/ll/config.ini"),
         review_threshold=80.0,
         transcode_bitrate="128k",
         worker_pool_size=4,
@@ -96,8 +95,6 @@ def test_integration_fields_default_none(tmp_path):
     assert cfg.audiobookshelf_url is None
     assert cfg.audiobookshelf_token is None
     assert cfg.audiobookshelf_library_id is None
-    assert cfg.lazylibrarian_url is None
-    assert cfg.lazylibrarian_api_key is None
 
 
 def test_port_and_root_path_defaults(tmp_path):
@@ -121,8 +118,6 @@ def test_integration_fields_round_trip(tmp_path):
         audiobookshelf_url="http://abs.local:13378",
         audiobookshelf_token="abs-tok",
         audiobookshelf_library_id="lib_1",
-        lazylibrarian_url="http://ll.local:5299",
-        lazylibrarian_api_key="ll-key",
     )
     save_config(cfg, path)
     assert load_config(path) == cfg
@@ -190,3 +185,37 @@ def test_source_prefs_default_empty():
     cfg = Config()
     assert cfg.source_order == []
     assert cfg.disabled_sources == []
+
+
+def test_organize_pattern_defaults():
+    from colophon.adapters.config import Config
+
+    cfg = Config()
+    assert cfg.organize_folder_pattern == "$Author/$Title"
+    assert cfg.organize_file_pattern == "$Title"
+
+
+def test_organize_patterns_round_trip(tmp_path):
+    from colophon.adapters.config import Config, load_config, save_config
+
+    cfg = Config(
+        organize_folder_pattern="$SortAuthor/$Series #$PadNum - $Title",
+        organize_file_pattern="$Title ($PubYear)",
+    )
+    path = tmp_path / "c.toml"
+    save_config(cfg, path)
+    assert load_config(path) == cfg
+
+
+def test_legacy_lazylibrarian_keys_are_ignored(tmp_path):
+    from colophon.adapters.config import load_config
+
+    path = tmp_path / "c.toml"
+    path.write_text(
+        'lazylibrarian_url = "http://old"\n'
+        'lazylibrarian_api_key = "k"\n'
+        'lazylibrarian_config_ini = "/x/config.ini"\n'
+    )
+    cfg = load_config(path)  # must not raise
+    assert not hasattr(cfg, "lazylibrarian_url")
+    assert not hasattr(cfg, "lazylibrarian_config_ini")
