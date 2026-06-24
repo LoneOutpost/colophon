@@ -26,6 +26,7 @@ from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, norm
 from colophon.core.sources import SourceResult
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.dialogs import (
+    bulk_tag_dialog,
     compare_dialog,
     cover_dialog,
     remap_dialog,
@@ -795,74 +796,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.notify(f"Updated {n} field(s) on {len(books)} books")
                 _clear_selection()
 
-            async def _bulk_tag_dialog() -> None:
-                _apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
-                plans = [(b, controller.tag_plan(b)) for b in books]
-                total_files = sum(len(p.files) for _, p in plans)
-                with ui.dialog() as dialog, ui.card().classes("w-96"):
-                    ui.label(f"Write tags to {len(books)} books ({total_files} files)").classes(
-                        "text-subtitle1"
-                    )
-                    statuses: dict[str, ui.item_label] = {}
-                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
-                        with ui.list().props("dense").classes("w-full"):
-                            for b, plan in plans:
-                                with ui.item():
-                                    with ui.item_section():
-                                        ui.item_label(b.title or "(untitled)")
-                                        note = f"{len(plan.files)} file(s)" + (
-                                            f" · {len(plan.warnings)} warning(s)" if plan.warnings else ""
-                                        )
-                                        ui.item_label(note).props("caption")
-                                    with ui.item_section().props("side"):
-                                        statuses[b.id] = ui.item_label("queued").props("caption")
-                    actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
-                    with actions:
-                        progress_label = ui.label().classes(
-                            "text-caption text-grey-7 q-mr-auto self-center"
-                        )
-                        ui.button("Cancel", on_click=dialog.close).props("flat")
-                        commit_btn = ui.button("Write tags", icon="sell")
-
-                    async def _commit() -> None:
-                        def _on_progress(done: int, book, result) -> None:
-                            statuses[book.id].set_text(
-                                f"written ({result.written})" if not result.failed
-                                else f"failed: {result.failed} file(s)"
-                            )
-                            progress_label.set_text(f"{done} / {len(books)} books")
-
-                        commit_btn.props("loading=true")
-                        try:
-                            results = await controller.write_tags_books(books, progress=_on_progress)
-                        finally:
-                            commit_btn.props(remove="loading")
-                        wrote = sum(r.written for r in results)
-                        failed = sum(r.failed for r in results)
-                        actions.clear()
-                        with actions:
-                            note = f"Wrote {wrote} file(s) across {len(books)} books" + (
-                                f", {failed} failed" if failed else ""
-                            )
-                            ui.label(note).classes("text-caption q-mr-auto self-center")
-                            ui.button(
-                                "Undo",
-                                icon="undo",
-                                on_click=lambda: (
-                                    controller.undo_tag_batch(),
-                                    ui.notify("Reverted tag write (embedded covers kept)"),
-                                    dialog.close(),
-                                    _clear_selection(),
-                                ),
-                            ).props("flat")
-                            ui.button(
-                                "Close", on_click=lambda: (dialog.close(), _clear_selection())
-                            ).props("flat")
-                        # Selection is cleared when the results dialog is dismissed (above),
-                        # not here, so the per-book progress + summary stay visible meanwhile.
-
-                    commit_btn.on_click(_commit)
-                dialog.open()
 
             ui.separator().classes("q-my-sm")
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
@@ -1029,7 +962,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
-                ui.button("Write tags", icon="sell", on_click=_bulk_tag_dialog).props("outline")
+                ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
                 ui.button(
                     "Clear selection", icon="clear", on_click=_clear_selection,
                 ).props("flat")
