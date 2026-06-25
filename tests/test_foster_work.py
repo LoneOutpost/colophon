@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from colophon.services.foster import foster_work
