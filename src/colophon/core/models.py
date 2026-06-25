@@ -45,6 +45,54 @@ class Provenance(StrEnum):
     MANUAL = "manual"
 
 
+class ContentKind(StrEnum):
+    """Axis 1 — how many distinct works a folder holds."""
+
+    SINGLE = "single"
+    MULTI = "multi"
+    UNKNOWN = "unknown"
+
+
+class FolderKind(StrEnum):
+    """Axis 2 — what the folder itself represents."""
+
+    AUTHOR = "author"
+    TITLE = "title"
+    UNDETERMINED = "undetermined"
+
+
+class FindingSeverity(StrEnum):
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"
+
+
+class FindingCode(StrEnum):
+    LOOSE_IN_AUTHOR = "loose_in_author"
+    MULTI_IN_AUTHOR = "multi_in_author"
+    MULTI_IN_UNDETERMINED = "multi_in_undetermined"
+    MIXED_WORKS = "mixed_works"
+    DUP_FORMAT = "dup_format"
+    DUP_EDITION = "dup_edition"
+
+
+class Finding(_Base):
+    """One structural finding about a book unit (recomputed each scan)."""
+
+    code: FindingCode
+    severity: FindingSeverity
+    detail: str
+
+
+class DetectedWork(_Base):
+    """One distinct work the classifier found inside a folder; the unit a split
+    would foster into. `files` are the source files belonging to this work."""
+
+    label: str
+    author: str | None = None
+    files: list[Path] = []
+
+
 class SourceFile(_Base):
     path: Path
     size: int
@@ -120,6 +168,13 @@ class BookUnit(_Base):
     provenance: dict[str, str] = {}
     confidence: float = 0.0
     confidence_signals: list[ConfidenceSignal] = []
+    content_kind: ContentKind = ContentKind.UNKNOWN
+    folder_kind: FolderKind = FolderKind.UNDETERMINED
+    classification_confidence: float = 0.0
+    classification_signals: list[ConfidenceSignal] = []
+    findings: list[Finding] = []
+    detected_works: list[DetectedWork] = []
+    acknowledged_findings: list[FindingCode] = []
     manually_confirmed: bool = False
     state: BookState = BookState.DETECTED
 
