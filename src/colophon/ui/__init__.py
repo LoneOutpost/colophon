@@ -12,6 +12,7 @@ from colophon.ui.acquire import render_acquire
 from colophon.ui.manage import render_manage
 from colophon.ui.settings import render_settings
 from colophon.ui.stats import render_stats
+from colophon.ui.theme import preload_theme_background
 from colophon.ui.workspace import render_workspace
 
 
@@ -29,21 +30,28 @@ def create_app(controller: AppController) -> None:
 
     @ui.page("/")
     async def index(filter: str = "") -> None:  # the URL query-param name is "filter"
+        # Paint the themed background into the initial HTML before awaiting the client,
+        # so this page (the most navigated to) doesn't flash light on every visit.
+        preload_theme_background()
         await ui.context.client.connected()
         render_workspace(controller, initial_filter=filter)
 
     @ui.page("/manage")
     def manage() -> None:
+        preload_theme_background()
         render_manage(controller)
 
     @ui.page("/stats")
     def stats() -> None:
+        preload_theme_background()
         render_stats(controller)
 
     @ui.page("/settings")
     def settings() -> None:
+        preload_theme_background()
         render_settings(controller)
 
     @ui.page("/acquire")
     def acquire() -> None:
+        preload_theme_background()
         render_acquire(controller)

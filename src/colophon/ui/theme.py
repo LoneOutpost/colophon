@@ -25,6 +25,7 @@ BORDER_DARK = "#736a5a"    # 3.02 vs dark surface
 SURFACE_LIGHT = "#fcf9f4"
 SURFACE_DARK = "#262019"
 PAGE_DARK = "#1c1916"
+PAGE_LIGHT = "#f6f1ea"
 
 _LIGHT_VARS = {
     "col-radius": "12px",
@@ -36,7 +37,7 @@ _LIGHT_VARS = {
     "colophon-border": BORDER_LIGHT,
     "colophon-muted": MUTED_LIGHT,
     "colophon-surface": SURFACE_LIGHT,
-    "colophon-page": "#f6f1ea",
+    "colophon-page": PAGE_LIGHT,
 }
 _DARK_VARS = {
     # !important beats the inline --q-primary that ui.colors sets on <body>.
@@ -170,6 +171,32 @@ def apply_theme() -> None:
         dark_page=PAGE_DARK,      # dark page background
     )
     ui.add_css(_CSS)
+
+
+def preload_background_css(pref: str) -> str:
+    """The `html` background rule that paints the page in the right theme color in
+    the initial HTML, before the dark-mode class is applied on connect. Without it,
+    every full-page navigation flashes the light background for an explicit-dark user
+    (the dark class only arrives after the websocket connects). Styling `html`
+    (Quasar styles `body`) means it shows only during the pre-hydration blank and
+    never fights the hydrated theme. 'auto' uses the OS media query, like Quasar."""
+    if pref == "dark":
+        return f"html{{background:{PAGE_DARK}}}"
+    if pref == "light":
+        return f"html{{background:{PAGE_LIGHT}}}"
+    return (
+        f"html{{background:{PAGE_LIGHT}}}"
+        f"@media(prefers-color-scheme:dark){{html{{background:{PAGE_DARK}}}}}"
+    )
+
+
+def preload_theme_background() -> None:
+    """Inject the early page-background `<style>` into the document head. Call this in
+    every page handler's *synchronous* prefix (before any `await`), so it lands in
+    the initial HTML and the navigation paints in the right theme instead of flashing
+    light until the dark-mode class arrives on connect."""
+    pref = app.storage.general.get("dark_mode", "auto")
+    ui.add_head_html(f"<style>{preload_background_css(pref)}</style>")
 
 
 def setup_dark_mode() -> ui.dark_mode:
