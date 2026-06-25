@@ -237,6 +237,15 @@ def classify(
         findings.append(actionable)
     findings.extend(_duplicate_findings(folder_kind, works, features))
 
+    # An UNKNOWN content folder with no other finding (conflicting/absent signals)
+    # would otherwise stay invisible; surface it for a human look.
+    if content_kind is ContentKind.UNKNOWN and not findings:
+        findings.append(Finding(
+            code=FindingCode.STRUCTURE_UNCLEAR,
+            severity=FindingSeverity.INFO,
+            detail="multiple files but the structure could not be determined; review",
+        ))
+
     signals = group_signals + fk_signals
     return ClassificationResult(
         content_kind=content_kind,

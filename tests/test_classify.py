@@ -156,3 +156,27 @@ def test_clean_single_title_has_no_findings():
     feats = [_feat("/lib/Legion/Legion.mp3", album="Legion")]
     r = _classify("/lib/Legion", "/lib", feats)
     assert r.findings == []
+
+
+def test_unknown_content_emits_structure_unclear():
+    feats = [_feat("/lib/Brandon Sanderson/alpha.mp3"), _feat("/lib/Brandon Sanderson/bravo.mp3")]
+    r = _classify("/lib/Brandon Sanderson", "/lib", feats)
+    assert r.content_kind is ContentKind.UNKNOWN
+    su = [f for f in r.findings if f.code is FC.STRUCTURE_UNCLEAR]
+    assert su and su[0].severity is FindingSeverity.INFO
+
+
+def test_clean_single_title_still_has_no_findings_after_unclear_rule():
+    feats = [_feat("/lib/Legion/Legion.mp3", album="Legion")]
+    r = _classify("/lib/Legion", "/lib", feats)
+    assert r.findings == []
+
+
+def test_structure_unclear_not_added_when_other_finding_present():
+    # Two distinct albums in a title-named folder -> MIXED_WORKS (error), content MULTI.
+    feats = [
+        _feat("/lib/Legion/Legion.mp3", album="Legion"),
+        _feat("/lib/Legion/Elantris.mp3", album="Elantris"),
+    ]
+    r = _classify("/lib/Legion", "/lib", feats)
+    assert all(f.code is not FC.STRUCTURE_UNCLEAR for f in r.findings)

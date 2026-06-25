@@ -74,6 +74,7 @@ class FindingCode(StrEnum):
     MIXED_WORKS = "mixed_works"
     DUP_FORMAT = "dup_format"
     DUP_EDITION = "dup_edition"
+    STRUCTURE_UNCLEAR = "structure_unclear"
 
 
 class Finding(_Base):

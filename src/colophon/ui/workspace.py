@@ -434,7 +434,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                 ui.button("Confirm split", on_click=_confirm_split).props("color=primary")
             for f in findings:
-                if f.code.value in ("dup_format", "dup_edition"):
+                if f.code.value in ("dup_format", "dup_edition", "structure_unclear"):
                     code = f.code
 
                     def _ack(c=code, b=book) -> None:
