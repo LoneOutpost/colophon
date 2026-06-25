@@ -67,7 +67,9 @@ def foster_one(path: Path) -> Path:
 def foster_work(files: list[Path], parent: Path, subdir_name: str) -> list[Path]:
     """Move `files` into a new `parent/<sanitized subdir_name>/` directory and
     return their new paths. The directory must not already exist, so an existing
-    book is never silently merged into (raises FileExistsError)."""
+    book is never silently merged into (raises FileExistsError). Because the
+    target dir is created fresh, a mid-loop failure cannot overwrite an existing
+    file; already-moved files are left in the new dir (no per-file rollback)."""
     target_dir = parent / sanitize_segment(subdir_name)
     if target_dir.exists():
         raise FileExistsError(f"{target_dir} already exists")

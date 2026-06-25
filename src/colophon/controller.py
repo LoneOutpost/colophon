@@ -805,6 +805,9 @@ class AppController:
                 result.failures.append(
                     FosterResult(source=parent / work.label, ok=False, error=str(e))
                 )
+        # Re-scan the parent so the new subfolder books register and the parent
+        # book refreshes; prune the parent if no audio remains directly in it
+        # (same re-scan-from-parent pattern as foster_files).
         template = self.ctx.config.filename_template
         scan_ingest(
             self.ctx.books, parent, template=template,
