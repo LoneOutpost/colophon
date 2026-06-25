@@ -53,22 +53,23 @@ def busy(button: ui.button) -> Iterator[None]:
         button.props(remove="loading")
 
 
-def pattern_chips_row(
-    label: str,
+def attach_history_menu(
+    field: ui.input,
     items: list,
-    chip_text: Callable[[object], object],
+    item_text: Callable[[object], object],
     on_pick: Callable[[object], None],
+    *,
+    tooltip: str = "Recent patterns",
 ) -> None:
-    """A row of quick-pick chips for recently-used patterns; clicking one calls
-    on_pick with that item. Renders nothing when the history is empty."""
+    """Attach a 'recent values' dropdown to a text input's append slot; picking an
+    entry calls on_pick with that item. Renders nothing when the history is empty."""
     if not items:
         return
-    with ui.row().classes("items-center w-full q-gutter-xs"):
-        ui.label(label).classes("text-caption colophon-muted self-center")
-        for it in items:
-            ui.chip(str(chip_text(it)), on_click=lambda i=it: on_pick(i)).props(
-                "dense clickable"
-            ).classes("colophon-chip")
+    with field.add_slot("append"):
+        with ui.button(icon="history").props("flat dense round size=sm").tooltip(tooltip):
+            with ui.menu():
+                for it in items:
+                    ui.menu_item(str(item_text(it)), on_click=lambda i=it: on_pick(i))
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -713,16 +714,18 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                 template = ui.input("Filename template", value=cfg.filename_template).props(
                     "outlined dense"
                 ).classes("w-full")
-                pattern_chips_row(
-                    "Recent:", cfg.recent_filename_templates,
+                attach_history_menu(
+                    template, cfg.recent_filename_templates,
                     lambda p: p, lambda p: template.set_value(p),
+                    tooltip="Recent templates",
                 )
                 scheme = ui.input(
                     "Directory scheme (blank disables)", value=cfg.directory_scheme
                 ).props("outlined dense").classes("w-full")
-                pattern_chips_row(
-                    "Recent:", cfg.recent_directory_schemes,
+                attach_history_menu(
+                    scheme, cfg.recent_directory_schemes,
                     lambda p: p, lambda p: scheme.set_value(p),
+                    tooltip="Recent schemes",
                 )
                 dry = ui.checkbox("Dry run (show what would be parsed, change nothing)", value=False)
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
@@ -913,9 +916,10 @@ async def process_dialog(
                     file_pat.set_value(op.file)
                     _preview()
 
-                pattern_chips_row(
-                    "Recent:", cfg.recent_organize_patterns,
+                attach_history_menu(
+                    folder_pat, cfg.recent_organize_patterns,
                     lambda op: f"{op.folder} · {op.file}", _pick_pair,
+                    tooltip="Recent folder + file patterns",
                 )
                 dry = ui.checkbox("Dry run (show destinations, change nothing)", value=False)
                 ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(

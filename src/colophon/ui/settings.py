@@ -196,7 +196,7 @@ def render_settings(controller: AppController) -> None:
                         if not items:
                             ui.label("None yet").classes("text-caption colophon-muted")
                         for it in items:
-                            ui.chip(label(it), removable=True).props("dense").classes(
+                            ui.chip(label(it), removable=True).props("dense outline").classes(
                                 "colophon-chip"
                             ).on("remove", lambda _e, i=it: on_remove(i))
 
