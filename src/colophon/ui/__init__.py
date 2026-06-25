@@ -11,6 +11,7 @@ from colophon.controller import AppController
 from colophon.ui.acquire import render_acquire
 from colophon.ui.manage import render_manage
 from colophon.ui.settings import render_settings
+from colophon.ui.stats import render_stats
 from colophon.ui.workspace import render_workspace
 
 
@@ -34,6 +35,10 @@ def create_app(controller: AppController) -> None:
     @ui.page("/manage")
     def manage() -> None:
         render_manage(controller)
+
+    @ui.page("/stats")
+    def stats() -> None:
+        render_stats(controller)
 
     @ui.page("/settings")
     def settings() -> None:
