@@ -1,10 +1,17 @@
 from pathlib import Path
 
-from colophon.core.classify import FileFeatures, classify_folder_kind, content_kind_for, group_works
+from colophon.core.classify import (
+    FileFeatures,
+    classify,
+    classify_folder_kind,
+    content_kind_for,
+    group_works,
+)
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
+from colophon.core.models import ContentKind, EmbeddedTags, FindingSeverity, FolderKind
 from colophon.core.models import ContentKind as CK
-from colophon.core.models import EmbeddedTags, FolderKind
+from colophon.core.models import FindingCode as FC
 
 
 def _feat(path: str, **tag_kwargs) -> FileFeatures:
@@ -98,3 +105,54 @@ def test_asin_beats_album_for_grouping():
     ]
     works, _ = group_works(feats)
     assert len(works) == 1
+
+
+def _classify(folder, root, feats):
+    return classify(Path(folder), Path(root), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+
+
+def test_multi_in_author_folder_flags_actionable():
+    feats = [
+        _feat("/lib/Brandon Sanderson/Legion.mp3", album="Legion", artist="Brandon Sanderson"),
+        _feat("/lib/Brandon Sanderson/Elantris.mp3", album="Elantris", artist="Brandon Sanderson"),
+    ]
+    r = _classify("/lib/Brandon Sanderson", "/lib", feats)
+    assert r.content_kind is ContentKind.MULTI
+    assert r.folder_kind is FolderKind.AUTHOR
+    assert any(f.code is FC.MULTI_IN_AUTHOR for f in r.findings)
+
+
+def test_single_loose_in_author_folder():
+    feats = [_feat("/lib/Brandon Sanderson/Legion.mp3", artist="Brandon Sanderson")]
+    r = _classify("/lib/Brandon Sanderson", "/lib", feats)
+    assert r.content_kind is ContentKind.SINGLE
+    assert any(f.code is FC.LOOSE_IN_AUTHOR for f in r.findings)
+
+
+def test_format_variants_in_title_folder_are_info():
+    feats = [
+        _feat("/lib/Legion/Legion.mp3", album="Legion"),
+        _feat("/lib/Legion/Legion.m4b", album="Legion"),
+    ]
+    r = _classify("/lib/Legion", "/lib", feats)
+    assert r.content_kind is ContentKind.SINGLE
+    assert r.folder_kind is FolderKind.TITLE
+    dup = [f for f in r.findings if f.code is FC.DUP_FORMAT]
+    assert dup and dup[0].severity is FindingSeverity.INFO
+
+
+def test_mixed_works_in_title_folder_is_error():
+    feats = [
+        _feat("/lib/Legion/Legion.mp3", album="Legion"),
+        _feat("/lib/Legion/Elantris.mp3", album="Elantris"),
+    ]
+    r = _classify("/lib/Legion", "/lib", feats)
+    assert r.folder_kind is FolderKind.TITLE
+    err = [f for f in r.findings if f.code is FC.MIXED_WORKS]
+    assert err and err[0].severity is FindingSeverity.ERROR
+
+
+def test_clean_single_title_has_no_findings():
+    feats = [_feat("/lib/Legion/Legion.mp3", album="Legion")]
+    r = _classify("/lib/Legion", "/lib", feats)
+    assert r.findings == []

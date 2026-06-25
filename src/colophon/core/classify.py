@@ -20,6 +20,8 @@ from colophon.core.models import (
     DetectedWork,
     EmbeddedTags,
     Finding,
+    FindingCode,
+    FindingSeverity,
     FolderKind,
 )
 from colophon.core.normalize import normalize_text
@@ -168,3 +170,79 @@ def content_kind_for(works: list[DetectedWork], signals: list[ConfidenceSignal])
         return ContentKind.SINGLE
     points = sum(s.points for s in signals)
     return ContentKind.MULTI if points >= CONTENT_THRESHOLD else ContentKind.UNKNOWN
+
+
+def _actionable_finding(
+    content_kind: ContentKind, folder_kind: FolderKind, works: list[DetectedWork]
+) -> Finding | None:
+    if content_kind is ContentKind.SINGLE and folder_kind is FolderKind.AUTHOR:
+        return Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN,
+                       detail="a single book sitting loose in an author folder")
+    if content_kind is ContentKind.MULTI and folder_kind is FolderKind.AUTHOR:
+        return Finding(code=FindingCode.MULTI_IN_AUTHOR, severity=FindingSeverity.WARN,
+                       detail=f"{len(works)} distinct works in an author folder")
+    if content_kind is ContentKind.MULTI and folder_kind is FolderKind.UNDETERMINED:
+        return Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN,
+                       detail=f"{len(works)} distinct works; folder type undetermined")
+    return None
+
+
+def _duplicate_findings(
+    folder_kind: FolderKind, works: list[DetectedWork], features: list[FileFeatures]
+) -> list[Finding]:
+    """Title-folder sub-analysis: same-work variants vs. genuinely different works."""
+    if folder_kind is not FolderKind.TITLE:
+        return []
+    if len(works) > 1:
+        return [Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR,
+                        detail=f"{len(works)} different works in a title folder")]
+    files = works[0].files
+    exts = {p.suffix.lower() for p in files}
+    if len(files) > 1 and len(exts) > 1:
+        return [Finding(code=FindingCode.DUP_FORMAT, severity=FindingSeverity.INFO,
+                        detail=f"same book in formats: {', '.join(sorted(exts))}")]
+    narrators = {_norm(f.tags.narrator) for f in features if f.tags.narrator}
+    years = {f.tags.year for f in features if f.tags.year}
+    if len(files) > 1 and (len(narrators) > 1 or len(years) > 1):
+        return [Finding(code=FindingCode.DUP_EDITION, severity=FindingSeverity.WARN,
+                        detail="multiple editions in one folder (narrator/year differ)")]
+    return []
+
+
+def classify(
+    folder: Path,
+    root: Path,
+    features: list[FileFeatures],
+    *,
+    template_pattern: Pattern[str],
+    scheme_patterns: list[Pattern[str]],
+) -> ClassificationResult:
+    """Classify one folder. `features` is non-empty (a folder with no audio is
+    never scanned). Pure: all signals are passed in."""
+    if len(features) == 1:
+        works = [_to_work(features)]
+        group_signals: list[ConfidenceSignal] = []
+        content_kind = ContentKind.SINGLE
+    else:
+        works, group_signals = group_works(features)
+        content_kind = content_kind_for(works, group_signals)
+
+    folder_kind, fk_signals = classify_folder_kind(
+        folder, root, features, template_pattern=template_pattern, scheme_patterns=scheme_patterns
+    )
+
+    findings: list[Finding] = []
+    actionable = _actionable_finding(content_kind, folder_kind, works)
+    if actionable is not None:
+        findings.append(actionable)
+    findings.extend(_duplicate_findings(folder_kind, works, features))
+
+    signals = group_signals + fk_signals
+    return ClassificationResult(
+        content_kind=content_kind,
+        folder_kind=folder_kind,
+        confidence=float(sum(s.points for s in signals)),
+        signals=signals,
+        findings=findings,
+        detected_works=works,
+    )
