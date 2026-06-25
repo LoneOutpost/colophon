@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import ClassVar
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import PATTERN_HISTORY_CAP, Config, OrganizePattern, save_config
@@ -29,6 +30,9 @@ from colophon.core.models import (
     BookUnit,
     ConfidenceSignal,
     EditChange,
+    Finding,
+    FindingCode,
+    FindingSeverity,
     OperationRecord,
     Provenance,
     _Base,
@@ -81,6 +85,7 @@ from colophon.services.foster import (
     RestructureResult,
     derive_book_fields,
     foster_one,
+    foster_work,
 )
 from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, scan_ingest
 from colophon.services.matching import gather_matches, query_for_book
@@ -760,6 +765,54 @@ class AppController:
             return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
         except OSError:
             return False
+
+    _SEVERITY_RANK: ClassVar[dict[FindingSeverity, int]] = {
+        FindingSeverity.ERROR: 0,
+        FindingSeverity.WARN: 1,
+        FindingSeverity.INFO: 2,
+    }
+
+    def _active_findings(self, book: BookUnit) -> list[Finding]:
+        """Findings not dismissed via acknowledge."""
+        return [f for f in book.findings if f.code not in book.acknowledged_findings]
+
+    def books_needing_attention(self) -> list[BookUnit]:
+        """All books carrying at least one un-acknowledged finding, most severe first."""
+        flagged = [b for b in self.ctx.books.list_all() if self._active_findings(b)]
+        return sorted(
+            flagged,
+            key=lambda b: min(self._SEVERITY_RANK[f.severity] for f in self._active_findings(b)),
+        )
+
+    def acknowledge_finding(self, book: BookUnit, code: FindingCode) -> None:
+        """Dismiss an advisory finding so a re-scan won't resurface it."""
+        if code not in book.acknowledged_findings:
+            book.acknowledged_findings = [*book.acknowledged_findings, code]
+            book.touch()
+            self.ctx.books.upsert(book)
+
+    def split_into_works(self, book: BookUnit) -> RestructureResult:
+        """Foster each detected work in `book` into its own subfolder, then
+        re-scan the parent so the new books register (mirrors foster_files)."""
+        result = RestructureResult()
+        parent = book.source_folder
+        for work in book.detected_works:
+            try:
+                foster_work(work.files, parent, work.label)
+                result.fostered += len(work.files)
+            except OSError as e:
+                logger.warning(f"split failed for {work.label} in {parent}: {e}")
+                result.failures.append(
+                    FosterResult(source=parent / work.label, ok=False, error=str(e))
+                )
+        template = self.ctx.config.filename_template
+        scan_ingest(
+            self.ctx.books, parent, template=template,
+            directory_scheme=self.ctx.config.directory_scheme,
+        )
+        if not self._has_direct_audio(parent):
+            self.ctx.books.delete(BookUnit.id_for(parent))
+        return result
 
     def _restructure_sync(
         self, paths: list[Path], author_override: str | None
