@@ -19,7 +19,7 @@ from colophon.adapters.sidecar import write_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
-from colophon.core.chapters import runtime_mismatch
+from colophon.core.chapters import Chapter, normalize_chapters, runtime_mismatch
 from colophon.core.confidence import IdentificationOutcome, score_identification
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
@@ -1255,6 +1255,14 @@ class AppController:
     def reset_chapters(self, book: BookUnit) -> None:
         """Clear stored chapters (revert to the file-boundary default)."""
         book.chapters = []
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._sync_sidecar(book)
+
+    def save_chapters(self, book: BookUnit, chapters: list[Chapter]) -> None:
+        """Persist hand-edited chapters, sorting by start and recomputing the ends
+        against the book runtime so the stored timeline stays consistent."""
+        book.chapters = normalize_chapters(chapters, book.duration_ms)
         book.touch()
         self.ctx.books.upsert(book)
         self._sync_sidecar(book)
