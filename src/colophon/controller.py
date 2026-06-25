@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from colophon.adapters.audio import is_audio_file
-from colophon.adapters.config import Config, save_config
+from colophon.adapters.config import PATTERN_HISTORY_CAP, Config, OrganizePattern, save_config
 from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.downloader import (
     DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
@@ -623,23 +623,56 @@ class AppController:
             changed += 1
         return changed
 
-    def save_filename_pattern(self, pattern: str) -> None:
-        """Add a validated `pattern` to the saved list (deduped) and persist.
-        Raises ValueError if the pattern does not compile."""
-        pat = pattern.strip()
-        if not pat:
-            return
-        compile_template(pat)  # validate; raises ValueError on bad placeholders
-        if pat in self.ctx.config.saved_filename_patterns:
-            return
-        self.ctx.config.saved_filename_patterns.append(pat)
+    def _push_history(self, items: list, value: object) -> None:
+        """Move `value` to the front (dedup), cap the list, and persist the config."""
+        if value in items:
+            items.remove(value)
+        items.insert(0, value)
+        del items[PATTERN_HISTORY_CAP:]
         save_config(self.ctx.config, self.ctx.config_path)
 
-    def remove_filename_pattern(self, pattern: str) -> None:
-        """Remove `pattern` from the saved list and persist (no-op if absent)."""
-        if pattern in self.ctx.config.saved_filename_patterns:
-            self.ctx.config.saved_filename_patterns.remove(pattern)
+    def _remove_history(self, items: list, value: object) -> None:
+        if value in items:
+            items.remove(value)
             save_config(self.ctx.config, self.ctx.config_path)
+
+    def record_filename_template(self, template: str) -> None:
+        """Record a used filename template at the front of the capped history."""
+        t = template.strip()
+        if t:
+            self._push_history(self.ctx.config.recent_filename_templates, t)
+
+    def record_directory_scheme(self, scheme: str) -> None:
+        """Record a used directory scheme at the front of the capped history."""
+        s = scheme.strip()
+        if s:
+            self._push_history(self.ctx.config.recent_directory_schemes, s)
+
+    def record_organize_pattern(self, folder: str, file: str) -> None:
+        """Record a used organize folder+file pair at the front of the capped history."""
+        folder, file = folder.strip(), file.strip()
+        if folder or file:
+            self._push_history(
+                self.ctx.config.recent_organize_patterns, OrganizePattern(folder=folder, file=file)
+            )
+
+    def remove_filename_template(self, template: str) -> None:
+        self._remove_history(self.ctx.config.recent_filename_templates, template)
+
+    def remove_directory_scheme(self, scheme: str) -> None:
+        self._remove_history(self.ctx.config.recent_directory_schemes, scheme)
+
+    def remove_organize_pattern(self, folder: str, file: str) -> None:
+        self._remove_history(
+            self.ctx.config.recent_organize_patterns, OrganizePattern(folder=folder, file=file)
+        )
+
+    def clear_pattern_history(self) -> None:
+        """Empty all three pattern histories and persist."""
+        self.ctx.config.recent_filename_templates.clear()
+        self.ctx.config.recent_directory_schemes.clear()
+        self.ctx.config.recent_organize_patterns.clear()
+        save_config(self.ctx.config, self.ctx.config_path)
 
     def move_file(self, book: BookUnit, path: Path, delta: int) -> None:
         """Move a file up (delta=-1) or down (delta=+1) in the book's order."""

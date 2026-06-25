@@ -428,35 +428,6 @@ def test_apply_filename_parse_is_undoable(tmp_path):
     ctx.close()
 
 
-def test_save_and_remove_filename_pattern_persist(tmp_path):
-    from colophon.adapters.config import load_config
-
-    cfg_path = tmp_path / "c.toml"
-    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"), config_path=cfg_path)
-    ctrl = AppController(ctx)
-    ctrl.save_filename_pattern("$Author - $Title")
-    ctrl.save_filename_pattern("$Author - $Title")  # dedup: no second copy
-    ctrl.save_filename_pattern("$Series #$SerNum - $Title")
-    assert load_config(cfg_path).saved_filename_patterns == [
-        "$Author - $Title",
-        "$Series #$SerNum - $Title",
-    ]
-    ctrl.remove_filename_pattern("$Author - $Title")
-    assert load_config(cfg_path).saved_filename_patterns == ["$Series #$SerNum - $Title"]
-    ctx.close()
-
-
-def test_save_filename_pattern_rejects_bad_template(tmp_path):
-    import pytest
-
-    ctx = _ctx(tmp_path)
-    ctrl = AppController(ctx)
-    with pytest.raises(ValueError):
-        ctrl.save_filename_pattern("$Nope")
-    assert ctx.config.saved_filename_patterns == []
-    ctx.close()
-
-
 class _FakeAbs:
     def __init__(self):
         self.scanned = []
@@ -2510,4 +2481,35 @@ async def test_scan_preview_honors_template_override(tmp_path, monkeypatch):
     AppController(ctx).scan_preview(template="$Title", directory_scheme="$Author")
     assert captured["template"] == "$Title"
     assert captured["scheme"] == "$Author"
+    ctx.close()
+
+
+def test_pattern_history_record_dedup_cap_and_remove(tmp_path):
+    from colophon.adapters.config import OrganizePattern, load_config
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    ctrl.record_filename_template("$Author - $Title")
+    ctrl.record_filename_template("$Title")
+    ctrl.record_filename_template("$Author - $Title")  # re-use -> front, no dup
+    assert ctx.config.recent_filename_templates == ["$Author - $Title", "$Title"]
+
+    ctrl.record_filename_template("   ")  # blank ignored
+    assert ctx.config.recent_filename_templates == ["$Author - $Title", "$Title"]
+
+    for i in range(12):
+        ctrl.record_directory_scheme(f"$Author/$Series{i}")
+    assert len(ctx.config.recent_directory_schemes) == 10  # capped
+
+    ctrl.record_organize_pattern("$Author", "$Title")
+    assert ctx.config.recent_organize_patterns == [OrganizePattern(folder="$Author", file="$Title")]
+    ctrl.remove_organize_pattern("$Author", "$Title")
+    assert ctx.config.recent_organize_patterns == []
+
+    ctrl.remove_filename_template("$Title")
+    assert ctx.config.recent_filename_templates == ["$Author - $Title"]
+    ctrl.clear_pattern_history()
+    assert ctx.config.recent_filename_templates == [] and ctx.config.recent_directory_schemes == []
+
+    assert load_config(ctx.config_path).recent_filename_templates == []  # persisted
     ctx.close()
