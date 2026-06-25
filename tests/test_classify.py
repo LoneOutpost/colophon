@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from colophon.core.classify import FileFeatures, classify_folder_kind
+from colophon.core.classify import FileFeatures, classify_folder_kind, content_kind_for, group_works
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
+from colophon.core.models import ContentKind as CK
 from colophon.core.models import EmbeddedTags, FolderKind
 
 
@@ -53,3 +54,47 @@ def test_no_signal_is_undetermined():
     )
     assert kind is FolderKind.UNDETERMINED
     assert signals == []
+
+
+def test_shared_album_groups_into_one_work():
+    feats = [
+        _feat("/a/d/01.mp3", album="The Way of Kings"),
+        _feat("/a/d/02.mp3", album="The Way of Kings"),
+    ]
+    works, signals = group_works(feats)
+    assert len(works) == 1
+    assert len(works[0].files) == 2
+    assert content_kind_for(works, signals) is CK.SINGLE
+
+
+def test_distinct_albums_are_multi():
+    feats = [
+        _feat("/a/d/Legion.mp3", album="Legion", artist="Brandon Sanderson"),
+        _feat("/a/d/Elantris.mp3", album="Elantris", artist="Brandon Sanderson"),
+    ]
+    works, signals = group_works(feats)
+    assert len(works) == 2
+    assert content_kind_for(works, signals) is CK.MULTI
+
+
+def test_numbered_files_no_tags_are_one_sequence():
+    feats = [_feat("/a/d/track 1.mp3"), _feat("/a/d/track 2.mp3"), _feat("/a/d/track 3.mp3")]
+    works, signals = group_works(feats)
+    assert len(works) == 1
+    assert content_kind_for(works, signals) is CK.SINGLE
+
+
+def test_untagged_unsequenced_files_are_unknown():
+    feats = [_feat("/a/d/alpha.mp3"), _feat("/a/d/bravo.mp3")]
+    works, signals = group_works(feats)
+    assert len(works) == 2
+    assert content_kind_for(works, signals) is CK.UNKNOWN
+
+
+def test_asin_beats_album_for_grouping():
+    feats = [
+        _feat("/a/d/a.mp3", asin="B001", album="X"),
+        _feat("/a/d/b.mp3", asin="B001", album="Y"),
+    ]
+    works, _ = group_works(feats)
+    assert len(works) == 1

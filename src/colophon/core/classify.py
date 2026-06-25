@@ -22,6 +22,7 @@ from colophon.core.models import (
     Finding,
     FolderKind,
 )
+from colophon.core.normalize import normalize_text
 
 
 @dataclass(frozen=True)
@@ -84,3 +85,86 @@ def classify_folder_kind(
         return FolderKind.TITLE, [_signal("foldername_is_file_stem", 1, "folder name matches a file stem")]
 
     return FolderKind.UNDETERMINED, []
+
+
+CONTENT_THRESHOLD = 2  # min grouping points to assert MULTI rather than UNKNOWN
+
+
+def _work_key(f: FileFeatures) -> str | None:
+    """The strongest available work-identity key for a file, or None."""
+    t = f.tags
+    if t.asin:
+        return f"asin:{t.asin.strip().lower()}"
+    if t.isbn:
+        return f"isbn:{t.isbn.strip().lower()}"
+    if t.album:
+        return f"album:{_norm(t.album)}"
+    return None
+
+
+def _is_single_sequence(files: list[FileFeatures]) -> bool:
+    """True when every file carries a distinct number in its stem — i.e. the
+    files look like numbered parts of one work, not separate books."""
+    nums: list[int] = []
+    for f in files:
+        m = re.search(r"\d+", f.path.stem)
+        if not m:
+            return False
+        nums.append(int(m.group()))
+    return len(set(nums)) == len(nums)
+
+
+def _first(values) -> str | None:
+    for v in values:
+        if v:
+            return v
+    return None
+
+
+def _to_work(group: list[FileFeatures]) -> DetectedWork:
+    label = (
+        _first(f.tags.album for f in group)
+        or _first(f.tags.title for f in group)
+        or normalize_text(group[0].path.stem)
+    )
+    return DetectedWork(
+        label=label,
+        author=_first(f.tags.artist for f in group),
+        files=[f.path for f in group],
+    )
+
+
+def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[ConfidenceSignal]]:
+    """Group files into distinct works: shared asin/isbn/album group together;
+    otherwise unkeyed files either form one numbered sequence or each stand alone."""
+    signals: list[ConfidenceSignal] = []
+    keyed: dict[str, list[FileFeatures]] = {}
+    unkeyed: list[FileFeatures] = []
+    for f in features:
+        key = _work_key(f)
+        if key is None:
+            unkeyed.append(f)
+        else:
+            keyed.setdefault(key, []).append(f)
+
+    works: list[list[FileFeatures]] = list(keyed.values())
+    if keyed:
+        signals.append(_signal("tag_work_keys", 2 * len(keyed), f"{len(keyed)} work key(s) from tags"))
+
+    if unkeyed:
+        if len(unkeyed) > 1 and _is_single_sequence(unkeyed):
+            works.append(unkeyed)
+            signals.append(_signal("filename_sequence", 2, f"{len(unkeyed)} files form one numbered sequence"))
+        else:
+            works.extend([f] for f in unkeyed)
+            if len(unkeyed) > 1:
+                signals.append(_signal("unkeyed_singletons", 0, f"{len(unkeyed)} files lack a shared work key"))
+
+    return [_to_work(g) for g in works], signals
+
+
+def content_kind_for(works: list[DetectedWork], signals: list[ConfidenceSignal]) -> ContentKind:
+    if len(works) == 1:
+        return ContentKind.SINGLE
+    points = sum(s.points for s in signals)
+    return ContentKind.MULTI if points >= CONTENT_THRESHOLD else ContentKind.UNKNOWN
