@@ -145,6 +145,11 @@ body {
 .body--dark .q-btn.bg-primary, .body--dark .q-btn.bg-primary .q-btn__content {
   color: #1c1916 !important;  /* dark accent fails white-on-fill; beats Quasar .text-white */
 }
+/* Checkbox/radio/toggle text labels inherit the page's dark ink, so in dark mode
+   they render dark-on-dark. Route them through the AA muted token. */
+.body--dark .q-checkbox__label,
+.body--dark .q-radio__label,
+.body--dark .q-toggle__label { color: var(--colophon-muted); }
 .q-dialog .q-card { max-width: calc(100vw - 2rem); }
 """
 
