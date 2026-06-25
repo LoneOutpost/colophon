@@ -149,6 +149,69 @@ def render_settings(controller: AppController) -> None:
                     ui.button("Import", icon="download", on_click=_import_ll).props("flat")
 
             with _section(
+                "Pattern history",
+                "Recently used patterns, offered as quick picks in the Scan, Parse, and "
+                "Encode dialogs. Remove any you no longer want, or clear them all.",
+            ):
+                history_box = ui.column().classes("w-full gap-3")
+
+                def _render_history() -> None:
+                    c = controller.ctx.config
+                    history_box.clear()
+                    with history_box:
+                        _history_group(
+                            "Filename templates",
+                            c.recent_filename_templates,
+                            lambda p: p,
+                            lambda p: _remove_history(controller.remove_filename_template, p),
+                        )
+                        _history_group(
+                            "Directory schemes",
+                            c.recent_directory_schemes,
+                            lambda p: p,
+                            lambda p: _remove_history(controller.remove_directory_scheme, p),
+                        )
+                        _history_group(
+                            "Organize patterns",
+                            c.recent_organize_patterns,
+                            lambda op: f"{op.folder} · {op.file}",
+                            lambda op: _remove_history(
+                                controller.remove_organize_pattern, op.folder, op.file
+                            ),
+                        )
+                        if (
+                            c.recent_filename_templates
+                            or c.recent_directory_schemes
+                            or c.recent_organize_patterns
+                        ):
+                            ui.button(
+                                "Clear all history",
+                                icon="delete_sweep",
+                                on_click=_clear_history,
+                            ).props("flat dense")
+
+                def _history_group(title, items, label, on_remove) -> None:
+                    ui.label(title).classes("text-caption colophon-muted")
+                    with ui.row().classes("items-center w-full q-gutter-xs"):
+                        if not items:
+                            ui.label("None yet").classes("text-caption colophon-muted")
+                        for it in items:
+                            ui.chip(label(it), removable=True).props("dense").classes(
+                                "colophon-chip"
+                            ).on("remove", lambda _e, i=it: on_remove(i))
+
+                def _remove_history(remover, *parts) -> None:
+                    remover(*parts)
+                    _render_history()
+
+                def _clear_history() -> None:
+                    controller.clear_pattern_history()
+                    _render_history()
+                    ui.notify("Cleared pattern history")
+
+                _render_history()
+
+            with _section(
                 "Encoding & review",
                 "Transcode bitrate for MP3 sources, and the confidence score at or "
                 "above which a book is automatically marked ready.",
@@ -311,7 +374,7 @@ def render_settings(controller: AppController) -> None:
             def do_save() -> None:
                 try:
                     # Copy from the live config so fields this form doesn't edit
-                    # (storage_secret, saved_filename_patterns, downloads_scan_prompt_seen,
+                    # (storage_secret, recent_*_patterns, downloads_scan_prompt_seen,
                     # db_path, worker_pool_size, ...) are preserved, not reset to defaults.
                     new = cfg.model_copy(update={
                         "scan_paths": _text_to_paths(scan_paths.value),
