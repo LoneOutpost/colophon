@@ -13,6 +13,7 @@ from pathlib import Path
 
 from colophon.core.models import _Base
 from colophon.core.normalize import normalize_text
+from colophon.core.pathscheme import sanitize_segment
 
 
 class FosterResult(_Base):
@@ -61,3 +62,19 @@ def foster_one(path: Path) -> Path:
     destination = target_dir / path.name
     path.rename(destination)
     return destination
+
+
+def foster_work(files: list[Path], parent: Path, subdir_name: str) -> list[Path]:
+    """Move `files` into a new `parent/<sanitized subdir_name>/` directory and
+    return their new paths. The directory must not already exist, so an existing
+    book is never silently merged into (raises FileExistsError)."""
+    target_dir = parent / sanitize_segment(subdir_name)
+    if target_dir.exists():
+        raise FileExistsError(f"{target_dir} already exists")
+    target_dir.mkdir()
+    destinations: list[Path] = []
+    for path in files:
+        dest = target_dir / path.name
+        path.rename(dest)
+        destinations.append(dest)
+    return destinations
