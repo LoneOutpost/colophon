@@ -11,6 +11,13 @@ from pydantic import BaseModel
 
 from colophon.core.tokens import migrate_directory_scheme, migrate_filename_template
 
+PATTERN_HISTORY_CAP = 10  # max entries kept per pattern-history list
+
+
+class OrganizePattern(BaseModel):
+    folder: str
+    file: str
+
 
 class Config(BaseModel):
     scan_paths: list[Path] = []
@@ -21,7 +28,9 @@ class Config(BaseModel):
     root_path: str = ""  # URL base path behind a reverse proxy; "" serves at "/"
     db_path: Path | None = None             # None => default user-data location
     filename_template: str = "$Author - $Title"
-    saved_filename_patterns: list[str] = []  # reusable patterns offered in the parse-from-filename modal
+    recent_filename_templates: list[str] = []      # newest-first, capped history (parse + scan)
+    recent_directory_schemes: list[str] = []        # newest-first, capped
+    recent_organize_patterns: list[OrganizePattern] = []  # newest-first, capped (folder+file pairs)
     directory_scheme: str = ""  # e.g. "Author/Series/Title"; "" disables directory inference
     organize_folder_pattern: str = "$Author/$Title"  # LazyLibrarian-style $Token folder grammar
     organize_file_pattern: str = "$Title"  # the M4B file name pattern (no extension)
@@ -53,12 +62,19 @@ def load_config(path: Path | None = None) -> Config:
         return Config()
     with path.open("rb") as f:
         data = tomllib.load(f)
+    # Legacy saved_filename_patterns -> recent_filename_templates (migrated to $Token), unless
+    # the config is already on the new schema. Read from raw TOML since the field is removed.
+    legacy = data.pop("saved_filename_patterns", None)
+    if legacy and "recent_filename_templates" not in data:
+        seen: list[str] = []
+        for p in (migrate_filename_template(x) for x in legacy):
+            if p and p not in seen:
+                seen.append(p)
+        data["recent_filename_templates"] = seen[:PATTERN_HISTORY_CAP]
     cfg = Config.model_validate(data)
     # Migrate legacy %placeholder% parse templates to the unified $Token grammar.
     cfg.filename_template = migrate_filename_template(cfg.filename_template)
-    cfg.saved_filename_patterns = [
-        migrate_filename_template(p) for p in cfg.saved_filename_patterns
-    ]
+    cfg.recent_filename_templates = [migrate_filename_template(p) for p in cfg.recent_filename_templates]
     # Migrate a legacy bare directory scheme ('Author/Series/Title') to $Token form.
     cfg.directory_scheme = migrate_directory_scheme(cfg.directory_scheme)
     return cfg

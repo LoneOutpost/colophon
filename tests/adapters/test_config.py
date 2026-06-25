@@ -54,10 +54,10 @@ def test_new_config_fields_round_trip(tmp_path):
 def test_load_migrates_legacy_percent_template(tmp_path):
     path = tmp_path / "c.toml"
     save_config(Config(filename_template="%author% - %title%",
-                       saved_filename_patterns=["%series% #%sequence%"]), path)
+                       recent_filename_templates=["%series% #%sequence%"]), path)
     cfg = load_config(path)
     assert cfg.filename_template == "$Author - $Title"
-    assert cfg.saved_filename_patterns == ["$Series #$SerNum"]
+    assert cfg.recent_filename_templates == ["$Series #$SerNum"]
 
 
 def test_ensure_config_file_creates_when_absent(tmp_path):
@@ -254,7 +254,7 @@ def test_settings_save_preserves_non_form_fields():
 
     cfg = Config(
         storage_secret="secret-xyz",
-        saved_filename_patterns=["$Series #$SerNum - $Title"],
+        recent_filename_templates=["$Series #$SerNum - $Title"],
         downloads_scan_prompt_seen=True,
         hardcover_api_token="hc-token",
         filename_template="$Author - $Title",
@@ -266,7 +266,7 @@ def test_settings_save_preserves_non_form_fields():
     assert saved.port == 9000
     # non-form fields preserved, not reset to defaults
     assert saved.storage_secret == "secret-xyz"
-    assert saved.saved_filename_patterns == ["$Series #$SerNum - $Title"]
+    assert saved.recent_filename_templates == ["$Series #$SerNum - $Title"]
     assert saved.downloads_scan_prompt_seen is True
     assert saved.hardcover_api_token == "hc-token"
 
@@ -276,3 +276,29 @@ def test_load_migrates_legacy_directory_scheme(tmp_path):
     path = tmp_path / "c.toml"
     save_config(Config(directory_scheme="Author/Series/Title"), path)
     assert load_config(path).directory_scheme == "$Author/$Series/$Title"
+
+
+def test_pattern_history_defaults_empty():
+    from colophon.adapters.config import Config
+    cfg = Config()
+    assert cfg.recent_filename_templates == []
+    assert cfg.recent_directory_schemes == []
+    assert cfg.recent_organize_patterns == []
+
+
+def test_saved_filename_patterns_migrates_into_recent(tmp_path):
+    import tomli_w
+
+    from colophon.adapters.config import load_config
+    path = tmp_path / "c.toml"
+    with path.open("wb") as f:
+        tomli_w.dump({"saved_filename_patterns": ["%author% - %title%", "%title%"]}, f)
+    cfg = load_config(path)
+    assert cfg.recent_filename_templates == ["$Author - $Title", "$Title"]
+
+
+def test_organize_pattern_round_trips(tmp_path):
+    from colophon.adapters.config import Config, OrganizePattern, load_config, save_config
+    path = tmp_path / "c.toml"
+    save_config(Config(recent_organize_patterns=[OrganizePattern(folder="$Author", file="$Title")]), path)
+    assert load_config(path).recent_organize_patterns == [OrganizePattern(folder="$Author", file="$Title")]

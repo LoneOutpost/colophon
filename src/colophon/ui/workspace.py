@@ -25,6 +25,7 @@ from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, norm
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui.dialogs import (
+    attach_history_menu,
     bulk_remap_dialog,
     bulk_tag_dialog,
     compare_dialog,
@@ -1037,46 +1038,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             pattern_input = ui.input("Pattern", value=initial_pattern).props(
                 "dense clearable"
             ).classes("w-full q-mt-sm")
+            # Quick-pick recent patterns from a dropdown; managed (removed) in Settings.
+            attach_history_menu(
+                pattern_input, controller.ctx.config.recent_filename_templates,
+                lambda p: p, lambda p: pattern_input.set_value(p),
+                tooltip="Recent patterns",
+            )
 
-            saved_row = ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mt-xs")
             fields_row = ui.row().classes("items-center w-full q-gutter-sm q-mt-sm")
             preview_box = ui.column().classes("w-full q-mt-sm")
             apply_btn = ui.button("Apply to selection", icon="auto_fix_high")
-
-            def _render_saved() -> None:
-                saved_row.clear()
-                patterns = controller.ctx.config.saved_filename_patterns
-                with saved_row:
-                    if not patterns:
-                        ui.label("No saved patterns yet").classes("text-caption colophon-muted")
-                    for pat in patterns:
-                        with ui.button(on_click=lambda p=pat: _load_pattern(p)).props(
-                            "outline dense no-caps"
-                        ).classes("q-pr-none"):
-                            ui.label(pat).classes("text-caption")
-                            ui.icon("close").classes("q-ml-xs").on(
-                                "click.stop", lambda p=pat: _unsave(p)
-                            ).tooltip("Remove this saved pattern")
-
-            def _load_pattern(pat: str) -> None:
-                pattern_input.set_value(pat)  # triggers _on_pattern_change -> preview
-
-            def _unsave(pat: str) -> None:
-                controller.remove_filename_pattern(pat)
-                _render_saved()
-                ui.notify("Removed saved pattern")
-
-            def _save_current() -> None:
-                pat = (pattern_input.value or "").strip()
-                if not pat:
-                    return
-                try:
-                    controller.save_filename_pattern(pat)
-                except ValueError as e:
-                    ui.notify(f"Invalid pattern: {e}", type="negative")
-                    return
-                _render_saved()
-                ui.notify("Saved pattern")
 
             def _render_fields(present: list[str]) -> None:
                 fields_row.clear()
@@ -1150,6 +1121,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 except ValueError as e:
                     ui.notify(f"Invalid pattern: {e}", type="negative")
                     return
+                controller.record_filename_template(pat)
                 ui.notify(f"Parsed and wrote fields to {n} of {len(books)} book(s)")
                 _close()
 
@@ -1164,11 +1136,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     _after_select()
 
             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-md"):
-                ui.button("Save pattern", icon="bookmark_add", on_click=_save_current).props("flat")
                 ui.button("Cancel", on_click=dialog.close).props("flat")
                 apply_btn.on_click(_apply)
 
-            _render_saved()
             _render_preview()
         dialog.open()
 
