@@ -190,8 +190,11 @@ def render_acquire(controller: AppController) -> None:
                     ).props("dense")
                     cb.on("click.stop")
                     fr["cb"] = cb
-                    fr["label"] = ui.label(_folder_caption(node, picks)).props("caption")
-            fbody = ui.column().classes("w-full gap-0 q-pl-lg")
+                    fr["label"] = ui.label(_folder_caption(node, picks)).classes(
+                        "text-caption colophon-muted"
+                    )
+            with f_exp:  # files must live inside the expansion so collapse hides them
+                fbody = ui.column().classes("w-full gap-0 q-pl-lg")
 
             def _build_files(open_state: bool, body=fbody, nd=node, t=tid, frr=fr) -> None:
                 if frr["built"]["on"] or not open_state:
@@ -204,7 +207,7 @@ def render_acquire(controller: AppController) -> None:
                             f"{f.name}    {_fmt_size(f.bytes)}",
                             value=f.id in pk,
                             on_change=lambda e, tt=t, fid=f.id: _set_file(tt, fid, e.value),
-                        ).props("dense")
+                        ).props("dense").classes("colophon-muted")
 
             f_exp.on_value_change(lambda e, fn=_build_files: fn(e.value))
 
@@ -226,7 +229,9 @@ def render_acquire(controller: AppController) -> None:
                 r["master"].on("click.stop")
                 with ui.column().classes("col gap-0"):
                     ui.label(cand.torrent.filename or "(unnamed)")
-                    r["total"] = ui.label(_candidate_caption(cand, picks, tree)).props("caption")
+                    r["total"] = ui.label(_candidate_caption(cand, picks, tree)).classes(
+                        "text-caption colophon-muted"
+                    )
                 if not cand.is_audiobook:
                     ui.badge("no audio").props("outline").classes("colophon-chip")
                 ui.button("All", on_click=lambda _e, t=tid: _select_all(t, True)).props(
@@ -235,7 +240,8 @@ def render_acquire(controller: AppController) -> None:
                 ui.button("None", on_click=lambda _e, t=tid: _select_all(t, False)).props(
                     "flat dense"
                 ).on("click.stop")
-        body = ui.column().classes("w-full gap-0 q-pl-md")
+        with exp:  # content must live inside the expansion so collapse hides it
+            body = ui.column().classes("w-full gap-0 q-pl-md")
         built = {"on": False}
 
         def _build_body(open_state: bool, container=body, t=tid, tr=tree, b=built) -> None:
@@ -300,7 +306,7 @@ def render_acquire(controller: AppController) -> None:
                         with ui.item_section():
                             ui.item_label(entry.name or "(unnamed)")
                             detail = f"{entry.status} · {entry.detail}" if entry.detail else entry.status
-                            ui.item_label(detail).props("caption")
+                            ui.item_label(detail).props("caption").classes("colophon-muted")
                         if entry.status in ("active", "paused"):
                             with ui.item_section().props("side"):
                                 if entry.status == "active":
