@@ -20,7 +20,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
-from colophon.core.models import BookState, BookUnit
+from colophon.core.models import BookState, BookUnit, FindingSeverity
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
@@ -87,6 +87,12 @@ _STATE_BADGE: dict[BookState, tuple[str, str]] = {
     BookState.ORGANIZED: ("Organized", "info"),
     BookState.FAILED: ("Failed", "negative"),
     BookState.SKIPPED: ("Skipped", "grey-6"),
+}
+
+_SEVERITY_BADGE: dict[FindingSeverity, tuple[str, str]] = {
+    FindingSeverity.ERROR: ("error", "negative"),
+    FindingSeverity.WARN: ("warning", "warning"),
+    FindingSeverity.INFO: ("info", "info"),
 }
 
 # Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
@@ -369,6 +375,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _books_for_scope() -> list:
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
+        if kind == "attention":
+            return controller.books_needing_attention()
         if kind == "needs_id":
             books = list(tree.needs_id)
         elif kind == "author":
@@ -396,6 +404,46 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if not terms:
             return books
         return [b for b in books if _matches_filter(b, terms)]
+
+    # --- attention pane (findings + guided actions) ---
+    def render_attention_pane(book) -> None:
+        findings = controller._active_findings(book)
+        with ui.column().classes("w-full gap-2"):
+            for f in findings:
+                icon, color = _SEVERITY_BADGE[f.severity]
+                with ui.row().classes("items-center gap-2"):
+                    ui.icon(icon).props(f"color={color}")
+                    ui.label(f.detail)
+            actionable = [f for f in findings if f.code.value in (
+                "loose_in_author", "multi_in_author", "multi_in_undetermined", "mixed_works")]
+            if actionable and book.detected_works:
+                ui.label("Will split into:").props("caption")
+                for w in book.detected_works:
+                    ui.label(f"  {w.label}  ({len(w.files)} file(s))").props("caption")
+
+                def _confirm_split(b=book) -> None:
+                    result = controller.split_into_works(b)
+                    ui.notify(
+                        f"Split {result.fostered} file(s) into "
+                        f"{len(b.detected_works)} book(s)",
+                        type="positive",
+                    )
+                    refresh_nav()
+                    _render_middle()
+                    refresh_status()
+
+                ui.button("Confirm split", on_click=_confirm_split).props("color=primary")
+            for f in findings:
+                if f.code.value in ("dup_format", "dup_edition", "structure_unclear"):
+                    code = f.code
+
+                    def _ack(c=code, b=book) -> None:
+                        controller.acknowledge_finding(b, c)
+                        ui.notify("Acknowledged", type="info")
+                        refresh_nav()
+                        _render_middle()
+
+                    ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
@@ -624,6 +672,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             )
             _set_dirty(False)
             _persist_view()
+
+            if controller._active_findings(book):
+                ui.separator().classes("q-my-sm")
+                ui.label("Attention").classes("text-subtitle2")
+                render_attention_pane(book)
 
             if book.source_files:
                 ui.separator().classes("q-my-sm")
@@ -1403,6 +1456,19 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         lambda: _set_scope("needs_id", None),
                         color="negative",
                         checkbox=_node_checkbox([b.id for b in needs_id]),
+                    )
+                attention = [b for b in controller.books_needing_attention() if _in_folder(b)]
+                if attention:
+                    counts = {"error": 0, "warn": 0, "info": 0}
+                    for b in attention:
+                        for f in controller._active_findings(b):
+                            counts[f.severity.value] += 1
+                    _nav_item(
+                        f"Needs attention ({len(attention)})", "flag",
+                        kind == "attention",
+                        lambda: _set_scope("attention", None),
+                        color="negative" if counts["error"] else "warning",
+                        checkbox=_node_checkbox([b.id for b in attention]),
                     )
                 if view["group_by"] == "series":
                     series_books: dict[str, list[str]] = {}

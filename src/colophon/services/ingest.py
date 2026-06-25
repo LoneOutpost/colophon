@@ -7,6 +7,7 @@ fields; only empty fields are filled and the on-disk file list is refreshed.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,10 +16,13 @@ from colophon.adapters.repository.store import BookUnitRepo
 from colophon.adapters.scan import group_book_units
 from colophon.adapters.sidecar import read_sidecar
 from colophon.adapters.tags import read_embedded_tags
+from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookUnit
 from colophon.core.reconcile import reconcile
+
+logger = logging.getLogger(__name__)
 
 _RECONCILED_FIELDS = (
     "title", "subtitle", "authors", "narrators", "series",
@@ -59,6 +63,29 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
 
         first = unit.files[0]
         embedded = read_embedded_tags(first)
+
+        # Build per-file features for the structural classifier. Reuse the
+        # first-file tag read; only fan out the remaining reads when needed
+        # (the cost gate — a 1-file folder is trivially single).
+        features = []
+        for sf in book.source_files:
+            tags = embedded if sf.path == first else read_embedded_tags(sf.path)
+            features.append(
+                FileFeatures(path=sf.path, ext=sf.ext,
+                             duration_seconds=sf.duration_seconds, tags=tags)
+            )
+        try:
+            result = classify(unit.folder, root, features,
+                              template_pattern=pattern, scheme_patterns=scheme)
+            book.content_kind = result.content_kind
+            book.folder_kind = result.folder_kind
+            book.classification_confidence = result.confidence
+            book.classification_signals = result.signals
+            book.findings = result.findings
+            book.detected_works = result.detected_works
+        except Exception as e:  # classification must never fail a scan
+            logger.warning(f"classification failed for {unit.folder}: {e}")
+
         filename_fields = parse_filename(pattern, first.name) or {}
         sidecar = read_sidecar(unit.folder)
         directory_fields = infer_from_path(unit.folder, root, scheme)
