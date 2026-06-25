@@ -53,6 +53,24 @@ def busy(button: ui.button) -> Iterator[None]:
         button.props(remove="loading")
 
 
+def pattern_chips_row(
+    label: str,
+    items: list,
+    chip_text: Callable[[object], object],
+    on_pick: Callable[[object], None],
+) -> None:
+    """A row of quick-pick chips for recently-used patterns; clicking one calls
+    on_pick with that item. Renders nothing when the history is empty."""
+    if not items:
+        return
+    with ui.row().classes("items-center w-full q-gutter-xs"):
+        ui.label(label).classes("text-caption colophon-muted self-center")
+        for it in items:
+            ui.chip(str(chip_text(it)), on_click=lambda i=it: on_pick(i)).props(
+                "dense clickable"
+            ).classes("colophon-chip")
+
+
 def _fmt_duration(seconds: float) -> str:
     """Format a file length as hours and minutes, e.g. '1h 2m' or '47m'."""
     minutes = round(seconds / 60)
@@ -695,28 +713,37 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                 template = ui.input("Filename template", value=cfg.filename_template).props(
                     "outlined dense"
                 ).classes("w-full")
+                pattern_chips_row(
+                    "Recent:", cfg.recent_filename_templates,
+                    lambda p: p, lambda p: template.set_value(p),
+                )
                 scheme = ui.input(
                     "Directory scheme (blank disables)", value=cfg.directory_scheme
                 ).props("outlined dense").classes("w-full")
+                pattern_chips_row(
+                    "Recent:", cfg.recent_directory_schemes,
+                    lambda p: p, lambda p: scheme.set_value(p),
+                )
                 dry = ui.checkbox("Dry run (show what would be parsed, change nothing)", value=False)
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _preview() -> None:
+                        used_template = template.value or cfg.filename_template
                         try:
                             plan = await asyncio.to_thread(
                                 controller.scan_preview,
-                                template=template.value or cfg.filename_template,
+                                template=used_template,
                                 directory_scheme=scheme.value,
                             )
                         except ValueError as e:
                             ui.notify(f"Invalid pattern: {e}", type="negative")
                             return
-                        show_results(plan, dry.value)
+                        show_results(plan, dry.value, used_template, scheme.value)
 
                     ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
 
-        def show_results(plan, dry: bool) -> None:
+        def show_results(plan, dry: bool, used_template: str, used_scheme: str) -> None:
             body.clear()
             with body:
                 if plan.new_books == 0 and plan.existing_books == 0:
@@ -749,6 +776,8 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
 
                 async def _apply() -> None:
                     dialog.close()
+                    controller.record_filename_template(used_template)
+                    controller.record_directory_scheme(used_scheme)  # blank-ignored
                     written = await asyncio.to_thread(controller.apply_scan, plan)
                     refresh_all()
                     ui.notify(f"Scan complete ({written} books)")
@@ -878,6 +907,16 @@ async def process_dialog(
                 folder_pat.on_value_change(lambda _e: _preview())
                 file_pat.on_value_change(lambda _e: _preview())
                 _preview()
+
+                def _pick_pair(op) -> None:
+                    folder_pat.set_value(op.folder)
+                    file_pat.set_value(op.file)
+                    _preview()
+
+                pattern_chips_row(
+                    "Recent:", cfg.recent_organize_patterns,
+                    lambda op: f"{op.folder} · {op.file}", _pick_pair,
+                )
                 dry = ui.checkbox("Dry run (show destinations, change nothing)", value=False)
                 ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
                     "text-caption colophon-muted"
@@ -926,6 +965,10 @@ async def process_dialog(
                             delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
                             patterns=_patterns(),
                         )
+                        if options.organize and options.patterns is not None:
+                            controller.record_organize_pattern(
+                                options.patterns.folder, options.patterns.single_file
+                            )
                         await show_progress(options)
 
                     ui.button("Run", icon="play_arrow", on_click=_run).props("unelevated")
