@@ -154,20 +154,24 @@ def _editor_text(widget) -> str:
     return value or ""
 
 
-def _cover_src(book: BookUnit) -> str | None:
+def _cover_src(book: BookUnit, *, thumb: bool = False) -> str | None:
     """The cover-serving URL for a book, or None when it has no cover. The
-    `?v=` cache-buster refreshes the image whenever the book changes."""
+    `?v=` cache-buster refreshes the image whenever the book changes; `thumb`
+    requests the small downscaled cover for the list/navigator rows."""
     if book.cover_path or book.cover_url:
-        return f"/cover/{book.id}?v={int(book.updated_at.timestamp())}"
+        size = "&size=thumb" if thumb else ""
+        return f"/cover/{book.id}?v={int(book.updated_at.timestamp())}{size}"
     return None
 
 
-def _render_cover(book: BookUnit, *, width: int, height: int, icon: str = "") -> None:
+def _render_cover(
+    book: BookUnit, *, width: int, height: int, icon: str = "", thumb: bool = False
+) -> None:
     """Render a book's cover at its natural aspect ratio: the width is fixed and the
     height follows the image, so portrait (book) and square covers both show
     uncropped. `height` sizes the neutral placeholder box shown when there is no
-    cover (kept book-shaped)."""
-    src = _cover_src(book)
+    cover (kept book-shaped). `thumb` serves the small cover (list/navigator rows)."""
+    src = _cover_src(book, thumb=thumb)
     if src:
         ui.image(src).classes("rounded").style(f"width:{width}px;height:auto")
     else:
@@ -867,7 +871,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     on_change=lambda e, bid=book.id: _toggle_book(bid, e.value),
                 ).props("dense")
             with ui.item_section().props("avatar"):
-                _render_cover(book, width=36, height=54)
+                _render_cover(book, width=36, height=54, thumb=True)
             with ui.item_section().classes("cursor-pointer").on(
                 "click", lambda bid=book.id: _set_focus(bid)
             ):

@@ -13,11 +13,43 @@ import logging
 from pathlib import Path
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from colophon.adapters.cover import ext_for_mime, fetch_cover
 from colophon.core.models import BookUnit
 
 logger = logging.getLogger(__name__)
+
+THUMB_MAX_PX = 96  # longest edge of the list/navigator thumbnail
+
+
+def _thumb_path(source: Path) -> Path:
+    # Beside the source so it travels with the cover; the full source name keeps
+    # two covers of different types (cover.jpg / cover.png) from colliding.
+    return source.with_name(source.name + ".thumb.jpg")
+
+
+def thumbnail_bytes(source: Path, *, max_px: int = THUMB_MAX_PX) -> tuple[bytes, str] | None:
+    """A small JPEG thumbnail of `source` as (bytes, "image/jpeg"), generated and
+    cached beside it on first use and regenerated when the source is newer.
+
+    Returns None when the source is missing or not a decodable image, so the
+    caller can fall back to serving the full-size cover. Synchronous (Pillow):
+    call it from a worker thread when on the event loop.
+    """
+    if not source.exists():
+        return None
+    thumb = _thumb_path(source)
+    if not thumb.exists() or thumb.stat().st_mtime < source.stat().st_mtime:
+        try:
+            with Image.open(source) as im:
+                rgb = im.convert("RGB")
+                rgb.thumbnail((max_px, max_px))
+                rgb.save(thumb, "JPEG", quality=82)
+        except (OSError, UnidentifiedImageError, ValueError) as e:
+            logger.warning(f"thumbnailing {source} failed: {e}")
+            return None
+    return thumb.read_bytes(), "image/jpeg"
 
 
 async def ensure_cached_cover(

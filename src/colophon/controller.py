@@ -59,7 +59,7 @@ from colophon.services.acquire import (
     sanitize_name,
 )
 from colophon.services.catalog import apply_catalog_mapping
-from colophon.services.cover import ensure_cached_cover
+from colophon.services.cover import ensure_cached_cover, thumbnail_bytes
 from colophon.services.editing import (
     apply_fields,
     bulk_apply_fields,
@@ -243,21 +243,29 @@ class AppController:
     def get_book(self, book_id: str) -> BookUnit | None:
         return self.ctx.books.get(book_id)
 
-    async def book_cover(self, book_id: str) -> tuple[bytes, str] | None:
+    async def book_cover(self, book_id: str, *, thumb: bool = False) -> tuple[bytes, str] | None:
         """A book's cover image as (bytes, mime): the cached file if present, else
-        fetched from `cover_url` and cached for next time. None when the book has
-        no cover or the fetch fails."""
+        fetched from `cover_url` and cached for next time. With `thumb`, serve a
+        small downscaled JPEG (for the list/navigator rows) instead of the
+        full-size image, falling back to full if it can't be thumbnailed. None when
+        the book has no cover or the fetch fails."""
         book = self.get_book(book_id)
         if book is None:
             return None
+        source = None
         if book.cover_path and book.cover_path.exists():
-            return book.cover_path.read_bytes(), mime_for_suffix(book.cover_path)
-        if book.cover_url:
-            path = await ensure_cached_cover(book, dest_dir=book.source_folder)
-            if path is not None:
+            source = book.cover_path
+        elif book.cover_url:
+            source = await ensure_cached_cover(book, dest_dir=book.source_folder)
+            if source is not None:
                 self.ctx.books.upsert(book)  # remember the cache location
-                return path.read_bytes(), mime_for_suffix(path)
-        return None
+        if source is None:
+            return None
+        if thumb:
+            tn = await asyncio.to_thread(thumbnail_bytes, source)
+            if tn is not None:
+                return tn
+        return source.read_bytes(), mime_for_suffix(source)
     async def ensure_cover_cached(self, book: BookUnit) -> None:
         """Cache the book's cover_url into cover_path (if not already cached) so a
         synchronous encode can embed it. No-op when a cached cover exists or there
