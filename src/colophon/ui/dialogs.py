@@ -18,6 +18,7 @@ from nicegui import ui
 
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.controller import AppController
+from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
 from colophon.core.pathscheme import sample_target
@@ -292,6 +293,79 @@ def cover_dialog(
         )
         with ui.row().classes("w-full justify-end q-mt-sm"):
             ui.button("Cancel", on_click=dialog.close).props("flat")
+    dialog.open()
+
+
+def chapter_edit_dialog(
+    controller: AppController,
+    book: BookUnit,
+    chapters: list[Chapter],
+    *,
+    show_detail: Callable[[str], None],
+) -> None:
+    """Edit chapter titles and start times, optionally shifting them all by an
+    offset; Save persists the timeline (sorted, ends recomputed) onto the book."""
+    rows: list[dict] = []  # {"title": ui.input, "time": ui.input}
+
+    def _read_time(row: dict) -> int | None:
+        try:
+            return parse_timecode(row["time"].value or "0")
+        except ValueError:
+            ui.notify(f"Bad time: {row['time'].value!r} (use H:MM:SS)", type="negative")
+            return None
+
+    with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 640px"):
+        ui.label(f"Edit chapters ({len(chapters)})").classes("text-subtitle1")
+        ui.label(
+            "Titles and start times are written into the M4B when you encode."
+        ).classes("text-caption colophon-muted")
+
+        with ui.row().classes("items-center no-wrap q-gutter-sm q-mt-xs"):
+            shift_in = ui.number("Shift all (seconds)", value=0, format="%d").props(
+                "dense"
+            ).classes("w-40")
+
+            def _apply_shift() -> None:
+                delta_ms = round(float(shift_in.value or 0) * 1000)
+                if not delta_ms:
+                    return
+                bases = [_read_time(row) for row in rows]
+                if any(b is None for b in bases):
+                    return
+                for row, base in zip(rows, bases, strict=True):
+                    row["time"].set_value(format_timecode(max(0, base + delta_ms)))
+                shift_in.set_value(0)
+
+            ui.button("Apply shift", icon="schedule", on_click=_apply_shift).props(
+                "flat dense no-caps"
+            )
+
+        with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
+                ui.list().props("dense").classes("w-full"):
+            for n, ch in enumerate(chapters, start=1):
+                with ui.item(), ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                    ui.label(str(n)).classes("colophon-muted").style("min-width: 1.5rem")
+                    title_in = ui.input(value=ch.title).props("dense").classes("col")
+                    time_in = ui.input(value=format_timecode(ch.start_ms)).props(
+                        "dense"
+                    ).classes("w-28")
+                    rows.append({"title": title_in, "time": time_in})
+
+        def _save() -> None:
+            edited: list[Chapter] = []
+            for row in rows:
+                start = _read_time(row)
+                if start is None:
+                    return
+                edited.append(
+                    Chapter(title=(row["title"].value or "").strip(), start_ms=start, end_ms=start)
+                )
+            controller.save_chapters(book, edited)
+            dialog.close()
+            ui.notify(f"Saved {len(edited)} chapter(s)")
+            show_detail(book.id)
+
+        dialog_actions(dialog, confirm_label="Save", confirm_icon="save", on_confirm=_save)
     dialog.open()
 
 

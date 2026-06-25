@@ -28,6 +28,7 @@ from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
     bulk_tag_dialog,
+    chapter_edit_dialog,
     compare_dialog,
     cover_dialog,
     identify_dialog,
@@ -645,8 +646,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.row().classes("items-center w-full no-wrap q-mt-sm"):
                     ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2")
                     if applied:
-                        ui.badge("from Audible").props("outline").classes("colophon-chip").classes("self-center")
+                        ui.badge("custom").props("outline").classes("colophon-chip").classes("self-center")
                     ui.space()
+                    ui.button(
+                        "Edit", icon="edit",
+                        on_click=lambda b=book, chs=chapters: chapter_edit_dialog(
+                            controller, b, chs, show_detail=show_detail
+                        ),
+                    ).props("flat dense no-caps")
                     ui.button(
                         "Fetch from Audible", icon="cloud_download", on_click=_fetch_clicked
                     ).props("flat dense no-caps")
