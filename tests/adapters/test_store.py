@@ -214,3 +214,51 @@ def test_list_all_second_call_is_cached(tmp_path: Path):
     repo.conn.execute("DELETE FROM book_units")
     repo.conn.commit()
     assert len(repo.list_all()) == 1  # served from the cache, not re-read from SQL
+
+
+def _fresh(repo) -> list[str]:
+    """Titles read straight from SQL (bypassing the cache), sorted, for parity checks."""
+    rows = repo.conn.execute("SELECT data FROM book_units").fetchall()
+    return sorted(BookUnit.model_validate_json(r["data"]).title or "" for r in rows)
+
+
+def _titled(folder: Path, title: str) -> BookUnit:
+    bu = BookUnit.new(source_folder=folder)
+    bu.title = title
+    return bu
+
+
+def test_incremental_cache_matches_fresh_db_across_mixed_ops(tmp_path: Path):
+    repo = _repo(tmp_path)
+    a = _titled(tmp_path / "a", "A")
+    b = _titled(tmp_path / "b", "B")
+    c = _titled(tmp_path / "c", "C")
+    repo.upsert(a)
+    repo.list_all()        # warm the cache, then keep editing
+    repo.upsert(b)         # new id -> appended to the live cache
+    a.title = "A2"
+    repo.upsert(a)         # existing id -> replaced in place
+    repo.upsert(c)
+    repo.delete(b.id)      # removed from the live cache
+    # The cache (list_all) must agree with a fresh deserialize of the table.
+    cached = sorted(x.title or "" for x in repo.list_all())
+    assert cached == _fresh(repo) == ["A2", "C"]
+
+
+def test_cache_is_insulated_from_caller_mutation_after_upsert(tmp_path: Path):
+    repo = _repo(tmp_path)
+    bu = _titled(tmp_path / "x", "Saved")
+    repo.upsert(bu)
+    repo.list_all()                     # warm cache with a deep copy
+    bu.title = "Mutated, not written"   # caller edits its own object, no upsert
+    assert [x.title for x in repo.list_all()] == ["Saved"]
+
+
+def test_uncommitted_write_rebuilds_cache(tmp_path: Path):
+    repo = _repo(tmp_path)
+    repo.upsert(_titled(tmp_path / "first", "First"))
+    repo.list_all()  # warm cache
+    # A bulk-style write (commit=False) invalidates rather than patches, so a rollback
+    # can't leave the cache ahead of the DB; the next read rebuilds and includes it.
+    repo.upsert(_titled(tmp_path / "second", "Second"), commit=False)
+    assert sorted(x.title or "" for x in repo.list_all()) == ["First", "Second"]

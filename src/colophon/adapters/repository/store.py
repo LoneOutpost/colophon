@@ -110,11 +110,16 @@ def migrate(conn: sqlite3.Connection) -> None:
 @dataclass
 class BookUnitRepo:
     conn: sqlite3.Connection
-    # Memoized full-table read. A workspace refresh calls list_all() several times
-    # (nav tree, list, stats); without this each call re-deserializes every row on
-    # the event loop. Invalidated on every write below. Colophon owns its DB, so no
-    # external writer can stale it.
-    _cache: list[BookUnit] | None = field(default=None, init=False, repr=False)
+    # Memoized full-table read keyed by id. A workspace refresh calls list_all()
+    # several times (nav tree, list, stats); without this each call re-deserializes
+    # every row on the event loop. A *committed* single write updates one entry in
+    # place (so the after-an-edit refresh stays warm); an uncommitted (commit=False,
+    # bulk) write invalidates instead, so a mid-batch rollback can't leave the cache
+    # ahead of the DB — it rebuilds once after the batch commits. The lock guards the
+    # cache against worker threads (encode jobs upsert state) racing event-loop reads.
+    # Colophon owns its DB, so no external writer can stale it.
+    _cache: dict[str, BookUnit] | None = field(default=None, init=False, repr=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
 
     def upsert(self, book: BookUnit, commit: bool = True) -> None:
         # The denormalized columns (source_folder, state, confidence, created_at,
@@ -143,7 +148,13 @@ class BookUnitRepo:
         )
         if commit:
             self.conn.commit()
-        self._cache = None
+            with self._lock:
+                if self._cache is not None:
+                    # store a deep copy so later in-place edits to the caller's
+                    # object can't reach the cache without their own write
+                    self._cache[book.id] = book.model_copy(deep=True)
+        else:
+            self._invalidate()
 
     def get(self, id: str) -> BookUnit | None:
         row = self.conn.execute(
@@ -158,13 +169,23 @@ class BookUnitRepo:
         self.conn.execute("DELETE FROM book_units WHERE id = ?", (id,))
         if commit:
             self.conn.commit()
-        self._cache = None
+            with self._lock:
+                if self._cache is not None:
+                    self._cache.pop(id, None)
+        else:
+            self._invalidate()
+
+    def _invalidate(self) -> None:
+        with self._lock:
+            self._cache = None
 
     def list_all(self) -> list[BookUnit]:
-        if self._cache is None:
-            rows = self.conn.execute("SELECT data FROM book_units").fetchall()
-            self._cache = [BookUnit.model_validate_json(r["data"]) for r in rows]
-        return list(self._cache)  # shallow copy: callers may sort/append without corrupting the cache
+        with self._lock:
+            if self._cache is None:
+                rows = self.conn.execute("SELECT data FROM book_units").fetchall()
+                books = (BookUnit.model_validate_json(r["data"]) for r in rows)
+                self._cache = {b.id: b for b in books}
+            return list(self._cache.values())  # shallow copy: callers may sort/append freely
 
     def list_by_state(self, state: BookState) -> list[BookUnit]:
         rows = self.conn.execute(
