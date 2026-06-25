@@ -10,6 +10,7 @@ from colophon.controller import AppController
 _BASE_TABS = [
     ("Library", "/", "library"),
     ("Manage", "/manage", "manage"),
+    ("Stats", "/stats", "stats"),
     ("Settings", "/settings", "settings"),
 ]
 
