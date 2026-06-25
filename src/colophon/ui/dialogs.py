@@ -111,6 +111,20 @@ def _confidence_color(value: float) -> str:
     return "negative"
 
 
+def _cover_thumb(url: str | None) -> None:
+    """A small cover thumbnail for a match row; a placeholder when there's no art,
+    so every row keeps the same left gutter."""
+    if url:
+        ui.image(url).classes("rounded").style(
+            "width: 36px; height: 54px; object-fit: cover"
+        )
+    else:
+        with ui.element("div").classes(
+            "rounded flex items-center justify-center colophon-chip"
+        ).style("width: 36px; height: 54px; border: 1px solid var(--colophon-border)"):
+            ui.icon("menu_book", size="18px").classes("colophon-muted")
+
+
 def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
     """Render a candidate's metadata block (captions + runtime/abridged row),
     comparing runtime against `book`. Emits NiceGUI elements into the current
@@ -386,6 +400,8 @@ def compare_dialog(
                 with ui.list().props("dense").classes("w-full"):
                     for m in matches[:10]:
                         with ui.item(on_click=lambda result=m: show_picker(result)).props("clickable"):
+                            with ui.item_section().props("avatar"):
+                                _cover_thumb(m.cover_url)
                             with ui.item_section():
                                 ui.item_label(m.title or "?")
                                 _candidate_meta(
@@ -649,6 +665,7 @@ async def quick_match_dialog(
                                 exp = ui.expansion().classes("w-full")
                                 with exp.add_slot("header"):
                                     with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
+                                        _cover_thumb(p.best.cover_url)
                                         with ui.column().classes("gap-0"):
                                             ui.label(f"{cur} → {p.best.title or '?'}")
                                             ui.label(
