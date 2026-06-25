@@ -1045,38 +1045,26 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             def _render_saved() -> None:
                 saved_row.clear()
-                patterns = controller.ctx.config.saved_filename_patterns
+                patterns = controller.ctx.config.recent_filename_templates
                 with saved_row:
                     if not patterns:
-                        ui.label("No saved patterns yet").classes("text-caption colophon-muted")
+                        ui.label("No recent patterns yet").classes("text-caption colophon-muted")
                     for pat in patterns:
                         with ui.button(on_click=lambda p=pat: _load_pattern(p)).props(
                             "outline dense no-caps"
-                        ).classes("q-pr-none"):
+                        ).classes("colophon-chip q-pr-none"):
                             ui.label(pat).classes("text-caption")
                             ui.icon("close").classes("q-ml-xs").on(
                                 "click.stop", lambda p=pat: _unsave(p)
-                            ).tooltip("Remove this saved pattern")
+                            ).tooltip("Remove from history")
 
             def _load_pattern(pat: str) -> None:
                 pattern_input.set_value(pat)  # triggers _on_pattern_change -> preview
 
             def _unsave(pat: str) -> None:
-                controller.remove_filename_pattern(pat)
+                controller.remove_filename_template(pat)
                 _render_saved()
-                ui.notify("Removed saved pattern")
-
-            def _save_current() -> None:
-                pat = (pattern_input.value or "").strip()
-                if not pat:
-                    return
-                try:
-                    controller.save_filename_pattern(pat)
-                except ValueError as e:
-                    ui.notify(f"Invalid pattern: {e}", type="negative")
-                    return
-                _render_saved()
-                ui.notify("Saved pattern")
+                ui.notify("Removed from history")
 
             def _render_fields(present: list[str]) -> None:
                 fields_row.clear()
@@ -1150,6 +1138,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 except ValueError as e:
                     ui.notify(f"Invalid pattern: {e}", type="negative")
                     return
+                controller.record_filename_template(pat)
                 ui.notify(f"Parsed and wrote fields to {n} of {len(books)} book(s)")
                 _close()
 
@@ -1164,7 +1153,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     _after_select()
 
             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-md"):
-                ui.button("Save pattern", icon="bookmark_add", on_click=_save_current).props("flat")
                 ui.button("Cancel", on_click=dialog.close).props("flat")
                 apply_btn.on_click(_apply)
 
