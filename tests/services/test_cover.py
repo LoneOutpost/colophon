@@ -59,3 +59,57 @@ async def test_disk_write_failure_returns_none(tmp_path: Path):
     path = await ensure_cached_cover(book, dest_dir=tmp_path / "blocker" / "sub", client=_client(handler))
     assert path is None
     assert book.cover_path is None
+
+
+def _make_image(path: Path, size=(400, 600)) -> None:
+    from PIL import Image
+    Image.new("RGB", size, (180, 90, 60)).save(path)
+
+
+def test_thumbnail_downscales_and_caches_beside_source(tmp_path: Path):
+    from PIL import Image
+
+    from colophon.services.cover import THUMB_MAX_PX, _thumb_path, thumbnail_bytes
+    src = tmp_path / "cover.jpg"
+    _make_image(src, (400, 600))
+    result = thumbnail_bytes(src)
+    assert result is not None
+    data, mime = result
+    assert mime == "image/jpeg"
+    assert _thumb_path(src).exists()
+    assert len(data) < src.stat().st_size  # smaller payload than the full cover
+    from io import BytesIO
+    with Image.open(BytesIO(data)) as im:
+        assert max(im.size) <= THUMB_MAX_PX  # longest edge bounded
+        assert im.size == (64, 96)           # aspect ratio preserved (400x600 -> 64x96)
+
+
+def test_thumbnail_regenerates_when_source_is_newer(tmp_path: Path):
+    import os
+
+    from colophon.services.cover import _thumb_path, thumbnail_bytes
+    src = tmp_path / "cover.jpg"
+    _make_image(src, (400, 600))
+    thumbnail_bytes(src)
+    first_mtime = _thumb_path(src).stat().st_mtime
+    # Replace the cover with a newer file; the next call must rebuild the thumb.
+    _make_image(src, (300, 300))
+    os.utime(src, (first_mtime + 10, first_mtime + 10))
+    thumbnail_bytes(src)
+    from io import BytesIO
+
+    from PIL import Image
+    with Image.open(BytesIO(thumbnail_bytes(src)[0])) as im:
+        assert im.size == (96, 96)  # reflects the new square source
+
+
+def test_thumbnail_missing_source_returns_none(tmp_path: Path):
+    from colophon.services.cover import thumbnail_bytes
+    assert thumbnail_bytes(tmp_path / "nope.jpg") is None
+
+
+def test_thumbnail_non_image_returns_none(tmp_path: Path):
+    from colophon.services.cover import thumbnail_bytes
+    bad = tmp_path / "cover.jpg"
+    bad.write_text("not an image")
+    assert thumbnail_bytes(bad) is None  # falls back to full cover at the call site

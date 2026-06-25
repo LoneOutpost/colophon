@@ -20,8 +20,8 @@ def create_app(controller: AppController) -> None:
     app.add_static_files("/assets", str(Path(__file__).parent / "assets"))
 
     @app.get("/cover/{book_id}")
-    async def cover(book_id: str) -> Response:
-        result = await controller.book_cover(book_id)
+    async def cover(book_id: str, size: str = "") -> Response:
+        result = await controller.book_cover(book_id, thumb=(size == "thumb"))
         if result is None:
             return Response(status_code=404)
         data, mime = result
