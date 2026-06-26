@@ -1,5 +1,3 @@
-import pytest
-
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
 from colophon.core.models import BookUnit, Phase, PhaseState
 from colophon.core.phases import state_of
@@ -48,13 +46,6 @@ def test_new_only_honors_phase_subset(tmp_path):
     assert state_of(book, Phase.SEARCH) is PhaseState.FRESH
     assert state_of(book, Phase.CATEGORIZE) is PhaseState.FRESH
     assert state_of(book, Phase.IDENTIFY) is PhaseState.PENDING
-
-
-def test_update_and_refresh_not_yet_wired(tmp_path):
-    repo = _repo(tmp_path)
-    for scope in (ScanScope.UPDATE, ScanScope.REFRESH):
-        with pytest.raises(NotImplementedError):
-            plan_scan(repo, tmp_path, template="$Title", options=ScanOptions(scope=scope))
 
 
 def test_options_none_is_legacy_behavior(tmp_path):

@@ -8,6 +8,7 @@ fields; only empty fields are filled and the on-disk file list is refreshed.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -43,8 +44,8 @@ class ScanPlan:
 
 class ScanScope(StrEnum):
     NEW_ONLY = "new_only"   # add newly-discovered books; skip already-known ones
-    UPDATE = "update"       # (deferred) known books: re-run selected phases where stale/pending
-    REFRESH = "refresh"     # (deferred) known books: force selected phases even if fresh
+    UPDATE = "update"       # known books: re-run selected phases where stale/pending
+    REFRESH = "refresh"     # known books: force selected phases even if fresh
 
 
 @dataclass
@@ -203,32 +204,103 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
 
 
 def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
-              options: ScanOptions | None = None) -> ScanPlan:
+              options: ScanOptions | None = None, inference_root: Path | None = None) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything.
-    `options is None` keeps the legacy behavior (all books, all local phases)."""
+    `options is None` keeps the legacy behavior (all books, all local phases).
+    `inference_root` (default `root`) is the scan path used for classify/dir-inference depth."""
     if options is None:
         return _plan_scan_all(repo, root, template=template, directory_scheme=directory_scheme)
-    if options.scope is not ScanScope.NEW_ONLY:
-        raise NotImplementedError(f"scan scope {options.scope.value} not yet wired")
-    return _plan_scan_new_only(repo, root, options.phases,
-                               template=template, directory_scheme=directory_scheme)
+    if options.scope is ScanScope.NEW_ONLY:
+        return _plan_scan_new_only(repo, root, options.phases, template=template,
+                                   directory_scheme=directory_scheme, inference_root=inference_root)
+    return _plan_scan_reprocess(repo, root, options.phases,
+                                force=options.scope is ScanScope.REFRESH,
+                                template=template, directory_scheme=directory_scheme,
+                                inference_root=inference_root)
 
 
 def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
-                        template: str, directory_scheme: str) -> ScanPlan:
+                        template: str, directory_scheme: str,
+                        inference_root: Path | None = None) -> ScanPlan:
     """Ingest only books not already known; run the selected local phases on each.
     SEARCH is always run for a new book (probing is intrinsic to discovery)."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
+    inf_root = inference_root or root
     plan = ScanPlan()
     for unit in group_book_units(root):
         if repo.get(BookUnit.id_for(unit.folder)) is not None:
             continue
         book = BookUnit.new(source_folder=unit.folder)
         run_local_phases(book, phases | {Phase.SEARCH}, force=False,
-                         root=root, pattern=pattern, scheme=scheme, unit_files=unit.files)
+                         root=inf_root, pattern=pattern, scheme=scheme, unit_files=unit.files)
         plan.new_books += 1
         plan.files_added += len(book.source_files)
+        plan.units.append(book)
+    return plan
+
+
+def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
+                         force: bool, template: str, directory_scheme: str,
+                         inference_root: Path | None = None) -> ScanPlan:
+    """UPDATE (force=False) / REFRESH (force=True): add new books and re-process known ones
+    in `root`. New books run the selected phases (always incl. SEARCH); known books re-run
+    the selected phases — only STALE/PENDING unless `force`."""
+    pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
+    inf_root = inference_root or root
+    plan = ScanPlan()
+    for unit in group_book_units(root):
+        existing = repo.get(BookUnit.id_for(unit.folder))
+        book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
+        run_phases = phases if existing is not None else (phases | {Phase.SEARCH})
+        before_empty = _empty_fields(book) if existing is not None else set()
+        prior_paths = {sf.path for sf in book.source_files}
+
+        run_local_phases(book, run_phases, force=force, root=inf_root,
+                         pattern=pattern, scheme=scheme, unit_files=unit.files)
+
+        plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
+        if existing is not None:
+            plan.existing_books += 1
+            plan.fields_filled += len(before_empty - _empty_fields(book))
+        else:
+            plan.new_books += 1
+        plan.units.append(book)
+    return plan
+
+
+def plan_rescan_books(
+    repo: BookUnitRepo,
+    books: list[BookUnit],
+    phases: frozenset[Phase],
+    *,
+    force: bool,
+    template: str,
+    directory_scheme: str,
+    root_for: Callable[[BookUnit], Path],
+) -> ScanPlan:
+    """Re-process exactly `books` (selection-scoped).
+
+    `root_for(book) -> Path` gives the configured scan root for inference.
+    Known books only; never discovers new ones. Files for a forced/stale
+    SEARCH are re-probed from a cheap per-folder walk.
+    """
+    pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
+    plan = ScanPlan()
+    for book in books:
+        units = group_book_units(book.source_folder)
+        unit_files = next((u.files for u in units if u.folder == book.source_folder), [])
+        before_empty = _empty_fields(book)
+        prior_paths = {sf.path for sf in book.source_files}
+        run_local_phases(
+            book, phases, force=force, root=root_for(book),
+            pattern=pattern, scheme=scheme, unit_files=unit_files,
+        )
+        plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
+        plan.existing_books += 1
+        plan.fields_filled += len(before_empty - _empty_fields(book))
         plan.units.append(book)
     return plan
 

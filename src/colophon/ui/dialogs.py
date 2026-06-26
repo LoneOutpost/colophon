@@ -797,6 +797,7 @@ async def scan_dialog(
     *,
     refresh_all: Callable[[], None],
     folder: Path | None = None,
+    selected_ids: set[str] | None = None,
 ) -> None:
     """Preview a filesystem scan with per-run pattern overrides, scope, and phase
     controls, then apply it (merge new books/files, fill empties)."""
@@ -825,17 +826,32 @@ async def scan_dialog(
                     tooltip="Recent schemes",
                 )
 
-                scope_text = f"folder: {folder.name}" if folder is not None else "all library paths"
-                ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
+                selection = set(selected_ids or ())
+                if selection:
+                    ui.label(f"Scanning: {len(selection)} selected books").classes(
+                        "text-caption colophon-muted"
+                    )
+                else:
+                    scope_text = f"folder: {folder.name}" if folder is not None else "all library paths"
+                    ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
 
                 ui.label("Scope").classes("colophon-seccap")
-                ui.radio({"new_only": "Only new"}, value="new_only").props("dense")
-                for lbl in ("Update existing", "Refresh existing"):
+                if selection:
+                    scope_choice = ui.radio(
+                        {"update": "Update existing", "refresh": "Refresh existing"},
+                        value="update",
+                    ).props("dense")
                     with ui.row().classes("items-center q-gutter-xs q-ml-sm").style("opacity: 0.5"):
                         ui.icon("radio_button_unchecked", size="18px").classes("colophon-muted")
-                        ui.label(f"{lbl} (coming soon)").classes("text-caption colophon-muted").tooltip(
-                            "Re-processing known books arrives in a follow-up"
+                        ui.label("Only new — not applicable to a selection").classes(
+                            "text-caption colophon-muted"
                         )
+                else:
+                    scope_choice = ui.radio(
+                        {"new_only": "Only new", "update": "Update existing",
+                         "refresh": "Refresh existing"},
+                        value="new_only",
+                    ).props("dense")
 
                 ui.label("Phases").classes("colophon-seccap")
                 phase_boxes = {
@@ -850,11 +866,14 @@ async def scan_dialog(
                     async def _preview() -> None:
                         used_template = template.value or cfg.filename_template
                         chosen = frozenset(p for p, box in phase_boxes.items() if box.value)
-                        opts = ScanOptions(scope=ScanScope.NEW_ONLY, phases=chosen)
+                        scope = {"new_only": ScanScope.NEW_ONLY, "update": ScanScope.UPDATE,
+                                 "refresh": ScanScope.REFRESH}[scope_choice.value]
+                        opts = ScanOptions(scope=scope, phases=chosen,
+                                           book_ids=selection or None)
                         try:
                             plan = await asyncio.to_thread(
                                 controller.scan_preview,
-                                [folder] if folder is not None else None,
+                                None if selection else ([folder] if folder is not None else None),
                                 template=used_template,
                                 directory_scheme=scheme.value,
                                 options=opts,
@@ -876,9 +895,10 @@ async def scan_dialog(
                         ui.button("Close", on_click=dialog.close).props("flat")
                     return
                 ui.label("Scan preview").classes("text-subtitle1")
-                ui.label(f"{plan.new_books} new · {plan.files_added} files added").classes(
-                    "text-caption colophon-muted"
-                )
+                ui.label(
+                    f"{plan.new_books} new · {plan.existing_books} updated · "
+                    f"{plan.files_added} files added"
+                ).classes("text-caption colophon-muted")
 
                 async def _apply() -> None:
                     dialog.close()
