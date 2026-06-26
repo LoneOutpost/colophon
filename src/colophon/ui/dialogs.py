@@ -20,9 +20,10 @@ from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.controller import AppController
 from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, Phase
 from colophon.core.pathscheme import sample_target
 from colophon.core.sources import SourceResult
+from colophon.services.ingest import ScanOptions, ScanScope
 from colophon.ui.batch_log import BatchItem, BatchLog
 
 logger = logging.getLogger(__name__)
@@ -791,9 +792,14 @@ async def quick_match_dialog(
     dialog.open()
 
 
-async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], None]) -> None:
-    """Preview a filesystem scan with per-run pattern overrides and an optional dry run,
-    then apply it (merge new books/files, fill empties)."""
+async def scan_dialog(
+    controller: AppController,
+    *,
+    refresh_all: Callable[[], None],
+    folder: Path | None = None,
+) -> None:
+    """Preview a filesystem scan with per-run pattern overrides, scope, and phase
+    controls, then apply it (merge new books/files, fill empties)."""
     cfg = controller.ctx.config
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
         body = ui.column().classes("w-full")
@@ -818,26 +824,49 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                     lambda p: p, lambda p: scheme.set_value(p),
                     tooltip="Recent schemes",
                 )
-                dry = ui.checkbox("Dry run (show what would be parsed, change nothing)", value=False)
+
+                scope_text = f"folder: {folder.name}" if folder is not None else "all library paths"
+                ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
+
+                ui.label("Scope").classes("colophon-seccap")
+                ui.radio({"new_only": "Only new"}, value="new_only").props("dense")
+                for lbl in ("Update existing", "Refresh existing"):
+                    with ui.row().classes("items-center q-gutter-xs q-ml-sm").style("opacity: 0.5"):
+                        ui.icon("radio_button_unchecked", size="18px").classes("colophon-muted")
+                        ui.label(f"{lbl} (coming soon)").classes("text-caption colophon-muted").tooltip(
+                            "Re-processing known books arrives in a follow-up"
+                        )
+
+                ui.label("Phases").classes("colophon-seccap")
+                phase_boxes = {
+                    Phase.SEARCH: ui.checkbox("Search", value=True),
+                    Phase.CATEGORIZE: ui.checkbox("Categorize", value=True),
+                    Phase.IDENTIFY: ui.checkbox("Identify", value=True),
+                }
+
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _preview() -> None:
                         used_template = template.value or cfg.filename_template
+                        chosen = frozenset(p for p, box in phase_boxes.items() if box.value)
+                        opts = ScanOptions(scope=ScanScope.NEW_ONLY, phases=chosen)
                         try:
                             plan = await asyncio.to_thread(
                                 controller.scan_preview,
+                                [folder] if folder is not None else None,
                                 template=used_template,
                                 directory_scheme=scheme.value,
+                                options=opts,
                             )
                         except ValueError as e:
                             ui.notify(f"Invalid pattern: {e}", type="negative")
                             return
-                        show_results(plan, dry.value, used_template, scheme.value)
+                        show_results(plan, used_template, scheme.value)
 
                     ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
 
-        def show_results(plan, dry: bool, used_template: str, used_scheme: str) -> None:
+        def show_results(plan, used_template: str, used_scheme: str) -> None:
             body.clear()
             with body:
                 if plan.new_books == 0 and plan.existing_books == 0:
@@ -847,26 +876,9 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                         ui.button("Close", on_click=dialog.close).props("flat")
                     return
                 ui.label("Scan preview").classes("text-subtitle1")
-                ui.label(
-                    f"{plan.new_books} new · {plan.existing_books} existing (preserved) · "
-                    f"{plan.fields_filled} fields filled · {plan.files_added} files added"
-                ).classes("text-caption colophon-muted")
-                if dry:
-                    with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
-                            ui.list().props("dense").classes("w-full"):
-                        for b in plan.units:
-                            with ui.item(), ui.item_section():
-                                ui.item_label(str(b.source_folder))
-                                parsed = " · ".join(filter(None, [
-                                    b.authors[0] if b.authors else "",
-                                    (b.series[0].name if b.series else ""),
-                                    b.title or "",
-                                ])) or "(no fields parsed)"
-                                ui.item_label(parsed).props("caption").classes("colophon-muted")
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Back", on_click=show_options).props("flat")
-                        ui.button("Close", on_click=dialog.close).props("flat")
-                    return
+                ui.label(f"{plan.new_books} new · {plan.files_added} files added").classes(
+                    "text-caption colophon-muted"
+                )
 
                 async def _apply() -> None:
                     dialog.close()

@@ -90,7 +90,14 @@ from colophon.services.foster import (
     foster_one,
     foster_work,
 )
-from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, refresh_local, scan_ingest
+from colophon.services.ingest import (
+    ScanOptions,
+    ScanPlan,
+    commit_scan,
+    plan_scan,
+    refresh_local,
+    scan_ingest,
+)
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
 from colophon.services.tag_ops import (
@@ -221,6 +228,7 @@ class AppController:
     def scan_preview(
         self, roots: list[Path] | None = None,
         *, template: str | None = None, directory_scheme: str | None = None,
+        options: ScanOptions | None = None,
     ) -> ScanPlan:
         """Compute, without persisting, what a scan of `roots` (default: the configured
         scan paths) would do across all roots. `template`/`directory_scheme` override the
@@ -234,6 +242,7 @@ class AppController:
         for root in roots:
             plan = plan_scan(
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
+                options=options,
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -246,9 +255,9 @@ class AppController:
         """Persist a previously-computed scan plan; returns the number written."""
         return commit_scan(self.ctx.books, plan)
 
-    def scan(self, roots: list[Path] | None = None) -> int:
+    def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
-        return self.apply_scan(self.scan_preview(roots))
+        return self.apply_scan(self.scan_preview(roots, options=options))
 
     def _root_for(self, book: BookUnit) -> Path:
         """The configured scan root that contains `book`, for re-running local phases."""
