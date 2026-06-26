@@ -135,3 +135,19 @@ def test_rerun_phase_deferred_raises(tmp_path):
     book = BookUnit.new(source_folder=tmp_path / "x")
     with pytest.raises(NotImplementedError):
         ctrl.rerun_phase([book], Phase.ENCODE)
+
+
+def test_get_book_hydrates_legacy_phase_map(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "legacy")
+    book.authors = ["Some Author"]
+    book.confidence = 100.0
+    book.state = BookState.READY
+    book.phases = {}                      # legacy row: no phase map
+    ctx.books.upsert(book)
+
+    got = ctrl.get_book(book.id)
+    assert got is not None
+    assert state_of(got, Phase.IDENTIFY) is PhaseState.FRESH   # seeded from legacy state
+    assert got.state is BookState.READY                        # derived, consistent with the list

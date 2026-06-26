@@ -323,7 +323,8 @@ class AppController:
         return stats
 
     def get_book(self, book_id: str) -> BookUnit | None:
-        return self.ctx.books.get(book_id)
+        book = self.ctx.books.get(book_id)
+        return self._hydrate([book])[0] if book is not None else None
 
     async def book_cover(self, book_id: str, *, thumb: bool = False) -> tuple[bytes, str] | None:
         """A book's cover image as (bytes, mime): the cached file if present, else
