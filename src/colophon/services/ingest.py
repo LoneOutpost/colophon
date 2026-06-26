@@ -20,7 +20,7 @@ from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.models import BookUnit, Phase, PhaseState
-from colophon.core.phases import mark, resync_state, state_of
+from colophon.core.phases import LOCAL, mark, resync_state, state_of
 from colophon.core.reconcile import reconcile
 
 logger = logging.getLogger(__name__)
@@ -110,31 +110,42 @@ def _run_local(
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
 
 
-def refresh_local(book: BookUnit, *, root: Path, template: str, directory_scheme: str) -> None:
-    """Re-run the STALE/PENDING local phases for one already-known book, in order.
-    FRESH on success; FAILED stops the chain. Mirrors plan_scan's per-book body."""
-    pattern = compile_template(template)
-    scheme = parse_scheme(directory_scheme)
+def run_local_phases(
+    book: BookUnit, phases: frozenset[Phase], *, force: bool,
+    root: Path, pattern: object, scheme: object,
+    unit_files: list[Path] | None = None,
+) -> None:
+    """Run the requested LOCAL phases for `book`, in pipeline order. A phase runs when
+    `force` or its state is STALE/PENDING (so non-force mirrors the old refresh_local).
+    FRESH on success; FAILED stops the chain. Always resyncs the derived state."""
+    def _should(phase: Phase) -> bool:
+        return phase in phases and (force or state_of(book, phase) in (PhaseState.STALE, PhaseState.PENDING))
 
-    # Collect on-disk files for the SEARCH runner if it will run.
-    unit_files: list[Path] | None = None
-    if state_of(book, Phase.SEARCH) in (PhaseState.STALE, PhaseState.PENDING):
+    if unit_files is None and _should(Phase.SEARCH):
         units = group_book_units(root)
         match = next((u for u in units if u.folder == book.source_folder), None)
         unit_files = match.files if match else []
 
     for phase in (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY):
-        if state_of(book, phase) not in (PhaseState.STALE, PhaseState.PENDING):
+        if not _should(phase):
             continue
         try:
-            _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
-                       unit_files=unit_files)
+            _run_local(book, phase, root=root, pattern=pattern, scheme=scheme, unit_files=unit_files)
             mark(book, phase, PhaseState.FRESH)
         except Exception as e:  # a local phase must not crash the caller
             logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
             mark(book, phase, PhaseState.FAILED, detail=str(e))
             break
     resync_state(book)
+
+
+def refresh_local(book: BookUnit, *, root: Path, template: str, directory_scheme: str) -> None:
+    """Re-run the STALE/PENDING local phases for one already-known book, in order.
+    FRESH on success; FAILED stops the chain. Mirrors plan_scan's per-book body."""
+    run_local_phases(
+        book, frozenset(LOCAL), force=False,
+        root=root, pattern=compile_template(template), scheme=parse_scheme(directory_scheme),
+    )
 
 
 def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> ScanPlan:
