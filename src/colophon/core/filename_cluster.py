@@ -111,6 +111,15 @@ def _parts_work(files: list[Path], per_file: list[list[str]]) -> DetectedWork:
                         files=list(files))
 
 
+def shares_token(a: str, b: str) -> bool:
+    """True if the two strings share a non-numeric word (>=2 chars), case-insensitive.
+    Distinguishes a title folder (name relates to the book title) from an author
+    folder (name unrelated -> it is the author and the filename is the title)."""
+    ta = {t for t in _tokens(a) if not _is_num(t) and len(t) >= 2}
+    tb = {t for t in _tokens(b) if not _is_num(t) and len(t) >= 2}
+    return bool(ta & tb)
+
+
 def cluster(files: list[Path]) -> ClusterResult:
     """Classify a folder's files into works by filename structure alone."""
     if not files:

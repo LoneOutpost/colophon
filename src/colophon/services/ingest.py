@@ -18,8 +18,9 @@ from colophon.adapters.sidecar import read_sidecar
 from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
+from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import compile_template, parse_filename
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, ContentKind, SeriesRef
 from colophon.core.reconcile import reconcile
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,13 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
         except Exception as e:  # classification must never fail a scan
             logger.warning(f"classification failed for {unit.folder}: {e}")
 
+        # Pre-fill series/sequence from filename cluster before reconcile, so that
+        # reconcile's "if not book.series" gate prevents it from being overridden.
+        if book.content_kind is ContentKind.SINGLE and book.detected_works:
+            dw = book.detected_works[0]
+            if dw.series and not book.series:
+                book.series = [SeriesRef(name=dw.series, sequence=dw.sequence)]
+
         filename_fields = parse_filename(pattern, first.name) or {}
         sidecar = read_sidecar(unit.folder)
         directory_fields = infer_from_path(unit.folder, root, scheme)
@@ -99,6 +107,28 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
             filename_fields=filename_fields,
             directory_fields=directory_fields,
         )
+
+        # After reconcile: if the title is still the bare folder name and the
+        # filename carries a more specific title, the folder is likely an author
+        # folder rather than a title folder — apply the filename label as title
+        # and promote the folder name to authors (conservative: only when no
+        # embedded author or directory-scheme author is already set, and the
+        # label faithfully represents the full filename rather than a fragment).
+        if book.content_kind is ContentKind.SINGLE and book.detected_works:
+            dw = book.detected_works[0]
+            folder_name = unit.folder.name
+            if (
+                dw.label
+                and not shares_token(folder_name, dw.label)
+                and shares_token(first.stem, dw.label)
+                and book.title == folder_name
+                and not embedded.artist
+                and not directory_fields.get("author")
+            ):
+                # The folder is the author, not the title.
+                book.title = dw.label
+                if not book.authors:
+                    book.authors = [folder_name]
         if existing is not None:
             plan.existing_books += 1
             plan.fields_filled += len(before_empty - _empty_fields(book))

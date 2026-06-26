@@ -226,8 +226,14 @@ def classify(
     """Classify one folder. `features` is non-empty (a folder with no audio is
     never scanned). Pure: all signals are passed in."""
     if len(features) == 1:
-        works = [_to_work(features)]
-        group_signals: list[ConfidenceSignal] = []
+        if _fully_untagged(features):
+            # Let cluster parse series/sequence from the filename.
+            cr = cluster([features[0].path])
+            works = cr.detected_works
+            group_signals = cr.signals
+        else:
+            works = [_to_work(features)]
+            group_signals = []
         content_kind = ContentKind.SINGLE
     elif _fully_untagged(features):
         # No tag signal: cluster by filename structure (parts vs separate books).
