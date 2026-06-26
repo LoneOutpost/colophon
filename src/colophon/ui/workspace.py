@@ -1798,6 +1798,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             controller,
             refresh_all=_refresh_all,
             folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
+            selected_ids=set(selected_ids),
         )
     )  # manages its own preview dialog + refresh
     identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all))  # streams its own preview dialog + refresh
