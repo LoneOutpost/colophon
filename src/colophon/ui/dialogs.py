@@ -843,15 +843,17 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                                 "text-caption colophon-muted"
                             )
 
-                        def _tick() -> None:
-                            total = state["total"]
-                            if total:
-                                bar.set_value(state["done"] / total)
-                                status.set_text(
-                                    f"{state['done']} / {total} folders — {state['name']}"
-                                )
+                            def _tick() -> None:
+                                total = state["total"]
+                                if total:
+                                    bar.set_value(state["done"] / total)
+                                    status.set_text(
+                                        f"{state['done']} / {total} folders — {state['name']}"
+                                    )
 
-                        timer = ui.timer(0.1, _tick)
+                            # Create the timer inside `body`'s slot: the handler's own slot
+                            # (the Preview button) was just deleted by body.clear() above.
+                            timer = ui.timer(0.1, _tick)
                         try:
                             plan = await asyncio.to_thread(
                                 controller.scan_preview,
