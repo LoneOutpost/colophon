@@ -127,6 +127,32 @@ class BookState(StrEnum):
     SKIPPED = "skipped"
 
 
+class Phase(StrEnum):
+    """Pipeline phases, in pipeline order (declaration order is load-bearing)."""
+
+    SEARCH = "search"
+    CATEGORIZE = "categorize"
+    IDENTIFY = "identify"
+    MATCH = "match"
+    TAG = "tag"
+    ORGANIZE = "organize"
+    ENCODE = "encode"
+
+
+class PhaseState(StrEnum):
+    PENDING = "pending"
+    FRESH = "fresh"
+    STALE = "stale"
+    RUNNING = "running"
+    FAILED = "failed"
+
+
+class PhaseRecord(_Base):
+    state: PhaseState = PhaseState.PENDING
+    updated_at: datetime | None = None
+    detail: str | None = None
+
+
 class SeriesRef(_Base):
     name: str
     sequence: float | None = None
@@ -178,6 +204,8 @@ class BookUnit(_Base):
     acknowledged_findings: list[FindingCode] = []
     manually_confirmed: bool = False
     state: BookState = BookState.DETECTED
+    phases: dict[Phase, PhaseRecord] = {}  # sparse: a missing key reads as PENDING
+    skipped: bool = False
 
     created_at: datetime = Field(frozen=True)
     updated_at: datetime

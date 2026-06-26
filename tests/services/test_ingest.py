@@ -4,7 +4,8 @@ from pathlib import Path
 from mutagen.id3 import ID3, TPE1
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookState, Provenance
+from colophon.core.models import BookState, Phase, PhaseState, Provenance
+from colophon.core.phases import state_of
 from colophon.services.ingest import scan_ingest
 
 
@@ -29,7 +30,11 @@ def test_scan_ingest_persists_book_units(tmp_path: Path):
 
     assert len(units) == 1
     book = units[0]
-    assert book.state == BookState.DETECTED
+    # Local phases run during scan; confidence=0 → NEEDS_REVIEW (IDENTIFY FRESH, low confidence)
+    assert book.state == BookState.NEEDS_REVIEW
+    assert state_of(book, Phase.SEARCH) is PhaseState.FRESH
+    assert state_of(book, Phase.CATEGORIZE) is PhaseState.FRESH
+    assert state_of(book, Phase.IDENTIFY) is PhaseState.FRESH
     assert book.title == "Dune"  # from directory name
     assert book.provenance["title"] == Provenance.DIRECTORY.value
     assert book.authors == ["Frank Herbert"]  # from embedded TPE1

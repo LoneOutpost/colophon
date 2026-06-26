@@ -34,6 +34,8 @@ from colophon.core.models import (
     FindingCode,
     FindingSeverity,
     OperationRecord,
+    Phase,
+    PhaseState,
     Provenance,
     _Base,
     new_batch_id,
@@ -46,6 +48,7 @@ from colophon.core.navigator import (
 )
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
+from colophon.core.phases import ensure_phases, invalidate_from, mark, resync_state, state_of
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -87,7 +90,7 @@ from colophon.services.foster import (
     foster_one,
     foster_work,
 )
-from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, scan_ingest
+from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, refresh_local, scan_ingest
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
 from colophon.services.tag_ops import (
@@ -196,6 +199,10 @@ class AppController:
         from the full available set (re-discovering abs-agg) and arranged per the
         saved order/disabled prefs, so reorders, enable/disable, and abs-agg URL
         changes all take effect without a restart. (db_path changes need a restart.)"""
+        scheme_changed = (
+            self.ctx.config.filename_template != config.filename_template
+            or self.ctx.config.directory_scheme != config.directory_scheme
+        )
         save_config(config, self.ctx.config_path)
         self.ctx.config = config
         self.ctx.sources = arrange_sources(
@@ -203,6 +210,12 @@ class AppController:
             order=config.source_order,
             disabled=config.disabled_sources,
         )
+        if scheme_changed:
+            for book in self.ctx.books.list_all():
+                if not book.phases:
+                    ensure_phases(book)
+                invalidate_from(book, Phase.CATEGORIZE)   # stale; next scan re-runs local phases
+                self.ctx.books.upsert(book)
 
     # --- scanning / identification ---
     def scan_preview(
@@ -237,9 +250,52 @@ class AppController:
         """Convenience: preview then immediately commit. Returns the count."""
         return self.apply_scan(self.scan_preview(roots))
 
+    def _root_for(self, book: BookUnit) -> Path:
+        """The configured scan root that contains `book`, for re-running local phases."""
+        for root in self.ctx.config.scan_paths:
+            try:
+                book.source_folder.relative_to(root)
+                return root
+            except ValueError:
+                continue
+        # Fallback: only reached for books outside every configured scan root.
+        # Directory re-inference from source_folder.parent is best-effort in that case.
+        return book.source_folder.parent
+
+    def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
+        """Invalidate `from_phase` forward, auto-rerun the local phases, persist.
+        Deferred phases are left stale for an explicit run."""
+        if not book.phases:
+            ensure_phases(book)
+        invalidate_from(book, from_phase)
+        refresh_local(
+            book,
+            root=self._root_for(book),
+            template=self.ctx.config.filename_template,
+            directory_scheme=self.ctx.config.directory_scheme,
+        )
+        self.ctx.books.upsert(book)
+
+    def _hydrate(self, books: list[BookUnit]) -> list[BookUnit]:
+        """Seed the phase map on legacy books that have an empty `phases` dict.
+        Seeding is in-memory only; the next upsert of each book will persist it."""
+        for b in books:
+            if not b.phases:
+                ensure_phases(b)
+        return books
+
+    def books_by_state(self, state: BookState) -> list[BookUnit]:
+        """Books whose derived BookState equals `state` (legacy rows hydrated)."""
+        return [b for b in self._hydrate(self.ctx.books.list_all()) if b.state is state]
+
+    def books_with_phase(self, phase: Phase, status: PhaseState) -> list[BookUnit]:
+        """Books whose `phase` is in `status` (legacy rows hydrated first)."""
+        return [b for b in self._hydrate(self.ctx.books.list_all())
+                if state_of(b, phase) is status]
+
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
-        books = self.ctx.books.list_all()
+        books = self._hydrate(self.ctx.books.list_all())
         stats = {"total": len(books)}
         for state in BookState:
             stats[state.value] = sum(1 for b in books if b.state == state)
@@ -394,7 +450,7 @@ class AppController:
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into Author -> Series/standalone, plus a needs-id list."""
-        return build_library_tree(self.ctx.books.list_all())
+        return build_library_tree(self._hydrate(self.ctx.books.list_all()))
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
@@ -429,6 +485,7 @@ class AppController:
     def edit_field(self, book: BookUnit, field: str, value: str | None) -> str:
         batch = set_field_value(self.ctx.books, self.ctx.history, book, field, value)
         self._sync_sidecar(book)
+        self.invalidate(book, Phase.TAG)
         return batch
 
     def save_fields(self, book: BookUnit, updates: dict[str, str | None]) -> str:
@@ -438,6 +495,7 @@ class AppController:
             self.ctx.books, self.ctx.history, book, updates, provenance=Provenance.MANUAL.value
         )
         self._sync_sidecar(book)
+        self.invalidate(book, Phase.TAG)
         return batch
 
     # --- Real-Debrid acquisition (issue #11) ---
@@ -912,6 +970,8 @@ class AppController:
         batch = _svc_bulk_set_field(self.ctx.books, self.ctx.history, books, field, value)
         for book in books:
             self._sync_sidecar(book)
+        for book in books:
+            self.invalidate(book, Phase.TAG)
         return batch
 
     def bulk_normalize(self, books: list[BookUnit], fields: list[str]) -> str:
@@ -921,12 +981,16 @@ class AppController:
         )
         for book in books:
             self._sync_sidecar(book)
+        for book in books:
+            self.invalidate(book, Phase.TAG)
         return batch
 
     def bulk_remap(self, books: list[BookUnit], *, src: str, dst: str, clear_source: bool) -> str:
         batch = _svc_bulk_remap(self.ctx.books, self.ctx.history, books, src=src, dst=dst, clear_source=clear_source)
         for book in books:
             self._sync_sidecar(book)
+        for book in books:
+            self.invalidate(book, Phase.TAG)
         return batch
 
     def batch_changes(self, batch_id: str) -> list[EditChange]:
@@ -949,7 +1013,9 @@ class AppController:
         return True
 
     def mark_ready(self, book: BookUnit) -> None:
-        book.state = BookState.READY
+        book.manually_confirmed = True
+        mark(book, Phase.IDENTIFY, PhaseState.FRESH)
+        resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         book.touch()
         self.ctx.books.upsert(book)
 
@@ -961,7 +1027,8 @@ class AppController:
             ConfidenceSignal(name="manual_confirmation", points=100, detail="Manually confirmed")
         ]
         book.manually_confirmed = True
-        book.state = BookState.READY
+        mark(book, Phase.IDENTIFY, PhaseState.FRESH)
+        resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         book.touch()
         self.ctx.books.upsert(book)
 
@@ -1126,7 +1193,8 @@ class AppController:
         book.manually_confirmed = False
         has_identity = bool(book.authors) or bool(book.series)
         ready = outcome.confidence >= self.ctx.config.review_threshold and has_identity
-        book.state = BookState.READY if ready else BookState.NEEDS_REVIEW
+        mark(book, Phase.IDENTIFY, PhaseState.FRESH)
+        resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         return ready
 
     def _authority_map(self) -> dict[str, int]:
@@ -1274,10 +1342,14 @@ class AppController:
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         # Re-score against the applied result so the book's confidence and state
         # reflect the match, consistent with Quick Match.
+        # Note: Phase.MATCH is intentionally not marked here in v1 — match results
+        # land on IDENTIFY via _rescore_after_match. MATCH is a reserved node in the
+        # invalidation graph, pending the full match-phase wiring in a future release.
         self._rescore_after_match(book, [result])
         book.touch()
         self.ctx.books.upsert(book)
         self._sync_sidecar(book)
+        self.invalidate(book, Phase.TAG)
         return batch
 
     def apply_match(self, book: BookUnit, result: SourceResult) -> str:
@@ -1357,7 +1429,8 @@ class AppController:
             target = self._encode_target(book)
             if target.exists() and target != book.output_path:
                 return BookProcessResult(book_id=book.id, status="failed", detail="output name collision")
-            book.state = BookState.ENCODING
+            mark(book, Phase.ENCODE, PhaseState.RUNNING)
+            resync_state(book)
             self.ctx.books.upsert(book)
             enc = encode_book(
                 book, target, bitrate=self.ctx.config.transcode_bitrate,
@@ -1365,11 +1438,13 @@ class AppController:
                 chapters=book.chapters or None,
             )
             if not enc.verified or enc.output_path is None:
-                book.state = BookState.FAILED
+                mark(book, Phase.ENCODE, PhaseState.FAILED, detail=enc.error)
+                resync_state(book)
                 self.ctx.books.upsert(book)
                 return BookProcessResult(book_id=book.id, status="failed", detail=enc.error)
             book.output_path = enc.output_path
-            book.state = BookState.ENCODED
+            mark(book, Phase.ENCODE, PhaseState.FRESH)
+            resync_state(book)
             book.touch()
             self.ctx.books.upsert(book)
         elif book.output_path is None or not book.output_path.exists():
@@ -1382,7 +1457,8 @@ class AppController:
                 patterns=options.patterns or self.ctx.patterns,
             )
             if not org.moved or org.target_path is None:
-                book.state = BookState.FAILED
+                mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail=(org.error or "collision"))
+                resync_state(book)
                 book.touch()
                 self.ctx.books.upsert(book)
                 return BookProcessResult(
