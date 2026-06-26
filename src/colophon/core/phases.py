@@ -73,7 +73,8 @@ def derive_state(book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRES
         return BookState.ORGANIZED
     if state_of(book, Phase.ENCODE) is PhaseState.FRESH:
         return BookState.ENCODED
-    if state_of(book, Phase.IDENTIFY) is PhaseState.FRESH:
+    if (state_of(book, Phase.IDENTIFY) is PhaseState.FRESH
+            or state_of(book, Phase.MATCH) is PhaseState.FRESH):
         has_identity = bool(book.authors) or bool(book.series)
         if book.manually_confirmed or (book.confidence >= ready_threshold and has_identity):
             return BookState.READY
