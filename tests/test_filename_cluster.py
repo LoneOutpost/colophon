@@ -1,6 +1,11 @@
 from colophon.core.filename_cluster import (
-    _chunks, _spaced, _tokens, _is_num, _text_sig,
-    _trailing_number, _strip_trailing_number,
+    _chunks,
+    _is_num,
+    _spaced,
+    _strip_trailing_number,
+    _text_sig,
+    _tokens,
+    _trailing_number,
 )
 
 

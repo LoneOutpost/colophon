@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
 
