@@ -34,6 +34,7 @@ from colophon.core.models import (
     FindingCode,
     FindingSeverity,
     OperationRecord,
+    Phase,
     Provenance,
     _Base,
     new_batch_id,
@@ -46,6 +47,7 @@ from colophon.core.navigator import (
 )
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
+from colophon.core.phases import ensure_phases, invalidate_from
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -87,7 +89,7 @@ from colophon.services.foster import (
     foster_one,
     foster_work,
 )
-from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, scan_ingest
+from colophon.services.ingest import ScanPlan, commit_scan, plan_scan, refresh_local, scan_ingest
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
 from colophon.services.tag_ops import (
@@ -236,6 +238,36 @@ class AppController:
     def scan(self, roots: list[Path] | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
         return self.apply_scan(self.scan_preview(roots))
+
+    def _root_for(self, book: BookUnit) -> Path:
+        """The configured scan root that contains `book`, for re-running local phases."""
+        for root in self.ctx.config.scan_paths:
+            try:
+                book.source_folder.relative_to(root)
+                return root
+            except ValueError:
+                continue
+        return book.source_folder.parent
+
+    def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
+        """Invalidate `from_phase` forward, auto-rerun the local phases, persist.
+        Deferred phases are left stale for an explicit run."""
+        invalidate_from(book, from_phase)
+        refresh_local(
+            book,
+            root=self._root_for(book),
+            template=self.ctx.config.filename_template,
+            directory_scheme=self.ctx.config.directory_scheme,
+        )
+        self.ctx.books.upsert(book)
+
+    def _hydrate(self, books: list[BookUnit]) -> list[BookUnit]:
+        """Seed the phase map on legacy books that have an empty `phases` dict.
+        Seeding is in-memory only; the next upsert of each book will persist it."""
+        for b in books:
+            if not b.phases:
+                ensure_phases(b)
+        return books
 
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
@@ -394,7 +426,7 @@ class AppController:
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into Author -> Series/standalone, plus a needs-id list."""
-        return build_library_tree(self.ctx.books.list_all())
+        return build_library_tree(self._hydrate(self.ctx.books.list_all()))
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
