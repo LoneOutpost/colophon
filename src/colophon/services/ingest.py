@@ -19,7 +19,8 @@ from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.filename_parser import compile_template, parse_filename
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, Phase, PhaseState
+from colophon.core.phases import mark, resync_state, state_of
 from colophon.core.reconcile import reconcile
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,95 @@ def _empty_fields(book: BookUnit) -> set[str]:
     return out
 
 
+def _run_local(
+    book: BookUnit,
+    phase: Phase,
+    *,
+    root: Path,
+    pattern: object,
+    scheme: object,
+    unit_files: list[Path] | None = None,
+) -> None:
+    """Execute one local phase's work for `book`.
+
+    SEARCH: re-probe source_files from on-disk audio (requires unit_files).
+    CATEGORIZE: build FileFeatures and run classify; sets classification fields.
+    IDENTIFY: read embedded/sidecar/filename/directory fields; calls reconcile.
+
+    Raises on failure — callers decide how to mark the phase (FRESH or FAILED).
+    `unit_files` is required for SEARCH; ignored for CATEGORIZE and IDENTIFY.
+    """
+    if phase is Phase.SEARCH:
+        if unit_files is None:
+            raise ValueError("unit_files required for SEARCH phase")
+        book.source_files = [probe_audio_file(p) for p in unit_files]
+
+    elif phase is Phase.CATEGORIZE:
+        first_path = book.source_files[0].path if book.source_files else None
+        embedded = read_embedded_tags(first_path) if first_path else None
+        features = []
+        for sf in book.source_files:
+            tags = embedded if sf.path == first_path else read_embedded_tags(sf.path)
+            features.append(
+                FileFeatures(path=sf.path, ext=sf.ext,
+                             duration_seconds=sf.duration_seconds, tags=tags)
+            )
+        result = classify(book.source_folder, root, features,
+                          template_pattern=pattern, scheme_patterns=scheme)
+        book.content_kind = result.content_kind
+        book.folder_kind = result.folder_kind
+        book.classification_confidence = result.confidence
+        book.classification_signals = result.signals
+        book.findings = result.findings
+        book.detected_works = result.detected_works
+
+    elif phase is Phase.IDENTIFY:
+        first_path = book.source_files[0].path if book.source_files else None
+        embedded = read_embedded_tags(first_path) if first_path else None
+        filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
+        sidecar = read_sidecar(book.source_folder)
+        directory_fields = infer_from_path(book.source_folder, root, scheme)
+        reconcile(
+            book,
+            embedded=embedded,
+            sidecar=sidecar,
+            dir_title=book.source_folder.name,
+            filename_fields=filename_fields or {},
+            directory_fields=directory_fields,
+        )
+
+    else:
+        raise ValueError(f"_run_local: unsupported phase {phase!r}")
+
+
+def refresh_local(book: BookUnit, *, template: str, directory_scheme: str) -> None:
+    """Re-run the STALE/PENDING local phases for one already-known book, in order.
+    FRESH on success; FAILED stops the chain. Mirrors plan_scan's per-book body."""
+    pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
+    root = book.source_folder.parent
+
+    # Collect on-disk files for the SEARCH runner if it will run.
+    unit_files: list[Path] | None = None
+    if state_of(book, Phase.SEARCH) in (PhaseState.STALE, PhaseState.PENDING):
+        units = group_book_units(book.source_folder.parent)
+        match = next((u for u in units if u.folder == book.source_folder), None)
+        unit_files = match.files if match else []
+
+    for phase in (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY):
+        if state_of(book, phase) not in (PhaseState.STALE, PhaseState.PENDING):
+            continue
+        try:
+            _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
+                       unit_files=unit_files)
+            mark(book, phase, PhaseState.FRESH)
+        except Exception as e:  # a local phase must not crash the caller
+            logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
+            mark(book, phase, PhaseState.FAILED, detail=str(e))
+            break
+    resync_state(book)
+
+
 def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything."""
     pattern = compile_template(template)
@@ -57,48 +147,27 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
         existing = repo.get(BookUnit.id_for(unit.folder))
         book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
 
+        # SEARCH phase — capture prior paths before probing for files_added accounting
         prior_paths = {sf.path for sf in book.source_files}
-        book.source_files = [probe_audio_file(p) for p in unit.files]
+        _run_local(book, Phase.SEARCH, root=root, pattern=pattern, scheme=scheme,
+                   unit_files=unit.files)
+        mark(book, Phase.SEARCH, PhaseState.FRESH)
         plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
 
-        first = unit.files[0]
-        embedded = read_embedded_tags(first)
-
-        # Build per-file features for the structural classifier. Reuse the
-        # first-file tag read; only fan out the remaining reads when needed
-        # (the cost gate — a 1-file folder is trivially single).
-        features = []
-        for sf in book.source_files:
-            tags = embedded if sf.path == first else read_embedded_tags(sf.path)
-            features.append(
-                FileFeatures(path=sf.path, ext=sf.ext,
-                             duration_seconds=sf.duration_seconds, tags=tags)
-            )
+        # CATEGORIZE phase
         try:
-            result = classify(unit.folder, root, features,
-                              template_pattern=pattern, scheme_patterns=scheme)
-            book.content_kind = result.content_kind
-            book.folder_kind = result.folder_kind
-            book.classification_confidence = result.confidence
-            book.classification_signals = result.signals
-            book.findings = result.findings
-            book.detected_works = result.detected_works
+            _run_local(book, Phase.CATEGORIZE, root=root, pattern=pattern, scheme=scheme)
+            mark(book, Phase.CATEGORIZE, PhaseState.FRESH)
         except Exception as e:  # classification must never fail a scan
             logger.warning(f"classification failed for {unit.folder}: {e}")
+            mark(book, Phase.CATEGORIZE, PhaseState.FAILED, detail=str(e))
 
-        filename_fields = parse_filename(pattern, first.name) or {}
-        sidecar = read_sidecar(unit.folder)
-        directory_fields = infer_from_path(unit.folder, root, scheme)
-
+        # IDENTIFY phase
         before_empty = _empty_fields(book) if existing is not None else set()
-        reconcile(
-            book,
-            embedded=embedded,
-            sidecar=sidecar,
-            dir_title=unit.folder.name,
-            filename_fields=filename_fields,
-            directory_fields=directory_fields,
-        )
+        _run_local(book, Phase.IDENTIFY, root=root, pattern=pattern, scheme=scheme)
+        mark(book, Phase.IDENTIFY, PhaseState.FRESH)
+        resync_state(book)
+
         if existing is not None:
             plan.existing_books += 1
             plan.fields_filled += len(before_empty - _empty_fields(book))
