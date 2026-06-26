@@ -44,3 +44,14 @@ def test_old_row_without_new_fields_loads_with_defaults():
     loaded = BookUnit.model_validate(blob)
     assert loaded.content_kind is ContentKind.UNKNOWN
     assert loaded.findings == []
+
+
+def test_detected_work_carries_series_and_sequence():
+    from colophon.core.models import DetectedWork
+    w = DetectedWork(label="Father of Lies", series="Darkly Disturbing Trilogy", sequence=1.0,
+                     files=[Path("/a/Father of Lies (Darkly Disturbing Trilogy 1).mp3")])
+    assert w.series == "Darkly Disturbing Trilogy"
+    assert w.sequence == 1.0
+    # defaults stay None
+    w2 = DetectedWork(label="Owlmen", files=[Path("/a/Owlmen.mp3")])
+    assert w2.series is None and w2.sequence is None
