@@ -868,6 +868,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
                 ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
+                rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline")
+                rerun_btn.set_enabled(False)
+                rerun_btn.tooltip("Re-run a phase across the selection — coming soon")
                 ui.button(
                     "Clear selection", icon="clear", on_click=_clear_selection,
                 ).props("flat")
