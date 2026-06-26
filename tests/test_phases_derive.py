@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from colophon.core.models import BookState, BookUnit, Phase, PhaseState
-from colophon.core.phases import derive_state, mark, resync_state
+from colophon.core.phases import derive_state, mark, resync_state, state_of
 
 
 def _book(**kw):
@@ -76,3 +76,21 @@ def test_resync_writes_state_through():
     mark(b, Phase.IDENTIFY, PhaseState.FRESH)
     resync_state(b)
     assert b.state is BookState.READY
+
+
+def test_match_fresh_without_identify_is_ready():
+    b = _book(confidence=80.0, authors=["Some Author"])
+    mark(b, Phase.MATCH, PhaseState.FRESH)            # IDENTIFY stays PENDING
+    assert state_of(b, Phase.IDENTIFY) is PhaseState.PENDING
+    assert derive_state(b) is BookState.READY
+
+
+def test_match_fresh_below_threshold_is_needs_review():
+    b = _book(confidence=50.0, authors=["Some Author"])
+    mark(b, Phase.MATCH, PhaseState.FRESH)
+    assert derive_state(b) is BookState.NEEDS_REVIEW
+
+
+def test_neither_identify_nor_match_fresh_is_detected():
+    b = _book(confidence=80.0, authors=["Some Author"])   # confident but un-identified
+    assert derive_state(b) is BookState.DETECTED

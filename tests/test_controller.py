@@ -612,6 +612,29 @@ def test_apply_match_sets_fields_with_provider_provenance(tmp_path):
     ctx.close()
 
 
+def test_apply_match_records_the_match_phase(tmp_path):
+    from colophon.core.models import Phase, PhaseState
+    from colophon.core.phases import mark, state_of
+
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "y")
+    book.source_folder.mkdir(parents=True)
+    # Simulate a scanned book (local phases fresh) so invalidate(TAG)'s refresh_local
+    # leaves them alone; MATCH starts PENDING so a fresh MATCH proves apply_match set it.
+    for p in (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY):
+        mark(book, p, PhaseState.FRESH)
+    ctx.books.upsert(book)
+    result = SourceResult(
+        provider="audnexus", title="Dune", authors=["Frank Herbert"], asin="B002V1A0WE",
+    )
+    AppController(ctx).apply_match(book, result)
+    persisted = ctx.books.get(book.id)
+    # An online-source match records the MATCH phase.
+    assert state_of(persisted, Phase.MATCH) is PhaseState.FRESH
+    assert persisted.state in (BookState.READY, BookState.NEEDS_REVIEW)
+    ctx.close()
+
+
 def test_get_matches_empty_when_no_sources(tmp_path):
     ctx = _ctx(tmp_path, sources=[])
     book = BookUnit.new(source_folder=tmp_path / "x")

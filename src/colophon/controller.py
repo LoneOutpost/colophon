@@ -1225,17 +1225,16 @@ class AppController:
         return ready
 
     def _rescore_after_match(self, book: BookUnit, results: list[SourceResult]) -> bool:
-        """Re-score `book` against `results` and set its confidence, signals, and
-        state (Ready when confident and it has an identity). Returns True if it is
-        now Ready. Confidence/state are persisted by the caller (not part of the
-        undoable field batch)."""
+        """Re-score `book` against `results`, set its confidence/signals, and mark the
+        MATCH phase fresh (an online-source match). Returns True if it is now Ready.
+        Confidence/state are persisted by the caller (not part of the undoable batch)."""
         outcome = self._score(book, results)
         book.confidence = outcome.confidence
         book.confidence_signals = outcome.signals
         book.manually_confirmed = False
         has_identity = bool(book.authors) or bool(book.series)
         ready = outcome.confidence >= self.ctx.config.review_threshold and has_identity
-        mark(book, Phase.IDENTIFY, PhaseState.FRESH)
+        mark(book, Phase.MATCH, PhaseState.FRESH)
         resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         return ready
 
@@ -1383,10 +1382,7 @@ class AppController:
         self._normalize_match_updates(updates)
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         # Re-score against the applied result so the book's confidence and state
-        # reflect the match, consistent with Quick Match.
-        # Note: Phase.MATCH is intentionally not marked here in v1 — match results
-        # land on IDENTIFY via _rescore_after_match. MATCH is a reserved node in the
-        # invalidation graph, pending the full match-phase wiring in a future release.
+        # reflect the match, consistent with Quick Match. This records the MATCH phase.
         self._rescore_after_match(book, [result])
         book.touch()
         self.ctx.books.upsert(book)
