@@ -818,7 +818,6 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                     lambda p: p, lambda p: scheme.set_value(p),
                     tooltip="Recent schemes",
                 )
-                dry = ui.checkbox("Dry run (show what would be parsed, change nothing)", value=False)
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
@@ -826,7 +825,6 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                         # Read input values before clearing the body (which destroys them).
                         used_template = template.value or cfg.filename_template
                         used_scheme = scheme.value
-                        dry_value = dry.value
                         state = {"done": 0, "total": 0, "name": ""}
 
                         def _on_progress(done: int, total: int, name: str) -> None:
@@ -867,11 +865,11 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                             show_options()
                             return
                         timer.cancel()
-                        show_results(plan, dry_value, used_template, used_scheme)
+                        show_results(plan, used_template, used_scheme)
 
                     ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
 
-        def show_results(plan, dry: bool, used_template: str, used_scheme: str) -> None:
+        def show_results(plan, used_template: str, used_scheme: str) -> None:
             body.clear()
             with body:
                 if plan.new_books == 0 and plan.existing_books == 0:
@@ -885,22 +883,17 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                     f"{plan.new_books} new · {plan.existing_books} existing (preserved) · "
                     f"{plan.fields_filled} fields filled · {plan.files_added} files added"
                 ).classes("text-caption colophon-muted")
-                if dry:
-                    with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
-                            ui.list().props("dense").classes("w-full"):
-                        for b in plan.units:
-                            with ui.item(), ui.item_section():
-                                ui.item_label(str(b.source_folder))
-                                parsed = " · ".join(filter(None, [
-                                    b.authors[0] if b.authors else "",
-                                    (b.series[0].name if b.series else ""),
-                                    b.title or "",
-                                ])) or "(no fields parsed)"
-                                ui.item_label(parsed).props("caption").classes("colophon-muted")
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Back", on_click=show_options).props("flat")
-                        ui.button("Close", on_click=dialog.close).props("flat")
-                    return
+                with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
+                        ui.list().props("dense").classes("w-full"):
+                    for b in plan.units:
+                        with ui.item(), ui.item_section():
+                            ui.item_label(str(b.source_folder))
+                            parsed = " · ".join(filter(None, [
+                                b.authors[0] if b.authors else "",
+                                (b.series[0].name if b.series else ""),
+                                b.title or "",
+                            ])) or "(no fields parsed)"
+                            ui.item_label(parsed).props("caption").classes("colophon-muted")
 
                 async def _apply() -> None:
                     controller.record_filename_template(used_template)
