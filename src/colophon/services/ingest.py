@@ -110,17 +110,16 @@ def _run_local(
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
 
 
-def refresh_local(book: BookUnit, *, template: str, directory_scheme: str) -> None:
+def refresh_local(book: BookUnit, *, root: Path, template: str, directory_scheme: str) -> None:
     """Re-run the STALE/PENDING local phases for one already-known book, in order.
     FRESH on success; FAILED stops the chain. Mirrors plan_scan's per-book body."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
-    root = book.source_folder.parent
 
     # Collect on-disk files for the SEARCH runner if it will run.
     unit_files: list[Path] | None = None
     if state_of(book, Phase.SEARCH) in (PhaseState.STALE, PhaseState.PENDING):
-        units = group_book_units(book.source_folder.parent)
+        units = group_book_units(root)
         match = next((u for u in units if u.folder == book.source_folder), None)
         unit_files = match.files if match else []
 
