@@ -24,6 +24,7 @@ from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, Ph
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
+from colophon.ui import state_panel
 from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
@@ -461,8 +462,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.icon("menu_book").classes("text-h3 text-grey-5")
                     ui.label("Select a book to see its details").classes("colophon-muted")
                 return
-
-            import colophon.ui.state_panel as state_panel  # local import: breaks the cycle
 
             def _details_body() -> None:
                 # editable fields, each prefilled with its value + provenance badge

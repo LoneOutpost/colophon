@@ -2,7 +2,19 @@ from pathlib import Path
 
 from colophon.core.models import BookUnit, Phase, PhaseState
 from colophon.core.phases import mark
-from colophon.ui.state_panel import phase_rows
+from colophon.ui.state_panel import (
+    _PHASE_ICONS,
+    _PHASE_LABELS,
+    _PHASE_STATE_COLOR,
+    phase_rows,
+)
+
+
+def test_phase_maps_cover_all_enum_members():
+    # phase_rows indexes these with [] — a missing member would KeyError at render.
+    assert set(_PHASE_LABELS) == set(Phase)
+    assert set(_PHASE_ICONS) == set(Phase)
+    assert set(_PHASE_STATE_COLOR) == set(PhaseState)
 
 
 def test_phase_rows_are_in_pipeline_order_and_reflect_state():
