@@ -269,6 +269,41 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
     return plan
 
 
+def plan_rescan_books(
+    repo: BookUnitRepo,
+    books: list[BookUnit],
+    phases: frozenset[Phase],
+    *,
+    force: bool,
+    template: str,
+    directory_scheme: str,
+    root_for,
+) -> ScanPlan:
+    """Re-process exactly `books` (selection-scoped).
+
+    `root_for(book) -> Path` gives the configured scan root for inference.
+    Known books only; never discovers new ones. Files for a forced/stale
+    SEARCH are re-probed from a cheap per-folder walk.
+    """
+    pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
+    plan = ScanPlan()
+    for book in books:
+        units = group_book_units(book.source_folder)
+        unit_files = next((u.files for u in units if u.folder == book.source_folder), [])
+        before_empty = _empty_fields(book)
+        prior_paths = {sf.path for sf in book.source_files}
+        run_local_phases(
+            book, phases, force=force, root=root_for(book),
+            pattern=pattern, scheme=scheme, unit_files=unit_files,
+        )
+        plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
+        plan.existing_books += 1
+        plan.fields_filled += len(before_empty - _empty_fields(book))
+        plan.units.append(book)
+    return plan
+
+
 def commit_scan(repo: BookUnitRepo, plan: ScanPlan) -> int:
     """Persist a computed plan; returns the number of books written."""
     for book in plan.units:
