@@ -1,6 +1,6 @@
 from colophon.controller import AppController
-from colophon.core.models import BookUnit, Phase, PhaseState
-from colophon.core.phases import mark, state_of
+from colophon.core.models import BookState, BookUnit, Phase, PhaseState
+from colophon.core.phases import mark, resync_state, state_of
 from tests.test_controller import _ctx
 
 
@@ -46,3 +46,19 @@ def test_edit_field_stales_writers_not_encode(tmp_path):
     assert state_of(edited, Phase.TAG) is PhaseState.STALE
     assert state_of(edited, Phase.ORGANIZE) is PhaseState.STALE
     assert state_of(edited, Phase.ENCODE) is PhaseState.FRESH       # audio untouched (override)
+
+
+def test_books_by_state_and_by_phase(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    mark(a, Phase.IDENTIFY, PhaseState.FRESH)
+    a.manually_confirmed = True
+    resync_state(a)                                  # -> READY (manual)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    mark(b, Phase.MATCH, PhaseState.STALE)
+    ctx.books.upsert(a)
+    ctx.books.upsert(b)
+
+    assert a.id in {x.id for x in ctrl.books_by_state(BookState.READY)}
+    assert b.id in {x.id for x in ctrl.books_with_phase(Phase.MATCH, PhaseState.STALE)}

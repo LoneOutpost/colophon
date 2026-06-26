@@ -48,7 +48,7 @@ from colophon.core.navigator import (
 )
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
-from colophon.core.phases import ensure_phases, invalidate_from, mark, resync_state
+from colophon.core.phases import ensure_phases, invalidate_from, mark, resync_state, state_of
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -279,6 +279,15 @@ class AppController:
             if not b.phases:
                 ensure_phases(b)
         return books
+
+    def books_by_state(self, state: BookState) -> list[BookUnit]:
+        """Books whose derived BookState equals `state` (legacy rows hydrated)."""
+        return [b for b in self._hydrate(self.ctx.books.list_all()) if b.state is state]
+
+    def books_with_phase(self, phase: Phase, status: PhaseState) -> list[BookUnit]:
+        """Books whose `phase` is in `status` (legacy rows hydrated first)."""
+        return [b for b in self._hydrate(self.ctx.books.list_all())
+                if state_of(b, phase) is status]
 
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
