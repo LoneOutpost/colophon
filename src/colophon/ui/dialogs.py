@@ -841,11 +841,12 @@ async def scan_dialog(
                         {"update": "Update existing", "refresh": "Refresh existing"},
                         value="update",
                     ).props("dense")
-                    with ui.row().classes("items-center q-gutter-xs q-ml-sm").style("opacity: 0.5"):
-                        ui.icon("radio_button_unchecked", size="18px").classes("colophon-muted")
-                        ui.label("Only new — not applicable to a selection").classes(
-                            "text-caption colophon-muted"
-                        )
+                    # A disabled stand-in for the "Only new" radio option (Quasar can't
+                    # disable a single option). Match the dense radio's dot size and label
+                    # font so it lines up as a greyed-out third option, not small/indented.
+                    with ui.row().classes("items-center q-gutter-sm").style("opacity: 0.5"):
+                        ui.icon("radio_button_unchecked", size="24px").classes("colophon-muted")
+                        ui.label("Only new — not applicable to a selection").classes("colophon-muted")
                 else:
                     scope_choice = ui.radio(
                         {"new_only": "Only new", "update": "Update existing",
