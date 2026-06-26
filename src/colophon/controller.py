@@ -276,8 +276,11 @@ class AppController:
         return path
 
     def _root_for(self, book: BookUnit) -> Path:
-        """The configured scan root that contains `book`, for re-running local phases."""
-        return self._scan_root_for_path(book.source_folder)
+        """The configured scan root that contains `book`, for re-running local phases.
+        For a book outside every scan path, fall back to its parent (best-effort one-level
+        directory inference) rather than the folder itself, which would infer nothing."""
+        root = self._scan_root_for_path(book.source_folder)
+        return root if root != book.source_folder else book.source_folder.parent
 
     def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
         """Invalidate `from_phase` forward, auto-rerun the local phases, persist.

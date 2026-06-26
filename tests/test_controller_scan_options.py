@@ -44,3 +44,22 @@ def test_scan_preview_selection_processes_only_selected(tmp_path):
     ))
     assert {u.source_folder for u in plan.units} == {a}           # only A
     assert plan.units[0].content_kind is not ContentKind.MULTI    # forced re-classify
+
+
+def test_root_for_returns_scan_path_for_in_scan_book(tmp_path):
+    ctx = _ctx(tmp_path)
+    scan = tmp_path / "library"
+    ctx.config.scan_paths = [scan]
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=scan / "Author" / "Book")
+    assert ctrl._root_for(book) == scan
+
+
+def test_root_for_falls_back_to_parent_for_out_of_scan_book(tmp_path):
+    # A book outside every scan path falls back to its parent (one-level best-effort
+    # inference), not the folder itself (which would infer nothing).
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path / "library"]
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "elsewhere" / "Book")
+    assert ctrl._root_for(book) == tmp_path / "elsewhere"

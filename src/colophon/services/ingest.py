@@ -8,6 +8,7 @@ fields; only empty fields are filled and the on-disk file list is refreshed.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -43,8 +44,8 @@ class ScanPlan:
 
 class ScanScope(StrEnum):
     NEW_ONLY = "new_only"   # add newly-discovered books; skip already-known ones
-    UPDATE = "update"       # (deferred) known books: re-run selected phases where stale/pending
-    REFRESH = "refresh"     # (deferred) known books: force selected phases even if fresh
+    UPDATE = "update"       # known books: re-run selected phases where stale/pending
+    REFRESH = "refresh"     # known books: force selected phases even if fresh
 
 
 @dataclass
@@ -277,7 +278,7 @@ def plan_rescan_books(
     force: bool,
     template: str,
     directory_scheme: str,
-    root_for,
+    root_for: Callable[[BookUnit], Path],
 ) -> ScanPlan:
     """Re-process exactly `books` (selection-scoped).
 
