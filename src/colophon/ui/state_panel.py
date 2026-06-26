@@ -106,7 +106,7 @@ def render(controller, book: BookUnit) -> None:
                         ui.label(row.updated_at.strftime("%Y-%m-%d %H:%M")).classes(
                             "colophon-muted text-caption"
                         )
-                    btn = ui.button(icon="refresh").props("flat dense round")
+                    btn = ui.button(icon="refresh").props("flat dense round color=grey-6")
                     btn.set_enabled(False)
                     btn.tooltip("Re-run — coming soon")
                 if row.detail:
