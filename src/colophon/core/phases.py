@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from colophon.core.models import BookUnit, Phase, PhaseRecord, PhaseState
+from colophon.core.models import BookState, BookUnit, Phase, PhaseRecord, PhaseState
 
 _ORDER = list(Phase)
 LOCAL = (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY)
@@ -54,4 +54,32 @@ def invalidate_from(book: BookUnit, phase: Phase) -> list[Phase]:
         if state_of(book, p) is not PhaseState.PENDING and invalidates(phase, p):
             mark(book, p, PhaseState.STALE)
             staled.append(p)
+    resync_state(book)
     return staled
+
+
+READY_THRESHOLD = 0.6   # align with the configured identification threshold
+
+
+def derive_state(book: BookUnit) -> BookState:
+    """The legacy BookState computed from the phase map (+ the two non-phase signals)."""
+    if book.skipped:
+        return BookState.SKIPPED
+    if any(state_of(book, p) is PhaseState.FAILED for p in Phase):
+        return BookState.FAILED
+    if any(state_of(book, p) is PhaseState.RUNNING for p in Phase):
+        return BookState.ENCODING
+    if state_of(book, Phase.ORGANIZE) is PhaseState.FRESH:
+        return BookState.ORGANIZED
+    if state_of(book, Phase.ENCODE) is PhaseState.FRESH:
+        return BookState.ENCODED
+    if state_of(book, Phase.IDENTIFY) is PhaseState.FRESH:
+        if book.manually_confirmed or book.confidence >= READY_THRESHOLD:
+            return BookState.READY
+        return BookState.NEEDS_REVIEW
+    return BookState.DETECTED
+
+
+def resync_state(book: BookUnit) -> None:
+    """Recompute and store the denormalized BookState cache. Call after any phase mutation."""
+    book.state = derive_state(book)
