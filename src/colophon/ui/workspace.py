@@ -459,276 +459,285 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.label("Select a book to see its details").classes("colophon-muted")
                 return
 
-            # editable fields, each prefilled with its value + provenance badge
-            inputs: dict[str, ui.input | ui.textarea] = {}
-            originals: dict[str, str] = {}
-            autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
+            import colophon.ui.state_panel as state_panel  # local import: breaks the cycle
 
-            def _build_field(field: str) -> None:
-                value = get_field(book, field) or ""
-                originals[field] = value
-                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
-                    if field in _CHIP_FIELDS:
-                        current = [s.strip() for s in value.split(";") if s.strip()]
-                        known = controller.known_genres() if field == "genre" else controller.known_tags()
-                        if field == "genre":
-                            known = sorted(set(known) | set(controller.genre_policy().accepted))
-                        inp = ui.select(
-                            sorted(set(known) | set(current)), label=field, value=current,
-                            multiple=True, new_value_mode="add-unique",
-                        ).props("use-chips use-input dense").classes("col")
+            def _details_body() -> None:
+                # editable fields, each prefilled with its value + provenance badge
+                inputs: dict[str, ui.input | ui.textarea] = {}
+                originals: dict[str, str] = {}
+                autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
+
+                def _build_field(field: str) -> None:
+                    value = get_field(book, field) or ""
+                    originals[field] = value
+                    with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                        if field in _CHIP_FIELDS:
+                            current = [s.strip() for s in value.split(";") if s.strip()]
+                            known = controller.known_genres() if field == "genre" else controller.known_tags()
+                            if field == "genre":
+                                known = sorted(set(known) | set(controller.genre_policy().accepted))
+                            inp = ui.select(
+                                sorted(set(known) | set(current)), label=field, value=current,
+                                multiple=True, new_value_mode="add-unique",
+                            ).props("use-chips use-input dense").classes("col")
+                            inputs[field] = inp
+                            source = field_provenance(book, field)
+                            if source:
+                                ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
+                            return
+                        if field == "description":
+                            inp = ui.textarea(field, value=value).props("dense").classes("col")
+                        else:
+                            inp = ui.input(
+                                field, value=value, autocomplete=autocomplete.get(field)
+                            ).props("dense").classes("col")
+                            if field in ("year", "asin", "isbn"):
+                                inp.classes("colophon-mono")
                         inputs[field] = inp
                         source = field_provenance(book, field)
                         if source:
                             ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
+
+                def _save_pending(b=book) -> bool:
+                    """Persist any pending field edits silently, advancing the editor's
+                    baseline. Returns True when something was saved."""
+                    changed = {
+                        f: (_editor_text(inputs[f]) or None)
+                        for f in EDITABLE_FIELDS
+                        if _editor_text(inputs[f]) != originals[f]
+                    }
+                    if not changed:
+                        return False
+                    controller.save_fields(b, changed)
+                    for f in changed:
+                        originals[f] = _editor_text(inputs[f])
+                    return True
+
+                def _is_dirty() -> bool:
+                    return any(_editor_text(inputs[f]) != originals[f] for f in EDITABLE_FIELDS)
+
+                def _save(b=book) -> None:
+                    if not _save_pending(b):
+                        ui.notify("No changes")
                         return
-                    if field == "description":
-                        inp = ui.textarea(field, value=value).props("dense").classes("col")
-                    else:
-                        inp = ui.input(
-                            field, value=value, autocomplete=autocomplete.get(field)
-                        ).props("dense").classes("col")
-                        if field in ("year", "asin", "isbn"):
-                            inp.classes("colophon-mono")
-                    inputs[field] = inp
-                    source = field_provenance(book, field)
-                    if source:
-                        ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
+                    _set_dirty(False)
+                    ui.notify("Saved")
+                    refresh_list()
+                    show_detail(b.id)
 
-            def _save_pending(b=book) -> bool:
-                """Persist any pending field edits silently, advancing the editor's
-                baseline. Returns True when something was saved."""
-                changed = {
-                    f: (_editor_text(inputs[f]) or None)
-                    for f in EDITABLE_FIELDS
-                    if _editor_text(inputs[f]) != originals[f]
-                }
-                if not changed:
-                    return False
-                controller.save_fields(b, changed)
-                for f in changed:
-                    originals[f] = _editor_text(inputs[f])
-                return True
+                def _normalize_all() -> None:
+                    for f, inp in inputs.items():
+                        fn = FIELD_NORMALIZERS.get(f)
+                        if fn is None or f in _CHIP_FIELDS:
+                            continue
+                        inp.set_value(fn(_editor_text(inp)))
+                    ui.notify("Normalized fields")
 
-            def _is_dirty() -> bool:
-                return any(_editor_text(inputs[f]) != originals[f] for f in EDITABLE_FIELDS)
+                async def _fetch_chapters(b=book, asin=None) -> None:
+                    res = await controller.apply_audnexus_chapters(b, asin=asin)
+                    if not res.ok:
+                        ui.notify(res.error or "No chapters found", type="warning")
+                        return
+                    ui.notify(f"Applied {res.count} chapters from Audible")
+                    if res.mismatch:
+                        def _fmt(ms: int) -> str:
+                            s = ms // 1000
+                            return f"{s // 3600}:{(s % 3600) // 60:02d}"
+                        ui.notify(
+                            f"Audible runtime {_fmt(res.audible_runtime_ms)} vs your files "
+                            f"{_fmt(res.source_runtime_ms)} - chapters may not line up",
+                            type="warning", timeout=8000,
+                        )
+                    show_detail(b.id)
 
-            def _save(b=book) -> None:
-                if not _save_pending(b):
-                    ui.notify("No changes")
-                    return
-                _set_dirty(False)
-                ui.notify("Saved")
-                refresh_list()
-                show_detail(b.id)
+                async def _fetch_clicked(b=book) -> None:
+                    if (b.asin or "").strip():
+                        await _fetch_chapters(b)
+                        return
+                    with ui.dialog() as dlg, ui.card().classes("w-80"):
+                        ui.label("Fetch chapters from Audible").classes("text-subtitle1")
+                        asin_in = ui.input("ASIN").props("dense").classes("w-full")
+                        with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                            ui.button("Cancel", on_click=dlg.close).props("flat")
 
-            def _normalize_all() -> None:
-                for f, inp in inputs.items():
-                    fn = FIELD_NORMALIZERS.get(f)
-                    if fn is None or f in _CHIP_FIELDS:
-                        continue
-                    inp.set_value(fn(_editor_text(inp)))
-                ui.notify("Normalized fields")
+                            async def _go() -> None:
+                                value = (asin_in.value or "").strip()
+                                if not value:
+                                    ui.notify("Enter an ASIN")
+                                    return
+                                dlg.close()
+                                await _fetch_chapters(b, asin=value)
 
+                            ui.button("Fetch", icon="cloud_download", on_click=_go)
+                    dlg.open()
 
+                with ui.row().classes("w-full no-wrap items-start q-gutter-md"):
+                    # Left aside: cover, status, location.
+                    with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
+                        _render_cover(book, width=112, height=168, icon="text-h2")
+                        ui.badge(f"{book.confidence:.0f}").props(
+                            f"color={_confidence_color(book.confidence)}"
+                        ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
+                        _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
+                        ui.badge(_slabel).props(f"color={_scolor} outline")
+                        if book.source_folder is not None:
+                            with ui.row().classes("items-center no-wrap q-gutter-xs").style("max-width:112px"):
+                                ui.icon("folder", size="14px").classes("colophon-muted")
+                                ui.label(_short_location(book.source_folder)).classes(
+                                    "text-caption colophon-muted ellipsis"
+                                ).tooltip(str(book.source_folder))
+                    # Main column: title, tools, grouped fields.
+                    with ui.column().classes("col q-gutter-none"):
+                        ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
+                        if book.confidence_signals:
+                            with ui.row().classes("items-center w-full q-gutter-xs q-mb-xs"):
+                                for sig in book.confidence_signals:
+                                    color = "positive" if sig.points >= 0 else "negative"
+                                    ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
+                                        f"color={color} outline"
+                                    ).tooltip(sig.detail)
 
+                        # --- metadata tool groups ---
+                        with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
+                            with ui.element("div").classes("colophon-toolgroup col"):
+                                ui.label("Fetch from sources").classes("colophon-seccap")
+                                with ui.row().classes("q-gutter-xs"):
+                                    ui.button("Matches", icon="search", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
+                                    ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
+                                    ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
+                            with ui.element("div").classes("colophon-toolgroup"):
+                                ui.label("Confidence").classes("colophon-seccap")
+                                with ui.row().classes("q-gutter-xs"):
+                                    if book.manually_confirmed:
+                                        async def _recheck(b=book) -> None:
+                                            ui.notify("Rechecking confidence...")
+                                            await controller.recheck_confidence(b)
+                                            show_detail(b.id)
+                                            refresh_list()
+                                            refresh_status()
+                                        ui.button("Recheck Confidence", icon="refresh", on_click=_recheck).props(
+                                            "flat dense no-caps"
+                                        ).tooltip("Re-query sources and revert to the computed confidence")
+                                    else:
+                                        def _confirm(b=book) -> None:
+                                            controller.confirm_confidence(b)
+                                            show_detail(b.id)
+                                            refresh_list()
+                                            refresh_status()
+                                        ui.button("Manual Confirmation", icon="verified", on_click=_confirm).props(
+                                            "flat dense no-caps"
+                                        ).tooltip("Confirm this book and set its confidence to 100%")
+                            with ui.element("div").classes("colophon-toolgroup"):
+                                ui.label("Clean up").classes("colophon-seccap")
+                                with ui.row().classes("q-gutter-xs"):
+                                    ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
+                                    ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
 
-            async def _fetch_chapters(b=book, asin=None) -> None:
-                res = await controller.apply_audnexus_chapters(b, asin=asin)
-                if not res.ok:
-                    ui.notify(res.error or "No chapters found", type="warning")
-                    return
-                ui.notify(f"Applied {res.count} chapters from Audible")
-                if res.mismatch:
-                    def _fmt(ms: int) -> str:
-                        s = ms // 1000
-                        return f"{s // 3600}:{(s % 3600) // 60:02d}"
-                    ui.notify(
-                        f"Audible runtime {_fmt(res.audible_runtime_ms)} vs your files "
-                        f"{_fmt(res.source_runtime_ms)} - chapters may not line up",
-                        type="warning", timeout=8000,
-                    )
-                show_detail(b.id)
+                        # --- grouped fields ---
+                        ui.label("Identity").classes("colophon-seccap")
+                        with ui.grid(columns=2).classes("w-full"):
+                            for f in ("title", "subtitle", "author", "narrator", "series", "sequence"):
+                                _build_field(f)
+                        ui.label("Description").classes("colophon-seccap")
+                        _build_field("description")
+                        ui.label("Publication").classes("colophon-seccap")
+                        with ui.grid(columns=2).classes("w-full"):
+                            for f in ("year", "publisher", "language", "asin", "isbn"):
+                                _build_field(f)
+                        _abridged_opts = {None: "Unknown", False: "Unabridged", True: "Abridged"}
+                        ui.select(
+                            _abridged_opts, value=book.abridged, label="Abridged",
+                            on_change=lambda e, b=book: (controller.set_abridged(b, e.value), refresh_list()),
+                        ).props("dense").classes("w-full")
+                        ui.label("Classification").classes("colophon-seccap")
+                        _build_field("genre")
+                        _build_field("tag")
 
-            async def _fetch_clicked(b=book) -> None:
-                if (b.asin or "").strip():
-                    await _fetch_chapters(b)
-                    return
-                with ui.dialog() as dlg, ui.card().classes("w-80"):
-                    ui.label("Fetch chapters from Audible").classes("text-subtitle1")
-                    asin_in = ui.input("ASIN").props("dense").classes("w-full")
-                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                        ui.button("Cancel", on_click=dlg.close).props("flat")
+                for _inp in inputs.values():
+                    _inp.on_value_change(lambda _e=None: _set_dirty(True))
 
-                        async def _go() -> None:
-                            value = (asin_in.value or "").strip()
-                            if not value:
-                                ui.notify("Enter an ASIN")
-                                return
-                            dlg.close()
-                            await _fetch_chapters(b, asin=value)
-
-                        ui.button("Fetch", icon="cloud_download", on_click=_go)
-                dlg.open()
-
-            with ui.row().classes("w-full no-wrap items-start q-gutter-md"):
-                # Left aside: cover, status, location.
-                with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
-                    _render_cover(book, width=112, height=168, icon="text-h2")
-                    ui.badge(f"{book.confidence:.0f}").props(
-                        f"color={_confidence_color(book.confidence)}"
-                    ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
-                    _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
-                    ui.badge(_slabel).props(f"color={_scolor} outline")
-                    if book.source_folder is not None:
-                        with ui.row().classes("items-center no-wrap q-gutter-xs").style("max-width:112px"):
-                            ui.icon("folder", size="14px").classes("colophon-muted")
-                            ui.label(_short_location(book.source_folder)).classes(
-                                "text-caption colophon-muted ellipsis"
-                            ).tooltip(str(book.source_folder))
-                # Main column: title, tools, grouped fields.
-                with ui.column().classes("col q-gutter-none"):
-                    ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
-                    if book.confidence_signals:
-                        with ui.row().classes("items-center w-full q-gutter-xs q-mb-xs"):
-                            for sig in book.confidence_signals:
-                                color = "positive" if sig.points >= 0 else "negative"
-                                ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
-                                    f"color={color} outline"
-                                ).tooltip(sig.detail)
-
-                    # --- metadata tool groups ---
-                    with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
-                        with ui.element("div").classes("colophon-toolgroup col"):
-                            ui.label("Fetch from sources").classes("colophon-seccap")
-                            with ui.row().classes("q-gutter-xs"):
-                                ui.button("Matches", icon="search", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
-                                ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
-                                ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
-                        with ui.element("div").classes("colophon-toolgroup"):
-                            ui.label("Confidence").classes("colophon-seccap")
-                            with ui.row().classes("q-gutter-xs"):
-                                if book.manually_confirmed:
-                                    async def _recheck(b=book) -> None:
-                                        ui.notify("Rechecking confidence...")
-                                        await controller.recheck_confidence(b)
-                                        show_detail(b.id)
-                                        refresh_list()
-                                        refresh_status()
-                                    ui.button("Recheck Confidence", icon="refresh", on_click=_recheck).props(
-                                        "flat dense no-caps"
-                                    ).tooltip("Re-query sources and revert to the computed confidence")
-                                else:
-                                    def _confirm(b=book) -> None:
-                                        controller.confirm_confidence(b)
-                                        show_detail(b.id)
-                                        refresh_list()
-                                        refresh_status()
-                                    ui.button("Manual Confirmation", icon="verified", on_click=_confirm).props(
-                                        "flat dense no-caps"
-                                    ).tooltip("Confirm this book and set its confidence to 100%")
-                        with ui.element("div").classes("colophon-toolgroup"):
-                            ui.label("Clean up").classes("colophon-seccap")
-                            with ui.row().classes("q-gutter-xs"):
-                                ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
-                                ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
-
-                    # --- grouped fields ---
-                    ui.label("Identity").classes("colophon-seccap")
-                    with ui.grid(columns=2).classes("w-full"):
-                        for f in ("title", "subtitle", "author", "narrator", "series", "sequence"):
-                            _build_field(f)
-                    ui.label("Description").classes("colophon-seccap")
-                    _build_field("description")
-                    ui.label("Publication").classes("colophon-seccap")
-                    with ui.grid(columns=2).classes("w-full"):
-                        for f in ("year", "publisher", "language", "asin", "isbn"):
-                            _build_field(f)
-                    _abridged_opts = {None: "Unknown", False: "Unabridged", True: "Abridged"}
-                    ui.select(
-                        _abridged_opts, value=book.abridged, label="Abridged",
-                        on_change=lambda e, b=book: (controller.set_abridged(b, e.value), refresh_list()),
-                    ).props("dense").classes("w-full")
-                    ui.label("Classification").classes("colophon-seccap")
-                    _build_field("genre")
-                    _build_field("tag")
-
-            for _inp in inputs.values():
-                _inp.on_value_change(lambda _e=None: _set_dirty(True))
-
-            with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
-                ui.button("Save", icon="save", on_click=_save).props("unelevated")
-                ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
-                ui.space()
-                ui.button(
-                    "Mark ready", icon="check",
-                    on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
-                ).props("flat")
-
-            editor_state.update(
-                book_id=book_id, is_dirty=_is_dirty,
-                save_pending=_save_pending, save=_save,
-                write=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b)),
-            )
-            _set_dirty(False)
-            _persist_view()
-
-            if controller._active_findings(book):
-                ui.separator().classes("q-my-sm")
-                ui.label("Attention").classes("text-subtitle2")
-                render_attention_pane(book)
-
-            if book.source_files:
-                ui.separator().classes("q-my-sm")
-                ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
-
-                with ui.list().props("dense bordered").classes("w-full"):
-                    for idx, sf in enumerate(book.source_files):
-                        with ui.item():
-                            with ui.item_section():
-                                ui.item_label(sf.path.name)
-                                ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
-                            with ui.item_section().props("side"):
-                                with ui.row().classes("q-gutter-xs no-wrap"):
-                                    ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').set_enabled(idx > 0)
-                                    ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').set_enabled(idx < len(book.source_files) - 1)
-                                    ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"')
-                                    ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"')
-
-                # chapters: applied named chapters (book.chapters) or file-boundary default
-                applied = bool(book.chapters)
-                chapters = book.chapters if applied else file_boundary_chapters(
-                    [(sf.path.name, sf.duration_seconds) for sf in book.source_files]
-                )
-                with ui.row().classes("items-center w-full no-wrap q-mt-sm"):
-                    ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2")
-                    if applied:
-                        ui.badge("custom").props("outline").classes("colophon-chip").classes("self-center")
+                with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
+                    ui.button("Save", icon="save", on_click=_save).props("unelevated")
+                    ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
                     ui.space()
                     ui.button(
-                        "Edit", icon="edit",
-                        on_click=lambda b=book, chs=chapters: chapter_edit_dialog(
-                            controller, b, chs, show_detail=show_detail
-                        ),
-                    ).props("flat dense no-caps")
-                    ui.button(
-                        "Fetch from Audible", icon="cloud_download", on_click=_fetch_clicked
-                    ).props("flat dense no-caps")
-                    if applied:
+                        "Mark ready", icon="check",
+                        on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
+                    ).props("flat")
+
+                editor_state.update(
+                    book_id=book_id, is_dirty=_is_dirty,
+                    save_pending=_save_pending, save=_save,
+                    write=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b)),
+                )
+                _set_dirty(False)
+                _persist_view()
+
+                if controller._active_findings(book):
+                    ui.separator().classes("q-my-sm")
+                    ui.label("Attention").classes("text-subtitle2")
+                    render_attention_pane(book)
+
+                if book.source_files:
+                    ui.separator().classes("q-my-sm")
+                    ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
+
+                    with ui.list().props("dense bordered").classes("w-full"):
+                        for idx, sf in enumerate(book.source_files):
+                            with ui.item():
+                                with ui.item_section():
+                                    ui.item_label(sf.path.name)
+                                    ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
+                                with ui.item_section().props("side"):
+                                    with ui.row().classes("q-gutter-xs no-wrap"):
+                                        ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').set_enabled(idx > 0)
+                                        ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').set_enabled(idx < len(book.source_files) - 1)
+                                        ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"')
+                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"')
+
+                    # chapters: applied named chapters (book.chapters) or file-boundary default
+                    applied = bool(book.chapters)
+                    chapters = book.chapters if applied else file_boundary_chapters(
+                        [(sf.path.name, sf.duration_seconds) for sf in book.source_files]
+                    )
+                    with ui.row().classes("items-center w-full no-wrap q-mt-sm"):
+                        ui.label(f"Chapters ({len(chapters)})").classes("text-subtitle2")
+                        if applied:
+                            ui.badge("custom").props("outline").classes("colophon-chip").classes("self-center")
+                        ui.space()
                         ui.button(
-                            "Reset to file boundaries", icon="restart_alt",
-                            on_click=lambda b=book: (controller.reset_chapters(b), show_detail(b.id)),
+                            "Edit", icon="edit",
+                            on_click=lambda b=book, chs=chapters: chapter_edit_dialog(
+                                controller, b, chs, show_detail=show_detail
+                            ),
                         ).props("flat dense no-caps")
-                with ui.list().props("dense").classes("w-full"):
-                    for n, ch in enumerate(chapters, start=1):
-                        with ui.item():
-                            with ui.item_section():
-                                ui.item_label(f"{n}. {ch.title}")
-                            with ui.item_section().props("side"):
-                                _t = ch.start_ms // 1000
-                                ui.item_label(
-                                    f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
-                                ).props("caption")
+                        ui.button(
+                            "Fetch from Audible", icon="cloud_download", on_click=_fetch_clicked
+                        ).props("flat dense no-caps")
+                        if applied:
+                            ui.button(
+                                "Reset to file boundaries", icon="restart_alt",
+                                on_click=lambda b=book: (controller.reset_chapters(b), show_detail(b.id)),
+                            ).props("flat dense no-caps")
+                    with ui.list().props("dense").classes("w-full"):
+                        for n, ch in enumerate(chapters, start=1):
+                            with ui.item():
+                                with ui.item_section():
+                                    ui.item_label(f"{n}. {ch.title}")
+                                with ui.item_section().props("side"):
+                                    _t = ch.start_ms // 1000
+                                    ui.item_label(
+                                        f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
+                                    ).props("caption")
+
+            with ui.tabs().props("dense no-caps").classes("w-full") as _tabs:
+                ui.tab("details", label="Details", icon="edit")
+                ui.tab("state", label="State", icon="insights")
+            with ui.tab_panels(_tabs, value="details").classes("w-full"):
+                with ui.tab_panel("details").classes("q-pa-none"):
+                    _details_body()
+                with ui.tab_panel("state").classes("q-pa-none"):
+                    state_panel.render(controller, book)
 
     def _clear_selection() -> None:
         """Clear the ENTIRE selection across every view and collapse the bulk
