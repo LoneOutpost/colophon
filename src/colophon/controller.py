@@ -263,6 +263,8 @@ class AppController:
     def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
         """Invalidate `from_phase` forward, auto-rerun the local phases, persist.
         Deferred phases are left stale for an explicit run."""
+        if not book.phases:
+            ensure_phases(book)
         invalidate_from(book, from_phase)
         refresh_local(
             book,

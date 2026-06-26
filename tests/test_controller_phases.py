@@ -4,6 +4,31 @@ from colophon.core.phases import mark, resync_state, state_of
 from tests.test_controller import _ctx
 
 
+def test_invalidate_hydrates_legacy_book_without_corruption(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    ctx.config.scan_paths = [ingest]
+    d = ingest / "Author" / "Book"
+    d.mkdir(parents=True)
+    (d / "Book.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([d])
+    book = ctx.books.get(BookUnit.id_for(d))
+    # Simulate a legacy row: no phase map, persisted as ORGANIZED, sources moved away.
+    book.phases = {}
+    book.state = BookState.ORGANIZED
+    ctx.books.upsert(book)
+    (d / "Book.mp3").unlink()                     # sources gone after organize/delete
+    prior_files = len(book.source_files)
+    assert prior_files >= 1
+
+    ctrl.edit_field(book, "title", "A New Title")
+    refreshed = ctx.books.get(BookUnit.id_for(d))
+    assert refreshed.state is not BookState.FAILED            # not corrupted
+    assert len(refreshed.source_files) == prior_files         # source list preserved
+    assert state_of(refreshed, Phase.ORGANIZE) is PhaseState.STALE   # cascade, not wiped
+
+
 def test_invalidate_reruns_local_stales_deferred(tmp_path):
     ingest = tmp_path / "ingest"
     ctx = _ctx(tmp_path)
