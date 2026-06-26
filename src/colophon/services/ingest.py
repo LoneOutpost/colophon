@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from colophon.adapters.audio import probe_audio_file
@@ -38,6 +39,19 @@ class ScanPlan:
     existing_books: int = 0
     fields_filled: int = 0
     files_added: int = 0
+
+
+class ScanScope(StrEnum):
+    NEW_ONLY = "new_only"   # add newly-discovered books; skip already-known ones
+    UPDATE = "update"       # (deferred) known books: re-run selected phases where stale/pending
+    REFRESH = "refresh"     # (deferred) known books: force selected phases even if fresh
+
+
+@dataclass
+class ScanOptions:
+    scope: ScanScope = ScanScope.NEW_ONLY
+    phases: frozenset[Phase] = field(default_factory=lambda: frozenset(LOCAL))
+    book_ids: set[str] | None = None   # reserved for the selection-scoped follow-up
 
 
 def _empty_fields(book: BookUnit) -> set[str]:
@@ -148,7 +162,7 @@ def refresh_local(book: BookUnit, *, root: Path, template: str, directory_scheme
     )
 
 
-def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> ScanPlan:
+def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
@@ -184,6 +198,37 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
         else:
             plan.new_books += 1
 
+        plan.units.append(book)
+    return plan
+
+
+def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
+              options: ScanOptions | None = None) -> ScanPlan:
+    """Compute what a scan of `root` would do, without writing anything.
+    `options is None` keeps the legacy behavior (all books, all local phases)."""
+    if options is None:
+        return _plan_scan_all(repo, root, template=template, directory_scheme=directory_scheme)
+    if options.scope is not ScanScope.NEW_ONLY:
+        raise NotImplementedError(f"scan scope {options.scope.value} not yet wired")
+    return _plan_scan_new_only(repo, root, options.phases,
+                               template=template, directory_scheme=directory_scheme)
+
+
+def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
+                        template: str, directory_scheme: str) -> ScanPlan:
+    """Ingest only books not already known; run the selected local phases on each.
+    SEARCH is always run for a new book (probing is intrinsic to discovery)."""
+    pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
+    plan = ScanPlan()
+    for unit in group_book_units(root):
+        if repo.get(BookUnit.id_for(unit.folder)) is not None:
+            continue
+        book = BookUnit.new(source_folder=unit.folder)
+        run_local_phases(book, phases | {Phase.SEARCH}, force=False,
+                         root=root, pattern=pattern, scheme=scheme, unit_files=unit.files)
+        plan.new_books += 1
+        plan.files_added += len(book.source_files)
         plan.units.append(book)
     return plan
 
