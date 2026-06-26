@@ -58,10 +58,10 @@ def invalidate_from(book: BookUnit, phase: Phase) -> list[Phase]:
     return staled
 
 
-READY_THRESHOLD = 0.6   # align with the configured identification threshold
+DEFAULT_READY_THRESHOLD = 75.0   # 0-100 scale; matches config.review_threshold default
 
 
-def derive_state(book: BookUnit) -> BookState:
+def derive_state(book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRESHOLD) -> BookState:
     """The legacy BookState computed from the phase map (+ the two non-phase signals)."""
     if book.skipped:
         return BookState.SKIPPED
@@ -74,15 +74,16 @@ def derive_state(book: BookUnit) -> BookState:
     if state_of(book, Phase.ENCODE) is PhaseState.FRESH:
         return BookState.ENCODED
     if state_of(book, Phase.IDENTIFY) is PhaseState.FRESH:
-        if book.manually_confirmed or book.confidence >= READY_THRESHOLD:
+        has_identity = bool(book.authors) or bool(book.series)
+        if book.manually_confirmed or (book.confidence >= ready_threshold and has_identity):
             return BookState.READY
         return BookState.NEEDS_REVIEW
     return BookState.DETECTED
 
 
-def resync_state(book: BookUnit) -> None:
+def resync_state(book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRESHOLD) -> None:
     """Recompute and store the denormalized BookState cache. Call after any phase mutation."""
-    book.state = derive_state(book)
+    book.state = derive_state(book, ready_threshold=ready_threshold)
 
 
 # Highest phase each legacy state implies is "done through".

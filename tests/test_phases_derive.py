@@ -39,12 +39,32 @@ def test_organized_then_encoded_precedence():
 
 
 def test_identified_ready_vs_needs_review():
-    ready = _book(manually_confirmed=True)
+    # manual confirmation is READY regardless of confidence/identity
+    confirmed = _book(manually_confirmed=True)
+    mark(confirmed, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(confirmed) is BookState.READY
+
+    # confident AND has identity -> READY (default threshold 75 on a 0-100 scale)
+    ready = _book(confidence=80.0, authors=["Some Author"])
     mark(ready, Phase.IDENTIFY, PhaseState.FRESH)
     assert derive_state(ready) is BookState.READY
-    review = _book(confidence=0.0)
-    mark(review, Phase.IDENTIFY, PhaseState.FRESH)
-    assert derive_state(review) is BookState.NEEDS_REVIEW
+
+    # confident but NO identity -> NEEDS_REVIEW
+    no_identity = _book(confidence=80.0)
+    mark(no_identity, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(no_identity) is BookState.NEEDS_REVIEW
+
+    # below threshold -> NEEDS_REVIEW
+    low = _book(confidence=50.0, authors=["Some Author"])
+    mark(low, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(low) is BookState.NEEDS_REVIEW
+
+
+def test_ready_threshold_is_overridable():
+    b = _book(confidence=60.0, authors=["A"])
+    mark(b, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(b) is BookState.NEEDS_REVIEW            # default 75
+    assert derive_state(b, ready_threshold=55.0) is BookState.READY
 
 
 def test_default_is_detected():
