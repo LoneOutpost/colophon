@@ -258,6 +258,8 @@ class AppController:
                 return root
             except ValueError:
                 continue
+        # Fallback: only reached for books outside every configured scan root.
+        # Directory re-inference from source_folder.parent is best-effort in that case.
         return book.source_folder.parent
 
     def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
@@ -1340,6 +1342,9 @@ class AppController:
         batch = apply_fields(self.ctx.books, self.ctx.history, book, updates, provenance=result.provider)
         # Re-score against the applied result so the book's confidence and state
         # reflect the match, consistent with Quick Match.
+        # Note: Phase.MATCH is intentionally not marked here in v1 — match results
+        # land on IDENTIFY via _rescore_after_match. MATCH is a reserved node in the
+        # invalidation graph, pending the full match-phase wiring in a future release.
         self._rescore_after_match(book, [result])
         book.touch()
         self.ctx.books.upsert(book)
