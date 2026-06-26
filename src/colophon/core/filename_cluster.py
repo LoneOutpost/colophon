@@ -109,3 +109,52 @@ def _parts_work(files: list[Path], per_file: list[list[str]]) -> DetectedWork:
     title = _strip_trailing_number(_spaced(first[0])) if first else _spaced(files[0].stem)
     return DetectedWork(label=title or _spaced(files[0].stem), series=None, sequence=None,
                         files=list(files))
+
+
+def cluster(files: list[Path]) -> ClusterResult:
+    """Classify a folder's files into works by filename structure alone."""
+    if not files:
+        return ClusterResult(ContentKind.UNKNOWN, 0.0)
+
+    per_file = [_chunks(f.stem) for f in files]
+    n = len(files)
+
+    if n == 1:
+        chunks = per_file[0]
+        title = _spaced(chunks[0]) if chunks else _spaced(files[0].stem)
+        series, seq = _series_and_seq(chunks[1:]) if len(chunks) > 1 else (None, None)
+        work = DetectedWork(label=title or _spaced(files[0].stem), series=series,
+                            sequence=seq, files=[files[0]])
+        return ClusterResult(ContentKind.SINGLE, 3.0,
+                             [_signal("single_file", 3, "one file in the folder")], [work])
+
+    if not all(per_file):  # a file produced no chunks -- can't reason
+        works = [_multi_work(files[i], per_file[i]) for i in range(n)]
+        return ClusterResult(ContentKind.UNKNOWN, 0.0,
+                             [_signal("unparseable", 0, "a file had no parseable name")], works)
+
+    min_len = min(len(c) for c in per_file)
+    same_count = len({len(c) for c in per_file}) == 1
+    rels = [_relationship([_tokens(per_file[f][i]) for f in range(n)]) for i in range(min_len)]
+    has_diff = DIFFERENT_TEXT in rels
+    has_match_num = MATCH_EXCEPT_NUMBER in rels
+
+    signals: list[ConfidenceSignal] = []
+    signals.append(_signal("uniform_chunk_count", 2, f"all files split into {min_len} parts")
+                   if same_count else
+                   _signal("ragged_chunk_count", -1, "files split into differing parts"))
+
+    if has_diff:
+        signals.append(_signal("distinct_titles", 2, "files have different title text"))
+        works = [_multi_work(files[i], per_file[i]) for i in range(n)]
+        kind = ContentKind.MULTI
+    elif same_count or has_match_num:
+        signals.append(_signal("parts_differ_by_number", 2, "files differ only by numbers"))
+        works = [_parts_work(files, per_file)]
+        kind = ContentKind.SINGLE
+    else:
+        works = [_multi_work(files[i], per_file[i]) for i in range(n)]
+        kind = ContentKind.UNKNOWN
+
+    confidence = float(max(sum(s.points for s in signals), 0))
+    return ClusterResult(kind, confidence, signals, works)

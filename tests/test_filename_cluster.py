@@ -15,7 +15,9 @@ from colophon.core.filename_cluster import (
     _text_sig,
     _tokens,
     _trailing_number,
+    cluster,
 )
+from colophon.core.models import ContentKind
 
 
 def test_chunks_split_on_separators():
@@ -88,3 +90,51 @@ def test_parts_work_strips_varying_number_from_title():
     w = _parts_work(files, per_file)
     assert w.label == "7th Sigma Unabridged Part"
     assert w.files == files and w.series is None
+
+
+def _paths(*names):
+    return [Path("/lib/Author") / n for n in names]
+
+
+def test_cluster_single_file_is_single():
+    r = cluster(_paths("Hillary.mp3"))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1 and r.detected_works[0].label == "Hillary"
+
+
+def test_cluster_parts_of_one_book_is_single():
+    r = cluster(_paths("7thSigmaUnabridgedPart1_ep6.mp3", "7thSigmaUnabridgedPart2_ep6.mp3"))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+    assert r.detected_works[0].label == "7th Sigma Unabridged Part"
+
+
+def test_cluster_cd_tracks_are_single():
+    r = cluster(_paths(*(f"girlblue-{i:02d}-cd0{1 + i // 6}-{i % 6 + 1:02d}.mp3" for i in range(1, 13))))
+    assert r.content_kind is ContentKind.SINGLE
+    assert r.detected_works[0].label == "girlblue"
+
+
+def test_cluster_series_of_separate_books_is_multi():
+    r = cluster(_paths("Father of Lies (Darkly Disturbing Trilogy 1).mp3",
+                       "Tanners Dell (Darkly Disturbing Trilogy 2).mp3"))
+    assert r.content_kind is ContentKind.MULTI
+    assert {w.label for w in r.detected_works} == {"Father of Lies", "Tanners Dell"}
+    assert all(w.series == "Darkly Disturbing Trilogy" for w in r.detected_works)
+    assert {w.sequence for w in r.detected_works} == {1.0, 2.0}
+
+
+def test_cluster_separate_books_no_series_is_multi():
+    r = cluster(_paths("Pearl Harbor Christmas.mp3", "eleven Days in December.mp3"))
+    assert r.content_kind is ContentKind.MULTI
+    assert all(w.series is None for w in r.detected_works)
+
+
+def test_cluster_ragged_distinct_titles_is_multi():
+    r = cluster(_paths("Father of Lies (Darkly Disturbing Trilogy 1).mp3",
+                       "Owlmen.mp3",
+                       "Tanners Dell (Darkly Disturbing Trilogy 2).mp3"))
+    assert r.content_kind is ContentKind.MULTI
+    assert len(r.detected_works) == 3
+    # series links the two that carry it
+    assert sum(w.series == "Darkly Disturbing Trilogy" for w in r.detected_works) == 2
