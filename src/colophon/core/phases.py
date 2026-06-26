@@ -83,3 +83,33 @@ def derive_state(book: BookUnit) -> BookState:
 def resync_state(book: BookUnit) -> None:
     """Recompute and store the denormalized BookState cache. Call after any phase mutation."""
     book.state = derive_state(book)
+
+
+# Highest phase each legacy state implies is "done through".
+_SEED_THROUGH: dict[BookState, Phase] = {
+    BookState.ORGANIZED: Phase.ENCODE,
+    BookState.ENCODED: Phase.ENCODE,
+    BookState.READY: Phase.IDENTIFY,
+    BookState.NEEDS_REVIEW: Phase.IDENTIFY,
+    BookState.IDENTIFIED: Phase.IDENTIFY,
+    BookState.FAILED: Phase.IDENTIFY,
+    BookState.DETECTED: Phase.SEARCH,
+}
+
+
+def ensure_phases(book: BookUnit) -> None:
+    """Lazily seed the phase map from the legacy `state` when it's empty (migration).
+    No-op when phases are already present. Self-heals on the next scan/run."""
+    if book.phases:
+        return
+    if book.state is BookState.SKIPPED:
+        book.skipped = True
+        through = Phase.SEARCH
+    else:
+        through = _SEED_THROUGH.get(book.state, Phase.SEARCH)
+    for p in _ORDER:
+        if _ORDER.index(p) <= _ORDER.index(through):
+            mark(book, p, PhaseState.FRESH)
+        else:
+            break
+    resync_state(book)
