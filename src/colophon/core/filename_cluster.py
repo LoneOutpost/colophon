@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
 
@@ -64,3 +65,47 @@ def _trailing_number(text: str) -> float | None:
 
 def _strip_trailing_number(text: str) -> str:
     return _TRAIL_NUM.sub("", text).strip()
+
+
+IDENTICAL = "identical"
+MATCH_EXCEPT_NUMBER = "match_except_number"
+DIFFERENT_TEXT = "different_text"
+
+
+def _relationship(col_tokens: list[list[str]]) -> str:
+    """Classify one position across files (token lists, one per file, all present)."""
+    if len({_text_sig(t) for t in col_tokens}) > 1:
+        return DIFFERENT_TEXT
+    if len({tuple(t) for t in col_tokens}) == 1:
+        return IDENTICAL
+    return MATCH_EXCEPT_NUMBER
+
+
+def _signal(name: str, points: int, detail: str) -> ConfidenceSignal:
+    return ConfidenceSignal(name=name, points=points, detail=detail)
+
+
+def _series_and_seq(chunks: list[str]) -> tuple[str | None, float | None]:
+    """First chunk that ends in a number -> (series_name, sequence)."""
+    for chunk in chunks:
+        disp = _spaced(chunk)
+        seq = _trailing_number(disp)
+        if seq is not None:
+            return (_strip_trailing_number(disp) or None), seq
+    return None, None
+
+
+def _multi_work(file: Path, chunks: list[str]) -> DetectedWork:
+    """One file = one work. Title is the leading chunk; series/seq from a later chunk."""
+    title = _spaced(chunks[0]) if chunks else _spaced(file.stem)
+    series, seq = _series_and_seq(chunks[1:]) if len(chunks) > 1 else (None, None)
+    return DetectedWork(label=title or _spaced(file.stem), series=series, sequence=seq, files=[file])
+
+
+def _parts_work(files: list[Path], per_file: list[list[str]]) -> DetectedWork:
+    """All files are one book's parts. Title is the leading chunk with the varying
+    part number stripped."""
+    first = per_file[0]
+    title = _strip_trailing_number(_spaced(first[0])) if first else _spaced(files[0].stem)
+    return DetectedWork(label=title or _spaced(files[0].stem), series=None, sequence=None,
+                        files=list(files))
