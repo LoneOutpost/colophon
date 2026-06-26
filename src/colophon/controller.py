@@ -293,6 +293,17 @@ class AppController:
         return [b for b in self._hydrate(self.ctx.books.list_all())
                 if state_of(b, phase) is status]
 
+    def phase_membership(self, books: list[BookUnit]) -> dict[Phase, list[BookUnit]]:
+        """Group `books` by phase: each phase maps to the subset whose phase is FRESH.
+        A book appears under every FRESH phase (cumulative funnel). One pass; pure over
+        the supplied list (the caller applies any folder/scope filtering)."""
+        out: dict[Phase, list[BookUnit]] = {p: [] for p in Phase}
+        for book in books:
+            for phase in Phase:
+                if state_of(book, phase) is PhaseState.FRESH:
+                    out[phase].append(book)
+        return out
+
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
         books = self._hydrate(self.ctx.books.list_all())

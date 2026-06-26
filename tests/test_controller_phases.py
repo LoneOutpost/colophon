@@ -87,3 +87,21 @@ def test_books_by_state_and_by_phase(tmp_path):
 
     assert a.id in {x.id for x in ctrl.books_by_state(BookState.READY)}
     assert b.id in {x.id for x in ctrl.books_with_phase(Phase.MATCH, PhaseState.STALE)}
+
+
+def test_phase_membership_groups_by_fresh_phase(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    mark(a, Phase.SEARCH, PhaseState.FRESH)
+    mark(a, Phase.IDENTIFY, PhaseState.FRESH)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    mark(b, Phase.SEARCH, PhaseState.FRESH)
+    mark(b, Phase.MATCH, PhaseState.STALE)      # STALE must NOT count
+
+    m = ctrl.phase_membership([a, b])
+    assert {x.id for x in m[Phase.SEARCH]} == {a.id, b.id}
+    assert {x.id for x in m[Phase.IDENTIFY]} == {a.id}
+    assert m[Phase.MATCH] == []
+    assert m[Phase.ENCODE] == []
+    assert set(m.keys()) == set(Phase)
