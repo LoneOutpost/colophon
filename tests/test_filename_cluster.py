@@ -138,3 +138,9 @@ def test_cluster_ragged_distinct_titles_is_multi():
     assert len(r.detected_works) == 3
     # series links the two that carry it
     assert sum(w.series == "Darkly Disturbing Trilogy" for w in r.detected_works) == 2
+
+
+def test_cluster_ragged_trailing_title_is_not_single():
+    # The distinguishing title is in a trailing chunk past the shorter sibling.
+    r = cluster(_paths("Series-1.mp3", "Series-2-Other Title.mp3"))
+    assert r.content_kind is not ContentKind.SINGLE  # must not silently merge two books

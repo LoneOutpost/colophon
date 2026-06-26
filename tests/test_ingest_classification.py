@@ -69,3 +69,26 @@ def test_scan_keeps_folder_title_when_folder_matches_filename(tmp_path):
     scan_ingest(repo, tmp_path, template="$Title", directory_scheme="")
     book = repo.get(BookUnit.id_for(book_dir))
     assert book.title == "7th Sigma"  # not the "7th Sigma Unabridged Part" residue
+
+
+def test_scan_records_filename_provenance_for_inferred_fields(tmp_path):
+    from colophon.core.models import Provenance
+    author = tmp_path / "Srini Pillay"
+    author.mkdir()
+    (author / "Tinker Dabble Doodle.mp3").write_bytes(b"")
+    repo = _repo(tmp_path)
+    scan_ingest(repo, tmp_path, template="$Title", directory_scheme="")
+    book = repo.get(BookUnit.id_for(author))
+    assert book.provenance.get("title") == Provenance.FILENAME.value
+    assert book.provenance.get("authors") == Provenance.FILENAME.value
+
+
+def test_scan_records_filename_provenance_for_series(tmp_path):
+    from colophon.core.models import Provenance
+    d = tmp_path / "Sally MacKenzie" / "Duchess of Love"
+    d.mkdir(parents=True)
+    (d / "Duchess of Love (Duchess of Love Trilogy 0.5).mp3").write_bytes(b"")
+    repo = _repo(tmp_path)
+    scan_ingest(repo, tmp_path, template="$Title", directory_scheme="")
+    book = repo.get(BookUnit.id_for(d))
+    assert book.provenance.get("series") == Provenance.FILENAME.value

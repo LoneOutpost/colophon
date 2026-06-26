@@ -114,7 +114,14 @@ def _parts_work(files: list[Path], per_file: list[list[str]]) -> DetectedWork:
 def shares_token(a: str, b: str) -> bool:
     """True if the two strings share a non-numeric word (>=2 chars), case-insensitive.
     Distinguishes a title folder (name relates to the book title) from an author
-    folder (name unrelated -> it is the author and the filename is the title)."""
+    folder (name unrelated -> it is the author and the filename is the title).
+
+    # KNOWN LIMITATION: tokenizes via _tokens, which does not split on '_' or '-'
+    # (only _chunks does). A separator-joined stem like "some_book_title" stays one
+    # token here, so callers comparing a raw stem may under-match. Fails safe
+    # (suppresses inference) rather than corrupting. Revisit with single-file title
+    # extraction in a follow-up.
+    """
     ta = {t for t in _tokens(a) if not _is_num(t) and len(t) >= 2}
     tb = {t for t in _tokens(b) if not _is_num(t) and len(t) >= 2}
     return bool(ta & tb)
@@ -158,9 +165,19 @@ def cluster(files: list[Path]) -> ClusterResult:
         works = [_multi_work(files[i], per_file[i]) for i in range(n)]
         kind = ContentKind.MULTI
     elif same_count or has_match_num:
-        signals.append(_signal("parts_differ_by_number", 2, "files differ only by numbers"))
-        works = [_parts_work(files, per_file)]
-        kind = ContentKind.SINGLE
+        # Ragged files can hide a distinguishing title in trailing chunks we did
+        # not compare; if any trailing chunk carries non-numeric text, stay UNKNOWN
+        # rather than wrongly merging separate books into one.
+        trailing_text = not same_count and any(
+            any(_text_sig(_tokens(c)) for c in per_file[f][min_len:]) for f in range(n)
+        )
+        if trailing_text:
+            works = [_multi_work(files[i], per_file[i]) for i in range(n)]
+            kind = ContentKind.UNKNOWN
+        else:
+            signals.append(_signal("parts_differ_by_number", 2, "files differ only by numbers"))
+            works = [_parts_work(files, per_file)]
+            kind = ContentKind.SINGLE
     else:
         works = [_multi_work(files[i], per_file[i]) for i in range(n)]
         kind = ContentKind.UNKNOWN

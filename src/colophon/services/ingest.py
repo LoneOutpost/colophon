@@ -20,7 +20,7 @@ from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import compile_template, parse_filename
-from colophon.core.models import BookUnit, ContentKind, SeriesRef
+from colophon.core.models import BookUnit, ContentKind, Provenance, SeriesRef
 from colophon.core.reconcile import reconcile
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
             dw = book.detected_works[0]
             if dw.series and not book.series:
                 book.series = [SeriesRef(name=dw.series, sequence=dw.sequence)]
+                book.provenance["series"] = Provenance.FILENAME.value
 
         filename_fields = parse_filename(pattern, first.name) or {}
         sidecar = read_sidecar(unit.folder)
@@ -127,8 +128,10 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
             ):
                 # The folder is the author, not the title.
                 book.title = dw.label
+                book.provenance["title"] = Provenance.FILENAME.value
                 if not book.authors:
                     book.authors = [folder_name]
+                    book.provenance["authors"] = Provenance.FILENAME.value
         if existing is not None:
             plan.existing_books += 1
             plan.fields_filled += len(before_empty - _empty_fields(book))
