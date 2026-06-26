@@ -1793,7 +1793,13 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
 
-    scan_btn.on_click(lambda: scan_dialog(controller, refresh_all=_refresh_all))  # manages its own preview dialog + refresh
+    scan_btn.on_click(
+        lambda: scan_dialog(
+            controller,
+            refresh_all=_refresh_all,
+            folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
+        )
+    )  # manages its own preview dialog + refresh
     identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all))  # streams its own preview dialog + refresh
     process_btn.on_click(lambda: process_dialog(controller, _selected_books() or controller.ready_books(), refresh_all=_refresh_all, clear_selection=selected_ids.clear))  # manages its own progress dialog + refresh
 
