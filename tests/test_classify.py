@@ -159,8 +159,9 @@ def test_clean_single_title_has_no_findings():
 
 
 def test_unknown_content_emits_structure_unclear():
-    feats = [_feat("/lib/Brandon Sanderson/alpha.mp3"), _feat("/lib/Brandon Sanderson/bravo.mp3")]
-    r = _classify("/lib/Brandon Sanderson", "/lib", feats)
+    # Files whose stems are all separators give cluster no parseable chunks -> UNKNOWN.
+    feats = [_feat("/lib/misc/-.mp3"), _feat("/lib/misc/--.mp3")]
+    r = _classify("/lib/misc", "/lib", feats)
     assert r.content_kind is ContentKind.UNKNOWN
     su = [f for f in r.findings if f.code is FC.STRUCTURE_UNCLEAR]
     assert su and su[0].severity is FindingSeverity.INFO
@@ -180,3 +181,24 @@ def test_structure_unclear_not_added_when_other_finding_present():
     ]
     r = _classify("/lib/Legion", "/lib", feats)
     assert all(f.code is not FC.STRUCTURE_UNCLEAR for f in r.findings)
+
+
+def test_untagged_multipart_book_is_single_not_flagged():
+    feats = [
+        _feat("/lib/Steven Gould/7th Sigma/7thSigmaUnabridgedPart1_ep6.mp3"),
+        _feat("/lib/Steven Gould/7th Sigma/7thSigmaUnabridgedPart2_ep6.mp3"),
+    ]
+    r = _classify("/lib/Steven Gould/7th Sigma", "/lib", feats)
+    assert r.content_kind is ContentKind.SINGLE
+    assert r.findings == []  # the false positive is gone
+
+
+def test_untagged_loose_books_are_multi_with_titles():
+    feats = [
+        _feat("/lib/S E England/Father of Lies (Darkly Disturbing Trilogy 1).mp3"),
+        _feat("/lib/S E England/Owlmen.mp3"),
+        _feat("/lib/S E England/Tanners Dell (Darkly Disturbing Trilogy 2).mp3"),
+    ]
+    r = _classify("/lib/S E England", "/lib", feats)
+    assert r.content_kind is ContentKind.MULTI
+    assert {w.label for w in r.detected_works} == {"Father of Lies", "Owlmen", "Tanners Dell"}
