@@ -10,8 +10,9 @@ from pathlib import Path
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.repository.store import BookUnitRepo
 from colophon.adapters.sidecar import write_sidecar
-from colophon.core.models import BookState, BookUnit, _Base
+from colophon.core.models import BookUnit, Phase, PhaseState, _Base
 from colophon.core.pathscheme import build_target_path
+from colophon.core.phases import mark, resync_state
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,8 @@ def organize_book(
         return OrganizeResult(book_id=book.id, target_path=target, error=str(e))
 
     book.output_path = target
-    book.state = BookState.ORGANIZED
+    mark(book, Phase.ORGANIZE, PhaseState.FRESH)
+    resync_state(book)
     book.touch()
     repo.upsert(book)
     try:
