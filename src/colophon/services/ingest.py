@@ -8,6 +8,7 @@ fields; only empty fields are filled and the on-disk file list is refreshed.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,12 +50,20 @@ def _empty_fields(book: BookUnit) -> set[str]:
     return out
 
 
-def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> ScanPlan:
-    """Compute what a scan of `root` would do, without writing anything."""
+def plan_scan(
+    repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
+    progress: Callable[[int, int, str], None] | None = None,
+) -> ScanPlan:
+    """Compute what a scan of `root` would do, without writing anything. When
+    `progress` is given it is called `(done, total, folder_name)` after each
+    folder is planned; the folder list is cheap to enumerate up front, the
+    per-file probe is the slow part."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     plan = ScanPlan()
-    for unit in group_book_units(root):
+    units = list(group_book_units(root))
+    total = len(units)
+    for index, unit in enumerate(units, start=1):
         existing = repo.get(BookUnit.id_for(unit.folder))
         book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
 
@@ -139,6 +148,8 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
             plan.new_books += 1
 
         plan.units.append(book)
+        if progress is not None:
+            progress(index, total, unit.folder.name)
     return plan
 
 

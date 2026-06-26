@@ -92,3 +92,18 @@ def test_scan_records_filename_provenance_for_series(tmp_path):
     scan_ingest(repo, tmp_path, template="$Title", directory_scheme="")
     book = repo.get(BookUnit.id_for(d))
     assert book.provenance.get("series") == Provenance.FILENAME.value
+
+
+def test_plan_scan_reports_progress_per_folder(tmp_path):
+    from colophon.services.ingest import plan_scan
+    for name in ("A", "B", "C"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / f"{name}.mp3").write_bytes(b"")
+    repo = _repo(tmp_path)
+    calls: list[tuple[int, int, str]] = []
+    plan_scan(repo, tmp_path, template="$Title", directory_scheme="",
+              progress=lambda done, total, name: calls.append((done, total, name)))
+    assert [c[0] for c in calls] == [1, 2, 3]          # done rises one per folder
+    assert all(c[1] == 3 for c in calls)               # total is the folder count
+    assert {c[2] for c in calls} == {"A", "B", "C"}    # each folder reported

@@ -823,17 +823,49 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _preview() -> None:
+                        # Read input values before clearing the body (which destroys them).
                         used_template = template.value or cfg.filename_template
+                        used_scheme = scheme.value
+                        dry_value = dry.value
+                        state = {"done": 0, "total": 0, "name": ""}
+
+                        def _on_progress(done: int, total: int, name: str) -> None:
+                            # Runs on the scan worker thread; only mutate the holder here.
+                            state.update(done=done, total=total, name=name)
+
+                        body.clear()
+                        with body:
+                            ui.label("Scanning library…").classes("text-subtitle1")
+                            bar = ui.linear_progress(value=0, show_value=False).props(
+                                "instant-feedback"
+                            )
+                            status = ui.label("Counting folders…").classes(
+                                "text-caption colophon-muted"
+                            )
+
+                        def _tick() -> None:
+                            total = state["total"]
+                            if total:
+                                bar.set_value(state["done"] / total)
+                                status.set_text(
+                                    f"{state['done']} / {total} folders — {state['name']}"
+                                )
+
+                        timer = ui.timer(0.1, _tick)
                         try:
                             plan = await asyncio.to_thread(
                                 controller.scan_preview,
                                 template=used_template,
-                                directory_scheme=scheme.value,
+                                directory_scheme=used_scheme,
+                                progress=_on_progress,
                             )
                         except ValueError as e:
+                            timer.cancel()
                             ui.notify(f"Invalid pattern: {e}", type="negative")
+                            show_options()
                             return
-                        show_results(plan, dry.value, used_template, scheme.value)
+                        timer.cancel()
+                        show_results(plan, dry_value, used_template, used_scheme)
 
                     ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
 
@@ -869,16 +901,17 @@ async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], No
                     return
 
                 async def _apply() -> None:
-                    dialog.close()
                     controller.record_filename_template(used_template)
                     controller.record_directory_scheme(used_scheme)  # blank-ignored
-                    written = await asyncio.to_thread(controller.apply_scan, plan)
+                    with busy(scan_btn):
+                        written = await asyncio.to_thread(controller.apply_scan, plan)
+                    dialog.close()
                     refresh_all()
                     ui.notify(f"Scan complete ({written} books)")
 
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Back", on_click=show_options).props("flat")
-                    ui.button("Scan", icon="search", on_click=_apply).props("unelevated")
+                    scan_btn = ui.button("Scan", icon="search", on_click=_apply).props("unelevated")
 
         dialog.open()
         show_options()

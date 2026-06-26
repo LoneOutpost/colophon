@@ -208,10 +208,12 @@ class AppController:
     def scan_preview(
         self, roots: list[Path] | None = None,
         *, template: str | None = None, directory_scheme: str | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
     ) -> ScanPlan:
         """Compute, without persisting, what a scan of `roots` (default: the configured
         scan paths) would do across all roots. `template`/`directory_scheme` override the
-        saved defaults for this run (None = use config)."""
+        saved defaults for this run (None = use config). `progress(done, total, name)` is
+        forwarded per folder (per root: the count restarts for each scan path)."""
         roots = roots or self.ctx.config.scan_paths
         template = template if template is not None else self.ctx.config.filename_template
         directory_scheme = (
@@ -221,6 +223,7 @@ class AppController:
         for root in roots:
             plan = plan_scan(
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
+                progress=progress,
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
