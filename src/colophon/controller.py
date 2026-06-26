@@ -93,7 +93,9 @@ from colophon.services.foster import (
 from colophon.services.ingest import (
     ScanOptions,
     ScanPlan,
+    ScanScope,
     commit_scan,
+    plan_rescan_books,
     plan_scan,
     refresh_local,
     scan_ingest,
@@ -233,16 +235,23 @@ class AppController:
         """Compute, without persisting, what a scan of `roots` (default: the configured
         scan paths) would do across all roots. `template`/`directory_scheme` override the
         saved defaults for this run (None = use config)."""
-        roots = roots or self.ctx.config.scan_paths
         template = template if template is not None else self.ctx.config.filename_template
         directory_scheme = (
             directory_scheme if directory_scheme is not None else self.ctx.config.directory_scheme
         )
+        if options is not None and options.book_ids:
+            books = [b for b in (self.get_book(i) for i in options.book_ids) if b is not None]
+            return plan_rescan_books(
+                self.ctx.books, books, options.phases,
+                force=options.scope is ScanScope.REFRESH,
+                template=template, directory_scheme=directory_scheme, root_for=self._root_for,
+            )
+        roots = roots or self.ctx.config.scan_paths
         combined = ScanPlan()
         for root in roots:
             plan = plan_scan(
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
-                options=options,
+                options=options, inference_root=self._scan_root_for_path(root),
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -259,17 +268,16 @@ class AppController:
         """Convenience: preview then immediately commit. Returns the count."""
         return self.apply_scan(self.scan_preview(roots, options=options))
 
+    def _scan_root_for_path(self, path: Path) -> Path:
+        """The configured scan path that contains (or equals) `path`, else `path` itself."""
+        for root in self.ctx.config.scan_paths:
+            if path == root or root in path.parents:
+                return root
+        return path
+
     def _root_for(self, book: BookUnit) -> Path:
         """The configured scan root that contains `book`, for re-running local phases."""
-        for root in self.ctx.config.scan_paths:
-            try:
-                book.source_folder.relative_to(root)
-                return root
-            except ValueError:
-                continue
-        # Fallback: only reached for books outside every configured scan root.
-        # Directory re-inference from source_folder.parent is best-effort in that case.
-        return book.source_folder.parent
+        return self._scan_root_for_path(book.source_folder)
 
     def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
         """Invalidate `from_phase` forward, auto-rerun the local phases, persist.
