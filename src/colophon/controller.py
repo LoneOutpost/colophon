@@ -48,7 +48,7 @@ from colophon.core.navigator import (
 )
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
-from colophon.core.phases import ensure_phases, invalidate_from, mark, resync_state, state_of
+from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -303,6 +303,16 @@ class AppController:
                 if state_of(book, phase) is PhaseState.FRESH:
                     out[phase].append(book)
         return out
+
+    def rerun_phase(self, books: list[BookUnit], phase: Phase) -> None:
+        """Re-run `phase` for each book. Local phases (Search/Categorize/Identify)
+        cascade-invalidate and auto-rerun via invalidate(). Deferred phases
+        (Match/Tag/Organize/Encode) are not yet wired — their job dispatch is a
+        follow-up — and raise NotImplementedError."""
+        if phase not in LOCAL:
+            raise NotImplementedError(f"re-run not yet wired for deferred phase {phase.value}")
+        for book in books:
+            self.invalidate(book, phase)
 
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
