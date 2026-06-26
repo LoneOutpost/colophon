@@ -792,8 +792,8 @@ async def quick_match_dialog(
 
 
 async def scan_dialog(controller: AppController, *, refresh_all: Callable[[], None]) -> None:
-    """Preview a filesystem scan with per-run pattern overrides and an optional dry run,
-    then apply it (merge new books/files, fill empties)."""
+    """Preview a filesystem scan with per-run pattern overrides (showing the parsed
+    result), then apply it (merge new books/files, fill empties) or cancel."""
     cfg = controller.ctx.config
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
         body = ui.column().classes("w-full")
