@@ -38,6 +38,14 @@ def test_skipped_sets_flag():
     assert b.skipped is True
 
 
+def test_encoded_seeds_encode_but_not_organize():
+    b = _book(BookState.ENCODED)
+    ensure_phases(b)
+    assert state_of(b, Phase.ENCODE) is PhaseState.FRESH
+    assert state_of(b, Phase.ORGANIZE) is PhaseState.PENDING    # NOT organized
+    assert b.state is BookState.ENCODED                          # derives correctly
+
+
 def test_ensure_is_idempotent_noop_when_already_populated():
     b = _book(BookState.DETECTED)
     ensure_phases(b)

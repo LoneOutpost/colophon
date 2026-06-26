@@ -113,4 +113,9 @@ def ensure_phases(book: BookUnit) -> None:
             mark(book, p, PhaseState.FRESH)
         else:
             break
+    # ENCODED means the audio was produced but the book was NOT organized/moved.
+    # The contiguous seed lights ORGANIZE (it precedes ENCODE in the enum), so clear it
+    # back to PENDING so derive_state yields ENCODED, not ORGANIZED.
+    if book.state is BookState.ENCODED:
+        book.phases.pop(Phase.ORGANIZE, None)
     resync_state(book)
