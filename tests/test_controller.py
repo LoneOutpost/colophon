@@ -2482,7 +2482,7 @@ async def test_scan_preview_honors_template_override(tmp_path, monkeypatch):
     ctx.config.scan_paths = [tmp_path]
     captured = {}
 
-    def fake_plan_scan(repo, root, *, template, directory_scheme=""):
+    def fake_plan_scan(repo, root, *, template, directory_scheme="", options=None):
         captured["template"] = template
         captured["scheme"] = directory_scheme
         return ScanPlan()
