@@ -54,11 +54,21 @@ def test_scan_counts_and_persists(tmp_path):
 
 
 def test_dashboard_stats_counts_by_state(tmp_path):
+    from colophon.core.models import Phase, PhaseState
+    from colophon.core.phases import mark, resync_state
+
     ctx = _ctx(tmp_path)
+    # Book a: IDENTIFY done, manually confirmed -> derives READY
     a = BookUnit.new(source_folder=tmp_path / "a")
-    a.state = BookState.READY
+    mark(a, Phase.IDENTIFY, PhaseState.FRESH)
+    a.manually_confirmed = True
+    resync_state(a)
+    assert a.state is BookState.READY
+    # Book b: IDENTIFY done, no identity/confidence -> derives NEEDS_REVIEW
     b = BookUnit.new(source_folder=tmp_path / "b")
-    b.state = BookState.NEEDS_REVIEW
+    mark(b, Phase.IDENTIFY, PhaseState.FRESH)
+    resync_state(b)
+    assert b.state is BookState.NEEDS_REVIEW
     ctx.books.upsert(a)
     ctx.books.upsert(b)
     stats = AppController(ctx).dashboard_stats()

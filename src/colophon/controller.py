@@ -293,7 +293,7 @@ class AppController:
 
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:
-        books = self.ctx.books.list_all()
+        books = self._hydrate(self.ctx.books.list_all())
         stats = {"total": len(books)}
         for state in BookState:
             stats[state.value] = sum(1 for b in books if b.state == state)
