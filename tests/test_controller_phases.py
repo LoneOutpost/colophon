@@ -1,3 +1,5 @@
+import pytest
+
 from colophon.controller import AppController
 from colophon.core.models import BookState, BookUnit, Phase, PhaseState
 from colophon.core.phases import mark, resync_state, state_of
@@ -87,3 +89,49 @@ def test_books_by_state_and_by_phase(tmp_path):
 
     assert a.id in {x.id for x in ctrl.books_by_state(BookState.READY)}
     assert b.id in {x.id for x in ctrl.books_with_phase(Phase.MATCH, PhaseState.STALE)}
+
+
+def test_phase_membership_groups_by_fresh_phase(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    a = BookUnit.new(source_folder=tmp_path / "a")
+    mark(a, Phase.SEARCH, PhaseState.FRESH)
+    mark(a, Phase.IDENTIFY, PhaseState.FRESH)
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    mark(b, Phase.SEARCH, PhaseState.FRESH)
+    mark(b, Phase.MATCH, PhaseState.STALE)      # STALE must NOT count
+
+    m = ctrl.phase_membership([a, b])
+    assert {x.id for x in m[Phase.SEARCH]} == {a.id, b.id}
+    assert {x.id for x in m[Phase.IDENTIFY]} == {a.id}
+    assert m[Phase.MATCH] == []
+    assert m[Phase.ENCODE] == []
+    assert set(m.keys()) == set(Phase)
+
+
+def test_rerun_phase_local_routes_through_invalidate(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    ctx.config.scan_paths = [ingest]
+    d = ingest / "Author" / "Book"
+    d.mkdir(parents=True)
+    (d / "Book.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([d])
+    book = ctx.books.get(BookUnit.id_for(d))
+    for p in (Phase.MATCH, Phase.TAG):
+        mark(book, p, PhaseState.FRESH)
+    ctx.books.upsert(book)
+
+    ctrl.rerun_phase([book], Phase.IDENTIFY)
+    refreshed = ctx.books.get(BookUnit.id_for(d))
+    assert state_of(refreshed, Phase.IDENTIFY) is PhaseState.FRESH
+    assert state_of(refreshed, Phase.MATCH) is PhaseState.STALE
+
+
+def test_rerun_phase_deferred_raises(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    with pytest.raises(NotImplementedError):
+        ctrl.rerun_phase([book], Phase.ENCODE)

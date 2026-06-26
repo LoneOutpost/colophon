@@ -48,7 +48,7 @@ from colophon.core.navigator import (
 )
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
-from colophon.core.phases import ensure_phases, invalidate_from, mark, resync_state, state_of
+from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -292,6 +292,27 @@ class AppController:
         """Books whose `phase` is in `status` (legacy rows hydrated first)."""
         return [b for b in self._hydrate(self.ctx.books.list_all())
                 if state_of(b, phase) is status]
+
+    def phase_membership(self, books: list[BookUnit]) -> dict[Phase, list[BookUnit]]:
+        """Group `books` by phase: each phase maps to the subset whose phase is FRESH.
+        A book appears under every FRESH phase (cumulative funnel). One pass; pure over
+        the supplied list (the caller applies any folder/scope filtering)."""
+        out: dict[Phase, list[BookUnit]] = {p: [] for p in Phase}
+        for book in books:
+            for phase in Phase:
+                if state_of(book, phase) is PhaseState.FRESH:
+                    out[phase].append(book)
+        return out
+
+    def rerun_phase(self, books: list[BookUnit], phase: Phase) -> None:
+        """Re-run `phase` for each book. Local phases (Search/Categorize/Identify)
+        cascade-invalidate and auto-rerun via invalidate(). Deferred phases
+        (Match/Tag/Organize/Encode) are not yet wired — their job dispatch is a
+        follow-up — and raise NotImplementedError."""
+        if phase not in LOCAL:
+            raise NotImplementedError(f"re-run not yet wired for deferred phase {phase.value}")
+        for book in books:
+            self.invalidate(book, phase)
 
     # --- dashboard ---
     def dashboard_stats(self) -> dict[str, int]:

@@ -41,3 +41,15 @@ def test_fmt_duration_hours_and_minutes():
     assert _fmt_duration(3725) == "1h 2m"   # 62.08 min -> 1h 2m
     assert _fmt_duration(3600) == "1h 0m"
     assert _fmt_duration(59 * 60 + 40) == "1h 0m"  # 59m40s rounds to 60 -> 1h 0m
+
+
+def test_state_panel_render_is_callable():
+    from colophon.ui import state_panel
+
+    assert callable(state_panel.render)
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit
+
+    rows = state_panel.phase_rows(BookUnit.new(source_folder=Path("/x")))
+    assert len(rows) == 7
