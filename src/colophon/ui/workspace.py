@@ -20,7 +20,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
-from colophon.core.models import BookState, BookUnit, FindingSeverity
+from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
@@ -39,6 +39,7 @@ from colophon.ui.dialogs import (
     scan_dialog,
     tag_dialog,
 )
+from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
@@ -384,6 +385,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             books = [b for s in node.series for b in s.books] + node.standalone if node else []
         elif kind == "series" and key:
             books = [b for a in tree.authors for s in a.series if s.name == key for b in s.books]
+        elif kind == "phase" and key:
+            books = controller.books_with_phase(Phase(key), PhaseState.FRESH)
         else:  # "all"
             books = list(tree.needs_id)
             for a in tree.authors:
@@ -1428,7 +1431,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
             ).props("dense").classes("q-mb-sm")
             ui.toggle(
-                {"author": "By author", "series": "By series"},
+                {"author": "By author", "series": "By series", "phase": "By phase"},
                 value=view["group_by"],
                 on_change=lambda e: _set_group_by(e.value),
             ).props("dense no-caps").classes("w-full q-mb-sm")
@@ -1479,7 +1482,22 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         color="negative" if counts["error"] else "warning",
                         checkbox=_node_checkbox([b.id for b in attention]),
                     )
-                if view["group_by"] == "series":
+                if view["group_by"] == "phase":
+                    universe = list(needs_id)
+                    for a in tree.authors:
+                        universe += [b for s in a.series for b in s.books if _in_folder(b)]
+                        universe += [b for b in a.standalone if _in_folder(b)]
+                    membership = controller.phase_membership(universe)
+                    for phase in Phase:
+                        group = membership[phase]
+                        _nav_item(
+                            f"{_PHASE_LABELS[phase]} ({len(group)})",
+                            _PHASE_ICONS[phase],
+                            kind == "phase" and key == phase.value,
+                            lambda p=phase: _set_scope("phase", p.value),
+                            checkbox=_node_checkbox([b.id for b in group]),
+                        )
+                elif view["group_by"] == "series":
                     series_books: dict[str, list[str]] = {}
                     for a in tree.authors:
                         for s in a.series:
