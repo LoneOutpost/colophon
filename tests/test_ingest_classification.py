@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
@@ -33,3 +34,29 @@ def test_scan_does_not_crash_on_classification(tmp_path):
     repo = _repo(tmp_path)
     units = scan_ingest(repo, tmp_path, template="$Title", directory_scheme="$Author/$Title")
     assert len(units) == 1
+
+
+def test_categorize_logs_content_kind_and_signals_at_debug(tmp_path, caplog):
+    author = tmp_path / "Brandon Sanderson"
+    author.mkdir()
+    (author / "Legion.mp3").write_bytes(b"")
+    (author / "Elantris.mp3").write_bytes(b"")
+    repo = _repo(tmp_path)
+    with caplog.at_level(logging.DEBUG, logger="colophon.services.ingest"):
+        scan_ingest(repo, tmp_path, template="$Title", directory_scheme="$Author/$Title")
+    categorize = [r for r in caplog.records if "CATEGORIZE" in r.getMessage()]
+    assert categorize, "expected a CATEGORIZE debug record"
+    msg = categorize[0].getMessage()
+    assert "content_kind=" in msg
+    assert "signals=" in msg
+
+
+def test_scan_emits_nothing_above_debug(tmp_path, caplog):
+    author = tmp_path / "Brandon Sanderson"
+    author.mkdir()
+    (author / "Legion.mp3").write_bytes(b"")
+    (author / "Elantris.mp3").write_bytes(b"")
+    repo = _repo(tmp_path)
+    with caplog.at_level(logging.INFO, logger="colophon.services.ingest"):
+        scan_ingest(repo, tmp_path, template="$Title", directory_scheme="$Author/$Title")
+    assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
