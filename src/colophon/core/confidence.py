@@ -7,7 +7,7 @@ Pure function over (candidate, source results). Signals are additive, clamped to
 from __future__ import annotations
 
 from colophon.core.isbn import isbn_equal
-from colophon.core.match import title_author_score
+from colophon.core.match import clean_match_title, title_author_score
 from colophon.core.models import BookUnit, ConfidenceSignal, _Base
 from colophon.core.sources import SourceResult
 
@@ -23,7 +23,10 @@ class IdentificationOutcome(_Base):
 
 
 def _result_score(book: BookUnit, result: SourceResult) -> float:
-    return title_author_score(book.title, book.authors, result.title, result.authors)
+    return title_author_score(
+        clean_match_title(book.title), book.authors,
+        clean_match_title(result.title), result.authors,
+    )
 
 
 def score_identification(

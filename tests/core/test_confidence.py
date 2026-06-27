@@ -227,3 +227,15 @@ def test_no_authority_bonus_when_best_is_weak():
 def test_authority_none_is_unchanged_behavior():
     out = score_identification(_auth_book(), [_auth_res("audnexus"), _auth_res("hardcover")])
     assert all(s.name != "source_authority" for s in out.signals)
+
+
+def test_messy_title_with_author_agrees_after_cleaning():
+    # A correct author but a noisy stored title must still reach agreement against
+    # the matching candidate once the title is cleaned for scoring.
+    book = _book(title="1982 - The Gunslinger (DT1 - original edition)", authors=["Stephen King"])
+    results = [SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"])]
+    outcome = score_identification(book, results)
+    assert any(
+        s.name in ("single_source_match", "cross_source_agreement") for s in outcome.signals
+    )
+    assert outcome.best is not None and outcome.best.title == "The Gunslinger"
