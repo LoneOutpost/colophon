@@ -159,11 +159,24 @@ def test_clean_single_title_has_no_findings():
 
 
 def test_unknown_content_emits_structure_unclear():
-    feats = [_feat("/lib/Brandon Sanderson/alpha.mp3"), _feat("/lib/Brandon Sanderson/bravo.mp3")]
+    # Fully-untagged files where the clusterer cannot determine structure:
+    # "foo.mp3" and "foo - Subtitle.mp3" share the leading chunk but have ragged
+    # trailing text with no number-only variation → cluster() returns UNKNOWN.
+    feats = [
+        _feat("/lib/Brandon Sanderson/foo.mp3"),
+        _feat("/lib/Brandon Sanderson/foo - bar.mp3"),
+    ]
     r = _classify("/lib/Brandon Sanderson", "/lib", feats)
     assert r.content_kind is ContentKind.UNKNOWN
     su = [f for f in r.findings if f.code is FC.STRUCTURE_UNCLEAR]
     assert su and su[0].severity is FindingSeverity.INFO
+
+
+def test_fully_untagged_distinct_filenames_are_multi():
+    # Fully-untagged files with distinct stems: cluster() identifies two works → MULTI.
+    feats = [_feat("/lib/Brandon Sanderson/alpha.mp3"), _feat("/lib/Brandon Sanderson/bravo.mp3")]
+    r = _classify("/lib/Brandon Sanderson", "/lib", feats)
+    assert r.content_kind is ContentKind.MULTI
 
 
 def test_clean_single_title_still_has_no_findings_after_unclear_rule():

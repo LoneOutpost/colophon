@@ -13,6 +13,7 @@ from pathlib import Path
 from re import Pattern
 
 from colophon.core.dirinfer import infer_from_path
+from colophon.core.filename_cluster import cluster
 from colophon.core.filename_parser import parse_filename
 from colophon.core.models import (
     ConfidenceSignal,
@@ -102,6 +103,11 @@ def _work_key(f: FileFeatures) -> str | None:
     if t.album:
         return f"album:{_norm(t.album)}"
     return None
+
+
+def _fully_untagged(features: list[FileFeatures]) -> bool:
+    """True when no file carries a tag-based work key (asin/isbn/album)."""
+    return all(_work_key(f) is None for f in features)
 
 
 def _is_single_sequence(files: list[FileFeatures]) -> bool:
@@ -220,9 +226,19 @@ def classify(
     """Classify one folder. `features` is non-empty (a folder with no audio is
     never scanned). Pure: all signals are passed in."""
     if len(features) == 1:
-        works = [_to_work(features)]
-        group_signals: list[ConfidenceSignal] = []
+        if _fully_untagged(features):
+            cr = cluster([features[0].path])     # let cluster parse series/sequence
+            works = cr.detected_works
+            group_signals = cr.signals
+        else:
+            works = [_to_work(features)]
+            group_signals = []
         content_kind = ContentKind.SINGLE
+    elif _fully_untagged(features):
+        cr = cluster([f.path for f in features])
+        works = cr.detected_works
+        group_signals = cr.signals
+        content_kind = cr.content_kind
     else:
         works, group_signals = group_works(features)
         content_kind = content_kind_for(works, group_signals)

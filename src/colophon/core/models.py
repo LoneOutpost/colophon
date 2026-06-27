@@ -91,6 +91,8 @@ class DetectedWork(_Base):
 
     label: str
     author: str | None = None
+    series: str | None = None
+    sequence: float | None = None
     files: list[Path] = []
 
 
