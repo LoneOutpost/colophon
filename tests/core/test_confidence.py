@@ -239,3 +239,45 @@ def test_messy_title_with_author_agrees_after_cleaning():
         s.name in ("single_source_match", "cross_source_agreement") for s in outcome.signals
     )
     assert outcome.best is not None and outcome.best.title == "The Gunslinger"
+
+
+def test_authorless_consensus_infers_author_and_surfaces_review():
+    book = _book(title="1982 - The Gunslinger (DT1 - original edition)")  # no authors
+    results = [
+        SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"]),
+        SourceResult(provider="openlibrary", title="The Gunslinger", authors=["Stephen King"]),
+        SourceResult(provider="googlebooks", title="The Gunslinger", authors=["Sarah Lamb"]),
+    ]
+    outcome = score_identification(book, results)
+    assert outcome.author_inferred is True
+    assert any(s.name == "cross_source_author_consensus" for s in outcome.signals)
+    assert outcome.best is not None and outcome.best.authors == ["Stephen King"]
+    assert outcome.confidence < 75
+
+
+def test_authorless_consensus_tie_yields_no_inference():
+    book = _book(title="The Gunslinger")
+    results = [
+        SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"]),
+        SourceResult(provider="openlibrary", title="The Gunslinger", authors=["Stephen King"]),
+        SourceResult(provider="googlebooks", title="The Gunslinger", authors=["Sarah Lamb"]),
+        SourceResult(provider="hardcover", title="The Gunslinger", authors=["Sarah Lamb"]),
+    ]
+    outcome = score_identification(book, results)
+    assert outcome.author_inferred is False
+    assert not any(s.name == "cross_source_author_consensus" for s in outcome.signals)
+
+
+def test_authorless_single_source_no_inference():
+    book = _book(title="The Gunslinger")
+    results = [SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"])]
+    assert score_identification(book, results).author_inferred is False
+
+
+def test_book_with_author_is_not_inferred():
+    book = _book(title="The Gunslinger", authors=["Stephen King"])
+    results = [
+        SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"]),
+        SourceResult(provider="openlibrary", title="The Gunslinger", authors=["Stephen King"]),
+    ]
+    assert score_identification(book, results).author_inferred is False

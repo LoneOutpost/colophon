@@ -19,6 +19,7 @@ class QuickMatchProposal(_Base):
     best: SourceResult | None = None
     results: list[SourceResult] = []  # noqa: RUF012 - pydantic field default, copied per instance
     confidence: float = 0.0
+    author_inferred: bool = False
 
 
 class QuickMatchSummary(_Base):
