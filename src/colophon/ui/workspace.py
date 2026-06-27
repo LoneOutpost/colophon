@@ -431,9 +431,19 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                 def _confirm_foster(b=book, n=count) -> None:
                     result = controller.foster_book(b)
+                    actions = (
+                        [{
+                            "label": "Undo", "color": "white",
+                            "handler": lambda bid=result.batch_id: (
+                                controller.undo_foster(bid),
+                                refresh_nav(), _render_middle(), refresh_status(),
+                            ),
+                        }]
+                        if result.batch_id else None
+                    )
                     ui.notify(
                         f"Fostered {result.fostered} file(s) into {n} book(s)",
-                        type="positive",
+                        type="positive", actions=actions,
                     )
                     refresh_nav()
                     _render_middle()
