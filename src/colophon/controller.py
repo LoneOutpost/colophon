@@ -121,6 +121,7 @@ logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 _OP_FOSTER = "foster"  # audit-log op_type for a pre-match foster move
+_MATCH_CONCURRENCY = 8  # max books scanned concurrently during Identify/Quick Match
 
 
 @dataclass
@@ -909,9 +910,11 @@ class AppController:
         works = [WorkRow(label=w.label, files=len(w.files)) for w in book.detected_works]
         return FosterPlan(author=author, works=works)
 
-    def fosterable_books(self, books: list[BookUnit]) -> list[BookUnit]:
-        """Subset of `books` that are foster containers (for the pre-match gate)."""
-        return [b for b in books if self.is_fosterable(b)]
+    def fosterable_books(self, books: list[BookUnit] | None = None) -> list[BookUnit]:
+        """Foster containers among `books` (default: the whole library), for the
+        pre-match gate."""
+        pool = self.ctx.books.list_all() if books is None else books
+        return [b for b in pool if self.is_fosterable(b)]
 
     def books_needing_attention(self) -> list[BookUnit]:
         """All books carrying at least one un-acknowledged finding, most severe first."""
@@ -1177,10 +1180,16 @@ class AppController:
         return self._score(book, results).ranked
 
     def identify_candidates(self) -> list[BookUnit]:
-        """Books eligible for Identify: not manually confirmed and not organized."""
+        """Books eligible for Identify: not manually confirmed, not organized, with a
+        title to query, not already matched (MATCH fresh), and not a foster container
+        (a multi-book folder must be fostered before its books can be matched)."""
         return [
             b for b in self.ctx.books.list_all()
-            if not b.manually_confirmed and b.output_path is None
+            if not b.manually_confirmed
+            and b.output_path is None
+            and b.title
+            and state_of(b, Phase.MATCH) is not PhaseState.FRESH
+            and not self.is_fosterable(b)
         ]
 
     async def identify_preview(
@@ -1257,15 +1266,17 @@ class AppController:
         `progress(book_id, kind)` fires once per book as it resolves, kind 'ok' when a
         source returned a candidate else 'fail'."""
         chosen = [s for s in self.ctx.sources if s.name in source_names]
+        sem = asyncio.Semaphore(_MATCH_CONCURRENCY)
 
         async def _scan(book: BookUnit) -> QuickMatchProposal:
-            results = await gather_matches(chosen, query_for_book(book, search_fields))
-            outcome = self._score(book, results)
-            if progress is not None:
-                progress(book.id, "ok" if outcome.best is not None else "fail")
-            return QuickMatchProposal(
-                book=book, best=outcome.best, results=results, confidence=outcome.confidence
-            )
+            async with sem:
+                results = await gather_matches(chosen, query_for_book(book, search_fields))
+                outcome = self._score(book, results)
+                if progress is not None:
+                    progress(book.id, "ok" if outcome.best is not None else "fail")
+                return QuickMatchProposal(
+                    book=book, best=outcome.best, results=results, confidence=outcome.confidence
+                )
 
         return list(await asyncio.gather(*(_scan(b) for b in books)))
 

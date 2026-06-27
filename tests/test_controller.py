@@ -2546,3 +2546,94 @@ def test_pattern_history_record_dedup_cap_and_remove(tmp_path):
 
     assert load_config(ctx.config_path).recent_filename_templates == []  # persisted
     ctx.close()
+
+
+def test_quick_match_scan_caps_concurrency(tmp_path):
+    state = {"cur": 0, "max": 0}
+
+    class _SlowSource:
+        name = "audnexus"
+
+        async def search(self, query):
+            state["cur"] += 1
+            state["max"] = max(state["max"], state["cur"])
+            await asyncio.sleep(0.01)
+            state["cur"] -= 1
+            return [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])]
+
+    ctx = _ctx(tmp_path, sources=[_SlowSource()])
+    ctrl = AppController(ctx)
+    books = [BookUnit.new(source_folder=tmp_path / f"b{i}") for i in range(20)]
+    for b in books:
+        b.title = "Dune"
+    proposals = asyncio.run(ctrl.quick_match_scan(books, ["audnexus"]))
+    assert len(proposals) == 20
+    assert state["max"] <= 8
+    assert state["max"] > 1
+
+
+def test_identify_candidates_excludes_unmatchable(tmp_path):
+    from colophon.core.models import (
+        DetectedWork,
+        Finding,
+        FindingCode,
+        FindingSeverity,
+        Phase,
+        PhaseState,
+    )
+    from colophon.core.phases import mark
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    plain = BookUnit.new(source_folder=tmp_path / "plain")
+    plain.title = "Dune"
+
+    no_title = BookUnit.new(source_folder=tmp_path / "notitle")
+
+    matched = BookUnit.new(source_folder=tmp_path / "matched")
+    matched.title = "Matched"
+    mark(matched, Phase.MATCH, PhaseState.FRESH)
+
+    container = BookUnit.new(source_folder=tmp_path / "Author")
+    container.title = "Author"
+    container.detected_works = [
+        DetectedWork(label="A", files=[tmp_path / "Author" / "a.mp3"]),
+        DetectedWork(label="B", files=[tmp_path / "Author" / "b.mp3"]),
+    ]
+    container.findings = [
+        Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN, detail="x")
+    ]
+
+    confirmed = BookUnit.new(source_folder=tmp_path / "conf")
+    confirmed.title = "Confirmed"
+    confirmed.manually_confirmed = True
+
+    for b in (plain, no_title, matched, container, confirmed):
+        ctx.books.upsert(b)
+
+    assert [b.id for b in ctrl.identify_candidates()] == [plain.id]
+
+
+def test_fosterable_books_defaults_to_whole_library(tmp_path):
+    from colophon.core.models import DetectedWork, Finding, FindingCode, FindingSeverity
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    container = BookUnit.new(source_folder=tmp_path / "Author")
+    container.title = "Author"
+    container.detected_works = [
+        DetectedWork(label="A", files=[tmp_path / "Author" / "a.mp3"]),
+        DetectedWork(label="B", files=[tmp_path / "Author" / "b.mp3"]),
+    ]
+    container.findings = [
+        Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN, detail="x")
+    ]
+    plain = BookUnit.new(source_folder=tmp_path / "plain")
+    plain.title = "Dune"
+    ctx.books.upsert(container)
+    ctx.books.upsert(plain)
+
+    assert [b.id for b in ctrl.fosterable_books()] == [container.id]
+    assert container.id not in {b.id for b in ctrl.identify_candidates()}

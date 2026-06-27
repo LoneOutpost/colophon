@@ -923,11 +923,11 @@ async def identify_dialog(
     """Preview source matches for unidentified books with a live per-book log, then apply
     (fill empties, route review) or retry the books that found no match."""
     candidates = controller.identify_candidates()
-    if not candidates:
+    pending = controller.fosterable_books()
+    if not candidates and not pending:
         ui.notify("Nothing to identify")
         return
 
-    pending = controller.fosterable_books(candidates)
     if pending:
         with ui.dialog() as gate, ui.card():
             ui.label(
@@ -946,9 +946,10 @@ async def identify_dialog(
                 controller.foster_book(b)
             refresh_all()
             candidates = controller.identify_candidates()
-            if not candidates:
-                ui.notify("Nothing to identify")
-                return
+
+    if not candidates:
+        ui.notify("Nothing to identify")
+        return
 
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
         ui.label(f"Identifying {len(candidates)} book(s)").classes("text-subtitle1")
