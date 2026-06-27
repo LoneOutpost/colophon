@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
 
 
@@ -28,6 +29,33 @@ def _best_author_ratio(a_authors: list[str], b_authors: list[str]) -> float:
     if not a_authors or not b_authors:
         return 0.0
     return max(ratio(a, b) for a in a_authors for b in b_authors)
+
+
+_YEAR_PREFIX_RE = re.compile(r"^\s*\(?\d{4}\)?\s*[-\u2013\u2014:]\s*")
+_FORMAT_KEYWORDS = (
+    r"edition|unabridged|abridged|dramati[sz]ed|version|"
+    r"remaster(?:ed)?|deluxe|complete|movie tie-in|audiobook"
+)
+_FORMAT_PAREN_RE = re.compile(
+    r"\s*[(\[][^)\]]*\b(?:" + _FORMAT_KEYWORDS + r")\b[^)\]]*[)\]]", re.IGNORECASE
+)
+_TRAILING_FORMAT_RE = re.compile(r"\s*[-\u2013\u2014:]?\s*\b(?:unabridged|abridged)\b\s*$", re.IGNORECASE)
+_TITLE_WS_RE = re.compile(r"\s+")
+
+
+def clean_match_title(title: str | None) -> str:
+    """Strip query/score noise from a title: a leading year+separator, any
+    parenthetical/bracket carrying an edition/format keyword, and trailing
+    standalone format words. Conservative — non-keyword parentheticals (e.g. a
+    series tag) are kept. Returns the original title when cleaning would empty it,
+    and "" for a falsy title."""
+    if not title:
+        return ""
+    cleaned = _YEAR_PREFIX_RE.sub("", title)
+    cleaned = _FORMAT_PAREN_RE.sub("", cleaned)
+    cleaned = _TRAILING_FORMAT_RE.sub("", cleaned)
+    cleaned = _TITLE_WS_RE.sub(" ", cleaned).strip()
+    return cleaned or title
 
 
 def title_author_score(
