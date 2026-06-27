@@ -927,6 +927,29 @@ async def identify_dialog(
         ui.notify("Nothing to identify")
         return
 
+    pending = controller.fosterable_books(candidates)
+    if pending:
+        with ui.dialog() as gate, ui.card():
+            ui.label(
+                f"{len(pending)} item(s) are marked fosterable. "
+                "Foster them before matching?"
+            ).classes("text-subtitle2")
+            with ui.row().classes("justify-end w-full"):
+                ui.button("Cancel", on_click=lambda: gate.submit("cancel")).props("flat")
+                ui.button("Skip", on_click=lambda: gate.submit("skip")).props("flat")
+                ui.button("Foster", on_click=lambda: gate.submit("foster")).props("color=primary")
+        choice = await gate
+        if choice == "cancel" or choice is None:
+            return
+        if choice == "foster":
+            for b in pending:
+                controller.foster_book(b)
+            refresh_all()
+            candidates = controller.identify_candidates()
+            if not candidates:
+                ui.notify("Nothing to identify")
+                return
+
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
         ui.label(f"Identifying {len(candidates)} book(s)").classes("text-subtitle1")
         log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in candidates])

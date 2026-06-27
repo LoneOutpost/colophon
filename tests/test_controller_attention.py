@@ -119,3 +119,15 @@ def test_fosterable_books_filters_the_set(tmp_path):
     ctrl, book = _multi_book(ctx, tmp_path)
     other = BookUnit.new(source_folder=tmp_path / "x")
     assert ctrl.fosterable_books([book, other]) == [book]
+
+
+def test_gate_selects_only_fosterable_candidates(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    plain = tmp_path / "ingest" / "Dune"
+    plain.mkdir(parents=True)
+    (plain / "01.mp3").write_bytes(b"")
+    ctrl.scan([plain])
+    plain_book = ctx.books.get(BookUnit.id_for(plain))
+    pending = ctrl.fosterable_books([book, plain_book])
+    assert pending == [book]
