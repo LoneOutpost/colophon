@@ -4,7 +4,7 @@ from pathlib import Path
 from mutagen.id3 import ID3, TPE1
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookState, Phase, PhaseState, Provenance
+from colophon.core.models import BookState, ContentKind, Phase, PhaseState, Provenance
 from colophon.core.phases import state_of
 from colophon.services.ingest import scan_ingest
 
@@ -172,3 +172,38 @@ def test_plan_scan_does_not_persist(tmp_path):
     plan = plan_scan(repo, ingest, template="$Author - $Title")
     assert plan.new_books == 1
     assert repo.list_all() == []
+
+
+def test_container_datafile_ignored_for_multi_folder(tmp_path):
+    incoming = tmp_path / "incoming"
+    folder = incoming / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    for n in ("Dead Cat Bounce (Home Repair is Homicide 1).mp3",
+              "A Face at the Window (Home Repair is Homicide 12).mp3",
+              "Death by Chocolate Malted Milkshake (Death by Chocolate 2).mp3"):
+        (folder / n).write_bytes(b"")
+    (folder / "metadata.json").write_text(json.dumps(
+        {"title": "Sarah Graves", "authors": ["TE_Audiobooks_S"]}))
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, incoming, template="$Author - $Title")
+    book = next(u for u in units if u.source_folder == folder)
+    assert book.content_kind is ContentKind.MULTI
+    assert book.authors == []
+    assert book.provenance.get("authors") != "datafile"
+
+
+def test_matching_name_datafile_kept_for_single_folder(tmp_path):
+    lib = tmp_path / "lib"
+    folder = lib / "Brandon Sanderson" / "Elantris"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+    (folder / "metadata.json").write_text(json.dumps(
+        {"title": "Elantris", "authors": ["Brandon Sanderson"]}))
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, lib, template="$Author - $Title")
+    book = units[0]
+    assert book.content_kind is ContentKind.SINGLE
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance.get("authors") == "datafile"
