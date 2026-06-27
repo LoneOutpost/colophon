@@ -1206,7 +1206,10 @@ class AppController:
     def _identify_plan(self, proposals: list[QuickMatchProposal], skipped: int) -> IdentifyPlan:
         """Partition scanned proposals into the IdentifyPlan counts (shared by preview/retry)."""
         threshold = self.ctx.config.review_threshold
-        to_apply = sum(1 for p in proposals if p.best is not None and p.confidence >= threshold)
+        to_apply = sum(
+            1 for p in proposals
+            if p.best is not None and p.confidence >= threshold and not p.author_inferred
+        )
         return IdentifyPlan(
             proposals=proposals, threshold=threshold,
             to_apply=to_apply, to_review=len(proposals) - to_apply, skipped=skipped,
@@ -1232,7 +1235,7 @@ class AppController:
         are not in the plan and are never touched."""
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in plan.proposals:
-            if p.best is not None and p.confidence >= plan.threshold:
+            if p.best is not None and p.confidence >= plan.threshold and not p.author_inferred:
                 updates = {
                     k: v for k, v in self.match_field_values(p.best).items()
                     if not get_field(p.book, k)
@@ -1275,7 +1278,8 @@ class AppController:
                 if progress is not None:
                     progress(book.id, "ok" if outcome.best is not None else "fail")
                 return QuickMatchProposal(
-                    book=book, best=outcome.best, results=results, confidence=outcome.confidence
+                    book=book, best=outcome.best, results=results,
+                    confidence=outcome.confidence, author_inferred=outcome.author_inferred,
                 )
 
         return list(await asyncio.gather(*(_scan(b) for b in books)))
@@ -1317,22 +1321,30 @@ class AppController:
     def _rescore_and_persist(self, proposal: QuickMatchProposal) -> bool:
         """Re-score a proposal's book against its carried results, then persist the
         book and sync its sidecar. Returns whether the book is now Ready."""
-        ready = self._rescore_after_match(proposal.book, proposal.results)
+        ready = self._rescore_after_match(
+            proposal.book, proposal.results, author_inferred=proposal.author_inferred
+        )
         proposal.book.touch()
         self.ctx.books.upsert(proposal.book)
         self._sync_sidecar(proposal.book)
         return ready
 
-    def _rescore_after_match(self, book: BookUnit, results: list[SourceResult]) -> bool:
+    def _rescore_after_match(
+        self, book: BookUnit, results: list[SourceResult], *, author_inferred: bool = False
+    ) -> bool:
         """Re-score `book` against `results`, set its confidence/signals, and mark the
         MATCH phase fresh (an online-source match). Returns True if it is now Ready.
-        Confidence/state are persisted by the caller (not part of the undoable batch)."""
+        An `author_inferred` match never auto-readies (it routes to review). Confidence/
+        state are persisted by the caller (not part of the undoable batch)."""
         outcome = self._score(book, results)
         book.confidence = outcome.confidence
         book.confidence_signals = outcome.signals
         book.manually_confirmed = False
         has_identity = bool(book.authors) or bool(book.series)
-        ready = outcome.confidence >= self.ctx.config.review_threshold and has_identity
+        ready = (
+            outcome.confidence >= self.ctx.config.review_threshold
+            and has_identity and not author_inferred
+        )
         mark(book, Phase.MATCH, PhaseState.FRESH)
         resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         return ready

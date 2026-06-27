@@ -2637,3 +2637,53 @@ def test_fosterable_books_defaults_to_whole_library(tmp_path):
 
     assert [b.id for b in ctrl.fosterable_books()] == [container.id]
     assert container.id not in {b.id for b in ctrl.identify_candidates()}
+
+
+def test_author_inferred_flag_blocks_ready(tmp_path):
+    from colophon.core.quickmatch import QuickMatchProposal
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    results = [
+        SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),
+        SourceResult(provider="openlibrary", title="Dune", authors=["Frank Herbert"]),
+    ]
+    flagged = QuickMatchProposal(
+        book=book, best=results[0], results=results, confidence=99.0, author_inferred=True)
+    plain = QuickMatchProposal(
+        book=book, best=results[0], results=results, confidence=99.0, author_inferred=False)
+
+    assert ctrl._rescore_and_persist(flagged) is False
+    assert ctrl._rescore_and_persist(plain) is True
+
+
+def test_identify_plan_routes_inferred_to_review(tmp_path):
+    from colophon.core.quickmatch import QuickMatchProposal
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.title = "The Gunslinger"
+    best = SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"])
+    p = QuickMatchProposal(book=book, best=best, results=[best], confidence=99.0, author_inferred=True)
+    plan = ctrl._identify_plan([p], skipped=0)
+    assert plan.to_apply == 0 and plan.to_review == 1
+
+
+def test_apply_identify_does_not_fill_inferred_author(tmp_path):
+    from colophon.core.quickmatch import QuickMatchProposal
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.title = "The Gunslinger"
+    ctx.books.upsert(book)
+    best = SourceResult(provider="audnexus", title="The Gunslinger", authors=["Stephen King"])
+    p = QuickMatchProposal(book=book, best=best, results=[best], confidence=99.0, author_inferred=True)
+
+    ctrl.apply_identify(ctrl._identify_plan([p], skipped=0))
+    assert ctx.books.get(book.id).authors == []
