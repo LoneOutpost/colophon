@@ -16,24 +16,17 @@ from pathlib import Path
 from colophon.adapters.audio import probe_audio_file
 from colophon.adapters.repository.store import BookUnitRepo
 from colophon.adapters.scan import group_book_units
-from colophon.adapters.sidecar import is_container_datafile, read_datafile_sidecar
 from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
-from colophon.core.dirinfer import infer_from_path, parse_scheme
-from colophon.core.filename_cluster import shares_token
-from colophon.core.filename_parser import compile_template, parse_filename
+from colophon.core.dirinfer import parse_scheme
+from colophon.core.filename_parser import compile_template
 from colophon.core.models import (
-    RESTRUCTURE_FINDINGS,
     BookUnit,
-    ContentKind,
-    FolderKind,
     Phase,
     PhaseState,
-    Provenance,
-    SeriesRef,
 )
 from colophon.core.phases import LOCAL, mark, resync_state, state_of
-from colophon.core.reconcile import reconcile
+from colophon.services.identify import run_identify
 
 logger = logging.getLogger(__name__)
 
@@ -124,77 +117,7 @@ def _run_local(
             )
 
     elif phase is Phase.IDENTIFY:
-        first_path = book.source_files[0].path if book.source_files else None
-        embedded = read_embedded_tags(first_path) if first_path else None
-        filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
-        datafile = read_datafile_sidecar(book.source_folder)
-        if datafile is not None and is_container_datafile(
-            datafile, book.source_folder, book.content_kind
-        ):
-            logger.debug(
-                f"scan {book.source_folder}: IDENTIFY ignored container datafile "
-                f"(title={datafile.title!r} authors={datafile.authors})"
-            )
-            datafile = None
-        directory_fields = infer_from_path(book.source_folder, root, scheme)
-
-        # Untagged single book: pre-fill series/seq from the filename cluster so
-        # reconcile's "if not book.series" gate keeps it.
-        if book.content_kind is ContentKind.SINGLE and book.detected_works:
-            dw = book.detected_works[0]
-            if dw.series and not book.series:
-                book.series = [SeriesRef(name=dw.series, sequence=dw.sequence)]
-                book.provenance["series"] = Provenance.FILENAME.value
-
-        reconcile(
-            book,
-            embedded=embedded,
-            sidecar=datafile,
-            dir_title=book.source_folder.name,
-            filename_fields=filename_fields or {},
-            directory_fields=directory_fields,
-        )
-
-        # Untagged single book whose folder is the author, not the title: promote
-        # the filename label to title and the folder name to author. Conservative —
-        # only when the folder name is unrelated to the work title, the filename IS
-        # the title, the title is still the bare folder name, and nothing better set
-        # an author.
-        if book.content_kind is ContentKind.SINGLE and book.detected_works and first_path:
-            dw = book.detected_works[0]
-            folder_name = book.source_folder.name
-            if (
-                dw.label
-                and not shares_token(folder_name, dw.label)
-                and shares_token(first_path.stem, dw.label)
-                and book.title == folder_name
-                and not (embedded and embedded.artist)
-                and not directory_fields.get("author")
-            ):
-                book.title = dw.label
-                book.provenance["title"] = Provenance.FILENAME.value
-                if not book.authors:
-                    book.authors = [folder_name]
-                    book.provenance["authors"] = Provenance.FILENAME.value
-
-        # Foster container: a multi/loose folder we will split before matching.
-        # The folder itself is the author (unless it is a title folder), so
-        # identify it now — the fosterable mark reads "Fosterable: <author> (<N>)".
-        if (
-            not book.authors
-            and book.folder_kind is not FolderKind.TITLE
-            and book.detected_works
-            and any(f.code in RESTRUCTURE_FINDINGS for f in book.findings)
-        ):
-            book.authors = [book.source_folder.name]
-            book.provenance["authors"] = Provenance.DIRECTORY.value
-
-        logger.debug(
-            f"scan {book.source_folder}: IDENTIFY title={book.title!r}"
-            f"({book.provenance.get('title')}) authors={book.authors}"
-            f"({book.provenance.get('authors')}) "
-            f"series={[s.name for s in book.series]}"
-        )
+        run_identify(book, root=root, pattern=pattern, scheme=scheme)
 
     else:
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
