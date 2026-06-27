@@ -7,7 +7,7 @@ Pure function over (candidate, source results). Signals are additive, clamped to
 from __future__ import annotations
 
 from colophon.core.isbn import isbn_equal
-from colophon.core.match import clean_match_title, title_author_score
+from colophon.core.match import clean_match_title, ratio, title_author_score
 from colophon.core.models import BookUnit, ConfidenceSignal, _Base
 from colophon.core.sources import SourceResult
 
@@ -20,6 +20,7 @@ class IdentificationOutcome(_Base):
     signals: list[ConfidenceSignal] = []  # noqa: RUF012 - pydantic field default, copied per instance
     ranked: list[SourceResult] = []  # noqa: RUF012 - pydantic field default, copied per instance
     best: SourceResult | None = None
+    author_inferred: bool = False
 
 
 def _result_score(book: BookUnit, result: SourceResult) -> float:
@@ -27,6 +28,30 @@ def _result_score(book: BookUnit, result: SourceResult) -> float:
         clean_match_title(book.title), book.authors,
         clean_match_title(result.title), result.authors,
     )
+
+
+def _author_consensus(book: BookUnit, results: list[SourceResult]) -> SourceResult | None:
+    """For an authorless book, the representative of the single author-cluster that
+    >=2 distinct providers agree on, among candidates whose cleaned title matches the
+    book's. None when the book has an author, or when no unique consensus exists
+    (zero, or multiple competing >=2-provider clusters)."""
+    if book.authors:
+        return None
+    btitle = clean_match_title(book.title)
+    providers: dict[str, set[str]] = {}
+    reps: dict[str, SourceResult] = {}
+    for r in results:
+        if not r.authors:
+            continue
+        if ratio(btitle, clean_match_title(r.title)) < _AGREEMENT_THRESHOLD:
+            continue
+        key = r.authors[0].strip().lower()
+        if not key:
+            continue
+        providers.setdefault(key, set()).add(r.provider)
+        reps.setdefault(key, r)
+    strong = [k for k, p in providers.items() if len(p) >= 2]
+    return reps[strong[0]] if len(strong) == 1 else None
 
 
 def score_identification(
@@ -68,6 +93,20 @@ def score_identification(
                 comparable,
                 key=lambda r: (authority.get(r.provider, len(authority)), -score_for[id(r)]),
             )
+
+    # Authorless consensus: with no local author to match on, agreement *among
+    # sources* on title+author is the inferred identity (review-only; never Ready).
+    inferred = _author_consensus(book, results)
+    author_inferred = inferred is not None
+    if author_inferred:
+        best = inferred
+        title_quality = ratio(clean_match_title(book.title), clean_match_title(inferred.title))
+        pts = round(60 * title_quality)
+        score += pts
+        signals.append(ConfidenceSignal(
+            name="cross_source_author_consensus", points=pts,
+            detail=f"author '{inferred.authors[0]}' inferred from agreeing sources",
+        ))
 
     # ASIN exact match — strongest single signal.
     asin_hit = book.asin and any(r.asin and r.asin == book.asin for r in results)
@@ -140,4 +179,7 @@ def score_identification(
             ))
 
     confidence = max(0.0, min(100.0, score))
-    return IdentificationOutcome(confidence=confidence, signals=signals, ranked=ranked, best=best)
+    return IdentificationOutcome(
+        confidence=confidence, signals=signals, ranked=ranked, best=best,
+        author_inferred=author_inferred,
+    )
