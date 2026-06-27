@@ -426,7 +426,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     ui.label(f"  {w.label}  ({len(w.files)} file(s))").props("caption")
 
                 def _confirm_split(b=book) -> None:
-                    result = controller.split_into_works(b)
+                    result = controller.foster_book(b)
                     ui.notify(
                         f"Split {result.fostered} file(s) into "
                         f"{len(b.detected_works)} book(s)",

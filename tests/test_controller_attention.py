@@ -5,28 +5,31 @@ from colophon.core.models import BookUnit, FindingCode
 from tests.test_controller import _ctx
 
 
-def test_split_into_works_fosters_each_detected_work(tmp_path):
+def test_foster_book_fosters_propagates_author_and_records_ops(tmp_path):
     ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Brandon Sanderson"
+    from colophon.core.models import DetectedWork
+    author = tmp_path / "ingest" / "Sarah Graves"
     author.mkdir(parents=True)
-    (author / "Legion.mp3").write_bytes(b"")
-    (author / "Elantris.mp3").write_bytes(b"")
+    (author / "Dead Cat Bounce.mp3").write_bytes(b"")
+    (author / "A Face at the Window.mp3").write_bytes(b"")
     ctrl = AppController(ctx)
     ctrl.scan([author])
     book = ctx.books.get(BookUnit.id_for(author))
-    # Force a known multi grouping for a deterministic split.
-    from colophon.core.models import DetectedWork
     book.detected_works = [
-        DetectedWork(label="Legion", author="Brandon Sanderson", files=[author / "Legion.mp3"]),
-        DetectedWork(label="Elantris", author="Brandon Sanderson", files=[author / "Elantris.mp3"]),
+        DetectedWork(label="Dead Cat Bounce", files=[author / "Dead Cat Bounce.mp3"]),
+        DetectedWork(label="A Face at the Window", files=[author / "A Face at the Window.mp3"]),
     ]
     ctx.books.upsert(book)
 
-    result = ctrl.split_into_works(book)
+    result = ctrl.foster_book(book)
     assert result.fostered == 2
-    assert (author / "Legion" / "Legion.mp3").is_file()
-    assert (author / "Elantris" / "Elantris.mp3").is_file()
-    assert ctx.books.get(BookUnit.id_for(author / "Legion")) is not None
+    assert (author / "Dead Cat Bounce" / "Dead Cat Bounce.mp3").is_file()
+    child = ctx.books.get(BookUnit.id_for(author / "Dead Cat Bounce"))
+    assert child is not None
+    assert child.authors == ["Sarah Graves"]          # author propagated from folder
+    assert child.provenance["authors"] == "directory"
+    assert result.batch_id                            # an operation batch was recorded
+    assert len(ctx.operations.list_batch(result.batch_id)) == 2
 
 
 def test_acknowledge_finding_persists(tmp_path):

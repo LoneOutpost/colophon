@@ -32,6 +32,7 @@ class RestructureResult(_Base):
     retagged: int = 0  # files whose tags were written (0 when write_tags is off)
     failures: list[FosterResult] = []  # noqa: RUF012 - pydantic default, copied per instance
     book_ids: list[str] = []  # noqa: RUF012 - pydantic default, copied per instance
+    batch_id: str = ""  # operations-log batch for this foster (audit / future undo)
 
 
 def derive_book_fields(destination: Path, author_override: str | None) -> tuple[str, str]:
