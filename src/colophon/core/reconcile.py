@@ -55,7 +55,7 @@ def reconcile(
         picked = _first([
             (embedded.title, Provenance.TAG),
             (embedded.album, Provenance.TAG),
-            (sc.title if sc else None, Provenance.SIDECAR),
+            (sc.title if sc else None, Provenance.DATAFILE),
             (dir_title, Provenance.DIRECTORY),
             (filename_fields.get("title"), Provenance.FILENAME),
         ])
@@ -64,14 +64,14 @@ def reconcile(
 
     # subtitle: embedded has none -> sidecar
     if not book.subtitle and sc and sc.subtitle:
-        book.subtitle, book.provenance["subtitle"] = sc.subtitle, Provenance.SIDECAR.value
+        book.subtitle, book.provenance["subtitle"] = sc.subtitle, Provenance.DATAFILE.value
 
     # authors: embedded.artist -> sidecar -> filename
     if not book.authors:
         if embedded.artist:
             book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
         elif sc and sc.authors:
-            book.authors, book.provenance["authors"] = list(sc.authors), Provenance.SIDECAR.value
+            book.authors, book.provenance["authors"] = list(sc.authors), Provenance.DATAFILE.value
         elif dirf.get("author"):
             book.authors, book.provenance["authors"] = [dirf["author"]], Provenance.DIRECTORY.value
         elif filename_fields.get("author"):
@@ -83,7 +83,7 @@ def reconcile(
         if embedded.narrator:
             book.narrators, book.provenance["narrators"] = _split_people(embedded.narrator), Provenance.TAG.value
         elif sc and sc.narrators:
-            book.narrators, book.provenance["narrators"] = list(sc.narrators), Provenance.SIDECAR.value
+            book.narrators, book.provenance["narrators"] = list(sc.narrators), Provenance.DATAFILE.value
         elif dirf.get("narrator"):
             book.narrators = [dirf["narrator"]]
             book.provenance["narrators"] = Provenance.DIRECTORY.value
@@ -98,7 +98,7 @@ def reconcile(
             ([SeriesRef(name=embedded.series, sequence=embedded.sequence)]
              if embedded.series else None, Provenance.TAG),
             ([SeriesRef(name=sc.series_name, sequence=sc.series_sequence)]
-             if sc and sc.series_name else None, Provenance.SIDECAR),
+             if sc and sc.series_name else None, Provenance.DATAFILE),
             ([SeriesRef(name=dirf["series"], sequence=to_float(dirf.get("sequence")))]
              if dirf.get("series") else None, Provenance.DIRECTORY),
             ([SeriesRef(name=filename_fields["series"],
@@ -113,7 +113,7 @@ def reconcile(
         if embedded.year is not None:
             book.publish_year, book.provenance["publish_year"] = embedded.year, Provenance.TAG.value
         elif sc and sc.publish_year is not None:
-            book.publish_year, book.provenance["publish_year"] = sc.publish_year, Provenance.SIDECAR.value
+            book.publish_year, book.provenance["publish_year"] = sc.publish_year, Provenance.DATAFILE.value
         elif dirf.get("year"):
             year = to_int(dirf["year"])
             if year is not None:
@@ -127,13 +127,13 @@ def reconcile(
 
     # publisher: embedded has none -> sidecar
     if not book.publisher and sc and sc.publisher:
-        book.publisher, book.provenance["publisher"] = sc.publisher, Provenance.SIDECAR.value
+        book.publisher, book.provenance["publisher"] = sc.publisher, Provenance.DATAFILE.value
 
     # description: embedded -> sidecar
     if not book.description:
         picked = _first([
             (embedded.description, Provenance.TAG),
-            (sc.description if sc else None, Provenance.SIDECAR),
+            (sc.description if sc else None, Provenance.DATAFILE),
         ])
         if picked:
             book.description, book.provenance["description"] = picked
@@ -142,7 +142,7 @@ def reconcile(
     if not book.asin:
         picked = _first([
             (embedded.asin, Provenance.TAG),
-            (sc.asin if sc else None, Provenance.SIDECAR),
+            (sc.asin if sc else None, Provenance.DATAFILE),
         ])
         if picked:
             book.asin, book.provenance["asin"] = picked
@@ -152,4 +152,4 @@ def reconcile(
         if embedded.isbn:
             book.isbn, book.provenance["isbn"] = normalize_isbn(embedded.isbn), Provenance.TAG.value
         elif sc and sc.isbn:
-            book.isbn, book.provenance["isbn"] = normalize_isbn(sc.isbn), Provenance.SIDECAR.value
+            book.isbn, book.provenance["isbn"] = normalize_isbn(sc.isbn), Provenance.DATAFILE.value

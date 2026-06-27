@@ -90,12 +90,12 @@ def test_sidecar_fills_gaps_below_embedded():
     assert book.title == "Embedded Title" and book.provenance["title"] == "tag"
     assert book.authors == ["Douglas Adams"] and book.provenance["authors"] == "tag"
     # sidecar fills the gaps embedded lacked:
-    assert book.narrators == ["Douglas Adams"] and book.provenance["narrators"] == "sidecar"
+    assert book.narrators == ["Douglas Adams"] and book.provenance["narrators"] == "datafile"
     assert book.series[0].name == "Dirk Gently" and book.series[0].sequence == 1.0
-    assert book.provenance["series"] == "sidecar"
-    assert book.publish_year == 2010 and book.provenance["publish_year"] == "sidecar"
-    assert book.asin == "B0041G6CSI" and book.provenance["asin"] == "sidecar"
-    assert book.description == "desc" and book.provenance["description"] == "sidecar"
+    assert book.provenance["series"] == "datafile"
+    assert book.publish_year == 2010 and book.provenance["publish_year"] == "datafile"
+    assert book.asin == "B0041G6CSI" and book.provenance["asin"] == "datafile"
+    assert book.description == "desc" and book.provenance["description"] == "datafile"
 
 
 def test_embedded_isbn_is_normalized_onto_book():
@@ -109,7 +109,7 @@ def test_sidecar_isbn_fills_when_embedded_lacks_it():
     book = _unit()
     sidecar = SidecarMetadata(isbn="0-306-40615-2")
     reconcile(book, embedded=EmbeddedTags(title="T"), sidecar=sidecar, dir_title=None, filename_fields={})
-    assert book.isbn == "0306406152" and book.provenance["isbn"] == "sidecar"
+    assert book.isbn == "0306406152" and book.provenance["isbn"] == "datafile"
 
 
 def test_sidecar_title_used_when_no_embedded_title():
@@ -122,7 +122,7 @@ def test_sidecar_title_used_when_no_embedded_title():
         filename_fields={},
     )
     assert book.title == "Sidecar Title"
-    assert book.provenance["title"] == "sidecar"  # sidecar outranks directory
+    assert book.provenance["title"] == "datafile"  # sidecar outranks directory
 
 
 def test_reconcile_without_sidecar_still_works():

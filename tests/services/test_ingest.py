@@ -103,7 +103,7 @@ def test_scan_ingest_uses_sidecar_for_series(tmp_path):
     assert book.series[0].sequence == 1.0
     assert book.narrators == ["Douglas Adams"]
     assert book.publish_year == 1987
-    assert book.provenance["series"] == "sidecar"
+    assert book.provenance["series"] == "datafile"
 
 
 def test_scan_infers_author_from_directory_scheme(tmp_path: Path):
