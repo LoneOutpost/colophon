@@ -2570,3 +2570,46 @@ def test_quick_match_scan_caps_concurrency(tmp_path):
     assert len(proposals) == 20
     assert state["max"] <= 8
     assert state["max"] > 1
+
+
+def test_identify_candidates_excludes_unmatchable(tmp_path):
+    from colophon.core.models import (
+        DetectedWork,
+        Finding,
+        FindingCode,
+        FindingSeverity,
+        Phase,
+        PhaseState,
+    )
+    from colophon.core.phases import mark
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    plain = BookUnit.new(source_folder=tmp_path / "plain")
+    plain.title = "Dune"
+
+    no_title = BookUnit.new(source_folder=tmp_path / "notitle")
+
+    matched = BookUnit.new(source_folder=tmp_path / "matched")
+    matched.title = "Matched"
+    mark(matched, Phase.MATCH, PhaseState.FRESH)
+
+    container = BookUnit.new(source_folder=tmp_path / "Author")
+    container.title = "Author"
+    container.detected_works = [
+        DetectedWork(label="A", files=[tmp_path / "Author" / "a.mp3"]),
+        DetectedWork(label="B", files=[tmp_path / "Author" / "b.mp3"]),
+    ]
+    container.findings = [
+        Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN, detail="x")
+    ]
+
+    confirmed = BookUnit.new(source_folder=tmp_path / "conf")
+    confirmed.title = "Confirmed"
+    confirmed.manually_confirmed = True
+
+    for b in (plain, no_title, matched, container, confirmed):
+        ctx.books.upsert(b)
+
+    assert [b.id for b in ctrl.identify_candidates()] == [plain.id]

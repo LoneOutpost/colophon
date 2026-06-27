@@ -1178,10 +1178,16 @@ class AppController:
         return self._score(book, results).ranked
 
     def identify_candidates(self) -> list[BookUnit]:
-        """Books eligible for Identify: not manually confirmed and not organized."""
+        """Books eligible for Identify: not manually confirmed, not organized, with a
+        title to query, not already matched (MATCH fresh), and not a foster container
+        (a multi-book folder must be fostered before its books can be matched)."""
         return [
             b for b in self.ctx.books.list_all()
-            if not b.manually_confirmed and b.output_path is None
+            if not b.manually_confirmed
+            and b.output_path is None
+            and b.title
+            and state_of(b, Phase.MATCH) is not PhaseState.FRESH
+            and not self.is_fosterable(b)
         ]
 
     async def identify_preview(
