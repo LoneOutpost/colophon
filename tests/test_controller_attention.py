@@ -131,3 +131,36 @@ def test_gate_selects_only_fosterable_candidates(tmp_path):
     plain_book = ctx.books.get(BookUnit.id_for(plain))
     pending = ctrl.fosterable_books([book, plain_book])
     assert pending == [book]
+
+
+def test_undo_foster_round_trips(tmp_path):
+    from colophon.core.models import ContentKind
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    author = book.source_folder
+    result = ctrl.foster_book(book)
+    assert (author / "Dead Cat Bounce" / "Dead Cat Bounce.mp3").is_file()
+
+    undo = ctrl.undo_foster(result.batch_id)
+    assert undo.restored == 2
+    assert undo.books_removed == 2
+    assert (author / "Dead Cat Bounce.mp3").is_file()
+    assert not (author / "Dead Cat Bounce").exists()
+    assert ctx.books.get(BookUnit.id_for(author / "Dead Cat Bounce")) is None
+    container = ctx.books.get(BookUnit.id_for(author))
+    assert container is not None and container.content_kind is ContentKind.MULTI
+    assert ctx.operations.latest_batch_id() != result.batch_id
+    assert len(ctx.operations.list_batch(result.batch_id)) == 2
+
+
+def test_undo_foster_records_failure_for_missing_subfolder(tmp_path):
+    import shutil
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    author = book.source_folder
+    result = ctrl.foster_book(book)
+    shutil.rmtree(author / "Dead Cat Bounce")
+
+    undo = ctrl.undo_foster(result.batch_id)
+    assert undo.failures
+    assert (author / "A Face at the Window.mp3").is_file()

@@ -88,10 +88,12 @@ from colophon.services.editing import (
 from colophon.services.encode import encode_book
 from colophon.services.foster import (
     FosterResult,
+    FosterUndoResult,
     RestructureResult,
     derive_book_fields,
     foster_one,
     foster_work,
+    unfoster_work,
 )
 from colophon.services.ingest import (
     ScanOptions,
@@ -973,6 +975,34 @@ class AppController:
         if not self._has_direct_audio(parent):
             self.ctx.books.delete(BookUnit.id_for(parent))
         result.batch_id = batch_id
+        return result
+
+    def undo_foster(self, batch_id: str) -> FosterUndoResult:
+        """Reverse a foster batch: move each work's files back to the parent,
+        delete the child books, then re-scan the parent so the container
+        re-registers. Idempotent via the operations-log `reverted` flag."""
+        result = FosterUndoResult()
+        parents: set[Path] = set()
+        for op in self.ctx.operations.list_batch(batch_id):
+            if op.op_type != _OP_FOSTER or op.outcome != "ok":
+                continue
+            subfolder = Path(op.target)
+            parent = Path(op.before) if op.before else subfolder.parent
+            if not subfolder.exists():
+                logger.warning(f"undo_foster: {subfolder} is gone; skipping")
+                result.failures.append(str(subfolder))
+                continue
+            result.restored += len(unfoster_work(subfolder, parent))
+            self.ctx.books.delete(BookUnit.id_for(subfolder))
+            result.books_removed += 1
+            parents.add(parent)
+        template = self.ctx.config.filename_template
+        for parent in parents:
+            scan_ingest(
+                self.ctx.books, parent, template=template,
+                directory_scheme=self.ctx.config.directory_scheme,
+            )
+        self.ctx.operations.mark_reverted(batch_id)
         return result
 
     def _restructure_sync(

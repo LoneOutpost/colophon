@@ -9,11 +9,15 @@ re-scans (see `AppController.foster_files`)."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from colophon.adapters.audio import is_audio_file
 from colophon.core.models import _Base
 from colophon.core.normalize import normalize_text
 from colophon.core.pathscheme import sanitize_segment
+
+logger = logging.getLogger(__name__)
 
 
 class FosterResult(_Base):
@@ -33,6 +37,36 @@ class RestructureResult(_Base):
     failures: list[FosterResult] = []  # noqa: RUF012 - pydantic default, copied per instance
     book_ids: list[str] = []  # noqa: RUF012 - pydantic default, copied per instance
     batch_id: str = ""  # operations-log batch for this foster (audit / future undo)
+
+
+class FosterUndoResult(_Base):
+    """Outcome of reverting a foster batch."""
+
+    restored: int = 0  # files moved back into their parent
+    books_removed: int = 0  # child books deleted
+    failures: list[str] = []  # noqa: RUF012 - pydantic default, copied per instance
+
+
+def unfoster_work(subfolder: Path, parent: Path) -> list[Path]:
+    """Move every audio file in `subfolder` back into `parent`, then remove the
+    emptied `subfolder`. The mirror of `foster_work`. Returns the restored paths.
+    Collision-safe: a file whose name already exists in `parent` is left in place
+    and logged, never overwritten."""
+    restored: list[Path] = []
+    for path in sorted(subfolder.iterdir()):
+        if not path.is_file() or not is_audio_file(path):
+            continue
+        dest = parent / path.name
+        if dest.exists():
+            logger.warning(f"unfoster collision: {dest} exists; leaving {path}")
+            continue
+        path.rename(dest)
+        restored.append(dest)
+    try:
+        subfolder.rmdir()
+    except OSError as e:
+        logger.warning(f"unfoster: could not remove {subfolder}: {e}")
+    return restored
 
 
 def derive_book_fields(destination: Path, author_override: str | None) -> tuple[str, str]:
