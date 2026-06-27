@@ -1,8 +1,13 @@
 import json
 from pathlib import Path
 
-from colophon.adapters.sidecar import DatafileSidecar, read_datafile_sidecar, write_datafile_sidecar
-from colophon.core.models import BookUnit, SeriesRef
+from colophon.adapters.sidecar import (
+    DatafileSidecar,
+    is_container_datafile,
+    read_datafile_sidecar,
+    write_datafile_sidecar,
+)
+from colophon.core.models import BookUnit, ContentKind, SeriesRef
 
 
 def _write(folder: Path, data: dict) -> Path:
@@ -145,3 +150,48 @@ def test_write_over_corrupt_existing_sidecar(tmp_path):
     (folder / "metadata.json").write_text("{ not json")
     write_datafile_sidecar(folder, _book(folder))  # must not raise; corrupt file is overwritten
     assert read_datafile_sidecar(folder).title == "Dirk Gently"
+
+
+def _meta(title, authors):
+    return DatafileSidecar(title=title, authors=authors)
+
+
+def test_container_datafile_multi_name_match_is_true(tmp_path):
+    folder = tmp_path / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    meta = _meta("Sarah Graves", ["TE_Audiobooks_S"])
+    assert is_container_datafile(meta, folder, ContentKind.MULTI) is True
+
+
+def test_single_name_match_is_not_container(tmp_path):
+    folder = tmp_path / "Brandon Sanderson" / "Elantris"
+    folder.mkdir(parents=True)
+    meta = _meta("Elantris", ["Brandon Sanderson"])
+    assert is_container_datafile(meta, folder, ContentKind.SINGLE) is False
+
+
+def test_multi_title_mismatch_is_not_container(tmp_path):
+    folder = tmp_path / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    meta = _meta("Different Title", ["TE_Audiobooks_S"])
+    assert is_container_datafile(meta, folder, ContentKind.MULTI) is False
+
+
+def test_multi_two_authors_is_not_container(tmp_path):
+    folder = tmp_path / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    meta = _meta("Sarah Graves", ["TE_Audiobooks_S", "Someone Else"])
+    assert is_container_datafile(meta, folder, ContentKind.MULTI) is False
+
+
+def test_multi_other_author_is_not_container(tmp_path):
+    folder = tmp_path / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    meta = _meta("Sarah Graves", ["Real Author"])
+    assert is_container_datafile(meta, folder, ContentKind.MULTI) is False
+
+
+def test_root_level_folder_is_not_container():
+    folder = Path("/Sarah Graves")  # parent is the filesystem root (no name)
+    meta = _meta("Sarah Graves", ["Sarah Graves"])
+    assert is_container_datafile(meta, folder, ContentKind.MULTI) is False

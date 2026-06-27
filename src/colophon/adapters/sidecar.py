@@ -11,7 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from colophon.core.coerce import to_float, year_or_none
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, ContentKind
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,21 @@ def read_datafile_sidecar(folder: Path) -> DatafileSidecar | None:
         asin=_str_or_none(data.get("asin")),
         isbn=_str_or_none(data.get("isbn")),
     )
+
+
+def is_container_datafile(
+    datafile: DatafileSidecar, folder: Path, content_kind: ContentKind
+) -> bool:
+    """True when the folder's metadata.json describes the container (a MULTI
+    folder) rather than a book: title == folder name and the sole author == the
+    parent (uploader) folder. Such a datafile must not seed a single BookUnit."""
+    if content_kind is not ContentKind.MULTI:
+        return False
+    parent = folder.parent
+    if not parent.name:  # root-level: no uploader/parent folder to match
+        return False
+    title = (datafile.title or "").strip()
+    return title == folder.name and datafile.authors == [parent.name]
 
 
 def _format_sequence(sequence: float | None) -> str:
