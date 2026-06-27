@@ -54,3 +54,65 @@ def test_books_needing_attention_sorts_errors_first(tmp_path):
     ctx.books.upsert(err)
     out = ctrl.books_needing_attention()
     assert [b.id for b in out][:2] == [err.id, warn.id]
+
+
+def _multi_book(ctx, tmp_path):
+    from colophon.core.models import DetectedWork
+    author = tmp_path / "ingest" / "Sarah Graves"
+    author.mkdir(parents=True)
+    (author / "Dead Cat Bounce.mp3").write_bytes(b"")
+    (author / "A Face at the Window.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([author])
+    book = ctx.books.get(BookUnit.id_for(author))
+    book.detected_works = [
+        DetectedWork(label="Dead Cat Bounce", files=[author / "Dead Cat Bounce.mp3"]),
+        DetectedWork(label="A Face at the Window", files=[author / "A Face at the Window.mp3"]),
+    ]
+    ctx.books.upsert(book)
+    return ctrl, book
+
+
+def test_is_fosterable_true_for_multi_container(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    assert ctrl.is_fosterable(book) is True
+
+
+def test_is_fosterable_false_when_no_works(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    book.detected_works = []
+    assert ctrl.is_fosterable(book) is False
+
+
+def test_is_fosterable_false_when_finding_acknowledged(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    book.acknowledged_findings = [f.code for f in book.findings]
+    assert ctrl.is_fosterable(book) is False
+
+
+def test_fosterable_plan_rows_and_author(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    book.authors = ["Sarah Graves"]
+    plan = ctrl.fosterable_plan(book)
+    assert plan is not None
+    assert plan.author == "Sarah Graves"
+    assert [(w.label, w.files) for w in plan.works] == [
+        ("Dead Cat Bounce", 1), ("A Face at the Window", 1)]
+
+
+def test_fosterable_plan_none_when_not_fosterable(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    book.detected_works = []
+    assert ctrl.fosterable_plan(book) is None
+
+
+def test_fosterable_books_filters_the_set(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl, book = _multi_book(ctx, tmp_path)
+    other = BookUnit.new(source_folder=tmp_path / "x")
+    assert ctrl.fosterable_books([book, other]) == [book]

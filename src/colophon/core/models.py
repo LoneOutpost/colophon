@@ -77,6 +77,15 @@ class FindingCode(StrEnum):
     STRUCTURE_UNCLEAR = "structure_unclear"
 
 
+# Findings whose remedy is fostering the folder into one subfolder per work.
+RESTRUCTURE_FINDINGS = frozenset({
+    FindingCode.LOOSE_IN_AUTHOR,
+    FindingCode.MULTI_IN_AUTHOR,
+    FindingCode.MULTI_IN_UNDETERMINED,
+    FindingCode.MIXED_WORKS,
+})
+
+
 class Finding(_Base):
     """One structural finding about a book unit (recomputed each scan)."""
 

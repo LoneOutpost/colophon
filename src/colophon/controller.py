@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
@@ -26,6 +27,7 @@ from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.models import (
+    RESTRUCTURE_FINDINGS,
     BookState,
     BookUnit,
     ConfidenceSignal,
@@ -115,6 +117,18 @@ from colophon.services.undo import undo_batch
 logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
+
+
+@dataclass
+class WorkRow:
+    label: str
+    files: int
+
+
+@dataclass
+class FosterPlan:
+    author: str | None
+    works: list[WorkRow]
 
 
 class CoverSetResult(_Base):
@@ -875,6 +889,25 @@ class AppController:
     def _active_findings(self, book: BookUnit) -> list[Finding]:
         """Findings not dismissed via acknowledge."""
         return [f for f in book.findings if f.code not in book.acknowledged_findings]
+
+    def is_fosterable(self, book: BookUnit) -> bool:
+        """A foster container: an active restructure finding plus detected works."""
+        return bool(book.detected_works) and any(
+            f.code in RESTRUCTURE_FINDINGS for f in self._active_findings(book)
+        )
+
+    def fosterable_plan(self, book: BookUnit) -> FosterPlan | None:
+        """Read-only preview of a foster: the identified author and per-work rows,
+        or None when the book is not a foster container."""
+        if not self.is_fosterable(book):
+            return None
+        author = book.authors[0] if book.authors else None
+        works = [WorkRow(label=w.label, files=len(w.files)) for w in book.detected_works]
+        return FosterPlan(author=author, works=works)
+
+    def fosterable_books(self, books: list[BookUnit]) -> list[BookUnit]:
+        """Subset of `books` that are foster containers (for the pre-match gate)."""
+        return [b for b in books if self.is_fosterable(b)]
 
     def books_needing_attention(self) -> list[BookUnit]:
         """All books carrying at least one un-acknowledged finding, most severe first."""
