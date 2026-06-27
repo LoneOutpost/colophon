@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from colophon.core.match import clean_match_title
 from colophon.core.models import BookUnit
 from colophon.core.sources import MetadataSource, SourceQuery, SourceResult
 
@@ -24,7 +25,7 @@ def query_for_book(book: BookUnit, fields: set[str] | None = None) -> SourceQuer
     author = book.authors[0] if book.authors else None
     series = book.series[0].name if book.series else None
     return SourceQuery(
-        title=book.title if "title" in use else None,
+        title=(clean_match_title(book.title) or None) if "title" in use else None,
         author=author if "author" in use else None,
         asin=book.asin if "asin" in use else None,
         isbn=book.isbn if "isbn" in use else None,

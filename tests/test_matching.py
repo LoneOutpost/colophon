@@ -112,3 +112,11 @@ def test_query_for_book_none_filter_keeps_all(tmp_path):
     assert q.title == "Dune"
     assert q.author == "Frank Herbert"
     assert q.asin == "B002V1A0WE"
+
+
+def test_query_for_book_cleans_title(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "1982 - The Gunslinger (DT1 - original edition)"
+    b.authors = ["Stephen King"]
+    q = query_for_book(b)
+    assert q.title == "The Gunslinger"

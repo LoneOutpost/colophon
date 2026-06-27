@@ -1,4 +1,4 @@
-from colophon.core.match import ratio, title_author_score
+from colophon.core.match import clean_match_title, ratio, title_author_score
 
 
 def test_ratio_is_case_and_space_insensitive():
@@ -25,3 +25,31 @@ def test_title_author_score_combines_both():
 def test_ratio_token_aware_handles_word_reordering():
     # char-sequence ratio is low for reordered words; token overlap rescues it
     assert ratio("Sanderson Brandon", "Brandon Sanderson") >= 0.9
+
+
+def test_clean_match_title_strips_year_prefix_and_edition_paren():
+    assert clean_match_title("1982 - The Gunslinger (DT1 - original edition)") == "The Gunslinger"
+
+
+def test_clean_match_title_keeps_series_paren():
+    assert clean_match_title("The Gunslinger (The Dark Tower #1)") == "The Gunslinger (The Dark Tower #1)"
+
+
+def test_clean_match_title_leaves_clean_title_untouched():
+    assert clean_match_title("Elantris") == "Elantris"
+
+
+def test_clean_match_title_strips_unabridged_paren():
+    assert clean_match_title("Mistborn (Unabridged)") == "Mistborn"
+
+
+def test_clean_match_title_strips_trailing_format_word():
+    assert clean_match_title("The Way of Kings - Unabridged") == "The Way of Kings"
+
+
+def test_clean_match_title_none_is_empty():
+    assert clean_match_title(None) == ""
+
+
+def test_clean_match_title_falls_back_when_cleaning_empties():
+    assert clean_match_title("(Unabridged)") == "(Unabridged)"
