@@ -16,7 +16,7 @@ from colophon.adapters.downloader import (
 )
 from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
-from colophon.adapters.sidecar import write_sidecar
+from colophon.adapters.sidecar import write_datafile_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
@@ -520,7 +520,7 @@ class AppController:
         never propagate and lose the already-persisted DB edit.
         """
         try:
-            write_sidecar(book.source_folder, book)
+            write_datafile_sidecar(book.source_folder, book)
         except Exception as e:  # broad on purpose: best-effort side effect, must not lose the DB edit
             logger.warning(f"sidecar write failed for {book.id}: {e}")
 

@@ -11,14 +11,14 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from colophon.core.coerce import to_float, year_or_none
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, ContentKind
 
 logger = logging.getLogger(__name__)
 
 _SERIES_RE = re.compile(r"^(?P<name>.*?)\s*#\s*(?P<num>[\d.]+)\s*$")
 
 
-class SidecarMetadata(BaseModel):
+class DatafileSidecar(BaseModel):
     title: str | None = None
     subtitle: str | None = None
     authors: list[str] = []
@@ -48,8 +48,8 @@ def _parse_series(series: object) -> tuple[str | None, float | None]:
     return first.strip(), None
 
 
-def read_sidecar(folder: Path) -> SidecarMetadata | None:
-    """Read `folder/metadata.json` into a SidecarMetadata, or None if absent/invalid."""
+def read_datafile_sidecar(folder: Path) -> DatafileSidecar | None:
+    """Read `folder/metadata.json` into a DatafileSidecar, or None if absent/invalid."""
     path = folder / "metadata.json"
     if not path.exists():
         return None
@@ -61,7 +61,7 @@ def read_sidecar(folder: Path) -> SidecarMetadata | None:
     if not isinstance(data, dict):
         return None
     series_name, series_sequence = _parse_series(data.get("series"))
-    return SidecarMetadata(
+    return DatafileSidecar(
         title=_str_or_none(data.get("title")),
         subtitle=_str_or_none(data.get("subtitle")),
         authors=[a for a in (data.get("authors") or []) if isinstance(a, str)],
@@ -74,6 +74,21 @@ def read_sidecar(folder: Path) -> SidecarMetadata | None:
         asin=_str_or_none(data.get("asin")),
         isbn=_str_or_none(data.get("isbn")),
     )
+
+
+def is_container_datafile(
+    datafile: DatafileSidecar, folder: Path, content_kind: ContentKind
+) -> bool:
+    """True when the folder's metadata.json describes the container (a MULTI
+    folder) rather than a book: title == folder name and the sole author == the
+    parent (uploader) folder. Such a datafile must not seed a single BookUnit."""
+    if content_kind is not ContentKind.MULTI:
+        return False
+    parent = folder.parent
+    if not parent.name:  # root-level: no uploader/parent folder to match
+        return False
+    title = (datafile.title or "").strip()
+    return title == folder.name and datafile.authors == [parent.name]
 
 
 def _format_sequence(sequence: float | None) -> str:
@@ -90,7 +105,7 @@ def _series_strings(book: BookUnit) -> list[str]:
     return out
 
 
-def write_sidecar(folder: Path, book: BookUnit) -> None:
+def write_datafile_sidecar(folder: Path, book: BookUnit) -> None:
     """Merge `book`'s managed fields into `folder/metadata.json`, atomically.
 
     Existing keys not managed by Colophon (genres, chapters, tags, etc.) are

@@ -247,7 +247,7 @@ def test_sidecar_write_failure_does_not_break_edit(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path)
     b = _book_in(ctx, tmp_path / "ingest" / "x")
     ctrl = AppController(ctx)
-    monkeypatch.setattr("colophon.controller.write_sidecar", lambda *a, **k: (_ for _ in ()).throw(OSError("nfs down")))
+    monkeypatch.setattr("colophon.controller.write_datafile_sidecar", lambda *a, **k: (_ for _ in ()).throw(OSError("nfs down")))
     # edit must still persist to the DB despite the sidecar write failing
     ctrl.edit_field(b, "title", "Right")
     assert ctx.books.get(b.id).title == "Right"
@@ -259,7 +259,7 @@ def test_sidecar_typeerror_does_not_break_edit(tmp_path, monkeypatch):
     b = _book_in(ctx, tmp_path / "ingest" / "x")
     ctrl = AppController(ctx)
     monkeypatch.setattr(
-        "colophon.controller.write_sidecar",
+        "colophon.controller.write_datafile_sidecar",
         lambda *a, **k: (_ for _ in ()).throw(TypeError("not serializable")),
     )
     # a non-OSError from the sidecar write must still not lose the DB edit

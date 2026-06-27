@@ -36,7 +36,7 @@ class Provenance(StrEnum):
     TAG = "tag"
     DIRECTORY = "directory"
     FILENAME = "filename"
-    SIDECAR = "sidecar"
+    DATAFILE = "datafile"
     AUDNEXUS = "audnexus"
     AUDIBLE = "audible"
     HARDCOVER = "hardcover"
