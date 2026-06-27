@@ -121,6 +121,7 @@ logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 _OP_FOSTER = "foster"  # audit-log op_type for a pre-match foster move
+_MATCH_CONCURRENCY = 8  # max books scanned concurrently during Identify/Quick Match
 
 
 @dataclass
@@ -1257,15 +1258,17 @@ class AppController:
         `progress(book_id, kind)` fires once per book as it resolves, kind 'ok' when a
         source returned a candidate else 'fail'."""
         chosen = [s for s in self.ctx.sources if s.name in source_names]
+        sem = asyncio.Semaphore(_MATCH_CONCURRENCY)
 
         async def _scan(book: BookUnit) -> QuickMatchProposal:
-            results = await gather_matches(chosen, query_for_book(book, search_fields))
-            outcome = self._score(book, results)
-            if progress is not None:
-                progress(book.id, "ok" if outcome.best is not None else "fail")
-            return QuickMatchProposal(
-                book=book, best=outcome.best, results=results, confidence=outcome.confidence
-            )
+            async with sem:
+                results = await gather_matches(chosen, query_for_book(book, search_fields))
+                outcome = self._score(book, results)
+                if progress is not None:
+                    progress(book.id, "ok" if outcome.best is not None else "fail")
+                return QuickMatchProposal(
+                    book=book, best=outcome.best, results=results, confidence=outcome.confidence
+                )
 
         return list(await asyncio.gather(*(_scan(b) for b in books)))
 

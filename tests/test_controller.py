@@ -2546,3 +2546,27 @@ def test_pattern_history_record_dedup_cap_and_remove(tmp_path):
 
     assert load_config(ctx.config_path).recent_filename_templates == []  # persisted
     ctx.close()
+
+
+def test_quick_match_scan_caps_concurrency(tmp_path):
+    state = {"cur": 0, "max": 0}
+
+    class _SlowSource:
+        name = "audnexus"
+
+        async def search(self, query):
+            state["cur"] += 1
+            state["max"] = max(state["max"], state["cur"])
+            await asyncio.sleep(0.01)
+            state["cur"] -= 1
+            return [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])]
+
+    ctx = _ctx(tmp_path, sources=[_SlowSource()])
+    ctrl = AppController(ctx)
+    books = [BookUnit.new(source_folder=tmp_path / f"b{i}") for i in range(20)]
+    for b in books:
+        b.title = "Dune"
+    proposals = asyncio.run(ctrl.quick_match_scan(books, ["audnexus"]))
+    assert len(proposals) == 20
+    assert state["max"] <= 8
+    assert state["max"] > 1
