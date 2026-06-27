@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from colophon.adapters.sidecar import SidecarMetadata
+from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.models import BookUnit, EmbeddedTags
 from colophon.core.reconcile import reconcile
 
@@ -80,7 +80,7 @@ def test_series_from_embedded_builds_series_ref():
 def test_sidecar_fills_gaps_below_embedded():
     book = _unit()
     embedded = EmbeddedTags(title="Embedded Title", artist="Douglas Adams")  # no series/year/narrator
-    sidecar = SidecarMetadata(
+    sidecar = DatafileSidecar(
         title="Sidecar Title", authors=["Someone Else"], narrators=["Douglas Adams"],
         series_name="Dirk Gently", series_sequence=1.0, publish_year=2010,
         description="desc", asin="B0041G6CSI",
@@ -107,7 +107,7 @@ def test_embedded_isbn_is_normalized_onto_book():
 
 def test_sidecar_isbn_fills_when_embedded_lacks_it():
     book = _unit()
-    sidecar = SidecarMetadata(isbn="0-306-40615-2")
+    sidecar = DatafileSidecar(isbn="0-306-40615-2")
     reconcile(book, embedded=EmbeddedTags(title="T"), sidecar=sidecar, dir_title=None, filename_fields={})
     assert book.isbn == "0306406152" and book.provenance["isbn"] == "datafile"
 
@@ -117,7 +117,7 @@ def test_sidecar_title_used_when_no_embedded_title():
     reconcile(
         book,
         embedded=EmbeddedTags(),
-        sidecar=SidecarMetadata(title="Sidecar Title", authors=["A"]),
+        sidecar=DatafileSidecar(title="Sidecar Title", authors=["A"]),
         dir_title="Folder Title",
         filename_fields={},
     )

@@ -16,7 +16,7 @@ from pathlib import Path
 from colophon.adapters.audio import probe_audio_file
 from colophon.adapters.repository.store import BookUnitRepo
 from colophon.adapters.scan import group_book_units
-from colophon.adapters.sidecar import read_sidecar
+from colophon.adapters.sidecar import read_datafile_sidecar
 from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
@@ -118,7 +118,7 @@ def _run_local(
         first_path = book.source_files[0].path if book.source_files else None
         embedded = read_embedded_tags(first_path) if first_path else None
         filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
-        sidecar = read_sidecar(book.source_folder)
+        sidecar = read_datafile_sidecar(book.source_folder)
         directory_fields = infer_from_path(book.source_folder, root, scheme)
 
         # Untagged single book: pre-fill series/seq from the filename cluster so

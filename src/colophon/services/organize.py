@@ -9,7 +9,7 @@ from pathlib import Path
 
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.repository.store import BookUnitRepo
-from colophon.adapters.sidecar import write_sidecar
+from colophon.adapters.sidecar import write_datafile_sidecar
 from colophon.core.models import BookUnit, Phase, PhaseState, _Base
 from colophon.core.pathscheme import build_target_path
 from colophon.core.phases import mark, resync_state
@@ -62,7 +62,7 @@ def organize_book(
     book.touch()
     repo.upsert(book)
     try:
-        write_sidecar(target.parent, book)
+        write_datafile_sidecar(target.parent, book)
     except Exception as e:  # destination sidecar is secondary to the completed move
         logger.warning(f"destination sidecar write failed for {book.id}: {e}")
     return OrganizeResult(book_id=book.id, target_path=target, moved=True)

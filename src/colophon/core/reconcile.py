@@ -8,7 +8,7 @@ later plans; this reconciles the identity-bearing fields plus sidecar extras.
 
 from __future__ import annotations
 
-from colophon.adapters.sidecar import SidecarMetadata
+from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.coerce import to_float, to_int
 from colophon.core.isbn import normalize_isbn
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
@@ -41,7 +41,7 @@ def reconcile(
     book: BookUnit,
     *,
     embedded: EmbeddedTags,
-    sidecar: SidecarMetadata | None = None,
+    sidecar: DatafileSidecar | None = None,
     dir_title: str | None,
     filename_fields: dict[str, str],
     directory_fields: dict[str, str] | None = None,
