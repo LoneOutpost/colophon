@@ -4,7 +4,7 @@ from pathlib import Path
 from mutagen.id3 import ID3, TPE1
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookState, ContentKind, Phase, PhaseState, Provenance
+from colophon.core.models import BookState, ContentKind, FolderKind, Phase, PhaseState, Provenance
 from colophon.core.phases import state_of
 from colophon.services.ingest import scan_ingest
 
@@ -189,8 +189,10 @@ def test_container_datafile_ignored_for_multi_folder(tmp_path):
     units = scan_ingest(repo, incoming, template="$Author - $Title")
     book = next(u for u in units if u.source_folder == folder)
     assert book.content_kind is ContentKind.MULTI
-    assert book.authors == []
-    assert book.provenance.get("authors") != "datafile"
+    # The uploader handle from the datafile is rejected; the folder name (the real
+    # author) is identified instead via the foster-container rule.
+    assert book.authors == ["Sarah Graves"]
+    assert book.provenance.get("authors") == "directory"
 
 
 def test_matching_name_datafile_kept_for_single_folder(tmp_path):
@@ -207,3 +209,35 @@ def test_matching_name_datafile_kept_for_single_folder(tmp_path):
     assert book.content_kind is ContentKind.SINGLE
     assert book.authors == ["Brandon Sanderson"]
     assert book.provenance.get("authors") == "datafile"
+
+
+def test_foster_container_author_is_folder_name(tmp_path):
+    incoming = tmp_path / "incoming"
+    folder = incoming / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    for n in ("Dead Cat Bounce (Home Repair is Homicide 1).mp3",
+              "A Face at the Window (Home Repair is Homicide 12).mp3",
+              "Death by Chocolate Malted Milkshake (Death by Chocolate 2).mp3"):
+        (folder / n).write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, incoming, template="$Author - $Title")
+    book = next(u for u in units if u.source_folder == folder)
+    assert book.content_kind is ContentKind.MULTI
+    assert book.authors == ["Sarah Graves"]
+    assert book.provenance["authors"] == "directory"
+
+
+def test_title_folder_split_gets_no_guessed_author(tmp_path):
+    incoming = tmp_path / "incoming"
+    folder = incoming / "Legion"  # a title folder holding two different works
+    folder.mkdir(parents=True)
+    (folder / "Legion.mp3").write_bytes(b"")
+    (folder / "Elantris.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, incoming, template="$Author - $Title",
+                        directory_scheme="$Title")
+    book = units[0]
+    assert book.folder_kind is FolderKind.TITLE
+    assert book.authors == []

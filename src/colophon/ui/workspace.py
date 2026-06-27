@@ -418,25 +418,28 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.row().classes("items-center gap-2"):
                     ui.icon(icon).props(f"color={color}")
                     ui.label(f.detail)
-            actionable = [f for f in findings if f.code.value in (
-                "loose_in_author", "multi_in_author", "multi_in_undetermined", "mixed_works")]
-            if actionable and book.detected_works:
-                ui.label("Will split into:").props("caption")
-                for w in book.detected_works:
-                    ui.label(f"  {w.label}  ({len(w.files)} file(s))").props("caption")
+            plan = controller.fosterable_plan(book)
+            if plan is not None:
+                count = len(plan.works)
+                mark = (
+                    f"Fosterable: {plan.author} ({count} works)"
+                    if plan.author else f"Fosterable: {count} works"
+                )
+                ui.label(mark).props("caption")
+                for w in plan.works:
+                    ui.label(f"  {w.label}  ({w.files} file(s))").props("caption")
 
-                def _confirm_split(b=book) -> None:
-                    result = controller.split_into_works(b)
+                def _confirm_foster(b=book, n=count) -> None:
+                    result = controller.foster_book(b)
                     ui.notify(
-                        f"Split {result.fostered} file(s) into "
-                        f"{len(b.detected_works)} book(s)",
+                        f"Fostered {result.fostered} file(s) into {n} book(s)",
                         type="positive",
                     )
                     refresh_nav()
                     _render_middle()
                     refresh_status()
 
-                ui.button("Confirm split", on_click=_confirm_split).props("color=primary")
+                ui.button("Foster", on_click=_confirm_foster).props("color=primary")
             for f in findings:
                 if f.code.value in ("dup_format", "dup_edition", "structure_unclear"):
                     code = f.code

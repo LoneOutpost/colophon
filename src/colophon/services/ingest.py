@@ -22,7 +22,16 @@ from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import compile_template, parse_filename
-from colophon.core.models import BookUnit, ContentKind, Phase, PhaseState, Provenance, SeriesRef
+from colophon.core.models import (
+    RESTRUCTURE_FINDINGS,
+    BookUnit,
+    ContentKind,
+    FolderKind,
+    Phase,
+    PhaseState,
+    Provenance,
+    SeriesRef,
+)
 from colophon.core.phases import LOCAL, mark, resync_state, state_of
 from colophon.core.reconcile import reconcile
 
@@ -167,6 +176,18 @@ def _run_local(
                 if not book.authors:
                     book.authors = [folder_name]
                     book.provenance["authors"] = Provenance.FILENAME.value
+
+        # Foster container: a multi/loose folder we will split before matching.
+        # The folder itself is the author (unless it is a title folder), so
+        # identify it now — the fosterable mark reads "Fosterable: <author> (<N>)".
+        if (
+            not book.authors
+            and book.folder_kind is not FolderKind.TITLE
+            and book.detected_works
+            and any(f.code in RESTRUCTURE_FINDINGS for f in book.findings)
+        ):
+            book.authors = [book.source_folder.name]
+            book.provenance["authors"] = Provenance.DIRECTORY.value
 
         logger.debug(
             f"scan {book.source_folder}: IDENTIFY title={book.title!r}"
