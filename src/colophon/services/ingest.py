@@ -87,6 +87,7 @@ def _run_local(
         if unit_files is None:
             raise ValueError("unit_files required for SEARCH phase")
         book.source_files = [probe_audio_file(p) for p in unit_files]
+        logger.debug(f"scan {book.source_folder}: SEARCH probed {len(book.source_files)} files")
 
     elif phase is Phase.CATEGORIZE:
         first_path = book.source_files[0].path if book.source_files else None
@@ -106,6 +107,12 @@ def _run_local(
         book.classification_signals = result.signals
         book.findings = result.findings
         book.detected_works = result.detected_works
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"scan {book.source_folder}: CATEGORIZE content_kind={book.content_kind.value} "
+                f"folder_kind={book.folder_kind.value} works={len(book.detected_works)} "
+                f"signals={[(s.name, s.points) for s in book.classification_signals]}"
+            )
 
     elif phase is Phase.IDENTIFY:
         first_path = book.source_files[0].path if book.source_files else None
@@ -152,6 +159,13 @@ def _run_local(
                 if not book.authors:
                     book.authors = [folder_name]
                     book.provenance["authors"] = Provenance.FILENAME.value
+
+        logger.debug(
+            f"scan {book.source_folder}: IDENTIFY title={book.title!r}"
+            f"({book.provenance.get('title')}) authors={book.authors}"
+            f"({book.provenance.get('authors')}) "
+            f"series={[s.name for s in book.series]}"
+        )
 
     else:
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
