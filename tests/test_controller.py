@@ -2613,3 +2613,27 @@ def test_identify_candidates_excludes_unmatchable(tmp_path):
         ctx.books.upsert(b)
 
     assert [b.id for b in ctrl.identify_candidates()] == [plain.id]
+
+
+def test_fosterable_books_defaults_to_whole_library(tmp_path):
+    from colophon.core.models import DetectedWork, Finding, FindingCode, FindingSeverity
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    container = BookUnit.new(source_folder=tmp_path / "Author")
+    container.title = "Author"
+    container.detected_works = [
+        DetectedWork(label="A", files=[tmp_path / "Author" / "a.mp3"]),
+        DetectedWork(label="B", files=[tmp_path / "Author" / "b.mp3"]),
+    ]
+    container.findings = [
+        Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN, detail="x")
+    ]
+    plain = BookUnit.new(source_folder=tmp_path / "plain")
+    plain.title = "Dune"
+    ctx.books.upsert(container)
+    ctx.books.upsert(plain)
+
+    assert [b.id for b in ctrl.fosterable_books()] == [container.id]
+    assert container.id not in {b.id for b in ctrl.identify_candidates()}

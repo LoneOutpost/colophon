@@ -910,9 +910,11 @@ class AppController:
         works = [WorkRow(label=w.label, files=len(w.files)) for w in book.detected_works]
         return FosterPlan(author=author, works=works)
 
-    def fosterable_books(self, books: list[BookUnit]) -> list[BookUnit]:
-        """Subset of `books` that are foster containers (for the pre-match gate)."""
-        return [b for b in books if self.is_fosterable(b)]
+    def fosterable_books(self, books: list[BookUnit] | None = None) -> list[BookUnit]:
+        """Foster containers among `books` (default: the whole library), for the
+        pre-match gate."""
+        pool = self.ctx.books.list_all() if books is None else books
+        return [b for b in pool if self.is_fosterable(b)]
 
     def books_needing_attention(self) -> list[BookUnit]:
         """All books carrying at least one un-acknowledged finding, most severe first."""
