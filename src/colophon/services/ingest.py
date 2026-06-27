@@ -20,8 +20,9 @@ from colophon.adapters.sidecar import read_sidecar
 from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import infer_from_path, parse_scheme
+from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import compile_template, parse_filename
-from colophon.core.models import BookUnit, Phase, PhaseState
+from colophon.core.models import BookUnit, ContentKind, Phase, PhaseState, Provenance, SeriesRef
 from colophon.core.phases import LOCAL, mark, resync_state, state_of
 from colophon.core.reconcile import reconcile
 
@@ -112,6 +113,15 @@ def _run_local(
         filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
         sidecar = read_sidecar(book.source_folder)
         directory_fields = infer_from_path(book.source_folder, root, scheme)
+
+        # Untagged single book: pre-fill series/seq from the filename cluster so
+        # reconcile's "if not book.series" gate keeps it.
+        if book.content_kind is ContentKind.SINGLE and book.detected_works:
+            dw = book.detected_works[0]
+            if dw.series and not book.series:
+                book.series = [SeriesRef(name=dw.series, sequence=dw.sequence)]
+                book.provenance["series"] = Provenance.FILENAME.value
+
         reconcile(
             book,
             embedded=embedded,
@@ -120,6 +130,28 @@ def _run_local(
             filename_fields=filename_fields or {},
             directory_fields=directory_fields,
         )
+
+        # Untagged single book whose folder is the author, not the title: promote
+        # the filename label to title and the folder name to author. Conservative —
+        # only when the folder name is unrelated to the work title, the filename IS
+        # the title, the title is still the bare folder name, and nothing better set
+        # an author.
+        if book.content_kind is ContentKind.SINGLE and book.detected_works and first_path:
+            dw = book.detected_works[0]
+            folder_name = book.source_folder.name
+            if (
+                dw.label
+                and not shares_token(folder_name, dw.label)
+                and shares_token(first_path.stem, dw.label)
+                and book.title == folder_name
+                and not (embedded and embedded.artist)
+                and not directory_fields.get("author")
+            ):
+                book.title = dw.label
+                book.provenance["title"] = Provenance.FILENAME.value
+                if not book.authors:
+                    book.authors = [folder_name]
+                    book.provenance["authors"] = Provenance.FILENAME.value
 
     else:
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
