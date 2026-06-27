@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 
 from nicegui import ui
@@ -20,7 +21,22 @@ from colophon.ui import create_app
 logger = logging.getLogger(__name__)
 
 
+def configure_logging(level_name: str | None = None) -> int:
+    """Set the log level for application loggers from the process environment.
+
+    Reads ``COLOPHON_LOG_LEVEL`` (default ``INFO``); set it to ``DEBUG`` to see
+    the per-book per-phase scan decisions. An unknown value falls back to INFO.
+    Returns the numeric level applied.
+    """
+    name = (level_name or os.environ.get("COLOPHON_LOG_LEVEL") or "INFO").upper()
+    level = logging.getLevelNamesMapping().get(name, logging.INFO)
+    logging.basicConfig(level=level)
+    logging.getLogger("colophon").setLevel(level)
+    return level
+
+
 def main() -> None:
+    configure_logging()
     created = ensure_config_file()
     if created:
         logger.info(f"wrote a default config file at {default_config_path()}")
