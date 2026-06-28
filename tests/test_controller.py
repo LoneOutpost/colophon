@@ -2736,3 +2736,30 @@ def test_node_classification_override_sticky_and_clear(tmp_path):
     assert g3.directories[dune_id].kind == "title"
     assert g3.directories[dune_id].kind_source == ""
     ctx.close()
+
+
+def test_confirm_hint_cohort_confirms_author_groupings(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    for author in ("Author A", "Author B"):
+        d = ingest / author / "Book"
+        d.mkdir(parents=True)
+        (d / "01.mp3").write_bytes(b"")
+
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+
+    n = ctrl.confirm_hint_cohort(ingest, "author")
+    assert n == 2  # the two author folders; the root is excluded
+
+    graph = ctrl.graph_for(ingest)
+    for author in ("Author A", "Author B"):
+        node = graph.directories[DirectoryNode.id_for(ingest / author)]
+        assert node.kind == "author"
+        assert node.kind_source == "manual"
+        assert node.kind_value == author
+    # the scan root itself is NOT confirmed
+    assert graph.directories[DirectoryNode.id_for(ingest)].kind_source == ""
+    ctx.close()

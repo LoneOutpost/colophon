@@ -102,6 +102,16 @@ def graph_tree(graph: Graph, root: Path) -> list[GraphTreeNode]:
     return _dir_node(graph, root_id).children
 
 
+def grouping_cohort(graph: Graph, *, root: Path, hint: str) -> list[DirectoryNode]:
+    """Grouping nodes (excluding the root itself) carrying the given author/series hint —
+    the set a 'Confirm all' bulk action targets. Root is excluded: it is the scan path, not
+    a content folder, and confirming it would re-create the uploader-name-as-author poison."""
+    return [
+        d for d in graph.directories.values()
+        if d.path != root and d.kind == "grouping" and d.kind_hint == hint
+    ]
+
+
 def graph_summary(graph: Graph) -> GraphSummary:
     """Diagnostic counts over the whole built graph."""
     by_role: dict[str, int] = {}

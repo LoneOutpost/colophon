@@ -184,3 +184,26 @@ def test_graph_summary_counts_manual_dirs():
         n.kind_source = src
         g.directories[n.id] = n
     assert graph_summary(g).manual_dirs == 2
+
+
+def test_grouping_cohort_excludes_root_and_filters_hint():
+    from colophon.core.graph_view import grouping_cohort
+
+    root = Path("/lib")
+    g = Graph()
+
+    def _n(path, kind, hint=""):
+        n = DirectoryNode(path=path)
+        n.kind = kind
+        n.kind_hint = hint
+        g.directories[n.id] = n
+        return n
+
+    _n(root, "grouping", "author")              # the root itself -> excluded
+    _n(root / "A1", "grouping", "author")
+    _n(root / "A2", "grouping", "author")
+    _n(root / "S1", "grouping", "series")        # different hint
+    _n(root / "C", "container")                   # not a grouping
+
+    cohort = grouping_cohort(g, root=root, hint="author")
+    assert {n.path for n in cohort} == {root / "A1", root / "A2"}

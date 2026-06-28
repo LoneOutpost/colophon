@@ -306,3 +306,22 @@ def test_node_override_repo_set_get_clear(tmp_path: Path):
     repo.clear("/lib/Doctor Who")
     assert repo.get("/lib/Doctor Who") is None
     assert repo.all() == {}
+
+
+def test_node_override_repo_set_many(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = NodeOverrideRepo(conn)
+    repo.set("/lib/Old", "container", None)  # will be upsert-replaced below
+
+    repo.set_many([
+        ("/lib/A", "author", "A"),
+        ("/lib/B", "author", "B"),
+        ("/lib/Old", "author", "Old"),
+    ])
+
+    assert repo.all() == {
+        "/lib/A": NodeOverride(kind="author", value="A"),
+        "/lib/B": NodeOverride(kind="author", value="B"),
+        "/lib/Old": NodeOverride(kind="author", value="Old"),
+    }
