@@ -26,6 +26,9 @@ class GraphSummary:
     container_dirs: int = 0
     title_dirs: int = 0
     unknown_dirs: int = 0
+    grouping_author_hint: int = 0
+    grouping_series_hint: int = 0
+    grouping_ambiguous_hint: int = 0
     books: int = 0
     multi_book_dirs: int = 0
     files_by_role: dict[str, int] = field(default_factory=dict)
@@ -35,7 +38,10 @@ def _dir_badges(node: DirectoryNode) -> list[str]:
     if node.kind == "author":
         return [f"AUTHOR → {node.author}"] if node.author else ["AUTHOR"]
     if node.kind in ("grouping", "container", "title"):
-        return [f"{node.kind.upper()} · {node.kind_confidence:.2f}"]
+        badges = [f"{node.kind.upper()} · {node.kind_confidence:.2f}"]
+        if node.kind == "grouping" and node.kind_hint:
+            badges.append(f"{node.kind_hint}? · {node.kind_hint_confidence:.2f}")
+        return badges
     return []
 
 
@@ -75,7 +81,7 @@ def _dir_node(graph: Graph, dir_id: str) -> GraphTreeNode:
     )
     return GraphTreeNode(
         "dir", d.path.name, _dir_badges(d), [*child_dirs, *books, *loose],
-        tooltip="; ".join(d.kind_evidence),
+        tooltip="; ".join([*d.kind_evidence, *d.kind_hint_evidence]),
     )
 
 
@@ -100,6 +106,15 @@ def graph_summary(graph: Graph) -> GraphSummary:
         container_dirs=sum(1 for d in graph.directories.values() if d.kind == "container"),
         title_dirs=sum(1 for d in graph.directories.values() if d.kind == "title"),
         unknown_dirs=sum(1 for d in graph.directories.values() if d.kind == "unknown"),
+        grouping_author_hint=sum(
+            1 for d in graph.directories.values()
+            if d.kind == "grouping" and d.kind_hint == "author"),
+        grouping_series_hint=sum(
+            1 for d in graph.directories.values()
+            if d.kind == "grouping" and d.kind_hint == "series"),
+        grouping_ambiguous_hint=sum(
+            1 for d in graph.directories.values()
+            if d.kind == "grouping" and d.kind_hint == "ambiguous"),
         books=len(graph.books),
         multi_book_dirs=sum(1 for d in graph.directories.values() if len(d.books) > 1),
         files_by_role=by_role,

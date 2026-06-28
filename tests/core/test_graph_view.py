@@ -125,3 +125,35 @@ def test_graph_summary_counts_coarse_kinds():
     assert s.container_dirs == 1
     assert s.title_dirs == 1
     assert s.unknown_dirs == 1
+
+
+def test_dir_badges_show_grouping_hint_chip():
+    from colophon.core.graph_view import _dir_badges
+
+    node = DirectoryNode(path=Path("/lib/Mistborn"))
+    node.kind = "grouping"
+    node.kind_confidence = 0.86
+    node.kind_hint = "series"
+    node.kind_hint_confidence = 0.74
+    assert _dir_badges(node) == ["GROUPING · 0.86", "series? · 0.74"]
+
+    no_hint = DirectoryNode(path=Path("/lib/A"))
+    no_hint.kind = "grouping"
+    no_hint.kind_confidence = 0.9
+    assert _dir_badges(no_hint) == ["GROUPING · 0.90"]
+
+
+def test_graph_summary_splits_grouping_hints():
+    from colophon.core.graph_view import graph_summary
+
+    g = Graph()
+    for name, hint in [("a", "author"), ("b", "series"), ("c", "series"), ("d", "ambiguous")]:
+        n = DirectoryNode(path=Path("/lib") / name)
+        n.kind = "grouping"
+        n.kind_hint = hint
+        g.directories[n.id] = n
+
+    s = graph_summary(g)
+    assert s.grouping_author_hint == 1
+    assert s.grouping_series_hint == 2
+    assert s.grouping_ambiguous_hint == 1
