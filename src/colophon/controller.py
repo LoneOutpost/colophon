@@ -200,7 +200,7 @@ class AppController:
         self._downloads: dict[str, DownloadEntry] = {}
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
-        self._graph_cache: dict[str, Graph] = {}  # diagnostic /graph: built graph per scan root
+        self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -1201,23 +1201,44 @@ class AppController:
         """The configured scan paths, for the graph-view root selector."""
         return list(self.ctx.config.scan_paths)
 
-    def graph_for(self, root: Path) -> Graph:
+    def graph_for(
+        self, root: Path, *, fresh: bool = False,
+        progress: Callable[[int, int, str], None] | None = None,
+    ) -> Graph:
         """Build (without persisting) the entity graph for one scan root and run the
-        directory classification + author inheritance, caching the result by root so the
-        diagnostic view need not rebuild on every visit. Blocking — via asyncio.to_thread."""
+        directory classification + author inheritance, caching by (root, fresh) so the
+        diagnostic view need not rebuild on every visit. `fresh` ignores persisted book
+        state (builds from disk-derived identity only). `progress(done, total, label)` fires
+        per folder. Blocking — call via asyncio.to_thread / graph_for_streamed."""
         graph = build_graph(
             self.ctx.books, root,
             template=self.ctx.config.filename_template,
             directory_scheme=self.ctx.config.directory_scheme,
+            fresh=fresh, progress=progress,
         )
         resolve_graph_authors(graph, [bn.book for bn in graph.books.values()], root=root)
-        self._graph_cache[str(root)] = graph
+        self._graph_cache[(str(root), fresh)] = graph
         return graph
 
-    def cached_graph(self, root: Path) -> Graph | None:
-        """The previously-built graph for `root`, or None if it has not been built this
+    def cached_graph(self, root: Path, *, fresh: bool = False) -> Graph | None:
+        """The previously-built graph for `(root, fresh)`, or None if not built this
         session. A snapshot — not invalidated by scans/edits; Rebuild refreshes it."""
-        return self._graph_cache.get(str(root))
+        return self._graph_cache.get((str(root), fresh))
+
+    async def graph_for_streamed(
+        self, root: Path, *, fresh: bool = False,
+        progress: Callable[[int, int, str], None] | None = None,
+    ) -> Graph:
+        """Run graph_for off the event loop, marshaling per-folder progress back onto it so
+        a live UI indicator updates safely from the worker thread."""
+        loop = asyncio.get_running_loop()
+
+        def safe(done: int, total: int, label: str) -> None:
+            if progress is not None:
+                loop.call_soon_threadsafe(progress, done, total, label)
+
+        return await asyncio.to_thread(self.graph_for, root, fresh=fresh, progress=safe)
+
     def source_tooltip(self, name: str) -> str:
         """Hover explanation for a provenance badge: a fixed sentence for a local tier,
         or 'Matched from <source>' for an external match source."""
