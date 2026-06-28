@@ -16,6 +16,7 @@ def test_create_app_registers_pages_without_running(tmp_path):
     assert "/" in routes
     assert "/settings" in routes
     assert "/acquire" in routes
+    assert "/graph" in routes
 
     import colophon.ui.workspace as ws
 
