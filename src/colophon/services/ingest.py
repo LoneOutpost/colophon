@@ -174,7 +174,8 @@ def _scan_label(folder: Path, root: Path) -> str:
 
 
 def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
-                   progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
+                   progress: Callable[[int, int, str], None] | None = None,
+                   fresh: bool = False) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
@@ -184,7 +185,7 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
     for i, unit in enumerate(units, start=1):
         if progress is not None:
             progress(i, total, _scan_label(unit.folder, root))
-        existing = repo.get(BookUnit.id_for(unit.folder))
+        existing = None if fresh else repo.get(BookUnit.id_for(unit.folder))
         book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
 
         # SEARCH phase — capture prior paths before probing for files_added accounting
@@ -220,14 +221,15 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
 
 def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
               options: ScanOptions | None = None, inference_root: Path | None = None,
-              progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
+              progress: Callable[[int, int, str], None] | None = None,
+              fresh: bool = False) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything.
     `options is None` keeps the legacy behavior (all books, all local phases).
     `inference_root` (default `root`) is the scan path used for classify/dir-inference depth.
     `progress(done, total, label)` fires once per folder as it is processed."""
     if options is None:
         return _plan_scan_all(repo, root, template=template,
-                              directory_scheme=directory_scheme, progress=progress)
+                              directory_scheme=directory_scheme, progress=progress, fresh=fresh)
     if options.scope is ScanScope.NEW_ONLY:
         return _plan_scan_new_only(repo, root, options.phases, template=template,
                                    directory_scheme=directory_scheme,

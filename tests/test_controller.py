@@ -2627,3 +2627,54 @@ def test_graph_for_caches_and_cached_graph_returns_it(tmp_path):
     assert ctrl.cached_graph(ingest) is built             # same object, cached
     assert ctrl.cached_graph(tmp_path / "other") is None  # a different, unbuilt root
     ctx.close()
+
+
+def test_graph_for_fresh_ignores_persisted_state(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    book = ctx.books.list_all()[0]
+    book.title = "POISONED"
+    book.provenance["title"] = "datafile"
+    ctx.books.upsert(book)
+
+    normal = ctrl.graph_for(ingest)
+    fresh = ctrl.graph_for(ingest, fresh=True)
+
+    assert [bn.book.title for bn in normal.books.values()] == ["POISONED"]
+    assert [bn.book.title for bn in fresh.books.values()] == ["Dune"]  # disk-derived
+    ctx.close()
+
+
+def test_graph_for_caches_modes_separately(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    g_normal = ctrl.graph_for(ingest, fresh=False)
+    g_fresh = ctrl.graph_for(ingest, fresh=True)
+
+    assert g_normal is not g_fresh
+    assert ctrl.cached_graph(ingest, fresh=False) is g_normal
+    assert ctrl.cached_graph(ingest, fresh=True) is g_fresh
+    ctx.close()
+
+
+async def test_graph_for_streamed_returns_graph_and_emits_progress(tmp_path):
+    import asyncio
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    calls: list[tuple[int, int, str]] = []
+    graph = await ctrl.graph_for_streamed(
+        ingest, progress=lambda d, t, label: calls.append((d, t, label)))
+    await asyncio.sleep(0)  # let the call_soon_threadsafe callbacks run
+
+    assert [bn.book.title for bn in graph.books.values()] == ["Dune"]
+    assert calls and calls[-1][1] == 1  # total == 1 folder
+    ctx.close()

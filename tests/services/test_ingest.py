@@ -17,6 +17,7 @@ from colophon.services.ingest import (
     ScanOptions,
     ScanScope,
     commit_scan,
+    plan_scan,
     plan_scan_graph,
     scan_ingest,
 )
@@ -526,6 +527,26 @@ def test_plan_scan_graph_forwards_progress(tmp_path: Path):
 
     assert {label for _, _, label in calls} == {"Dune", "Legion"}
     assert max(t for _, t, _ in calls) == 2
+
+
+def test_plan_scan_fresh_ignores_persisted_state(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Dune"
+    dune.mkdir(parents=True)
+    (dune / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    # Persist a book for this folder carrying an app-state-only flag that no disk
+    # evidence could re-derive — the proof that repo.get was (not) consulted.
+    persisted = BookUnit.new(source_folder=dune)
+    persisted.manually_confirmed = True
+    repo.upsert(persisted)
+
+    fresh = plan_scan(repo, ingest, template="$Author - $Title", fresh=True)
+    assert fresh.units[0].manually_confirmed is False  # started from BookUnit.new
+
+    normal = plan_scan(repo, ingest, template="$Author - $Title")
+    assert normal.units[0].manually_confirmed is True   # persisted state merged
 
 
 def _ingest_single_with_datafile_publisher(tmp_path: Path) -> tuple[BookUnitRepo, Path, Path]:

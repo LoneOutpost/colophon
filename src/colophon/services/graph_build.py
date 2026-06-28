@@ -78,12 +78,12 @@ def _ensure_ancestors(g: Graph, folder: Path, root: Path) -> None:
 def build_graph(
     repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
     options: ScanOptions | None = None, inference_root: Path | None = None,
-    progress: Callable[[int, int, str], None] | None = None,
+    progress: Callable[[int, int, str], None] | None = None, fresh: bool = False,
 ) -> Graph:
     """Run a (non-persisting) scan and wrap each BookUnit in Directory/File/Book nodes."""
     plan = plan_scan(
         repo, root, template=template, directory_scheme=directory_scheme,
-        options=options, inference_root=inference_root, progress=progress,
+        options=options, inference_root=inference_root, progress=progress, fresh=fresh,
     )
     g = Graph()
     for book in plan.units:

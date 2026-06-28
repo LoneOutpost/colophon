@@ -3,7 +3,6 @@ chosen scan root, with classification/role badges and summary counts."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 from nicegui import ui
@@ -53,6 +52,8 @@ def render_graph(controller: AppController) -> None:
         root_select = ui.select(
             {str(r): str(r) for r in roots}, value=state["root"],
         ).props("dense outlined").classes("col")
+        fresh_switch = ui.switch("From scratch").props("dense")
+        fresh_switch.tooltip("Ignore saved book data and build only from the files on disk.")
         rebuild_btn = ui.button("Rebuild", icon="refresh").props("flat no-caps")
 
     summary = ui.label().classes("text-caption colophon-muted q-px-sm q-mb-sm")
@@ -79,13 +80,19 @@ def render_graph(controller: AppController) -> None:
         body.clear()
         summary.set_text("Building…")
         with body:
-            spinner = ui.spinner(size="lg")
-        graph = await asyncio.to_thread(controller.graph_for, Path(state["root"]))
-        spinner.delete()
-        _show(graph)
+            with ui.row().classes("items-center q-gutter-sm q-pa-md"):
+                ui.spinner(size="lg")
+                prog = ui.label("Building…").classes("text-caption colophon-muted")
+
+        def _progress(done: int, total: int, label: str) -> None:
+            prog.set_text(f"Building {done} / {total} · {label}")
+
+        graph = await controller.graph_for_streamed(
+            Path(state["root"]), fresh=fresh_switch.value, progress=_progress)
+        _show(graph)  # clears body (removing the spinner row) and renders the tree
 
     async def _load() -> None:
-        cached = controller.cached_graph(Path(state["root"]))
+        cached = controller.cached_graph(Path(state["root"]), fresh=fresh_switch.value)
         if cached is not None:
             _show(cached)
         else:
@@ -97,4 +104,5 @@ def render_graph(controller: AppController) -> None:
 
     root_select.on_value_change(lambda e: _on_root(e.value))
     rebuild_btn.on_click(_build)
+    fresh_switch.on_value_change(lambda e: _load())
     ui.timer(0.1, _load, once=True)  # initial: render the cached graph, or build the first time
