@@ -301,6 +301,17 @@ class NodeOverrideRepo:
         )
         self.conn.commit()
 
+    def set_many(self, rows: list[tuple[str, str, str | None]]) -> None:
+        """Upsert many (path, kind, value) overrides under a single commit (a bulk cohort
+        confirm can touch hundreds of nodes)."""
+        for path, kind, value in rows:
+            self.conn.execute(
+                "INSERT INTO node_overrides (path, kind, value) VALUES (?, ?, ?) "
+                "ON CONFLICT(path) DO UPDATE SET kind = excluded.kind, value = excluded.value",
+                (path, kind, value),
+            )
+        self.conn.commit()
+
     def clear(self, path: str) -> None:
         self.conn.execute("DELETE FROM node_overrides WHERE path = ?", (path,))
         self.conn.commit()
