@@ -95,17 +95,28 @@ def _series_and_seq(chunks: list[str]) -> tuple[str | None, float | None]:
     return None, None
 
 
+def _title_chunks(chunks: list[str]) -> list[str]:
+    """Chunks the title is built from: drop leading number-only chunks (track/sequence
+    indexes — never title text), keeping at least the last chunk."""
+    i = 0
+    while i < len(chunks) - 1 and not _text_sig(_tokens(chunks[i])):
+        i += 1
+    return chunks[i:]
+
+
 def _multi_work(file: Path, chunks: list[str]) -> DetectedWork:
-    """One file = one work. Title is the leading chunk; series/seq from a later chunk."""
-    title = _spaced(chunks[0]) if chunks else _spaced(file.stem)
-    series, seq = _series_and_seq(chunks[1:]) if len(chunks) > 1 else (None, None)
+    """One file = one work. Title is the leading text chunk (number-only index chunks
+    dropped); series/seq from a later chunk."""
+    title_chunks = _title_chunks(chunks) if chunks else []
+    title = _spaced(title_chunks[0]) if title_chunks else _spaced(file.stem)
+    series, seq = _series_and_seq(title_chunks[1:]) if len(title_chunks) > 1 else (None, None)
     return DetectedWork(label=title or _spaced(file.stem), series=series, sequence=seq, files=[file])
 
 
 def _parts_work(files: list[Path], per_file: list[list[str]]) -> DetectedWork:
-    """All files are one book's parts. Title is the leading chunk with the varying
+    """All files are one book's parts. Title is the leading text chunk with the varying
     part number stripped."""
-    first = per_file[0]
+    first = _title_chunks(per_file[0]) if per_file[0] else []
     title = _strip_trailing_number(_spaced(first[0])) if first else _spaced(files[0].stem)
     return DetectedWork(label=title or _spaced(files[0].stem), series=None, sequence=None,
                         files=list(files))
@@ -136,11 +147,7 @@ def cluster(files: list[Path]) -> ClusterResult:
     n = len(files)
 
     if n == 1:
-        chunks = per_file[0]
-        title = _spaced(chunks[0]) if chunks else _spaced(files[0].stem)
-        series, seq = _series_and_seq(chunks[1:]) if len(chunks) > 1 else (None, None)
-        work = DetectedWork(label=title or _spaced(files[0].stem), series=series,
-                            sequence=seq, files=[files[0]])
+        work = _multi_work(files[0], per_file[0])
         return ClusterResult(ContentKind.SINGLE, 3.0,
                              [_signal("single_file", 3, "one file in the folder")], [work])
 
