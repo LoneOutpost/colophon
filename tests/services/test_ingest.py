@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from mutagen.id3 import ID3, TPE1
+from mutagen.id3 import ID3, TPE1, TXXX
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
 from colophon.core.models import (
@@ -293,3 +293,148 @@ def test_commit_scan_without_reconcile_keeps_everything(tmp_path: Path):
 
     assert repo.get(stale.id) is not None  # nothing pruned without reconcile
     assert repo.get(keep.id) is not None
+
+
+def test_plan_scan_graph_persists_leaves_not_container(tmp_path: Path):
+    from colophon.services.ingest import commit_scan, plan_scan_graph
+
+    ingest = tmp_path / "ingest"
+    author = ingest / "Brandon Sanderson"
+    author.mkdir(parents=True)
+    (author / "Legion.mp3").write_bytes(b"")
+    (author / "Elantris.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
+    commit_scan(repo, plan, reconcile=True)
+
+    persisted = repo.list_all()
+    assert len(persisted) == 2
+    assert {b.title for b in persisted} == {"Legion", "Elantris"}
+    assert all(b.content_kind is ContentKind.SINGLE for b in persisted)
+    assert repo.get(BookUnit.id_for(author)) is None  # no container row
+    assert author in plan.reconciled_folders
+
+
+def test_plan_scan_graph_enriches_leaf_from_its_tags(tmp_path: Path):
+    from colophon.services.ingest import plan_scan_graph
+
+    ingest = tmp_path / "ingest"
+    author = ingest / "Sarah Graves"
+    author.mkdir(parents=True)
+    f = author / "Dead Cat Bounce (Home Repair is Homicide 1).mp3"
+    f.write_bytes(b"")
+    (author / "A Face at the Window (Home Repair is Homicide 12).mp3").write_bytes(b"")
+    id3 = ID3()
+    id3.add(TXXX(encoding=3, desc="narrator", text=["Read By Me"]))
+    id3.save(f)
+
+    repo = _repo(tmp_path)
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
+    leaf = next(u for u in plan.units if u.title == "Dead Cat Bounce")
+
+    assert leaf.authors == ["Sarah Graves"]                 # cluster/container identity kept
+    assert leaf.provenance["authors"] == Provenance.DIRECTORY.value
+    assert leaf.narrators == ["Read By Me"]                 # empty field enriched from the tag
+    assert leaf.provenance["narrators"] == Provenance.TAG.value
+    assert state_of(leaf, Phase.IDENTIFY) is PhaseState.FRESH
+
+
+def test_plan_scan_graph_preserves_leaf_state_on_rescan(tmp_path: Path):
+    from colophon.services.ingest import (
+        ScanOptions,
+        ScanScope,
+        commit_scan,
+        plan_scan_graph,
+    )
+
+    ingest = tmp_path / "ingest"
+    author = ingest / "Brandon Sanderson"
+    author.mkdir(parents=True)
+    (author / "Legion.mp3").write_bytes(b"")
+    (author / "Elantris.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    commit_scan(repo, plan_scan_graph(repo, ingest, template="$Author - $Title"), reconcile=True)
+
+    legion = next(b for b in repo.list_all() if b.title == "Legion")
+    legion.manually_confirmed = True
+    legion.cover_path = Path("/covers/legion.jpg")
+    legion.narrators = ["A Narrator"]
+    legion.state = BookState.READY
+    repo.upsert(legion)
+
+    # Re-scan (UPDATE) the same folder.
+    plan = plan_scan_graph(
+        repo, ingest, template="$Author - $Title",
+        options=ScanOptions(scope=ScanScope.UPDATE),
+    )
+    commit_scan(repo, plan, reconcile=True)
+
+    again = repo.get(legion.id)
+    assert again is not None
+    assert again.manually_confirmed is True
+    assert again.cover_path == Path("/covers/legion.jpg")
+    assert again.narrators == ["A Narrator"]
+    assert again.state is BookState.READY
+
+
+def test_plan_scan_graph_prunes_legacy_container_on_reprocess(tmp_path: Path):
+    from colophon.services.ingest import (
+        ScanOptions,
+        ScanScope,
+        commit_scan,
+        plan_scan_graph,
+    )
+
+    ingest = tmp_path / "ingest"
+    author = ingest / "Brandon Sanderson"
+    author.mkdir(parents=True)
+    (author / "Legion.mp3").write_bytes(b"")
+    (author / "Elantris.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    # Simulate a pre-2b persisted MULTI container at id_for(folder).
+    container = BookUnit.new(source_folder=author)
+    container.content_kind = ContentKind.MULTI
+    container.title = "Brandon Sanderson"
+    repo.upsert(container)
+
+    plan = plan_scan_graph(
+        repo, ingest, template="$Author - $Title",
+        options=ScanOptions(scope=ScanScope.REFRESH),
+    )
+    commit_scan(repo, plan, reconcile=True)
+
+    assert repo.get(BookUnit.id_for(author)) is None  # legacy container pruned
+    assert {b.title for b in repo.list_all()} == {"Legion", "Elantris"}
+
+
+def test_plan_scan_graph_new_only_does_not_prune_known_folder(tmp_path: Path):
+    from colophon.services.ingest import (
+        ScanOptions,
+        ScanScope,
+        commit_scan,
+        plan_scan_graph,
+    )
+
+    ingest = tmp_path / "ingest"
+    author = ingest / "Brandon Sanderson"
+    author.mkdir(parents=True)
+    (author / "Legion.mp3").write_bytes(b"")
+    (author / "Elantris.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    container = BookUnit.new(source_folder=author)
+    container.content_kind = ContentKind.MULTI
+    repo.upsert(container)
+
+    plan = plan_scan_graph(
+        repo, ingest, template="$Author - $Title",
+        options=ScanOptions(scope=ScanScope.NEW_ONLY),
+    )
+    commit_scan(repo, plan, reconcile=True)
+
+    # NEW_ONLY skips the known folder → it's not reconciled → container survives.
+    assert author not in plan.reconciled_folders
+    assert repo.get(BookUnit.id_for(author)) is not None
