@@ -159,10 +159,14 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
 
 
 def run_identify(
-    book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]]
+    book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
+    rederive: bool = False,
 ) -> None:
-    """Run the IDENTIFY pipeline for `book`, mutating it in place."""
+    """Run the IDENTIFY pipeline for `book`, mutating it in place. `rederive` (Refresh)
+    first drops fields orphaned by a removed/vetted datafile so they re-derive."""
     evidence = gather(book, root=root, pattern=pattern, scheme=scheme)
+    if rederive:
+        drop_orphaned_datafile_fields(book, evidence)
     seed_series(book)
     resolve(book, evidence)
     attribute(book, evidence)

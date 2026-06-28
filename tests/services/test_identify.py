@@ -1,5 +1,7 @@
 import json
 
+from mutagen.id3 import ID3, TIT2
+
 from colophon.adapters.audio import probe_audio_file
 from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.dirinfer import parse_scheme
@@ -168,3 +170,88 @@ def test_drop_leaves_non_datafile_provenance(tmp_path):
     assert book.provenance["title"] == Provenance.MANUAL.value
     assert book.authors == ["From Audnexus"]
     assert book.provenance["authors"] == "audnexus"
+
+
+def test_run_identify_rederive_refills_title_from_tag(tmp_path):
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Some Author" / "Some Book"
+    folder.mkdir(parents=True)
+    f = folder / "01.mp3"
+    f.write_bytes(b"")
+    id3 = ID3()
+    id3.add(TIT2(encoding=3, text=["Real Title"]))
+    id3.save(f)
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(f)]
+    book.title = "Stale Datafile Title"
+    book.provenance["title"] = Provenance.DATAFILE.value
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""), rederive=True)
+
+    assert book.title == "Real Title"
+    assert book.provenance["title"] == Provenance.TAG.value
+
+
+def test_run_identify_rederive_clears_field_with_no_lower_tier(tmp_path):
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Some Author" / "Some Book"
+    folder.mkdir(parents=True)
+    f = folder / "01.mp3"
+    f.write_bytes(b"")  # no embedded tags -> no lower tier for description
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(f)]
+    book.description = "Stale datafile blurb"
+    book.provenance["description"] = Provenance.DATAFILE.value
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""), rederive=True)
+
+    assert book.description == ""
+    assert "description" not in book.provenance
+
+
+def test_run_identify_rederive_clears_when_datafile_vetted_as_container(tmp_path):
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "TE_Audiobooks_S" / "Sarah Graves"
+    folder.mkdir(parents=True)
+    (folder / "a.mp3").write_bytes(b"")
+    (folder / "metadata.json").write_text(
+        json.dumps({"title": "Sarah Graves", "authors": ["TE_Audiobooks_S"]}))
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(folder / "a.mp3")]
+    book.content_kind = ContentKind.MULTI
+    book.publisher = "Stale Publisher"
+    book.provenance["publisher"] = Provenance.DATAFILE.value
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""), rederive=True)
+
+    assert book.publisher == ""
+    assert "publisher" not in book.provenance
+
+
+def test_run_identify_without_rederive_keeps_orphaned_datafile_field(tmp_path):
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Some Author" / "Some Book"
+    folder.mkdir(parents=True)
+    f = folder / "01.mp3"
+    f.write_bytes(b"")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(f)]
+    book.description = "Stale datafile blurb"
+    book.provenance["description"] = Provenance.DATAFILE.value
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""))  # rederive defaults False
+
+    assert book.description == "Stale datafile blurb"
+    assert book.provenance["description"] == Provenance.DATAFILE.value
