@@ -357,6 +357,7 @@ def plan_scan_graph(
     are the folders it fully recomputed, so commit can prune what their unit set replaced."""
     # Lazy import: graph_build imports plan_scan from this module, so a module-scope
     # import of build_graph would create an import cycle.
+    from colophon.core.graph_resolve import resolve_graph_authors
     from colophon.services.graph_build import build_graph, project
 
     pattern = compile_template(template)
@@ -380,6 +381,7 @@ def plan_scan_graph(
         plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
         plan.units.append(adopted)
         plan.reconciled_folders.add(adopted.source_folder)
+    resolve_graph_authors(graph, plan.units, root=root)
     return plan
 
 
