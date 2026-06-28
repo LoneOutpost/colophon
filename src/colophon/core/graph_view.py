@@ -47,7 +47,7 @@ def _book_node(graph: Graph, book_id: str) -> GraphTreeNode:
         badges.append(f"author: {book.provenance.get('authors', '?')}")
     children = sorted(
         (_file_node(graph, fid) for fid in bn.owns if fid in graph.files),
-        key=lambda n: n.label,
+        key=lambda n: n.label.casefold(),
     )
     return GraphTreeNode("book", book.title or "(untitled)", badges, children)
 
@@ -57,16 +57,16 @@ def _dir_node(graph: Graph, dir_id: str) -> GraphTreeNode:
     owned = {fid for bid in d.books if bid in graph.books for fid in graph.books[bid].owns}
     child_dirs = sorted(
         (_dir_node(graph, cid) for cid in d.child_dirs if cid in graph.directories),
-        key=lambda n: n.label,
+        key=lambda n: n.label.casefold(),
     )
     books = sorted(
         (_book_node(graph, bid) for bid in d.books if bid in graph.books),
-        key=lambda n: n.label,
+        key=lambda n: n.label.casefold(),
     )
     loose = sorted(
         (_file_node(graph, fid) for fid in d.child_files
          if fid in graph.files and fid not in owned),
-        key=lambda n: n.label,
+        key=lambda n: n.label.casefold(),
     )
     return GraphTreeNode("dir", d.path.name, _dir_badges(d), [*child_dirs, *books, *loose])
 
