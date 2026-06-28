@@ -75,6 +75,9 @@ class DirectoryNode(_Base):
     books: list[str] = []        # noqa: RUF012 - BookNode ids residing here
     kind_confidence: float = 0.0          # 0..1 confidence in `kind`
     kind_evidence: list[str] = []          # noqa: RUF012 - human-readable reasons for `kind`
+    kind_hint: str = ""                    # advisory: "author" | "series" | "ambiguous" | ""
+    kind_hint_confidence: float = 0.0
+    kind_hint_evidence: list[str] = []      # noqa: RUF012 - reasons for the hint
 
     @property
     def id(self) -> str:

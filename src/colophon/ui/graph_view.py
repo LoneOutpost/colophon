@@ -66,7 +66,10 @@ def render_graph(controller: AppController) -> None:
         roles = ", ".join(f"{n} {role}" for role, n in sorted(s.files_by_role.items()))
         summary.set_text(
             f"{s.directories} directories · "
-            f"{s.author_dirs} author · {s.grouping_dirs} grouping · "
+            f"{s.author_dirs} author · "
+            f"{s.grouping_dirs} grouping "
+            f"({s.grouping_author_hint} author? · {s.grouping_series_hint} series? · "
+            f"{s.grouping_ambiguous_hint} ambiguous?) · "
             f"{s.container_dirs} container · {s.title_dirs} title · "
             f"{s.unknown_dirs} unknown · {s.books} books · files: {roles or 'none'}"
         )

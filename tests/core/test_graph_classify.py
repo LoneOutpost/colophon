@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, DetectedWork, SeriesRef
 
 
 def _g() -> Graph:
@@ -184,3 +184,127 @@ def test_shape_prior_flags_off_pattern_grouping():
     series_node = g.directories[DirectoryNode.id_for(series)]
     assert series_node.kind == "grouping"
     assert any("off-pattern" in e for e in series_node.kind_evidence)
+
+
+def _series_book(g, folder, title, series=None, seq=None, via="series"):
+    d = _dir(g, folder)
+    b = BookUnit.new(source_folder=folder)
+    b.title = title
+    if series and via == "series":
+        b.series = [SeriesRef(name=series, sequence=seq)]
+    elif series and via == "detected":
+        b.detected_works = [DetectedWork(label=title, series=series, sequence=seq, files=[])]
+    bn = BookNode(id=f"{folder}|{title}", book=b, dir_id=d.id)
+    g.books[bn.id] = bn
+    d.books.append(bn.id)
+
+
+def test_hint_series_for_one_series_with_ramp():
+    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+
+    root = Path("/lib")
+    series = root / "Mistborn"
+    g = _g()
+    for i, t in enumerate(("Final Empire", "Well of Ascension", "Hero of Ages"), start=1):
+        _link(g, series, series / t)
+        _series_book(g, series / t, t, series="Mistborn", seq=float(i))
+    _link(g, root, series)
+
+    classify_graph(g, root=root)
+    hint_grouping_kinds(g)
+
+    node = g.directories[DirectoryNode.id_for(series)]
+    assert node.kind == "grouping"
+    assert node.kind_hint == "series"
+    assert any("Mistborn" in e for e in node.kind_hint_evidence)
+
+
+def test_hint_author_for_multiple_series():
+    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+
+    root = Path("/lib")
+    author = root / "Brandon Sanderson"
+    g = _g()
+    for t, s, q in [("Final Empire", "Mistborn", 1.0), ("Well of Ascension", "Mistborn", 2.0),
+                    ("Way of Kings", "Stormlight", 1.0)]:
+        _link(g, author, author / t)
+        _series_book(g, author / t, t, series=s, seq=q)
+    _link(g, root, author)
+
+    classify_graph(g, root=root)
+    hint_grouping_kinds(g)
+
+    node = g.directories[DirectoryNode.id_for(author)]
+    assert node.kind == "grouping"
+    assert node.kind_hint == "author"
+
+
+def test_hint_author_for_standalone_titles():
+    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+
+    root = Path("/lib")
+    author = root / "Doris Kearns Goodwin"
+    g = _g()
+    for t in ("Team of Rivals", "Leadership", "The Bully Pulpit"):
+        _link(g, author, author / t)
+        _series_book(g, author / t, t)
+    _link(g, root, author)
+
+    classify_graph(g, root=root)
+    hint_grouping_kinds(g)
+
+    node = g.directories[DirectoryNode.id_for(author)]
+    assert node.kind == "grouping"
+    assert node.kind_hint == "author"
+    assert node.kind_hint_confidence == 0.6
+
+
+def test_hint_ambiguous_one_series_no_ramp():
+    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+
+    root = Path("/lib")
+    grp = root / "Some Collection"
+    g = _g()
+    for t in ("A", "B"):
+        _link(g, grp, grp / t)
+        _series_book(g, grp / t, t, series="Some Collection", seq=None)
+    _link(g, root, grp)
+
+    classify_graph(g, root=root)
+    hint_grouping_kinds(g)
+
+    node = g.directories[DirectoryNode.id_for(grp)]
+    assert node.kind == "grouping"
+    assert node.kind_hint == "ambiguous"
+
+
+def test_hint_uses_detected_works_fallback():
+    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+
+    root = Path("/lib")
+    series = root / "Mistborn"
+    g = _g()
+    for i, t in enumerate(("Final Empire", "Well of Ascension"), start=1):
+        _link(g, series, series / t)
+        _series_book(g, series / t, t, series="Mistborn", seq=float(i), via="detected")
+    _link(g, root, series)
+
+    classify_graph(g, root=root)
+    hint_grouping_kinds(g)
+
+    assert g.directories[DirectoryNode.id_for(series)].kind_hint == "series"
+
+
+def test_hint_only_on_grouping_nodes():
+    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+
+    root = Path("/lib")
+    g = _g()
+    _link(g, root, root / "Dune")
+    _series_book(g, root / "Dune", "Dune")
+
+    classify_graph(g, root=root)
+    hint_grouping_kinds(g)
+
+    assert g.directories[DirectoryNode.id_for(root / "Dune")].kind == "title"
+    assert g.directories[DirectoryNode.id_for(root / "Dune")].kind_hint == ""
