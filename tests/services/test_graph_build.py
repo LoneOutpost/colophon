@@ -177,3 +177,23 @@ def test_build_graph_threads_new_only_scope(tmp_path):
     g = build_graph(repo, ingest, template="$Author - $Title",
                     options=ScanOptions(scope=ScanScope.NEW_ONLY))
     assert g.books == {}  # known folder skipped → no book nodes
+
+
+def test_build_graph_materializes_ancestor_dirs(tmp_path):
+    from colophon.core.graph import DirectoryNode
+
+    ingest = tmp_path / "ingest"
+    folder = ingest / "up" / "Author" / "book"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+
+    g = build_graph(_repo(tmp_path), ingest, template="$Author - $Title")
+
+    up_id = DirectoryNode.id_for(ingest / "up")
+    author_id = DirectoryNode.id_for(ingest / "up" / "Author")
+    book_id = DirectoryNode.id_for(folder)
+    assert up_id in g.directories and author_id in g.directories
+    assert author_id in g.directories[up_id].child_dirs       # up -> Author
+    assert book_id in g.directories[author_id].child_dirs      # Author -> book
+    assert DirectoryNode.id_for(ingest) in g.directories       # root materialized
+    assert DirectoryNode.id_for(ingest.parent) not in g.directories  # stops at root
