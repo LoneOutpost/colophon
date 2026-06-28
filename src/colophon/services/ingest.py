@@ -306,6 +306,7 @@ def plan_rescan_books(
     template: str,
     directory_scheme: str,
     root_for: Callable[[BookUnit], Path],
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> ScanPlan:
     """Re-process exactly `books` (selection-scoped).
 
@@ -316,7 +317,10 @@ def plan_rescan_books(
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     plan = ScanPlan()
-    for book in books:
+    total = len(books)
+    for i, book in enumerate(books, start=1):
+        if progress is not None:
+            progress(i, total, book.title or book.source_folder.name)
         units = group_book_units(book.source_folder)
         unit_files = next((u.files for u in units if u.folder == book.source_folder), [])
         before_empty = _empty_fields(book)

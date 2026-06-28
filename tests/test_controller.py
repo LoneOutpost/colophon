@@ -2579,3 +2579,36 @@ def test_graph_for_builds_and_resolves_author_subtree(tmp_path):
     }
     assert {"The Gunslinger", "Wizard and Glass"} <= book_titles
     ctx.close()
+
+
+def test_scan_preview_forwards_progress(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ingest = tmp_path / "ingest"
+    (ingest / "Dune").mkdir(parents=True)
+    (ingest / "Dune" / "01.mp3").write_bytes(b"")
+    (ingest / "Legion").mkdir(parents=True)
+    (ingest / "Legion" / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+
+    calls: list[tuple[int, int, str]] = []
+    ctrl.scan_preview(progress=lambda d, t, label: calls.append((d, t, label)))
+    assert {label for _, _, label in calls} == {"Dune", "Legion"}
+    ctx.close()
+
+
+async def test_scan_preview_streamed_returns_plan_and_emits_progress(tmp_path):
+    import asyncio
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ingest = tmp_path / "ingest"
+    (ingest / "Dune").mkdir(parents=True)
+    (ingest / "Dune" / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+
+    calls: list[tuple[int, int, str]] = []
+    plan = await ctrl.scan_preview_streamed(progress=lambda d, t, label: calls.append((d, t, label)))
+    await asyncio.sleep(0)  # let the call_soon_threadsafe callbacks run
+    assert plan.new_books == 1
+    assert calls and calls[-1][1] == 1   # total == 1 folder
+    ctx.close()
