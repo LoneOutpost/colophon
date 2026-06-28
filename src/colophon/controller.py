@@ -25,6 +25,8 @@ from colophon.core.confidence import IdentificationOutcome, score_identification
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
+from colophon.core.graph import Graph
+from colophon.core.graph_resolve import resolve_graph_authors
 from colophon.core.models import (
     BookState,
     BookUnit,
@@ -83,6 +85,7 @@ from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
 from colophon.services.encode import encode_book
+from colophon.services.graph_build import build_graph
 from colophon.services.ingest import (
     ScanOptions,
     ScanPlan,
@@ -1163,6 +1166,23 @@ class AppController:
             if s.name == name:
                 return _label_for(s)
         return _SOURCE_LABELS.get(name, name.replace("_", " ").title())
+
+    def graph_roots(self) -> list[Path]:
+        """The configured scan paths, for the graph-view root selector."""
+        return list(self.ctx.config.scan_paths)
+
+    def graph_for(self, root: Path) -> Graph:
+        """Build (without persisting) the entity graph for one scan root and run the
+        directory classification + author inheritance, so the diagnostic view reflects
+        the resolved graph (AUTHOR dirs, graphing authors). Blocking — call via
+        asyncio.to_thread."""
+        graph = build_graph(
+            self.ctx.books, root,
+            template=self.ctx.config.filename_template,
+            directory_scheme=self.ctx.config.directory_scheme,
+        )
+        resolve_graph_authors(graph, [bn.book for bn in graph.books.values()], root=root)
+        return graph
 
     def review_threshold(self) -> float:
         """The confidence threshold above which a match is auto-checked / a book is Ready."""
