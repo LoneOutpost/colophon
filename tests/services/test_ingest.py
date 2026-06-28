@@ -460,3 +460,29 @@ def test_scan_cleans_gunslinger_title_and_label(tmp_path: Path):
     book = units[0]
     assert book.title == "The Gunslinger"                       # folder-name title cleaned
     assert book.detected_works[0].label == "The Gunslinger"     # single-file label fixed
+
+
+def test_scan_infers_buried_author_into_untagged_sibling(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    coll = ingest / "up" / "Stephen King" / "-collection-"
+    tagged = coll / "The Gunslinger"
+    untagged = coll / "Wizard and Glass"
+    tagged.mkdir(parents=True)
+    untagged.mkdir(parents=True)
+    f = tagged / "01.mp3"
+    f.write_bytes(b"")
+    id3 = ID3()
+    id3.add(TPE1(encoding=3, text=["Stephen King"]))
+    id3.save(f)
+    (untagged / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, ingest, template="$Author - $Title")
+    by_folder = {u.source_folder: u for u in units}
+
+    tagged_book = by_folder[tagged]
+    untagged_book = by_folder[untagged]
+    assert tagged_book.authors == ["Stephen King"]
+    assert tagged_book.provenance["authors"] == "tag"            # own tag wins
+    assert untagged_book.authors == ["Stephen King"]             # inherited
+    assert untagged_book.provenance["authors"] == "graphing"

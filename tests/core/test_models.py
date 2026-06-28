@@ -224,3 +224,8 @@ def test_book_state_has_encoded_between_ready_and_organized():
     members = list(BookState)
     assert members.index(BookState.ENCODED) > members.index(BookState.READY)
     assert members.index(BookState.ENCODED) < members.index(BookState.ORGANIZED)
+
+
+def test_provenance_has_graphing_tier():
+    from colophon.core.models import Provenance
+    assert Provenance.GRAPHING.value == "graphing"

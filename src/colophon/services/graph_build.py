@@ -59,6 +59,21 @@ def _leaves_for(book: BookUnit) -> list[tuple[BookUnit, list[Path]]]:
     return [(book, [sf.path for sf in book.source_files])]
 
 
+def _ensure_ancestors(g: Graph, folder: Path, root: Path) -> None:
+    """Materialize folder's ancestor DirectoryNodes up to (and including) root, linking
+    each child dir into its parent's child_dirs. Idempotent; stops at root."""
+    child = folder
+    while child != root and root in child.parents:
+        parent = child.parent
+        pnode = g.directories.setdefault(
+            DirectoryNode.id_for(parent), DirectoryNode(path=parent)
+        )
+        cid = DirectoryNode.id_for(child)
+        if cid not in pnode.child_dirs:
+            pnode.child_dirs.append(cid)
+        child = parent
+
+
 def build_graph(
     repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
     options: ScanOptions | None = None, inference_root: Path | None = None,
@@ -74,6 +89,7 @@ def build_graph(
             DirectoryNode.id_for(book.source_folder),
             DirectoryNode(path=book.source_folder),
         )
+        _ensure_ancestors(g, book.source_folder, root)
         file_id_by_path: dict[Path, str] = {}
         for sf in book.source_files:
             fn = FileNode(

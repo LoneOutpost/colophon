@@ -1,0 +1,64 @@
+"""Classify AUTHOR directories from descendant evidence, then inherit the author into a
+subtree's empty-or-weak-author books (GRAPHING). Depth-independent; see the Phase 3b
+design. A pure pass over a built Graph and the scan's resolved books."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from colophon.core.graph import DirectoryNode, Graph
+from colophon.core.models import BookUnit, Provenance
+from colophon.core.normalize import normalize_name
+
+_STRONG = {Provenance.TAG.value, Provenance.DATAFILE.value}
+_WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
+
+
+def _name_key(name: str) -> str:
+    """Comparison key tolerant of 'Last, First' vs 'First Last', case, and spacing."""
+    s = name.strip()
+    if "," in s:
+        last, _, first = s.partition(",")
+        s = f"{first.strip()} {last.strip()}"
+    return normalize_name(s).casefold()
+
+
+def _ancestors(graph: Graph, folder: Path, root: Path) -> list[DirectoryNode]:
+    """The DirectoryNodes from `folder` up to (and including) root, nearest first."""
+    out: list[DirectoryNode] = []
+    cur: Path | None = folder
+    while cur is not None:
+        node = graph.directories.get(DirectoryNode.id_for(cur))
+        if node is not None:
+            out.append(node)
+        if cur == root:
+            break
+        cur = cur.parent if root in cur.parents else None
+    return out
+
+
+def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
+    """Up: a dir whose name matches a TAG/DATAFILE author of a descendant book is AUTHOR.
+    Down: fill each empty-or-weak-author book from its nearest AUTHOR ancestor (GRAPHING)."""
+    # Up — classify AUTHOR nodes from strong descendant evidence.
+    for book in books:
+        if book.provenance.get("authors") not in _STRONG or not book.authors:
+            continue
+        keys = {_name_key(a): a for a in book.authors}
+        for node in _ancestors(graph, book.source_folder, root):
+            matched = keys.get(_name_key(node.path.name))
+            if matched is not None and node.kind != "author":
+                node.kind = "author"
+                node.author = matched
+
+    # Down — inherit into empty/weak-author books from the nearest AUTHOR ancestor.
+    for book in books:
+        prov = book.provenance.get("authors")
+        if book.authors and prov not in _WEAK:
+            continue  # keep TAG/DATAFILE/GRAPHING/MANUAL authors untouched
+        for node in _ancestors(graph, book.source_folder, root):
+            if node.kind == "author" and node.author:
+                if book.authors != [node.author]:
+                    book.authors = [node.author]
+                    book.provenance["authors"] = Provenance.GRAPHING.value
+                break
