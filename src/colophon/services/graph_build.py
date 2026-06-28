@@ -18,7 +18,7 @@ from colophon.core.models import (
     Provenance,
     SeriesRef,
 )
-from colophon.services.ingest import plan_scan
+from colophon.services.ingest import ScanOptions, plan_scan
 
 
 def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUnit:
@@ -32,9 +32,14 @@ def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUni
     leaf.title = work.label
     leaf.provenance["title"] = Provenance.FILENAME.value
     leaf.detected_works = [work]
-    if work.author:
+    if work.author:                       # the work named its own author
         leaf.authors = [work.author]
         leaf.provenance["authors"] = Provenance.FILENAME.value
+    elif container.authors:               # else inherit the container's resolved author
+        leaf.authors = list(container.authors)
+        leaf.provenance["authors"] = container.provenance.get(
+            "authors", Provenance.DIRECTORY.value
+        )
     if work.series:
         leaf.series = [SeriesRef(name=work.series, sequence=work.sequence)]
         leaf.provenance["series"] = Provenance.FILENAME.value
@@ -55,10 +60,14 @@ def _leaves_for(book: BookUnit) -> list[tuple[BookUnit, list[Path]]]:
 
 
 def build_graph(
-    repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = ""
+    repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
+    options: ScanOptions | None = None, inference_root: Path | None = None,
 ) -> Graph:
     """Run a (non-persisting) scan and wrap each BookUnit in Directory/File/Book nodes."""
-    plan = plan_scan(repo, root, template=template, directory_scheme=directory_scheme)
+    plan = plan_scan(
+        repo, root, template=template, directory_scheme=directory_scheme,
+        options=options, inference_root=inference_root,
+    )
     g = Graph()
     for book in plan.units:
         d = g.directories.setdefault(

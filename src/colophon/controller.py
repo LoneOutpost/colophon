@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
@@ -27,7 +26,6 @@ from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.models import (
-    RESTRUCTURE_FINDINGS,
     BookState,
     BookUnit,
     ConfidenceSignal,
@@ -35,7 +33,6 @@ from colophon.core.models import (
     Finding,
     FindingCode,
     FindingSeverity,
-    FolderKind,
     OperationRecord,
     Phase,
     PhaseState,
@@ -86,22 +83,13 @@ from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
 )
 from colophon.services.encode import encode_book
-from colophon.services.foster import (
-    FosterResult,
-    FosterUndoResult,
-    RestructureResult,
-    derive_book_fields,
-    foster_one,
-    foster_work,
-    unfoster_work,
-)
 from colophon.services.ingest import (
     ScanOptions,
     ScanPlan,
     ScanScope,
     commit_scan,
     plan_rescan_books,
-    plan_scan,
+    plan_scan_graph,
     refresh_local,
     scan_ingest,
 )
@@ -120,20 +108,7 @@ from colophon.services.undo import undo_batch
 logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
-_OP_FOSTER = "foster"  # audit-log op_type for a pre-match foster move
 _MATCH_CONCURRENCY = 8  # max books scanned concurrently during Identify/Quick Match
-
-
-@dataclass
-class WorkRow:
-    label: str
-    files: int
-
-
-@dataclass
-class FosterPlan:
-    author: str | None
-    works: list[WorkRow]
 
 
 class CoverSetResult(_Base):
@@ -268,7 +243,7 @@ class AppController:
         roots = roots or self.ctx.config.scan_paths
         combined = ScanPlan()
         for root in roots:
-            plan = plan_scan(
+            plan = plan_scan_graph(
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
                 options=options, inference_root=self._scan_root_for_path(root),
             )
@@ -277,11 +252,12 @@ class AppController:
             combined.existing_books += plan.existing_books
             combined.fields_filled += plan.fields_filled
             combined.files_added += plan.files_added
+            combined.reconciled_folders |= plan.reconciled_folders
         return combined
 
     def apply_scan(self, plan: ScanPlan) -> int:
         """Persist a previously-computed scan plan; returns the number written."""
-        return commit_scan(self.ctx.books, plan)
+        return commit_scan(self.ctx.books, plan, reconcile=True)
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
@@ -837,54 +813,6 @@ class AppController:
         self.ctx.books.upsert(book)
         return new
 
-    def foster_files(self, paths: list[Path]) -> list[FosterResult]:
-        """Move each loose file into its own stem-named subdirectory, then
-        re-scan affected parents so the new single-file books register.
-
-        Re-scanning a parent updates its book to the remaining loose files (or,
-        if none remain, leaves a stale book that `scan_ingest` won't touch -- so
-        we prune any parent folder that no longer directly contains audio).
-        Returns one FosterResult per input path; a failure on one file does not
-        abort the batch.
-        """
-        results: list[FosterResult] = []
-        parents: set[Path] = set()
-        for path in paths:
-            try:
-                destination = foster_one(path)
-            except (OSError, ValueError) as e:
-                logger.warning(f"foster failed for {path}: {e}")
-                results.append(FosterResult(source=path, ok=False, error=str(e)))
-                continue
-            results.append(FosterResult(source=path, destination=destination, ok=True))
-            parents.add(path.parent)
-
-        template = self.ctx.config.filename_template
-        for parent in parents:
-            # scan_ingest walks the parent's full subtree (os.walk), so this both
-            # registers the new child book(s) and refreshes the parent's own book.
-            # Inference depth is measured from `parent` here (not the configured
-            # scan root), so a multi-segment directory_scheme generally won't match
-            # on a foster re-scan; a later full scan re-derives it. This only ever
-            # yields fewer inferences, never wrong ones (inference is weak evidence).
-            scan_ingest(
-                self.ctx.books,
-                parent,
-                template=template,
-                directory_scheme=self.ctx.config.directory_scheme,
-            )
-            if not self._has_direct_audio(parent):
-                self.ctx.books.delete(BookUnit.id_for(parent))
-        return results
-
-    @staticmethod
-    def _has_direct_audio(folder: Path) -> bool:
-        """True if `folder` directly contains at least one audio file."""
-        try:
-            return any(is_audio_file(c) for c in folder.iterdir() if c.is_file())
-        except OSError:
-            return False
-
     _SEVERITY_RANK: ClassVar[dict[FindingSeverity, int]] = {
         FindingSeverity.ERROR: 0,
         FindingSeverity.WARN: 1,
@@ -894,27 +822,6 @@ class AppController:
     def _active_findings(self, book: BookUnit) -> list[Finding]:
         """Findings not dismissed via acknowledge."""
         return [f for f in book.findings if f.code not in book.acknowledged_findings]
-
-    def is_fosterable(self, book: BookUnit) -> bool:
-        """A foster container: an active restructure finding plus detected works."""
-        return bool(book.detected_works) and any(
-            f.code in RESTRUCTURE_FINDINGS for f in self._active_findings(book)
-        )
-
-    def fosterable_plan(self, book: BookUnit) -> FosterPlan | None:
-        """Read-only preview of a foster: the identified author and per-work rows,
-        or None when the book is not a foster container."""
-        if not self.is_fosterable(book):
-            return None
-        author = book.authors[0] if book.authors else None
-        works = [WorkRow(label=w.label, files=len(w.files)) for w in book.detected_works]
-        return FosterPlan(author=author, works=works)
-
-    def fosterable_books(self, books: list[BookUnit] | None = None) -> list[BookUnit]:
-        """Foster containers among `books` (default: the whole library), for the
-        pre-match gate."""
-        pool = self.ctx.books.list_all() if books is None else books
-        return [b for b in pool if self.is_fosterable(b)]
 
     def books_needing_attention(self) -> list[BookUnit]:
         """All books carrying at least one un-acknowledged finding, most severe first."""
@@ -930,130 +837,6 @@ class AppController:
             book.acknowledged_findings = [*book.acknowledged_findings, code]
             book.touch()
             self.ctx.books.upsert(book)
-
-    def foster_book(self, book: BookUnit) -> RestructureResult:
-        """Foster each detected work in `book` into its own subfolder (a deliberate
-        pre-match action), re-scan the parent so the new books register, propagate
-        the container author to the children, and record the moves for audit."""
-        result = RestructureResult()
-        parent = book.source_folder
-        original_kind = book.folder_kind
-        batch_id = new_batch_id()
-        for work in book.detected_works:
-            target = parent / work.label
-            try:
-                dests = foster_work(work.files, parent, work.label)
-                result.fostered += len(dests)
-                target = dests[0].parent if dests else target
-                self.ctx.operations.record(OperationRecord(
-                    batch_id=batch_id, book_id=book.id, op_type=_OP_FOSTER,
-                    target=str(target), before=str(parent), after=str(target),
-                    outcome="ok",
-                ))
-            except OSError as e:
-                logger.warning(f"foster failed for {work.label} in {parent}: {e}")
-                result.failures.append(
-                    FosterResult(source=target, ok=False, error=str(e))
-                )
-                self.ctx.operations.record(OperationRecord(
-                    batch_id=batch_id, book_id=book.id, op_type=_OP_FOSTER,
-                    target=str(target), before=str(parent), after=None,
-                    outcome="error", detail=str(e),
-                ))
-        # Re-scan the parent so the new subfolder books register and the parent
-        # book refreshes; prune the parent if no audio remains directly in it.
-        template = self.ctx.config.filename_template
-        new_units = scan_ingest(
-            self.ctx.books, parent, template=template,
-            directory_scheme=self.ctx.config.directory_scheme,
-        )
-        if original_kind is not FolderKind.TITLE:
-            for child in new_units:
-                if (child.source_folder.parent == parent
-                        and child.source_folder != parent and not child.authors):
-                    child.authors = [parent.name]
-                    child.provenance["authors"] = Provenance.DIRECTORY.value
-                    child.touch()
-                    self.ctx.books.upsert(child)
-        if not self._has_direct_audio(parent):
-            self.ctx.books.delete(BookUnit.id_for(parent))
-        result.batch_id = batch_id
-        return result
-
-    def undo_foster(self, batch_id: str) -> FosterUndoResult:
-        """Reverse a foster batch: move each work's files back to the parent,
-        delete the child books, then re-scan the parent so the container
-        re-registers. Idempotent via the operations-log `reverted` flag."""
-        result = FosterUndoResult()
-        parents: set[Path] = set()
-        for op in self.ctx.operations.list_batch(batch_id):
-            if op.op_type != _OP_FOSTER or op.outcome != "ok":
-                continue
-            subfolder = Path(op.target)
-            parent = Path(op.before) if op.before else subfolder.parent
-            if not subfolder.exists():
-                logger.warning(f"undo_foster: {subfolder} is gone; skipping")
-                result.failures.append(str(subfolder))
-                continue
-            result.restored += len(unfoster_work(subfolder, parent))
-            self.ctx.books.delete(BookUnit.id_for(subfolder))
-            result.books_removed += 1
-            parents.add(parent)
-        template = self.ctx.config.filename_template
-        for parent in parents:
-            scan_ingest(
-                self.ctx.books, parent, template=template,
-                directory_scheme=self.ctx.config.directory_scheme,
-            )
-        self.ctx.operations.mark_reverted(batch_id)
-        return result
-
-    def _restructure_sync(
-        self, paths: list[Path], author_override: str | None
-    ) -> tuple[list[FosterResult], list[BookUnit]]:
-        """Foster `paths`, then set author/title on each new book. Returns the
-        foster results and the new books. Blocking; call via asyncio.to_thread."""
-        results = self.foster_files(paths)
-        new_books: list[BookUnit] = []
-        for r in results:
-            if not r.ok or r.destination is None:
-                continue
-            book_id = BookUnit.id_for(r.destination.parent)
-            book = self.ctx.books.get(book_id)
-            if book is None:
-                logger.warning(f"restructure: no book found at {r.destination.parent}")
-                continue
-            author, title = derive_book_fields(r.destination, author_override)
-            self.save_fields(book, {"author": author, "title": title})
-            refreshed = self.ctx.books.get(book_id)
-            if refreshed is not None:
-                new_books.append(refreshed)
-        return results, new_books
-
-    async def restructure_as_books(
-        self,
-        paths: list[Path],
-        *,
-        author_override: str | None = None,
-        write_tags: bool = False,
-    ) -> RestructureResult:
-        """Foster each file into its own book directory, set author (from the
-        file's containing folder, or `author_override`) and a normalized title,
-        and optionally write the corrected tags. The blocking disk work runs in a
-        worker thread; the optional retag is awaited."""
-        results, new_books = await asyncio.to_thread(
-            self._restructure_sync, paths, author_override
-        )
-        retagged = 0
-        if write_tags and new_books:
-            tag_results = await self.write_tags_books(new_books)
-            retagged = sum(t.written for t in tag_results)
-        return RestructureResult(
-            fostered=sum(1 for r in results if r.ok),
-            retagged=retagged,
-            failures=[r for r in results if not r.ok],
-            book_ids=[b.id for b in new_books],
-        )
 
     def tag_plan(self, book: BookUnit) -> TagPlan:
         """The dry-run preview of writing this book's metadata into its files."""
@@ -1181,15 +964,14 @@ class AppController:
 
     def identify_candidates(self) -> list[BookUnit]:
         """Books eligible for Identify: not manually confirmed, not organized, with a
-        title to query, not already matched (MATCH fresh), and not a foster container
-        (a multi-book folder must be fostered before its books can be matched)."""
+        title to query, and not already matched (MATCH fresh). Multi-book folders are
+        split into per-work leaves at scan, so each leaf is matched on its own."""
         return [
             b for b in self.ctx.books.list_all()
             if not b.manually_confirmed
             and b.output_path is None
             and b.title
             and state_of(b, Phase.MATCH) is not PhaseState.FRESH
-            and not self.is_fosterable(b)
         ]
 
     async def identify_preview(

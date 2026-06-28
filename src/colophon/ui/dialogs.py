@@ -923,30 +923,6 @@ async def identify_dialog(
     """Preview source matches for unidentified books with a live per-book log, then apply
     (fill empties, route review) or retry the books that found no match."""
     candidates = controller.identify_candidates()
-    pending = controller.fosterable_books()
-    if not candidates and not pending:
-        ui.notify("Nothing to identify")
-        return
-
-    if pending:
-        with ui.dialog() as gate, ui.card():
-            ui.label(
-                f"{len(pending)} item(s) are marked fosterable. "
-                "Foster them before matching?"
-            ).classes("text-subtitle2")
-            with ui.row().classes("justify-end w-full"):
-                ui.button("Cancel", on_click=lambda: gate.submit("cancel")).props("flat")
-                ui.button("Skip", on_click=lambda: gate.submit("skip")).props("flat")
-                ui.button("Foster", on_click=lambda: gate.submit("foster")).props("color=primary")
-        choice = await gate
-        if choice == "cancel" or choice is None:
-            return
-        if choice == "foster":
-            for b in pending:
-                controller.foster_book(b)
-            refresh_all()
-            candidates = controller.identify_candidates()
-
     if not candidates:
         ui.notify("Nothing to identify")
         return

@@ -43,6 +43,7 @@ class ScanPlan:
     existing_books: int = 0
     fields_filled: int = 0
     files_added: int = 0
+    reconciled_folders: set[Path] = field(default_factory=set)
 
 
 class ScanScope(StrEnum):
@@ -303,15 +304,109 @@ def plan_rescan_books(
     return plan
 
 
-def commit_scan(repo: BookUnitRepo, plan: ScanPlan) -> int:
-    """Persist a computed plan; returns the number of books written."""
+def _adopt_and_identify(
+    unit: BookUnit, repo: BookUnitRepo, *, root: Path, pattern: object, scheme: object,
+) -> BookUnit:
+    """Return the unit to persist for one projected BookUnit.
+
+    A SINGLE/UNKNOWN container arrives already identified (plan_scan ran its phases and
+    merged existing state) — pass it through. A fresh leaf (IDENTIFY not FRESH) is
+    merged onto its persisted counterpart (by leaf id) so prior app state survives,
+    then identified on its own file subset. A leaf persists even if IDENTIFY fails."""
+    if state_of(unit, Phase.IDENTIFY) is PhaseState.FRESH:
+        return unit  # already-identified container (the SINGLE path)
+
+    existing = repo.get(unit.id)
+    if existing is not None:
+        # Existing leaf is the base: keep cover/confidence/state/manual edits and any
+        # filled identity. Refresh only the structural fields the new split provides,
+        # and fill the seeded identity where the existing row left it empty.
+        existing.source_files = unit.source_files
+        existing.content_kind = unit.content_kind
+        existing.detected_works = unit.detected_works
+        if not existing.title and unit.title:
+            existing.title = unit.title
+            existing.provenance["title"] = unit.provenance.get("title", "")
+        if not existing.authors and unit.authors:
+            existing.authors = list(unit.authors)
+            existing.provenance["authors"] = unit.provenance.get("authors", "")
+        if not existing.series and unit.series:
+            existing.series = list(unit.series)
+            existing.provenance["series"] = unit.provenance.get("series", "")
+        unit = existing
+
+    mark(unit, Phase.SEARCH, PhaseState.FRESH)      # files were probed at container level
+    mark(unit, Phase.CATEGORIZE, PhaseState.FRESH)  # being SINGLE is its categorization
+    try:
+        run_identify(unit, root=root, pattern=pattern, scheme=scheme)
+        mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
+    except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
+        logger.warning(f"leaf IDENTIFY failed for {unit.source_folder} [{unit.title!r}]: {e}")
+        mark(unit, Phase.IDENTIFY, PhaseState.FAILED, detail=str(e))
+    resync_state(unit)
+    unit.touch()
+    return unit
+
+
+def plan_scan_graph(
+    repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
+    options: ScanOptions | None = None, inference_root: Path | None = None,
+) -> ScanPlan:
+    """Graph-routed planner: persist `project(build_graph(...))` — single containers and
+    multi-book leaves — with per-leaf IDENTIFY and state preservation. `reconciled_folders`
+    are the folders it fully recomputed, so commit can prune what their unit set replaced."""
+    # Lazy import: graph_build imports plan_scan from this module, so a module-scope
+    # import of build_graph would create an import cycle.
+    from colophon.services.graph_build import build_graph, project
+
+    pattern = compile_template(template)
+    scheme = parse_scheme(directory_scheme)
+    inf_root = inference_root or root
+    graph = build_graph(
+        repo, root, template=template, directory_scheme=directory_scheme,
+        options=options, inference_root=inference_root,
+    )
+    plan = ScanPlan()
+    for unit in project(graph):
+        existing = repo.get(unit.id)
+        before_empty = _empty_fields(existing) if existing is not None else set()
+        prior_paths = {sf.path for sf in existing.source_files} if existing is not None else set()
+        adopted = _adopt_and_identify(unit, repo, root=inf_root, pattern=pattern, scheme=scheme)
+        if existing is not None:
+            plan.existing_books += 1
+            plan.fields_filled += len(before_empty - _empty_fields(adopted))
+        else:
+            plan.new_books += 1
+        plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
+        plan.units.append(adopted)
+        plan.reconciled_folders.add(adopted.source_folder)
+    return plan
+
+
+def commit_scan(repo: BookUnitRepo, plan: ScanPlan, *, reconcile: bool = False) -> int:
+    """Persist a computed plan; returns the number of books written.
+
+    With `reconcile`, for each folder the plan fully recomputed (`reconciled_folders`)
+    every persisted book in that folder whose id is not in the plan's new unit set is
+    deleted first — pruning a stale container that flipped to leaves, or a leaf the
+    re-cluster no longer produces. A pruned id is never one we re-upsert."""
+    if reconcile:
+        keep_by_folder: dict[Path, set[str]] = {}
+        for book in plan.units:
+            keep_by_folder.setdefault(book.source_folder, set()).add(book.id)
+        for folder in plan.reconciled_folders:
+            keep = keep_by_folder.get(folder, set())
+            for stale_id in repo.ids_in_folder(folder) - keep:
+                repo.delete(stale_id)
     for book in plan.units:
         repo.upsert(book)
     return len(plan.units)
 
 
 def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> list[BookUnit]:
-    """Plan and commit a scan of `root` in one call; returns the persisted units."""
-    plan = plan_scan(repo, root, template=template, directory_scheme=directory_scheme)
-    commit_scan(repo, plan)
+    """Plan and commit a scan of `root` in one call; returns the persisted units.
+    Routes through the entity graph: multi-book folders persist as leaves, the stale
+    container is pruned, existing leaf state is preserved."""
+    plan = plan_scan_graph(repo, root, template=template, directory_scheme=directory_scheme)
+    commit_scan(repo, plan, reconcile=True)
     return plan.units

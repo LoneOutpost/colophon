@@ -945,61 +945,6 @@ def test_rename_file_bad_name_returns_none(tmp_path):
     ctx.close()
 
 
-def test_foster_files_creates_subdir_books_and_updates_parent(tmp_path):
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Brandon Sanderson"
-    author.mkdir(parents=True)
-    (author / "Mistborn.mp3").write_bytes(b"")
-    (author / "Legion.mp3").write_bytes(b"")
-    ctrl = AppController(ctx)
-    ctrl.scan([author])  # one grouped book holding both loose files
-    grouped_id = BookUnit.new(source_folder=author).id
-    assert len(ctx.books.get(grouped_id).source_files) == 2
-
-    results = ctrl.foster_files([author / "Mistborn.mp3"])
-    assert len(results) == 1 and results[0].ok
-    assert results[0].destination == author / "Mistborn" / "Mistborn.mp3"
-
-    # The fostered file now scans as its own book...
-    fostered_id = BookUnit.new(source_folder=author / "Mistborn").id
-    assert ctx.books.get(fostered_id) is not None
-    # ...and the parent book retains only the remaining loose file.
-    parent_files = [sf.path.name for sf in ctx.books.get(grouped_id).source_files]
-    assert parent_files == ["Legion.mp3"]
-    ctx.close()
-
-
-def test_foster_files_prunes_parent_when_emptied(tmp_path):
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Solo Author"
-    author.mkdir(parents=True)
-    (author / "OnlyBook.mp3").write_bytes(b"")
-    ctrl = AppController(ctx)
-    ctrl.scan([author])
-    grouped_id = BookUnit.new(source_folder=author).id
-    assert ctx.books.get(grouped_id) is not None
-
-    ctrl.foster_files([author / "OnlyBook.mp3"])
-    # Parent folder now has no direct audio -> its stale book is removed.
-    assert ctx.books.get(grouped_id) is None
-    assert ctx.books.get(BookUnit.new(source_folder=author / "OnlyBook").id) is not None
-    ctx.close()
-
-
-def test_foster_files_reports_per_file_failure(tmp_path):
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Author"
-    author.mkdir(parents=True)
-    (author / "Book.mp3").write_bytes(b"")
-    (author / "Book").mkdir()  # collision: foster target already exists
-    ctrl = AppController(ctx)
-    results = ctrl.foster_files([author / "Book.mp3"])
-    assert len(results) == 1 and results[0].ok is False
-    assert results[0].error and results[0].destination is None
-    assert (author / "Book.mp3").exists()  # left in place
-    ctx.close()
-
-
 def test_tag_plan_and_write_tags_roundtrip(tmp_path):
     from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
     from colophon.core.models import EmbeddedTags, SourceFile
@@ -1450,75 +1395,6 @@ def test_known_genres_and_tags_distinct_sorted(tmp_path):
     ctrl = AppController(ctx)
     assert ctrl.known_genres() == ["Epic", "Fantasy"]
     assert ctrl.known_tags() == ["gift", "to-relisten"]
-    ctx.close()
-
-
-async def test_restructure_as_books_sets_author_title(tmp_path):
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Shiloh Walker"
-    author.mkdir(parents=True)
-    (author / "Burning Up.mp3").write_bytes(b"")
-    (author / "the-darkest-part.mp3").write_bytes(b"")
-    ctrl = AppController(ctx)
-    ctrl.scan([author])
-    result = await ctrl.restructure_as_books(
-        [author / "Burning Up.mp3", author / "the-darkest-part.mp3"]
-    )
-    assert result.fostered == 2
-    b1 = ctx.books.get(BookUnit.new(source_folder=author / "Burning Up").id)
-    b2 = ctx.books.get(BookUnit.new(source_folder=author / "the-darkest-part").id)
-    assert b1.authors == ["Shiloh Walker"] and b1.title == "Burning Up"
-    assert b2.authors == ["Shiloh Walker"] and b2.title == "The Darkest Part"
-    assert set(result.book_ids) == {b1.id, b2.id}
-    ctx.close()
-
-
-async def test_restructure_as_books_author_override(tmp_path):
-    ctx = _ctx(tmp_path)
-    folder = tmp_path / "ingest" / "TE_Audiobooks_S"
-    folder.mkdir(parents=True)
-    (folder / "Book One.mp3").write_bytes(b"")
-    ctrl = AppController(ctx)
-    result = await ctrl.restructure_as_books(
-        [folder / "Book One.mp3"], author_override="Shiloh Walker"
-    )
-    b = ctx.books.get(BookUnit.new(source_folder=folder / "Book One").id)
-    assert b.authors == ["Shiloh Walker"]
-    assert b.title == "Book One"
-    assert result.fostered == 1
-    ctx.close()
-
-
-async def test_restructure_as_books_writes_tags(tmp_path):
-    from colophon.adapters.tags import read_embedded_tags
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Shiloh Walker"
-    author.mkdir(parents=True)
-    (author / "Burning Up.mp3").write_bytes(b"")
-    ctrl = AppController(ctx)
-    result = await ctrl.restructure_as_books([author / "Burning Up.mp3"], write_tags=True)
-    dest = author / "Burning Up" / "Burning Up.mp3"
-    tags = read_embedded_tags(dest)
-    assert tags.title == "Burning Up"
-    assert tags.artist == "Shiloh Walker"
-    assert result.retagged == 1
-    ctx.close()
-
-
-async def test_restructure_as_books_reports_failure_without_aborting(tmp_path):
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Author"
-    author.mkdir(parents=True)
-    (author / "Good.mp3").write_bytes(b"")
-    (author / "Bad.mp3").write_bytes(b"")
-    (author / "Bad").mkdir()  # collision: foster target for Bad.mp3 already exists
-    ctrl = AppController(ctx)
-    result = await ctrl.restructure_as_books([author / "Good.mp3", author / "Bad.mp3"])
-    assert result.fostered == 1
-    assert len(result.failures) == 1
-    assert result.failures[0].source.name == "Bad.mp3"
-    good = ctx.books.get(BookUnit.new(source_folder=author / "Good").id)
-    assert good is not None and good.title == "Good"
     ctx.close()
 
 
@@ -2510,7 +2386,7 @@ async def test_scan_preview_honors_template_override(tmp_path, monkeypatch):
         captured["scheme"] = directory_scheme
         return ScanPlan()
 
-    monkeypatch.setattr(ctrl_mod, "plan_scan", fake_plan_scan)
+    monkeypatch.setattr(ctrl_mod, "plan_scan_graph", fake_plan_scan)
     AppController(ctx).scan_preview(template="$Title", directory_scheme="$Author")
     assert captured["template"] == "$Title"
     assert captured["scheme"] == "$Author"
@@ -2573,14 +2449,7 @@ def test_quick_match_scan_caps_concurrency(tmp_path):
 
 
 def test_identify_candidates_excludes_unmatchable(tmp_path):
-    from colophon.core.models import (
-        DetectedWork,
-        Finding,
-        FindingCode,
-        FindingSeverity,
-        Phase,
-        PhaseState,
-    )
+    from colophon.core.models import Phase, PhaseState
     from colophon.core.phases import mark
 
     ctx = _ctx(tmp_path)
@@ -2595,48 +2464,14 @@ def test_identify_candidates_excludes_unmatchable(tmp_path):
     matched.title = "Matched"
     mark(matched, Phase.MATCH, PhaseState.FRESH)
 
-    container = BookUnit.new(source_folder=tmp_path / "Author")
-    container.title = "Author"
-    container.detected_works = [
-        DetectedWork(label="A", files=[tmp_path / "Author" / "a.mp3"]),
-        DetectedWork(label="B", files=[tmp_path / "Author" / "b.mp3"]),
-    ]
-    container.findings = [
-        Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN, detail="x")
-    ]
-
     confirmed = BookUnit.new(source_folder=tmp_path / "conf")
     confirmed.title = "Confirmed"
     confirmed.manually_confirmed = True
 
-    for b in (plain, no_title, matched, container, confirmed):
+    for b in (plain, no_title, matched, confirmed):
         ctx.books.upsert(b)
 
     assert [b.id for b in ctrl.identify_candidates()] == [plain.id]
-
-
-def test_fosterable_books_defaults_to_whole_library(tmp_path):
-    from colophon.core.models import DetectedWork, Finding, FindingCode, FindingSeverity
-
-    ctx = _ctx(tmp_path)
-    ctrl = AppController(ctx)
-
-    container = BookUnit.new(source_folder=tmp_path / "Author")
-    container.title = "Author"
-    container.detected_works = [
-        DetectedWork(label="A", files=[tmp_path / "Author" / "a.mp3"]),
-        DetectedWork(label="B", files=[tmp_path / "Author" / "b.mp3"]),
-    ]
-    container.findings = [
-        Finding(code=FindingCode.MULTI_IN_UNDETERMINED, severity=FindingSeverity.WARN, detail="x")
-    ]
-    plain = BookUnit.new(source_folder=tmp_path / "plain")
-    plain.title = "Dune"
-    ctx.books.upsert(container)
-    ctx.books.upsert(plain)
-
-    assert [b.id for b in ctrl.fosterable_books()] == [container.id]
-    assert container.id not in {b.id for b in ctrl.identify_candidates()}
 
 
 def test_author_inferred_flag_blocks_ready(tmp_path):

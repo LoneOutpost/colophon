@@ -137,3 +137,43 @@ def test_single_book_folder_is_unchanged(tmp_path):
     assert b.id == BookUnit.id_for(dune)
     assert b.content_kind is not ContentKind.MULTI
     assert {sf.path.name for sf in b.source_files} == {"01.mp3", "02.mp3"}
+
+
+def test_leaf_inherits_container_author_when_work_has_none(tmp_path):
+    from colophon.core.models import Provenance
+    from colophon.services.graph_build import project
+
+    # An author folder of loose, untagged single-file works → MULTI container whose
+    # author IDENTIFY resolves to the folder name; leaves inherit it.
+    ingest = tmp_path / "ingest"
+    author = ingest / "Sarah Graves"
+    author.mkdir(parents=True)
+    for n in ("Dead Cat Bounce (Home Repair is Homicide 1).mp3",
+              "A Face at the Window (Home Repair is Homicide 12).mp3",
+              "Death by Chocolate Malted Milkshake (Death by Chocolate 2).mp3"):
+        (author / n).write_bytes(b"")
+
+    books = project(build_graph(_repo(tmp_path), ingest, template="$Author - $Title"))
+
+    assert len(books) == 3
+    for b in books:
+        assert b.authors == ["Sarah Graves"]
+        assert b.provenance["authors"] == Provenance.DIRECTORY.value
+
+
+def test_build_graph_threads_new_only_scope(tmp_path):
+    from colophon.core.models import BookUnit
+    from colophon.services.ingest import ScanOptions, ScanScope
+
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Dune"
+    dune.mkdir(parents=True)
+    (dune / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    # Pre-persist the Dune book so NEW_ONLY must skip it.
+    repo.upsert(BookUnit.new(source_folder=dune))
+
+    g = build_graph(repo, ingest, template="$Author - $Title",
+                    options=ScanOptions(scope=ScanScope.NEW_ONLY))
+    assert g.books == {}  # known folder skipped → no book nodes

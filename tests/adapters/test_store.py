@@ -262,3 +262,16 @@ def test_uncommitted_write_rebuilds_cache(tmp_path: Path):
     # can't leave the cache ahead of the DB; the next read rebuilds and includes it.
     repo.upsert(_titled(tmp_path / "second", "Second"), commit=False)
     assert sorted(x.title or "" for x in repo.list_all()) == ["First", "Second"]
+
+
+def test_ids_in_folder_returns_books_for_that_folder(tmp_path: Path):
+    repo = _repo(tmp_path)
+    a1 = BookUnit.new(source_folder=Path("/ingest/Author/BookA"))
+    a2 = BookUnit.new(source_folder=Path("/ingest/Author/BookB"))
+    other = BookUnit.new(source_folder=Path("/ingest/Elsewhere"))
+    for b in (a1, a2, other):
+        repo.upsert(b)
+
+    assert repo.ids_in_folder(Path("/ingest/Author/BookA")) == {a1.id}
+    assert repo.ids_in_folder(Path("/ingest/Elsewhere")) == {other.id}
+    assert repo.ids_in_folder(Path("/ingest/Nowhere")) == set()

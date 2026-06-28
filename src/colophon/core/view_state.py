@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_VIEW = {"mode": "library", "cwd": None, "multiselect": False, "group_by": "author"}
+_DEFAULT_VIEW = {"multiselect": False, "group_by": "author"}
 
 
 @dataclass
@@ -24,14 +24,11 @@ def view_to_snapshot(
     *, scope: dict[str, Any], folder_filter: dict[str, Any], view: dict[str, Any],
     filter_text: str, selected_ids: set[str], open_book_id: str | None,
 ) -> dict[str, Any]:
-    cwd = view.get("cwd")
     ff = folder_filter.get("path")
     return {
         "scope": {"kind": scope.get("kind", "all"), "key": scope.get("key")},
         "folder_filter": str(ff) if ff else None,
         "view": {
-            "mode": view.get("mode", "library"),
-            "cwd": str(cwd) if cwd else None,
             "multiselect": bool(view.get("multiselect")),
             "group_by": view.get("group_by", "author"),
         },
@@ -57,8 +54,6 @@ def snapshot_to_view(
 
     raw_view = snap.get("view") or {}
     view = {
-        "mode": raw_view.get("mode", "library"),
-        "cwd": Path(raw_view["cwd"]) if raw_view.get("cwd") else None,
         "multiselect": bool(raw_view.get("multiselect")),
         "group_by": raw_view.get("group_by", "author"),
     }
