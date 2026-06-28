@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from colophon.core.models import BookState, BookUnit, EditChange, OperationRecord
+from colophon.core.models import BookState, BookUnit, EditChange, NodeOverride, OperationRecord
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -285,3 +285,32 @@ class OperationRepo:
     def mark_reverted(self, batch_id: str) -> None:
         self.conn.execute("UPDATE operations SET reverted = 1 WHERE batch_id = ?", (batch_id,))
         self.conn.commit()
+
+
+@dataclass
+class NodeOverrideRepo:
+    """Persisted manual node classifications, keyed by absolute folder path."""
+
+    conn: sqlite3.Connection
+
+    def set(self, path: str, kind: str, value: str | None = None) -> None:
+        self.conn.execute(
+            "INSERT INTO node_overrides (path, kind, value) VALUES (?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET kind = excluded.kind, value = excluded.value",
+            (path, kind, value),
+        )
+        self.conn.commit()
+
+    def clear(self, path: str) -> None:
+        self.conn.execute("DELETE FROM node_overrides WHERE path = ?", (path,))
+        self.conn.commit()
+
+    def get(self, path: str) -> NodeOverride | None:
+        row = self.conn.execute(
+            "SELECT kind, value FROM node_overrides WHERE path = ?", (path,)
+        ).fetchone()
+        return NodeOverride(kind=row["kind"], value=row["value"]) if row else None
+
+    def all(self) -> dict[str, NodeOverride]:
+        rows = self.conn.execute("SELECT path, kind, value FROM node_overrides").fetchall()
+        return {r["path"]: NodeOverride(kind=r["kind"], value=r["value"]) for r in rows}

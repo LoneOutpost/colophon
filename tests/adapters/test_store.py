@@ -1,7 +1,13 @@
 from pathlib import Path
 
-from colophon.adapters.repository.store import BookUnitRepo, OperationRepo, connect, migrate
-from colophon.core.models import BookState, BookUnit, OperationRecord
+from colophon.adapters.repository.store import (
+    BookUnitRepo,
+    NodeOverrideRepo,
+    OperationRepo,
+    connect,
+    migrate,
+)
+from colophon.core.models import BookState, BookUnit, NodeOverride, OperationRecord
 
 
 def _table_names(conn):
@@ -18,7 +24,7 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     assert "book_units" in tables
     assert "schema_version" in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 3
+    assert version == 4
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -26,7 +32,7 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 3
+    assert version == 4
 
 
 def _repo(tmp_path: Path) -> BookUnitRepo:
@@ -275,3 +281,28 @@ def test_ids_in_folder_returns_books_for_that_folder(tmp_path: Path):
     assert repo.ids_in_folder(Path("/ingest/Author/BookA")) == {a1.id}
     assert repo.ids_in_folder(Path("/ingest/Elsewhere")) == {other.id}
     assert repo.ids_in_folder(Path("/ingest/Nowhere")) == set()
+
+
+def test_migrate_creates_node_overrides_table(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    assert "node_overrides" in _table_names(conn)
+
+
+def test_node_override_repo_set_get_clear(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = NodeOverrideRepo(conn)
+
+    assert repo.get("/lib/Doctor Who") is None
+    repo.set("/lib/Doctor Who", "franchise", "DOCTOR WHO")
+    ov = repo.get("/lib/Doctor Who")
+    assert ov is not None and ov.kind == "franchise" and ov.value == "DOCTOR WHO"
+
+    repo.set("/lib/Doctor Who", "author", "Someone")  # upsert replaces
+    assert repo.get("/lib/Doctor Who").kind == "author"
+    assert repo.all() == {"/lib/Doctor Who": NodeOverride(kind="author", value="Someone")}
+
+    repo.clear("/lib/Doctor Who")
+    assert repo.get("/lib/Doctor Who") is None
+    assert repo.all() == {}

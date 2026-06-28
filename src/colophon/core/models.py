@@ -170,6 +170,13 @@ class SeriesRef(_Base):
     sequence: float | None = None
 
 
+class NodeOverride(_Base):
+    """A user's manual classification of a directory node, keyed (in storage) by folder path."""
+
+    kind: str
+    value: str | None = None
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
