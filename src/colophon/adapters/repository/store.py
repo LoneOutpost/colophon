@@ -193,6 +193,13 @@ class BookUnitRepo:
         ).fetchall()
         return [BookUnit.model_validate_json(r["data"]) for r in rows]
 
+    def ids_in_folder(self, folder: Path) -> set[str]:
+        """Ids of every persisted book whose source_folder equals `folder`."""
+        rows = self.conn.execute(
+            "SELECT id FROM book_units WHERE source_folder = ?", (str(folder),)
+        ).fetchall()
+        return {r["id"] for r in rows}
+
 
 @dataclass
 class HistoryRepo:
