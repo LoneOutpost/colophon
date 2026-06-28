@@ -462,7 +462,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             inputs[field] = inp
                             source = field_provenance(book, field)
                             if source:
-                                ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
+                                ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center").tooltip(controller.source_tooltip(source))
                             return
                         if field == "description":
                             inp = ui.textarea(field, value=value).props("dense").classes("col")
@@ -475,7 +475,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         inputs[field] = inp
                         source = field_provenance(book, field)
                         if source:
-                            ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center")
+                            ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center").tooltip(controller.source_tooltip(source))
 
                 def _save_pending(b=book) -> bool:
                     """Persist any pending field edits silently, advancing the editor's
