@@ -157,3 +157,30 @@ def test_graph_summary_splits_grouping_hints():
     assert s.grouping_author_hint == 1
     assert s.grouping_series_hint == 2
     assert s.grouping_ambiguous_hint == 1
+
+
+def test_dir_badges_manual_override():
+    from colophon.core.graph_view import _dir_badges
+
+    node = DirectoryNode(path=Path("/lib/Doctor Who"))
+    node.kind = "franchise"
+    node.kind_value = "DOCTOR WHO"
+    node.kind_source = "manual"
+    assert _dir_badges(node) == ["FRANCHISE → DOCTOR WHO · manual"]
+
+    # a manual node shows no auto/hint chip even if those fields are set
+    node.kind_confidence = 0.9
+    node.kind_hint = "series"
+    assert _dir_badges(node) == ["FRANCHISE → DOCTOR WHO · manual"]
+
+
+def test_graph_summary_counts_manual_dirs():
+    from colophon.core.graph_view import graph_summary
+
+    g = Graph()
+    for name, src in [("a", "manual"), ("b", "manual"), ("c", "")]:
+        n = DirectoryNode(path=Path("/lib") / name)
+        n.kind = "grouping"
+        n.kind_source = src
+        g.directories[n.id] = n
+    assert graph_summary(g).manual_dirs == 2

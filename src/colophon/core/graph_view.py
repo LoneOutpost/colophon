@@ -16,6 +16,7 @@ class GraphTreeNode:
     badges: list[str] = field(default_factory=list)
     children: list[GraphTreeNode] = field(default_factory=list)
     tooltip: str = ""
+    path: Path | None = None
 
 
 @dataclass
@@ -26,6 +27,7 @@ class GraphSummary:
     container_dirs: int = 0
     title_dirs: int = 0
     unknown_dirs: int = 0
+    manual_dirs: int = 0
     grouping_author_hint: int = 0
     grouping_series_hint: int = 0
     grouping_ambiguous_hint: int = 0
@@ -35,6 +37,11 @@ class GraphSummary:
 
 
 def _dir_badges(node: DirectoryNode) -> list[str]:
+    if node.kind_source == "manual":
+        base = node.kind.upper()
+        if node.kind_value:
+            base = f"{base} → {node.kind_value}"
+        return [f"{base} · manual"]
     if node.kind == "author":
         return [f"AUTHOR → {node.author}"] if node.author else ["AUTHOR"]
     if node.kind in ("grouping", "container", "title"):
@@ -82,6 +89,7 @@ def _dir_node(graph: Graph, dir_id: str) -> GraphTreeNode:
     return GraphTreeNode(
         "dir", d.path.name, _dir_badges(d), [*child_dirs, *books, *loose],
         tooltip="; ".join([*d.kind_evidence, *d.kind_hint_evidence]),
+        path=d.path,
     )
 
 
@@ -106,6 +114,7 @@ def graph_summary(graph: Graph) -> GraphSummary:
         container_dirs=sum(1 for d in graph.directories.values() if d.kind == "container"),
         title_dirs=sum(1 for d in graph.directories.values() if d.kind == "title"),
         unknown_dirs=sum(1 for d in graph.directories.values() if d.kind == "unknown"),
+        manual_dirs=sum(1 for d in graph.directories.values() if d.kind_source == "manual"),
         grouping_author_hint=sum(
             1 for d in graph.directories.values()
             if d.kind == "grouping" and d.kind_hint == "author"),
