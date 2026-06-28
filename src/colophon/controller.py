@@ -26,7 +26,7 @@ from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
-from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
+from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
 from colophon.core.graph_resolve import resolve_graph_authors
 from colophon.core.models import (
     BookState,
@@ -1220,8 +1220,20 @@ class AppController:
         classify_graph(graph, root=root)
         resolve_graph_authors(graph, [bn.book for bn in graph.books.values()], root=root)
         hint_grouping_kinds(graph)
+        apply_overrides(graph, self.ctx.overrides.all())
         self._graph_cache[(str(root), fresh)] = graph
         return graph
+
+    def set_node_classification(self, path: Path, kind: str, value: str | None = None) -> None:
+        """Persist a manual classification for the folder `path` and invalidate the graph
+        cache so the next /graph load rebuilds with it applied."""
+        self.ctx.overrides.set(str(path), kind, value)
+        self._graph_cache.clear()
+
+    def clear_node_classification(self, path: Path) -> None:
+        """Remove the manual classification for `path` (revert to auto) and invalidate cache."""
+        self.ctx.overrides.clear(str(path))
+        self._graph_cache.clear()
 
     def cached_graph(self, root: Path, *, fresh: bool = False) -> Graph | None:
         """The previously-built graph for `(root, fresh)`, or None if not built this
