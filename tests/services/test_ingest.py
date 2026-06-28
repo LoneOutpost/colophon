@@ -595,3 +595,14 @@ def test_update_keeps_orphaned_datafile_field(tmp_path: Path):
     [book] = plan.units
     assert book.publisher == "Tantor Audio"  # not forced -> retained
     assert book.provenance["publisher"] == Provenance.DATAFILE.value
+
+
+def test_plan_scan_graph_runs_coarse_classification(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Dune"
+    dune.mkdir(parents=True)
+    (dune / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
+    assert any(u.title == "Dune" for u in plan.units)

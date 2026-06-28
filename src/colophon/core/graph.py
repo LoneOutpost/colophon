@@ -73,6 +73,8 @@ class DirectoryNode(_Base):
     child_dirs: list[str] = []   # noqa: RUF012
     child_files: list[str] = []  # noqa: RUF012
     books: list[str] = []        # noqa: RUF012 - BookNode ids residing here
+    kind_confidence: float = 0.0          # 0..1 confidence in `kind`
+    kind_evidence: list[str] = []          # noqa: RUF012 - human-readable reasons for `kind`
 
     @property
     def id(self) -> str:

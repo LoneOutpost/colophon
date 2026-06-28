@@ -18,7 +18,9 @@ def _render_node(node: GraphTreeNode) -> None:
         with exp.add_slot("header"):
             with ui.row().classes("items-center q-gutter-xs no-wrap"):
                 ui.icon("folder", color="amber-7")
-                ui.label(node.label)
+                lbl = ui.label(node.label)
+                if node.tooltip:
+                    lbl.tooltip(node.tooltip)
                 for b in node.badges:
                     ui.badge(b).props("outline").classes("colophon-chip")
         with exp:
@@ -63,9 +65,10 @@ def render_graph(controller: AppController) -> None:
         s = graph_summary(graph)
         roles = ", ".join(f"{n} {role}" for role, n in sorted(s.files_by_role.items()))
         summary.set_text(
-            f"{s.directories} directories ({s.author_dirs} author) · "
-            f"{s.books} books in {s.multi_book_dirs} multi-book folders · "
-            f"files: {roles or 'none'}"
+            f"{s.directories} directories · "
+            f"{s.author_dirs} author · {s.grouping_dirs} grouping · "
+            f"{s.container_dirs} container · {s.title_dirs} title · "
+            f"{s.unknown_dirs} unknown · {s.books} books · files: {roles or 'none'}"
         )
         body.clear()
         tree = graph_tree(graph, Path(state["root"]))

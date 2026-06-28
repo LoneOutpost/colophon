@@ -159,3 +159,31 @@ def test_directory_provenance_author_does_not_classify(tmp_path):
 
     resolve_graph_authors(graph, [book], root=root)
     assert graph.directories[DirectoryNode.id_for(author_dir)].kind == "unknown"
+
+
+def test_container_node_is_not_upgraded_to_author(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    folder = root / "Stephen King"
+    book = _book(folder / "Book", ["Stephen King"], Provenance.TAG.value)
+    graph = _graph_with_dirs(folder / "Book")
+    graph.directories[DirectoryNode.id_for(folder)].kind = "container"
+
+    resolve_graph_authors(graph, [book], root=root)
+
+    assert graph.directories[DirectoryNode.id_for(folder)].kind == "container"
+
+
+def test_title_node_is_not_upgraded_to_author(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    folder = root / "Stephen King"
+    book = _book(folder / "Book", ["Stephen King"], Provenance.TAG.value)
+    graph = _graph_with_dirs(folder / "Book")
+    graph.directories[DirectoryNode.id_for(folder)].kind = "title"
+
+    resolve_graph_authors(graph, [book], root=root)
+
+    assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"

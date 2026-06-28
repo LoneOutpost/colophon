@@ -58,7 +58,9 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
         keys = {_name_key(a): a for a in book.authors}
         for node in _ancestors(graph, book.source_folder, root):
             matched = keys.get(_name_key(node.path.name))
-            if matched is not None and node.kind != "author":
+            # author refines a grouping (or a not-yet-classified node); never a
+            # classified container/title — those are not author folders.
+            if matched is not None and node.kind in ("grouping", "unknown"):
                 node.kind = "author"
                 node.author = matched
 

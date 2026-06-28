@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph
-from colophon.core.graph_view import graph_summary, graph_tree
+from colophon.core.graph_view import _dir_badges, graph_summary, graph_tree
 from colophon.core.models import BookUnit, ContentKind, Provenance
 
 
@@ -98,3 +98,30 @@ def test_graph_summary_counts():
     assert s.books == 2
     assert s.multi_book_dirs == 1            # the Collection dir holds 2 books
     assert s.files_by_role == {"audio": 2, "datafile": 1}
+
+
+def test_dir_badges_show_coarse_kind_and_confidence():
+    node = DirectoryNode(path=Path("/lib/A"))
+    node.kind = "grouping"
+    node.kind_confidence = 0.86
+    assert _dir_badges(node) == ["GROUPING · 0.86"]
+
+    container = DirectoryNode(path=Path("/lib/junk"))
+    container.kind = "container"
+    container.kind_confidence = 0.9
+    assert _dir_badges(container) == ["CONTAINER · 0.90"]
+
+
+def test_graph_summary_counts_coarse_kinds():
+    g = Graph()
+    for name, kind in [("a", "grouping"), ("b", "grouping"), ("c", "container"),
+                       ("d", "title"), ("e", "unknown")]:
+        n = DirectoryNode(path=Path("/lib") / name)
+        n.kind = kind
+        g.directories[n.id] = n
+
+    s = graph_summary(g)
+    assert s.grouping_dirs == 2
+    assert s.container_dirs == 1
+    assert s.title_dirs == 1
+    assert s.unknown_dirs == 1
