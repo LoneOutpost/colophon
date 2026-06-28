@@ -2613,3 +2613,17 @@ async def test_scan_preview_streamed_returns_plan_and_emits_progress(tmp_path):
     assert plan.new_books == 1
     assert calls and calls[-1][1] == 1   # total == 1 folder
     ctx.close()
+
+
+def test_graph_for_caches_and_cached_graph_returns_it(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ingest = tmp_path / "ingest"
+    (ingest / "Dune").mkdir(parents=True)
+    (ingest / "Dune" / "01.mp3").write_bytes(b"")
+
+    assert ctrl.cached_graph(ingest) is None              # nothing built yet
+    built = ctrl.graph_for(ingest)
+    assert ctrl.cached_graph(ingest) is built             # same object, cached
+    assert ctrl.cached_graph(tmp_path / "other") is None  # a different, unbuilt root
+    ctx.close()

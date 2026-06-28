@@ -200,6 +200,7 @@ class AppController:
         self._downloads: dict[str, DownloadEntry] = {}
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
+        self._graph_cache: dict[str, Graph] = {}  # diagnostic /graph: built graph per scan root
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -1202,16 +1203,21 @@ class AppController:
 
     def graph_for(self, root: Path) -> Graph:
         """Build (without persisting) the entity graph for one scan root and run the
-        directory classification + author inheritance, so the diagnostic view reflects
-        the resolved graph (AUTHOR dirs, graphing authors). Blocking — call via
-        asyncio.to_thread."""
+        directory classification + author inheritance, caching the result by root so the
+        diagnostic view need not rebuild on every visit. Blocking — via asyncio.to_thread."""
         graph = build_graph(
             self.ctx.books, root,
             template=self.ctx.config.filename_template,
             directory_scheme=self.ctx.config.directory_scheme,
         )
         resolve_graph_authors(graph, [bn.book for bn in graph.books.values()], root=root)
+        self._graph_cache[str(root)] = graph
         return graph
+
+    def cached_graph(self, root: Path) -> Graph | None:
+        """The previously-built graph for `root`, or None if it has not been built this
+        session. A snapshot — not invalidated by scans/edits; Rebuild refreshes it."""
+        return self._graph_cache.get(str(root))
     def source_tooltip(self, name: str) -> str:
         """Hover explanation for a provenance badge: a fixed sentence for a local tier,
         or 'Matched from <source>' for an external match source."""
