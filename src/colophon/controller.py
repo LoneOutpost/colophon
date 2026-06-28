@@ -256,6 +256,7 @@ class AppController:
             plan = plan_scan_graph(
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
                 options=options, inference_root=self._scan_root_for_path(root), progress=progress,
+                node_overrides=self.ctx.overrides.all(),
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books

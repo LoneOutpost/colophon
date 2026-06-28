@@ -2395,7 +2395,7 @@ async def test_scan_preview_honors_template_override(tmp_path, monkeypatch):
     captured = {}
 
     def fake_plan_scan(repo, root, *, template, directory_scheme="", options=None,
-                       inference_root=None, progress=None):
+                       inference_root=None, progress=None, node_overrides=None):
         captured["template"] = template
         captured["scheme"] = directory_scheme
         return ScanPlan()
@@ -2762,4 +2762,21 @@ def test_confirm_hint_cohort_confirms_author_groupings(tmp_path):
         assert node.kind_value == author
     # the scan root itself is NOT confirmed
     assert graph.directories[DirectoryNode.id_for(ingest)].kind_source == ""
+    ctx.close()
+
+
+def test_scan_applies_author_override_to_books(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Brandon Sanderson" / "Elantris"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(ingest / "Brandon Sanderson", "author", "Brandon Sanderson")
+    ctrl.scan([ingest])
+
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["authors"] == "manual"
     ctx.close()
