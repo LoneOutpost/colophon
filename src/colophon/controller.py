@@ -28,6 +28,7 @@ from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
 from colophon.core.graph_resolve import resolve_graph_authors
+from colophon.core.graph_view import grouping_cohort
 from colophon.core.models import (
     BookState,
     BookUnit,
@@ -1234,6 +1235,15 @@ class AppController:
         """Remove the manual classification for `path` (revert to auto) and invalidate cache."""
         self.ctx.overrides.clear(str(path))
         self._graph_cache.clear()
+
+    def confirm_hint_cohort(self, root: Path, hint: str) -> int:
+        """Confirm every grouping under `root` hinted `hint` (author/series) as that kind,
+        each with its folder name as the value. Excludes the root. Returns the count."""
+        graph = self.graph_for(root)
+        nodes = grouping_cohort(graph, root=root, hint=hint)
+        self.ctx.overrides.set_many([(str(n.path), hint, n.path.name) for n in nodes])
+        self._graph_cache.clear()
+        return len(nodes)
 
     def cached_graph(self, root: Path, *, fresh: bool = False) -> Graph | None:
         """The previously-built graph for `(root, fresh)`, or None if not built this
