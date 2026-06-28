@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
+from colophon.core.models import NodeOverride
 from colophon.core.normalize import normalize_name
 
 GROUPING = "grouping"
@@ -165,3 +166,18 @@ def hint_grouping_kinds(graph: Graph) -> None:
         node.kind_hint = hint
         node.kind_hint_confidence = conf
         node.kind_hint_evidence = evidence
+
+
+def apply_overrides(graph: Graph, overrides: dict[str, NodeOverride]) -> None:
+    """Stamp persisted user classifications onto the graph, keyed by folder path. Runs LAST
+    (after the auto-passes) so a human assignment wins and is re-applied on every rebuild —
+    the node-level analog of MANUAL provenance. Never inferred; only ever set here."""
+    for node in graph.directories.values():
+        ov = overrides.get(str(node.path))
+        if ov is None:
+            continue
+        node.kind = ov.kind
+        node.kind_value = ov.value
+        node.kind_source = "manual"
+        if ov.kind == "author":
+            node.author = ov.value
