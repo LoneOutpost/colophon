@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import BookUnit, Provenance
+from colophon.core.models import BookUnit, Provenance, SeriesRef
 from colophon.core.normalize import normalize_name
 
 _WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
@@ -75,3 +75,24 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
                     book.authors = [node.author]
                     book.provenance["authors"] = Provenance.GRAPHING.value
                 break
+
+
+def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
+    """Fill empty/weak author/series on each book from its nearest MANUAL author/series
+    ancestor node (set by apply_overrides), stamped MANUAL. Authoritative + sticky; a book
+    that asserts its own author/series (tag/match/datafile) is left untouched."""
+    for book in books:
+        author = series = None
+        for node in _ancestors(graph, book.source_folder, root):
+            if node.kind_source != "manual":
+                continue
+            if author is None and node.kind == "author" and node.kind_value:
+                author = node.kind_value
+            if series is None and node.kind == "series" and node.kind_value:
+                series = node.kind_value
+        if author and (not book.authors or book.provenance.get("authors") in _WEAK):
+            book.authors = [author]
+            book.provenance["authors"] = Provenance.MANUAL.value
+        if series and (not book.series or book.provenance.get("series") in _WEAK):
+            book.series = [SeriesRef(name=series)]
+            book.provenance["series"] = Provenance.MANUAL.value
