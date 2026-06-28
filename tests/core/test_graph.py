@@ -43,3 +43,9 @@ def test_leaf_id_for_subset_is_distinct_and_stable(tmp_path):
     assert a != _node_id(folder)       # a subset is never the folder id
     assert a == leaf_id_for(folder, [legion])           # stable
     assert b == leaf_id_for(folder, [elantris, elantris])  # order/dupes don't matter
+
+
+def test_directory_node_carries_inferred_author(tmp_path):
+    d = DirectoryNode(path=tmp_path / "Stephen King", kind="author", author="Stephen King")
+    assert d.kind == "author" and d.author == "Stephen King"
+    assert DirectoryNode(path=tmp_path / "x").author is None  # default

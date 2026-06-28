@@ -37,6 +37,7 @@ class Provenance(StrEnum):
     DIRECTORY = "directory"
     FILENAME = "filename"
     DATAFILE = "datafile"
+    GRAPHING = "graphing"   # derived from a directory-tree relationship (Phase 3b)
     AUDNEXUS = "audnexus"
     AUDIBLE = "audible"
     HARDCOVER = "hardcover"

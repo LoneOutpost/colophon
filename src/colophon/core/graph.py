@@ -69,6 +69,7 @@ class BookNode(_Base):
 class DirectoryNode(_Base):
     path: Path
     kind: str = "unknown"     # AUTHOR/SERIES/TITLE/CONTAINER classification — later phases
+    author: str | None = None  # the author this node represents when kind == "author"
     child_dirs: list[str] = []   # noqa: RUF012
     child_files: list[str] = []  # noqa: RUF012
     books: list[str] = []        # noqa: RUF012 - BookNode ids residing here
