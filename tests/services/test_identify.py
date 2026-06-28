@@ -1,6 +1,7 @@
 import json
 
 from colophon.adapters.audio import probe_audio_file
+from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
 from colophon.core.models import (
@@ -11,6 +12,7 @@ from colophon.core.models import (
     FindingCode,
     FindingSeverity,
     FolderKind,
+    Provenance,
     SeriesRef,
 )
 from colophon.services.identify import (
@@ -119,3 +121,50 @@ def test_normalize_is_idempotent_and_clean_title_unchanged(tmp_path):
     assert book.title == "Dune"
     normalize(book)  # idempotent
     assert book.title == "Dune"
+
+
+def test_drop_clears_datafile_fields_when_datafile_gone(tmp_path):
+    from colophon.services.identify import drop_orphaned_datafile_fields
+
+    book = BookUnit.new(source_folder=tmp_path / "Book")
+    book.title = "Orphaned Title"
+    book.authors = ["Orphaned Author"]
+    book.provenance["title"] = Provenance.DATAFILE.value
+    book.provenance["authors"] = Provenance.DATAFILE.value
+
+    drop_orphaned_datafile_fields(book, Evidence(datafile=None))
+
+    assert book.title == ""
+    assert book.authors == []
+    assert "title" not in book.provenance
+    assert "authors" not in book.provenance
+
+
+def test_drop_is_noop_when_datafile_present(tmp_path):
+    from colophon.services.identify import drop_orphaned_datafile_fields
+
+    book = BookUnit.new(source_folder=tmp_path / "Book")
+    book.title = "Keep Me"
+    book.provenance["title"] = Provenance.DATAFILE.value
+
+    drop_orphaned_datafile_fields(book, Evidence(datafile=DatafileSidecar()))
+
+    assert book.title == "Keep Me"
+    assert book.provenance["title"] == Provenance.DATAFILE.value
+
+
+def test_drop_leaves_non_datafile_provenance(tmp_path):
+    from colophon.services.identify import drop_orphaned_datafile_fields
+
+    book = BookUnit.new(source_folder=tmp_path / "Book")
+    book.title = "Manual Title"
+    book.provenance["title"] = Provenance.MANUAL.value
+    book.authors = ["From Audnexus"]
+    book.provenance["authors"] = "audnexus"
+
+    drop_orphaned_datafile_fields(book, Evidence(datafile=None))
+
+    assert book.title == "Manual Title"
+    assert book.provenance["title"] == Provenance.MANUAL.value
+    assert book.authors == ["From Audnexus"]
+    assert book.provenance["authors"] == "audnexus"

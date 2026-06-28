@@ -47,6 +47,27 @@ class Evidence(_Base):
     directory_fields: dict[str, str] = {}  # noqa: RUF012 - pydantic default, copied per instance
 
 
+# Fields reconcile can fill from a datafile sidecar (the DATAFILE tier), each with the
+# empty value it resets to. Mirrors core/reconcile.py's sidecar branches.
+_DATAFILE_FIELDS: dict[str, object] = {
+    "title": "", "subtitle": "", "authors": [], "narrators": [], "series": [],
+    "publish_year": None, "publisher": "", "description": "", "asin": "", "isbn": "",
+}
+
+
+def drop_orphaned_datafile_fields(book: BookUnit, evidence: Evidence) -> None:
+    """Re-derive support: when the datafile sidecar that filled a field is gone (deleted,
+    or now vetted out as a container datafile, so `gather` produced no datafile), clear the
+    orphaned DATAFILE-stamped field so `reconcile` refills it from the surviving tiers — or
+    leaves it empty for a match to fill. A no-op when a datafile is still present."""
+    if evidence.datafile is not None:
+        return
+    for field, empty in _DATAFILE_FIELDS.items():
+        if book.provenance.get(field) == Provenance.DATAFILE.value:
+            setattr(book, field, list(empty) if isinstance(empty, list) else empty)
+            book.provenance.pop(field, None)
+
+
 def gather(
     book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]]
 ) -> Evidence:
