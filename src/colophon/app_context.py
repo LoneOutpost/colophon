@@ -14,6 +14,7 @@ from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.repository.store import (
     BookUnitRepo,
     HistoryRepo,
+    NodeOverrideRepo,
     OperationRepo,
     connect,
     migrate,
@@ -48,6 +49,7 @@ class AppContext:
     books: BookUnitRepo
     history: HistoryRepo
     operations: OperationRepo
+    overrides: NodeOverrideRepo
     sources: list[MetadataSource]
     patterns: AudiobookPatterns
     abs_client: AbsClient | None
@@ -78,6 +80,7 @@ class AppContext:
             books=BookUnitRepo(conn),
             history=HistoryRepo(conn),
             operations=OperationRepo(conn),
+            overrides=NodeOverrideRepo(conn),
             sources=sources,
             patterns=patterns,
             abs_client=abs_client,

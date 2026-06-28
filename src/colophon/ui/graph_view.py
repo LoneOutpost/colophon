@@ -12,7 +12,7 @@ from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree
 from colophon.ui.chrome import page_header
 
 
-def _render_node(node: GraphTreeNode) -> None:
+def _render_node(node: GraphTreeNode, on_classify=None) -> None:
     if node.node_kind == "dir":
         exp = ui.expansion().props("dense").classes("w-full")
         with exp.add_slot("header"):
@@ -23,9 +23,11 @@ def _render_node(node: GraphTreeNode) -> None:
                     lbl.tooltip(node.tooltip)
                 for b in node.badges:
                     ui.badge(b).props("outline").classes("colophon-chip")
+                if on_classify is not None and node.path is not None:
+                    on_classify(node)
         with exp:
             for child in node.children:
-                _render_node(child)
+                _render_node(child, on_classify)
         return
     icon = "menu_book" if node.node_kind == "book" else "insert_drive_file"
     with ui.row().classes("items-center q-gutter-xs no-wrap q-ml-lg"):
@@ -61,6 +63,32 @@ def render_graph(controller: AppController) -> None:
     summary = ui.label().classes("text-caption colophon-muted q-px-sm q-mb-sm")
     body = ui.column().classes("w-full q-px-sm")
 
+    async def _open_classify_dialog(node, kind: str) -> None:
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f"Classify {node.label} as {kind}")
+            name = ui.input("Name", value=node.label)
+            with ui.row():
+                ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
+                ui.button("Confirm",
+                          on_click=lambda: dialog.submit(name.value or "")).props("no-caps")
+        result = await dialog
+        if result is not None:
+            controller.set_node_classification(node.path, kind, result or None)
+            await _build()
+
+    async def _clear_classify(node) -> None:
+        controller.clear_node_classification(node.path)
+        await _build()
+
+    def _classify_menu(node) -> None:
+        with ui.button(icon="sell").props("flat dense round").classes("colophon-muted"):
+            with ui.menu():
+                for kind in ("author", "series", "franchise", "container"):
+                    ui.menu_item(kind.capitalize(),
+                                 lambda kind=kind, node=node: _open_classify_dialog(node, kind))
+                ui.separator()
+                ui.menu_item("Clear", lambda node=node: _clear_classify(node))
+
     def _show(graph) -> None:
         s = graph_summary(graph)
         roles = ", ".join(f"{n} {role}" for role, n in sorted(s.files_by_role.items()))
@@ -80,7 +108,7 @@ def render_graph(controller: AppController) -> None:
                 ui.label("No books found under this root.").classes("colophon-muted q-pa-md")
             else:
                 for node in tree:
-                    _render_node(node)
+                    _render_node(node, _classify_menu)
 
     async def _build() -> None:
         body.clear()

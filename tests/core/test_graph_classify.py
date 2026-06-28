@@ -308,3 +308,45 @@ def test_hint_only_on_grouping_nodes():
 
     assert g.directories[DirectoryNode.id_for(root / "Dune")].kind == "title"
     assert g.directories[DirectoryNode.id_for(root / "Dune")].kind_hint == ""
+
+
+def test_apply_overrides_wins_and_marks_manual():
+    from colophon.core.graph_classify import apply_overrides, classify_graph
+    from colophon.core.models import NodeOverride
+
+    root = Path("/lib")
+    franchise = root / "Doctor Who"
+    g = _g()
+    _link(g, root, franchise)
+    _book(g, franchise, "Power of the Daleks", n=3)  # auto would be container
+
+    classify_graph(g, root=root)
+    apply_overrides(g, {str(franchise): NodeOverride(kind="franchise", value="DOCTOR WHO")})
+
+    node = g.directories[DirectoryNode.id_for(franchise)]
+    assert node.kind == "franchise"
+    assert node.kind_value == "DOCTOR WHO"
+    assert node.kind_source == "manual"
+
+
+def test_apply_overrides_author_sets_author_attr():
+    from colophon.core.graph_classify import apply_overrides
+    from colophon.core.models import NodeOverride
+
+    g = _g()
+    d = _dir(g, Path("/lib/Some Folder"))
+    apply_overrides(g, {"/lib/Some Folder": NodeOverride(kind="author", value="Jane Doe")})
+
+    assert d.kind == "author" and d.author == "Jane Doe" and d.kind_source == "manual"
+
+
+def test_apply_overrides_ignores_unmatched_path():
+    from colophon.core.graph_classify import apply_overrides
+    from colophon.core.models import NodeOverride
+
+    g = _g()
+    d = _dir(g, Path("/lib/A"))
+    d.kind = "grouping"
+    apply_overrides(g, {"/lib/Other": NodeOverride(kind="franchise", value="X")})
+
+    assert d.kind == "grouping" and d.kind_source == ""

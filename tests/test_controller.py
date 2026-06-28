@@ -2707,3 +2707,32 @@ def test_graph_for_runs_grouping_hint(tmp_path):
     assert root.kind == "grouping"               # root holds the Dune title
     assert root.kind_hint == "author"            # one standalone title, no series
     ctx.close()
+
+
+def test_node_classification_override_sticky_and_clear(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+    dune_id = DirectoryNode.id_for(ingest / "Dune")
+
+    g0 = ctrl.graph_for(ingest)                      # caches: Dune is auto "title"
+    assert g0.directories[dune_id].kind == "title"
+
+    ctrl.set_node_classification(ingest / "Dune", "franchise", "DOCTOR WHO")
+    g1 = ctrl.graph_for(ingest)                      # cache invalidated -> override applied
+    node = g1.directories[dune_id]
+    assert node.kind == "franchise"
+    assert node.kind_source == "manual"
+    assert node.kind_value == "DOCTOR WHO"
+
+    g2 = ctrl.graph_for(ingest)                      # sticky across rebuild
+    assert g2.directories[dune_id].kind == "franchise"
+
+    ctrl.clear_node_classification(ingest / "Dune")
+    g3 = ctrl.graph_for(ingest)                      # reverts to auto
+    assert g3.directories[dune_id].kind == "title"
+    assert g3.directories[dune_id].kind_source == ""
+    ctx.close()

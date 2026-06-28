@@ -78,6 +78,8 @@ class DirectoryNode(_Base):
     kind_hint: str = ""                    # advisory: "author" | "series" | "ambiguous" | ""
     kind_hint_confidence: float = 0.0
     kind_hint_evidence: list[str] = []      # noqa: RUF012 - reasons for the hint
+    kind_source: str = ""                  # "" = auto, "manual" = a persisted user override
+    kind_value: str | None = None           # the override's value (franchise/author/series name)
 
     @property
     def id(self) -> str:
