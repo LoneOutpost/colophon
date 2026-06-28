@@ -43,6 +43,7 @@ class ScanPlan:
     existing_books: int = 0
     fields_filled: int = 0
     files_added: int = 0
+    reconciled_folders: set[Path] = field(default_factory=set)
 
 
 class ScanScope(StrEnum):
@@ -303,8 +304,21 @@ def plan_rescan_books(
     return plan
 
 
-def commit_scan(repo: BookUnitRepo, plan: ScanPlan) -> int:
-    """Persist a computed plan; returns the number of books written."""
+def commit_scan(repo: BookUnitRepo, plan: ScanPlan, *, reconcile: bool = False) -> int:
+    """Persist a computed plan; returns the number of books written.
+
+    With `reconcile`, for each folder the plan fully recomputed (`reconciled_folders`)
+    every persisted book in that folder whose id is not in the plan's new unit set is
+    deleted first — pruning a stale container that flipped to leaves, or a leaf the
+    re-cluster no longer produces. A pruned id is never one we re-upsert."""
+    if reconcile:
+        keep_by_folder: dict[Path, set[str]] = {}
+        for book in plan.units:
+            keep_by_folder.setdefault(book.source_folder, set()).add(book.id)
+        for folder in plan.reconciled_folders:
+            keep = keep_by_folder.get(folder, set())
+            for stale_id in repo.ids_in_folder(folder) - keep:
+                repo.delete(stale_id)
     for book in plan.units:
         repo.upsert(book)
     return len(plan.units)

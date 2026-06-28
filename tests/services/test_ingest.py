@@ -4,7 +4,15 @@ from pathlib import Path
 from mutagen.id3 import ID3, TPE1
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookState, ContentKind, FolderKind, Phase, PhaseState, Provenance
+from colophon.core.models import (
+    BookState,
+    BookUnit,
+    ContentKind,
+    FolderKind,
+    Phase,
+    PhaseState,
+    Provenance,
+)
 from colophon.core.phases import state_of
 from colophon.services.ingest import scan_ingest
 
@@ -241,3 +249,47 @@ def test_title_folder_split_gets_no_guessed_author(tmp_path):
     book = units[0]
     assert book.folder_kind is FolderKind.TITLE
     assert book.authors == []
+
+
+def test_commit_scan_reconcile_prunes_replaced_books(tmp_path: Path):
+    from colophon.services.ingest import ScanPlan, commit_scan
+
+    repo = _repo(tmp_path)
+    folder = Path("/ingest/Author/Multi")
+    container = BookUnit.new(source_folder=folder)          # id = id_for(folder)
+    leaf_keep = BookUnit.new(source_folder=folder)
+    leaf_keep.id = "1111111111111111"
+    leaf_orphan = BookUnit.new(source_folder=folder)
+    leaf_orphan.id = "2222222222222222"
+    for b in (container, leaf_keep, leaf_orphan):
+        repo.upsert(b)
+
+    # New scan of `folder` yields only leaf_keep + a brand-new leaf.
+    leaf_new = BookUnit.new(source_folder=folder)
+    leaf_new.id = "3333333333333333"
+    plan = ScanPlan(units=[leaf_keep, leaf_new], reconciled_folders={folder})
+
+    written = commit_scan(repo, plan, reconcile=True)
+
+    assert written == 2
+    assert repo.get(container.id) is None      # stale container pruned
+    assert repo.get(leaf_orphan.id) is None    # orphan leaf pruned
+    assert repo.get(leaf_keep.id) is not None  # kept
+    assert repo.get(leaf_new.id) is not None   # added
+
+
+def test_commit_scan_without_reconcile_keeps_everything(tmp_path: Path):
+    from colophon.services.ingest import ScanPlan, commit_scan
+
+    repo = _repo(tmp_path)
+    folder = Path("/ingest/Author/Multi")
+    stale = BookUnit.new(source_folder=folder)
+    stale.id = "4444444444444444"
+    repo.upsert(stale)
+    keep = BookUnit.new(source_folder=folder)
+    keep.id = "5555555555555555"
+
+    commit_scan(repo, ScanPlan(units=[keep], reconciled_folders={folder}))  # reconcile defaults False
+
+    assert repo.get(stale.id) is not None  # nothing pruned without reconcile
+    assert repo.get(keep.id) is not None
