@@ -76,6 +76,7 @@ def _run_local(
     pattern: object,
     scheme: object,
     unit_files: list[Path] | None = None,
+    rederive: bool = False,
 ) -> None:
     """Execute one local phase's work for `book`.
 
@@ -118,7 +119,7 @@ def _run_local(
             )
 
     elif phase is Phase.IDENTIFY:
-        run_identify(book, root=root, pattern=pattern, scheme=scheme)
+        run_identify(book, root=root, pattern=pattern, scheme=scheme, rederive=rederive)
 
     else:
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
@@ -144,7 +145,8 @@ def run_local_phases(
         if not _should(phase):
             continue
         try:
-            _run_local(book, phase, root=root, pattern=pattern, scheme=scheme, unit_files=unit_files)
+            _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
+                       unit_files=unit_files, rederive=force)
             mark(book, phase, PhaseState.FRESH)
         except Exception as e:  # a local phase must not crash the caller
             logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
@@ -338,6 +340,7 @@ def plan_rescan_books(
 
 def _adopt_and_identify(
     unit: BookUnit, repo: BookUnitRepo, *, root: Path, pattern: object, scheme: object,
+    rederive: bool = False,
 ) -> BookUnit:
     """Return the unit to persist for one projected BookUnit.
 
@@ -370,7 +373,7 @@ def _adopt_and_identify(
     mark(unit, Phase.SEARCH, PhaseState.FRESH)      # files were probed at container level
     mark(unit, Phase.CATEGORIZE, PhaseState.FRESH)  # being SINGLE is its categorization
     try:
-        run_identify(unit, root=root, pattern=pattern, scheme=scheme)
+        run_identify(unit, root=root, pattern=pattern, scheme=scheme, rederive=rederive)
         mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
     except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
         logger.warning(f"leaf IDENTIFY failed for {unit.source_folder} [{unit.title!r}]: {e}")
@@ -396,6 +399,7 @@ def plan_scan_graph(
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     inf_root = inference_root or root
+    rederive = options is not None and options.scope is ScanScope.REFRESH
     graph = build_graph(
         repo, root, template=template, directory_scheme=directory_scheme,
         options=options, inference_root=inference_root, progress=progress,
@@ -405,7 +409,8 @@ def plan_scan_graph(
         existing = repo.get(unit.id)
         before_empty = _empty_fields(existing) if existing is not None else set()
         prior_paths = {sf.path for sf in existing.source_files} if existing is not None else set()
-        adopted = _adopt_and_identify(unit, repo, root=inf_root, pattern=pattern, scheme=scheme)
+        adopted = _adopt_and_identify(unit, repo, root=inf_root, pattern=pattern,
+                                      scheme=scheme, rederive=rederive)
         if existing is not None:
             plan.existing_books += 1
             plan.fields_filled += len(before_empty - _empty_fields(adopted))
