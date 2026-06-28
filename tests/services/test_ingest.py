@@ -13,7 +13,14 @@ from colophon.core.models import (
     Provenance,
 )
 from colophon.core.phases import state_of
-from colophon.services.ingest import plan_scan, scan_ingest
+from colophon.services.ingest import (
+    ScanOptions,
+    ScanScope,
+    commit_scan,
+    plan_scan,
+    plan_scan_graph,
+    scan_ingest,
+)
 
 
 def _repo(tmp_path: Path) -> BookUnitRepo:
@@ -540,3 +547,51 @@ def test_plan_scan_fresh_ignores_persisted_state(tmp_path: Path):
 
     normal = plan_scan(repo, ingest, template="$Author - $Title")
     assert normal.units[0].manually_confirmed is True   # persisted state merged
+
+
+def _ingest_single_with_datafile_publisher(tmp_path: Path) -> tuple[BookUnitRepo, Path, Path]:
+    """Scan one SINGLE book whose metadata.json sets a DATAFILE-provenance publisher
+    (no embedded publisher tag, so the field's only source is the sidecar)."""
+    ingest = tmp_path / "ingest"
+    book_dir = ingest / "Frank Herbert" / "Dune"
+    book_dir.mkdir(parents=True)
+    (book_dir / "01.mp3").write_bytes(b"")
+    sidecar = book_dir / "metadata.json"
+    sidecar.write_text(json.dumps({"publisher": "Tantor Audio"}))
+
+    repo = _repo(tmp_path)
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
+    commit_scan(repo, plan, reconcile=True)
+
+    [book] = plan.units
+    assert book.publisher == "Tantor Audio"
+    assert book.provenance["publisher"] == Provenance.DATAFILE.value
+    return repo, ingest, sidecar
+
+
+def test_refresh_rederives_orphaned_datafile_field(tmp_path: Path):
+    repo, ingest, sidecar = _ingest_single_with_datafile_publisher(tmp_path)
+    sidecar.unlink()  # the bad/removed datafile
+
+    plan = plan_scan_graph(
+        repo, ingest, template="$Author - $Title",
+        options=ScanOptions(scope=ScanScope.REFRESH),
+    )
+
+    [book] = plan.units
+    assert book.publisher == ""
+    assert "publisher" not in book.provenance
+
+
+def test_update_keeps_orphaned_datafile_field(tmp_path: Path):
+    repo, ingest, sidecar = _ingest_single_with_datafile_publisher(tmp_path)
+    sidecar.unlink()
+
+    plan = plan_scan_graph(
+        repo, ingest, template="$Author - $Title",
+        options=ScanOptions(scope=ScanScope.UPDATE),
+    )
+
+    [book] = plan.units
+    assert book.publisher == "Tantor Audio"  # not forced -> retained
+    assert book.provenance["publisher"] == Provenance.DATAFILE.value
