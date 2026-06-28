@@ -486,3 +486,37 @@ def test_scan_infers_buried_author_into_untagged_sibling(tmp_path: Path):
     assert tagged_book.provenance["authors"] == "tag"            # own tag wins
     assert untagged_book.authors == ["Stephen King"]             # inherited
     assert untagged_book.provenance["authors"] == "graphing"
+
+
+def _two_folder_ingest(tmp_path: Path) -> Path:
+    ingest = tmp_path / "ingest"
+    (ingest / "Dune").mkdir(parents=True)
+    (ingest / "Dune" / "01.mp3").write_bytes(b"")
+    (ingest / "Legion").mkdir(parents=True)
+    (ingest / "Legion" / "01.mp3").write_bytes(b"")
+    return ingest
+
+
+def test_plan_scan_reports_progress_per_folder(tmp_path: Path):
+    from colophon.services.ingest import plan_scan
+
+    ingest = _two_folder_ingest(tmp_path)
+    calls: list[tuple[int, int, str]] = []
+    plan_scan(_repo(tmp_path), ingest, template="$Author - $Title",
+              progress=lambda d, t, label: calls.append((d, t, label)))
+
+    assert [d for d, _, _ in calls] == [1, 2]          # one tick per folder, in order
+    assert all(t == 2 for _, t, _ in calls)            # total is the folder count
+    assert {label for _, _, label in calls} == {"Dune", "Legion"}  # labels relative to root
+
+
+def test_plan_scan_graph_forwards_progress(tmp_path: Path):
+    from colophon.services.ingest import plan_scan_graph
+
+    ingest = _two_folder_ingest(tmp_path)
+    calls: list[tuple[int, int, str]] = []
+    plan_scan_graph(_repo(tmp_path), ingest, template="$Author - $Title",
+                    progress=lambda d, t, label: calls.append((d, t, label)))
+
+    assert {label for _, _, label in calls} == {"Dune", "Legion"}
+    assert max(t for _, t, _ in calls) == 2

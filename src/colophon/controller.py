@@ -229,10 +229,12 @@ class AppController:
         self, roots: list[Path] | None = None,
         *, template: str | None = None, directory_scheme: str | None = None,
         options: ScanOptions | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
     ) -> ScanPlan:
         """Compute, without persisting, what a scan of `roots` (default: the configured
         scan paths) would do across all roots. `template`/`directory_scheme` override the
-        saved defaults for this run (None = use config)."""
+        saved defaults for this run (None = use config). `progress(done, total, label)`
+        fires per folder (per root)."""
         template = template if template is not None else self.ctx.config.filename_template
         directory_scheme = (
             directory_scheme if directory_scheme is not None else self.ctx.config.directory_scheme
@@ -243,13 +245,14 @@ class AppController:
                 self.ctx.books, books, options.phases,
                 force=options.scope is ScanScope.REFRESH,
                 template=template, directory_scheme=directory_scheme, root_for=self._root_for,
+                progress=progress,
             )
         roots = roots or self.ctx.config.scan_paths
         combined = ScanPlan()
         for root in roots:
             plan = plan_scan_graph(
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
-                options=options, inference_root=self._scan_root_for_path(root),
+                options=options, inference_root=self._scan_root_for_path(root), progress=progress,
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -258,6 +261,26 @@ class AppController:
             combined.files_added += plan.files_added
             combined.reconciled_folders |= plan.reconciled_folders
         return combined
+
+    async def scan_preview_streamed(
+        self, roots: list[Path] | None = None, *,
+        template: str | None = None, directory_scheme: str | None = None,
+        options: ScanOptions | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
+    ) -> ScanPlan:
+        """Run scan_preview off the event loop, marshaling per-folder progress back onto
+        it so a live UI indicator updates safely from the worker thread."""
+        loop = asyncio.get_running_loop()
+
+        def safe(done: int, total: int, label: str) -> None:
+            if progress is not None:
+                loop.call_soon_threadsafe(progress, done, total, label)
+
+        return await asyncio.to_thread(
+            self.scan_preview, roots,
+            template=template, directory_scheme=directory_scheme,
+            options=options, progress=safe,
+        )
 
     def apply_scan(self, plan: ScanPlan) -> int:
         """Persist a previously-computed scan plan; returns the number written."""

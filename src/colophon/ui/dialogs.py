@@ -871,16 +871,29 @@ async def scan_dialog(
                                  "refresh": ScanScope.REFRESH}[scope_choice.value]
                         opts = ScanOptions(scope=scope, phases=chosen,
                                            book_ids=selection or None)
+                        body.clear()
+                        with body:
+                            ui.label("Scanning library").classes("text-subtitle1")
+                            with ui.row().classes("items-center q-gutter-sm"):
+                                ui.spinner()
+                                prog = ui.label("Scanning…").classes(
+                                    "text-caption colophon-muted"
+                                )
+
+                        def _progress(done: int, total: int, label: str) -> None:
+                            prog.set_text(f"Scanning {done} / {total} · {label}")
+
                         try:
-                            plan = await asyncio.to_thread(
-                                controller.scan_preview,
+                            plan = await controller.scan_preview_streamed(
                                 None if selection else ([folder] if folder is not None else None),
                                 template=used_template,
                                 directory_scheme=scheme.value,
                                 options=opts,
+                                progress=_progress,
                             )
                         except ValueError as e:
                             ui.notify(f"Invalid pattern: {e}", type="negative")
+                            show_options()
                             return
                         show_results(plan, used_template, scheme.value)
 

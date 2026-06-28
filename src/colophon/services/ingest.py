@@ -162,12 +162,26 @@ def refresh_local(book: BookUnit, *, root: Path, template: str, directory_scheme
     )
 
 
-def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> ScanPlan:
+def _scan_label(folder: Path, root: Path) -> str:
+    """A readable per-folder progress label: the folder path relative to the scan root,
+    or its bare name when it is not under root."""
+    try:
+        return str(folder.relative_to(root))
+    except ValueError:
+        return folder.name
+
+
+def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
+                   progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     plan = ScanPlan()
-    for unit in group_book_units(root):
+    units = group_book_units(root)
+    total = len(units)
+    for i, unit in enumerate(units, start=1):
+        if progress is not None:
+            progress(i, total, _scan_label(unit.folder, root))
         existing = repo.get(BookUnit.id_for(unit.folder))
         book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
 
@@ -203,31 +217,40 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
 
 
 def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
-              options: ScanOptions | None = None, inference_root: Path | None = None) -> ScanPlan:
+              options: ScanOptions | None = None, inference_root: Path | None = None,
+              progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything.
     `options is None` keeps the legacy behavior (all books, all local phases).
-    `inference_root` (default `root`) is the scan path used for classify/dir-inference depth."""
+    `inference_root` (default `root`) is the scan path used for classify/dir-inference depth.
+    `progress(done, total, label)` fires once per folder as it is processed."""
     if options is None:
-        return _plan_scan_all(repo, root, template=template, directory_scheme=directory_scheme)
+        return _plan_scan_all(repo, root, template=template,
+                              directory_scheme=directory_scheme, progress=progress)
     if options.scope is ScanScope.NEW_ONLY:
         return _plan_scan_new_only(repo, root, options.phases, template=template,
-                                   directory_scheme=directory_scheme, inference_root=inference_root)
+                                   directory_scheme=directory_scheme,
+                                   inference_root=inference_root, progress=progress)
     return _plan_scan_reprocess(repo, root, options.phases,
                                 force=options.scope is ScanScope.REFRESH,
                                 template=template, directory_scheme=directory_scheme,
-                                inference_root=inference_root)
+                                inference_root=inference_root, progress=progress)
 
 
 def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
                         template: str, directory_scheme: str,
-                        inference_root: Path | None = None) -> ScanPlan:
+                        inference_root: Path | None = None,
+                        progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
     """Ingest only books not already known; run the selected local phases on each.
     SEARCH is always run for a new book (probing is intrinsic to discovery)."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     inf_root = inference_root or root
     plan = ScanPlan()
-    for unit in group_book_units(root):
+    units = group_book_units(root)
+    total = len(units)
+    for i, unit in enumerate(units, start=1):
+        if progress is not None:
+            progress(i, total, _scan_label(unit.folder, root))
         if repo.get(BookUnit.id_for(unit.folder)) is not None:
             continue
         book = BookUnit.new(source_folder=unit.folder)
@@ -241,7 +264,8 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
 
 def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
                          force: bool, template: str, directory_scheme: str,
-                         inference_root: Path | None = None) -> ScanPlan:
+                         inference_root: Path | None = None,
+                         progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
     """UPDATE (force=False) / REFRESH (force=True): add new books and re-process known ones
     in `root`. New books run the selected phases (always incl. SEARCH); known books re-run
     the selected phases — only STALE/PENDING unless `force`."""
@@ -249,7 +273,11 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
     scheme = parse_scheme(directory_scheme)
     inf_root = inference_root or root
     plan = ScanPlan()
-    for unit in group_book_units(root):
+    units = group_book_units(root)
+    total = len(units)
+    for i, unit in enumerate(units, start=1):
+        if progress is not None:
+            progress(i, total, _scan_label(unit.folder, root))
         existing = repo.get(BookUnit.id_for(unit.folder))
         book = existing if existing is not None else BookUnit.new(source_folder=unit.folder)
         run_phases = phases if existing is not None else (phases | {Phase.SEARCH})
@@ -278,6 +306,7 @@ def plan_rescan_books(
     template: str,
     directory_scheme: str,
     root_for: Callable[[BookUnit], Path],
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> ScanPlan:
     """Re-process exactly `books` (selection-scoped).
 
@@ -288,7 +317,10 @@ def plan_rescan_books(
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     plan = ScanPlan()
-    for book in books:
+    total = len(books)
+    for i, book in enumerate(books, start=1):
+        if progress is not None:
+            progress(i, total, book.title or book.source_folder.name)
         units = group_book_units(book.source_folder)
         unit_files = next((u.files for u in units if u.folder == book.source_folder), [])
         before_empty = _empty_fields(book)
@@ -351,6 +383,7 @@ def _adopt_and_identify(
 def plan_scan_graph(
     repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
     options: ScanOptions | None = None, inference_root: Path | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> ScanPlan:
     """Graph-routed planner: persist `project(build_graph(...))` — single containers and
     multi-book leaves — with per-leaf IDENTIFY and state preservation. `reconciled_folders`
@@ -365,7 +398,7 @@ def plan_scan_graph(
     inf_root = inference_root or root
     graph = build_graph(
         repo, root, template=template, directory_scheme=directory_scheme,
-        options=options, inference_root=inference_root,
+        options=options, inference_root=inference_root, progress=progress,
     )
     plan = ScanPlan()
     for unit in project(graph):
