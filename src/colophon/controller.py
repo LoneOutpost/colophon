@@ -49,6 +49,7 @@ from colophon.core.navigator import (
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
 from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
+from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -1158,11 +1159,24 @@ class AppController:
         return rows
 
     def source_label(self, name: str) -> str:
-        """Human-facing label for a source/provenance name (e.g. 'audnexus' -> 'Audible')."""
+        """Human-facing label for a provenance/source name. A local provenance tier
+        (tag/datafile/directory/filename/graphing/manual) gets a fixed label; a match
+        source (audnexus/…) gets its live source label."""
+        local = provenance_label(name)
+        if local is not None:
+            return local
         for s in self.ctx.sources:
             if s.name == name:
                 return _label_for(s)
         return _SOURCE_LABELS.get(name, name.replace("_", " ").title())
+
+    def source_tooltip(self, name: str) -> str:
+        """Hover explanation for a provenance badge: a fixed sentence for a local tier,
+        or 'Matched from <source>' for an external match source."""
+        local = provenance_tooltip(name)
+        if local is not None:
+            return local
+        return f"Matched from {self.source_label(name)}"
 
     def review_threshold(self) -> float:
         """The confidence threshold above which a match is auto-checked / a book is Ready."""
