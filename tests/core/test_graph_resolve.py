@@ -113,3 +113,49 @@ def test_no_classification_without_matching_dir(tmp_path):
 
     assert graph.directories[DirectoryNode.id_for(a)].kind == "unknown"
     assert sibling.authors == []   # nothing classified -> nothing inherited
+
+
+def test_match_source_author_classifies_and_fills(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    author_dir = root / "Robert A Heinlein"
+    a = author_dir / "Stranger in a Strange Land"
+    b = author_dir / "Starship Troopers"
+    graph = _graph_with_dirs(a, b)
+
+    # author resolved from a match source (audnexus), not a tag
+    tagged = _book(a, ["Robert A. Heinlein"], "audnexus")
+    untagged = _book(b, [])
+    resolve_graph_authors(graph, [tagged, untagged], root=root)
+
+    node = graph.directories[DirectoryNode.id_for(author_dir)]
+    assert node.kind == "author" and node.author == "Robert A. Heinlein"
+    assert untagged.authors == ["Robert A. Heinlein"]
+    assert untagged.provenance["authors"] == Provenance.GRAPHING.value
+
+
+def test_manual_author_classifies(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    book = _book(author_dir / "Elantris", ["Brandon Sanderson"], Provenance.MANUAL.value)
+    graph = _graph_with_dirs(author_dir / "Elantris")
+
+    resolve_graph_authors(graph, [book], root=root)
+    assert graph.directories[DirectoryNode.id_for(author_dir)].kind == "author"
+
+
+def test_directory_provenance_author_does_not_classify(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    author_dir = root / "Some Folder"
+    # author was derived from the folder name itself (directory inference) — circular,
+    # so it must NOT classify the folder AUTHOR on its own.
+    book = _book(author_dir / "Book", ["Some Folder"], Provenance.DIRECTORY.value)
+    graph = _graph_with_dirs(author_dir / "Book")
+
+    resolve_graph_authors(graph, [book], root=root)
+    assert graph.directories[DirectoryNode.id_for(author_dir)].kind == "unknown"
