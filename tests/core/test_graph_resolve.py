@@ -187,3 +187,93 @@ def test_title_node_is_not_upgraded_to_author(tmp_path):
     resolve_graph_authors(graph, [book], root=root)
 
     assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"
+
+
+def test_propagate_manual_author_fills_empty_not_tag(tmp_path):
+    from colophon.core.graph_resolve import propagate_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    a, b2 = author_dir / "Elantris", author_dir / "Tagged"
+    graph = _graph_with_dirs(a, b2)
+    node = graph.directories[DirectoryNode.id_for(author_dir)]
+    node.kind, node.kind_source, node.kind_value = "author", "manual", "Brandon Sanderson"
+
+    empty = _book(a, [])
+    tagged = _book(b2, ["Someone Else"], Provenance.TAG.value)
+    propagate_overrides(graph, [empty, tagged], root=root)
+
+    assert empty.authors == ["Brandon Sanderson"]
+    assert empty.provenance["authors"] == Provenance.MANUAL.value
+    assert tagged.authors == ["Someone Else"]
+    assert tagged.provenance["authors"] == Provenance.TAG.value
+
+
+def test_propagate_manual_author_fills_weak(tmp_path):
+    from colophon.core.graph_resolve import propagate_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    a = author_dir / "Elantris"
+    graph = _graph_with_dirs(a)
+    node = graph.directories[DirectoryNode.id_for(author_dir)]
+    node.kind, node.kind_source, node.kind_value = "author", "manual", "Brandon Sanderson"
+
+    weak = _book(a, ["Elantris"], Provenance.DIRECTORY.value)
+    propagate_overrides(graph, [weak], root=root)
+
+    assert weak.authors == ["Brandon Sanderson"]
+    assert weak.provenance["authors"] == Provenance.MANUAL.value
+
+
+def test_propagate_manual_series_fills_empty(tmp_path):
+    from colophon.core.graph_resolve import propagate_overrides
+
+    root = tmp_path / "lib"
+    series_dir = root / "Mistborn"
+    a = series_dir / "Final Empire"
+    graph = _graph_with_dirs(a)
+    node = graph.directories[DirectoryNode.id_for(series_dir)]
+    node.kind, node.kind_source, node.kind_value = "series", "manual", "Mistborn"
+
+    book = _book(a, [])
+    propagate_overrides(graph, [book], root=root)
+
+    assert [s.name for s in book.series] == ["Mistborn"]
+    assert book.provenance["series"] == Provenance.MANUAL.value
+
+
+def test_propagate_nested_series_under_author_applies_both(tmp_path):
+    from colophon.core.graph_resolve import propagate_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    series_dir = author_dir / "Mistborn"
+    a = series_dir / "Final Empire"
+    graph = _graph_with_dirs(a)
+    an = graph.directories[DirectoryNode.id_for(author_dir)]
+    an.kind, an.kind_source, an.kind_value = "author", "manual", "Brandon Sanderson"
+    sn = graph.directories[DirectoryNode.id_for(series_dir)]
+    sn.kind, sn.kind_source, sn.kind_value = "series", "manual", "Mistborn"
+
+    book = _book(a, [])
+    propagate_overrides(graph, [book], root=root)
+
+    assert book.authors == ["Brandon Sanderson"]
+    assert [s.name for s in book.series] == ["Mistborn"]
+
+
+def test_propagate_franchise_does_not_touch_books(tmp_path):
+    from colophon.core.graph_resolve import propagate_overrides
+
+    root = tmp_path / "lib"
+    fdir = root / "Doctor Who"
+    a = fdir / "Book"
+    graph = _graph_with_dirs(a)
+    node = graph.directories[DirectoryNode.id_for(fdir)]
+    node.kind, node.kind_source, node.kind_value = "franchise", "manual", "DOCTOR WHO"
+
+    book = _book(a, [])
+    propagate_overrides(graph, [book], root=root)
+
+    assert book.authors == [] and "authors" not in book.provenance

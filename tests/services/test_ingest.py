@@ -8,6 +8,7 @@ from colophon.core.models import (
     BookState,
     BookUnit,
     ContentKind,
+    NodeOverride,
     Phase,
     PhaseState,
     Provenance,
@@ -617,3 +618,32 @@ def test_plan_scan_graph_runs_grouping_hint(tmp_path: Path):
     repo = _repo(tmp_path)
     plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
     assert any(u.title == "Dune" for u in plan.units)
+
+
+def test_plan_scan_graph_propagates_author_override(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Brandon Sanderson" / "Elantris"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")  # no tags -> empty author
+
+    repo = _repo(tmp_path)
+    overrides = {
+        str(ingest / "Brandon Sanderson"): NodeOverride(kind="author", value="Brandon Sanderson")
+    }
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title", node_overrides=overrides)
+
+    book = next(u for u in plan.units if u.source_folder == folder)
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["authors"] == "manual"
+
+
+def test_plan_scan_graph_without_overrides_unaffected(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Brandon Sanderson" / "Elantris"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")  # no node_overrides
+    book = next(u for u in plan.units if u.source_folder == folder)
+    assert book.provenance.get("authors") != "manual"
