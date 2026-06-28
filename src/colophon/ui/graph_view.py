@@ -8,7 +8,7 @@ from pathlib import Path
 from nicegui import ui
 
 from colophon.controller import AppController
-from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree
+from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
 from colophon.ui.chrome import page_header
 
 
@@ -61,6 +61,7 @@ def render_graph(controller: AppController) -> None:
         rebuild_btn = ui.button("Rebuild", icon="refresh").props("flat no-caps")
 
     summary = ui.label().classes("text-caption colophon-muted q-px-sm q-mb-sm")
+    cohort_actions = ui.row().classes("items-center q-gutter-sm q-px-sm q-mb-sm")
     body = ui.column().classes("w-full q-px-sm")
 
     async def _open_classify_dialog(node, kind: str) -> None:
@@ -89,6 +90,16 @@ def render_graph(controller: AppController) -> None:
                 ui.separator()
                 ui.menu_item("Clear", lambda node=node: _clear_classify(node))
 
+    async def _confirm_cohort(hint: str, count: int) -> None:
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f"Confirm {count} groupings as {hint}?")
+            with ui.row():
+                ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
+                ui.button("Confirm", on_click=lambda: dialog.submit(True)).props("no-caps")
+        if await dialog:
+            controller.confirm_hint_cohort(Path(state["root"]), hint)
+            await _build()
+
     def _show(graph) -> None:
         s = graph_summary(graph)
         roles = ", ".join(f"{n} {role}" for role, n in sorted(s.files_by_role.items()))
@@ -101,6 +112,16 @@ def render_graph(controller: AppController) -> None:
             f"{s.container_dirs} container · {s.title_dirs} title · "
             f"{s.unknown_dirs} unknown · {s.books} books · files: {roles or 'none'}"
         )
+        cohort_actions.clear()
+        with cohort_actions:
+            for hint in ("author", "series"):
+                cohort = grouping_cohort(graph, root=Path(state["root"]), hint=hint)
+                if cohort:
+                    count = len(cohort)
+                    ui.button(
+                        f"Confirm {count} {hint}",
+                        on_click=lambda hint=hint, count=count: _confirm_cohort(hint, count),
+                    ).props("flat dense no-caps").classes("colophon-chip")
         body.clear()
         tree = graph_tree(graph, Path(state["root"]))
         with body:
