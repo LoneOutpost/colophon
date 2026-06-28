@@ -8,7 +8,6 @@ from colophon.core.models import (
     BookState,
     BookUnit,
     ContentKind,
-    FolderKind,
     Phase,
     PhaseState,
     Provenance,
@@ -195,12 +194,15 @@ def test_container_datafile_ignored_for_multi_folder(tmp_path):
 
     repo = _repo(tmp_path)
     units = scan_ingest(repo, incoming, template="$Author - $Title")
-    book = next(u for u in units if u.source_folder == folder)
-    assert book.content_kind is ContentKind.MULTI
-    # The uploader handle from the datafile is rejected; the folder name (the real
-    # author) is identified instead via the foster-container rule.
-    assert book.authors == ["Sarah Graves"]
-    assert book.provenance.get("authors") == "directory"
+    leaves = [u for u in units if u.source_folder == folder]
+
+    assert len(leaves) == 3
+    assert all(u.content_kind is ContentKind.SINGLE for u in leaves)
+    # The uploader handle from the container datafile is rejected; the folder name (the
+    # real author) is carried onto every leaf.
+    for leaf in leaves:
+        assert leaf.authors == ["Sarah Graves"]
+        assert leaf.provenance.get("authors") == "directory"
 
 
 def test_matching_name_datafile_kept_for_single_folder(tmp_path):
@@ -230,10 +232,12 @@ def test_foster_container_author_is_folder_name(tmp_path):
 
     repo = _repo(tmp_path)
     units = scan_ingest(repo, incoming, template="$Author - $Title")
-    book = next(u for u in units if u.source_folder == folder)
-    assert book.content_kind is ContentKind.MULTI
-    assert book.authors == ["Sarah Graves"]
-    assert book.provenance["authors"] == "directory"
+    leaves = [u for u in units if u.source_folder == folder]
+
+    assert len(leaves) == 3
+    for leaf in leaves:
+        assert leaf.authors == ["Sarah Graves"]
+        assert leaf.provenance["authors"] == "directory"
 
 
 def test_title_folder_split_gets_no_guessed_author(tmp_path):
@@ -246,9 +250,12 @@ def test_title_folder_split_gets_no_guessed_author(tmp_path):
     repo = _repo(tmp_path)
     units = scan_ingest(repo, incoming, template="$Author - $Title",
                         directory_scheme="$Title")
-    book = units[0]
-    assert book.folder_kind is FolderKind.TITLE
-    assert book.authors == []
+    leaves = [u for u in units if u.source_folder == folder]
+    # A title folder holding distinct works splits into per-work leaves; none gets a
+    # guessed author (the container-author carry is author-only, not title folders).
+    assert len(leaves) == 2
+    for leaf in leaves:
+        assert leaf.authors == []
 
 
 def test_commit_scan_reconcile_prunes_replaced_books(tmp_path: Path):

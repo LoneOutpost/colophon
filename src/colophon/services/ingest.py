@@ -404,7 +404,9 @@ def commit_scan(repo: BookUnitRepo, plan: ScanPlan, *, reconcile: bool = False) 
 
 
 def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "") -> list[BookUnit]:
-    """Plan and commit a scan of `root` in one call; returns the persisted units."""
-    plan = plan_scan(repo, root, template=template, directory_scheme=directory_scheme)
-    commit_scan(repo, plan)
+    """Plan and commit a scan of `root` in one call; returns the persisted units.
+    Routes through the entity graph: multi-book folders persist as leaves, the stale
+    container is pruned, existing leaf state is preserved."""
+    plan = plan_scan_graph(repo, root, template=template, directory_scheme=directory_scheme)
+    commit_scan(repo, plan, reconcile=True)
     return plan.units

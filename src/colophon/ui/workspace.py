@@ -21,7 +21,7 @@ from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
-from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS, normalize_text
+from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.ui import state_panel
@@ -268,7 +268,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     # a scope selection refines within it.
     scope: dict[str, object] = {"kind": "all", "key": None}
     folder_filter: dict[str, object] = {"path": None}
-    foster_selected: set[Path] = set()
     book_filter: dict[str, str] = {"text": initial_filter or ""}
     editor_state: dict[str, object] = {
         "book_id": None, "is_dirty": None, "save_pending": None, "save": None, "write": None,
@@ -318,7 +317,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     row_elements: dict[str, ui.item] = {}
     refs: dict[str, object] = {"filter": None}
     view: dict[str, object] = {
-        "mode": "library", "cwd": None, "multiselect": False, "group_by": "author",
+        "multiselect": False, "group_by": "author",
     }
     _list_view: dict[str, object] = {"books": [], "rendered": 0}
     _list_el: dict[str, object] = {"el": None}      # the ui.list() holding rows
@@ -359,9 +358,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     if not initial_filter:  # an explicit ?filter= query wins over the snapshot
         book_filter["text"] = _restored.filter_text
     selected_ids.update(_restored.selected_ids)
-
-    def _scan_roots() -> list[Path]:
-        return list(controller.ctx.config.scan_paths)
 
     def _selected_books() -> list:
         return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
@@ -418,38 +414,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.row().classes("items-center gap-2"):
                     ui.icon(icon).props(f"color={color}")
                     ui.label(f.detail)
-            plan = controller.fosterable_plan(book)
-            if plan is not None:
-                count = len(plan.works)
-                mark = (
-                    f"Fosterable: {plan.author} ({count} works)"
-                    if plan.author else f"Fosterable: {count} works"
-                )
-                ui.label(mark).props("caption")
-                for w in plan.works:
-                    ui.label(f"  {w.label}  ({w.files} file(s))").props("caption")
-
-                def _confirm_foster(b=book, n=count) -> None:
-                    result = controller.foster_book(b)
-                    actions = (
-                        [{
-                            "label": "Undo", "color": "white",
-                            "handler": lambda bid=result.batch_id: (
-                                controller.undo_foster(bid),
-                                refresh_nav(), _render_middle(), refresh_status(),
-                            ),
-                        }]
-                        if result.batch_id else None
-                    )
-                    ui.notify(
-                        f"Fostered {result.fostered} file(s) into {n} book(s)",
-                        type="positive", actions=actions,
-                    )
-                    refresh_nav()
-                    _render_middle()
-                    refresh_status()
-
-                ui.button("Foster", on_click=_confirm_foster).props("color=primary")
             for f in findings:
                 if f.code.value in ("dup_format", "dup_edition", "structure_unclear"):
                     code = f.code
@@ -1080,10 +1044,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _update_count()
 
     def _on_key(e) -> None:
-        # Only drive the Books list in Library mode; NiceGUI's `ignore` list keeps
-        # these keys from firing while a text field/button is focused.
-        if view["mode"] != "library":
-            return
+        # NiceGUI's `ignore` list keeps these keys from firing while a text
+        # field/button is focused.
         key, action, mods = e.key, e.action, e.modifiers
         if mods.ctrl or mods.alt or mods.meta:
             return
@@ -1233,184 +1195,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             _render_preview()
         dialog.open()
 
-    # --- folder browser (Folders mode) ---
-    def _toggle_foster(path: Path, on: bool) -> None:
-        if on:
-            foster_selected.add(path)
-        else:
-            foster_selected.discard(path)
-
-    def _foster_dialog() -> None:
-        paths = sorted(foster_selected)
-        if not paths:
-            ui.notify("No files selected")
-            return
-        parents = {p.parent for p in paths}
-        default_author = next(iter(parents)).name if len(parents) == 1 else ""
-        with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
-            ui.label(f"Organize {len(paths)} file(s) into books").classes("text-subtitle1")
-            ui.label(
-                "Each file moves into its own book folder, with author set from its "
-                "containing folder and title from the filename. Optionally write the "
-                "corrected tags into each file."
-            ).classes("text-caption colophon-muted")
-            override = ui.input("Override author for all", value="").props(
-                "dense clearable"
-            ).classes("w-full")
-            if default_author:
-                override.props(f'placeholder="{default_author}"')
-            write_tags_cb = ui.checkbox("Write tags now", value=False)
-            body = ui.column().classes("w-full")
-
-            def _render_preview() -> None:
-                body.clear()
-                ovr = (override.value or "").strip() or None
-                with body, ui.scroll_area().classes("w-full").style("max-height: 32vh"):
-                    with ui.list().props("dense").classes("w-full"):
-                        for p in paths:
-                            author = ovr or p.parent.name
-                            title = normalize_text(p.stem)
-                            with ui.item(), ui.item_section():
-                                ui.item_label(p.name)
-                                ui.item_label(f"{author} · {title}").props("caption")
-
-            override.on_value_change(lambda _e: _render_preview())
-            _render_preview()
-            actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
-            with actions:
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-                confirm = ui.button("Organize into books", icon="auto_awesome_motion")
-
-            async def _commit() -> None:
-                # Disk renames + field edits + optional tag write; run off the loop.
-                confirm.props("loading=true")
-                try:
-                    result = await controller.restructure_as_books(
-                        paths,
-                        author_override=(override.value or "").strip() or None,
-                        write_tags=write_tags_cb.value,
-                    )
-                finally:
-                    confirm.props(remove="loading")
-                foster_selected.clear()
-                body.clear()
-                with body:
-                    note = f"Organized {result.fostered} of {len(paths)} into books"
-                    if write_tags_cb.value:
-                        note += f", retagged {result.retagged}"
-                    ui.label(note).classes("text-body2")
-                    if result.failures:
-                        ui.label("Failed:").classes("text-caption text-negative q-mt-xs")
-                        with ui.list().props("dense").classes("w-full"):
-                            for r in result.failures:
-                                with ui.item(), ui.item_section():
-                                    ui.item_label(r.source.name)
-                                    ui.item_label(r.error or "unknown error").props("caption")
-
-                def _close_and_refresh() -> None:
-                    # Refresh AFTER closing: _render_middle rebuilds the folder browser
-                    # (which hosts this dialog's trigger), so refreshing while the dialog
-                    # is open would tear it down before the result is read.
-                    dialog.close()
-                    refresh_nav()
-                    _render_middle()
-
-                actions.clear()
-                with actions:
-                    ui.button("Close", on_click=_close_and_refresh).props("flat")
-
-            confirm.on_click(_commit)
-        dialog.open()
-
-    def refresh_folders() -> None:
-        list_container.clear()
-        roots = _scan_roots()
-        cwd = view["cwd"]
-        multi = len(roots) > 1
-        if cwd is None and roots and not multi:
-            cwd = roots[0]  # a single scan path is browsed directly
-            view["cwd"] = cwd
-        with list_container:
-            if not roots:
-                ui.label("No scan paths configured. Set them in Settings.").classes(
-                    "colophon-muted q-pa-md"
-                )
-                return
-            if multi:
-                # "All scan paths" is a neutral state (no combined view); the
-                # operator picks one scan path to browse its folders.
-                cwd_path = Path(str(cwd)) if cwd is not None else None
-                selected = (
-                    "__all__" if cwd_path is None
-                    else next(
-                        (str(r) for r in roots if cwd_path == r or r in cwd_path.parents),
-                        "__all__",
-                    )
-                )
-                options = {"__all__": "All scan paths"}
-                options.update({str(r): (r.name or str(r)) for r in roots})
-                ui.select(
-                    options,
-                    value=selected,
-                    on_change=lambda e: _select_root(e.value),
-                ).props("dense outlined").classes("w-full q-mb-sm")
-            if cwd is None:
-                with ui.column().classes("w-full items-center q-pa-lg q-gutter-sm"):
-                    ui.icon("folder_open").classes("text-h4 text-grey-5")
-                    ui.label("Pick a scan path above to browse its folders.").classes(
-                        "colophon-muted text-center"
-                    )
-                return
-            cwd = Path(str(cwd))
-            with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mb-xs"):
-                ui.icon("folder_open").classes("colophon-muted")
-                ui.label(str(cwd)).classes("text-caption colophon-muted ellipsis col")
-                ui.button(
-                    "Organize into books", icon="subdirectory_arrow_right", on_click=_foster_dialog
-                ).props("color=primary").tooltip(
-                    "Move the selected loose files into a new book subfolder and retag them."
-                )
-
-            listing = controller.list_directory(cwd)
-            with ui.list().props("dense bordered").classes("w-full"):
-                # "Up" entry: hidden once cwd is a configured scan root, so normal
-                # browsing stops at the root (nested roots are not specially handled).
-                if cwd not in {Path(str(r)) for r in roots}:
-                    with ui.item(on_click=lambda p=cwd.parent: _browse_to(p)).props("clickable"):
-                        with ui.item_section().props("avatar"):
-                            ui.icon("arrow_upward")
-                        with ui.item_section():
-                            ui.item_label("..")
-                    ui.separator()
-                if not listing.entries:
-                    with ui.item():
-                        with ui.item_section():
-                            ui.item_label("(empty)").classes("colophon-muted")
-                for entry in listing.entries:
-                    if entry.is_dir:
-                        with ui.item(on_click=lambda p=entry.path: _browse_to(p)).props("clickable"):
-                            with ui.item_section().props("avatar"):
-                                ui.icon("folder", color="amber-7")
-                            with ui.item_section():
-                                ui.item_label(entry.name)
-                    elif entry.is_audio:
-                        with ui.item():
-                            with ui.item_section().props("avatar"):
-                                ui.checkbox(
-                                    value=entry.path in foster_selected,
-                                    on_change=lambda e, p=entry.path: _toggle_foster(p, e.value),
-                                )
-                            with ui.item_section().props("avatar"):
-                                ui.icon("audiotrack", color="primary")
-                            with ui.item_section():
-                                ui.item_label(entry.name)
-                    else:
-                        with ui.item().props("disable"):
-                            with ui.item_section().props("avatar"):
-                                ui.icon("insert_drive_file", color="grey-5")
-                            with ui.item_section():
-                                ui.item_label(entry.name).classes("text-grey-5")
-
     # --- navigator ---
     def _nav_item(
         label: str, icon: str, active: bool, on_click, color: str | None = None, *, checkbox=None
@@ -1430,18 +1214,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
         with nav_container:
-            ui.toggle(
-                {"library": "Library", "folders": "Folders"},
-                value=view["mode"],
-                on_change=lambda e: _set_mode(e.value),
-            ).props("dense no-caps").classes("w-full q-mb-sm").tooltip(
-                "Browse scan folders and organize loose files into their own book folders."
-            )
-            if view["mode"] == "folders":
-                ui.label(
-                    "Browse scan folders and foster loose files into their own subfolders."
-                ).classes("text-caption colophon-muted")
-                return
             ui.switch(
                 "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
             ).props("dense").classes("q-mb-sm")
@@ -1561,11 +1333,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _persist_view()
 
     def _render_middle() -> None:
-        is_folders = view["mode"] == "folders"
-        middle_title.text = "Folder contents" if is_folders else "Books"
-        # Show a folder-filter indicator in the Books header (Library mode only).
+        middle_title.text = "Books"
+        # Show a folder-filter indicator in the Books header.
         middle_filter.clear()
-        if not is_folders and folder_filter["path"]:
+        if folder_filter["path"]:
             folder = Path(str(folder_filter["path"]))
             with middle_filter:
                 ui.icon("filter_alt", color="primary")
@@ -1575,49 +1346,36 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.button(icon="close", on_click=_clear_folder_filter).props(
                     'flat dense round size=sm color=primary aria-label="Clear folder filter"'
                 ).tooltip("Clear folder filter")
-        # Books toolbar: free-text filter + selection controls (Library mode only).
+        # Books toolbar: free-text filter + selection controls.
         middle_toolbar.clear()
-        if not is_folders:
-            with middle_toolbar:
-                search = ui.input(
-                    placeholder="Filter title, author, series, narrator, genre, tag, filename",
-                    value=book_filter["text"],
-                ).props("dense clearable debounce=300").classes("w-full")
-                search.on_value_change(lambda e: _set_filter(e.value))
-                refs["filter"] = search  # so the "/" shortcut can focus it
+        with middle_toolbar:
+            search = ui.input(
+                placeholder="Filter title, author, series, narrator, genre, tag, filename",
+                value=book_filter["text"],
+            ).props("dense clearable debounce=300").classes("w-full")
+            search.on_value_change(lambda e: _set_filter(e.value))
+            refs["filter"] = search  # so the "/" shortcut can focus it
 
-                def _clear_filter() -> None:
-                    search.set_value("")
-                    _set_filter("")
-                    search.run_method("blur")  # return keyboard control to the list
+            def _clear_filter() -> None:
+                search.set_value("")
+                _set_filter("")
+                search.run_method("blur")  # return keyboard control to the list
 
-                search.on("keydown.esc", _clear_filter)
-                with search.add_slot("prepend"):
-                    ui.icon("search")
-                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
-                    ui.button("Select all", icon="done_all", on_click=_select_visible) \
-                        .props("flat dense no-caps").tooltip("Select all books matching the filter")
-                    ui.button("Deselect visible", icon="remove_done", on_click=_deselect_visible) \
-                        .props("flat dense no-caps").tooltip("Deselect only the books matching the current filter")
-                    ui.space()
-                    ui.button("Parse", icon="auto_fix_high", on_click=_parse_dialog) \
-                        .props("flat dense no-caps").tooltip(
-                            "Parse fields from the selected books' filenames"
-                        )
+            search.on("keydown.esc", _clear_filter)
+            with search.add_slot("prepend"):
+                ui.icon("search")
+            with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                ui.button("Select all", icon="done_all", on_click=_select_visible) \
+                    .props("flat dense no-caps").tooltip("Select all books matching the filter")
+                ui.button("Deselect visible", icon="remove_done", on_click=_deselect_visible) \
+                    .props("flat dense no-caps").tooltip("Deselect only the books matching the current filter")
+                ui.space()
+                ui.button("Parse", icon="auto_fix_high", on_click=_parse_dialog) \
+                    .props("flat dense no-caps").tooltip(
+                        "Parse fields from the selected books' filenames"
+                    )
         _update_count()
-        if is_folders:
-            refresh_folders()
-        else:
-            refresh_list()
-
-    def _set_mode(mode: str) -> None:
-        if _guard_nav(None, lambda: _set_mode(mode)):
-            return
-        _clear_editor_state()
-        view["mode"] = mode
-        refresh_nav()
-        _render_middle()
-        _persist_view()
+        refresh_list()
 
     def _set_group_by(value: str) -> None:
         view["group_by"] = value
@@ -1645,26 +1403,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_nav()  # author/series list returns to the full library
         _render_middle()
         _persist_view()
-
-    def _browse_to(folder: Path) -> None:
-        # Navigating the folder browser sets a folder filter that constrains both
-        # the Books list and the navigator once you switch to Library mode. The
-        # author/series selection resets so the whole folder is shown.
-        view["cwd"] = folder
-        folder_filter["path"] = str(folder)
-        scope["kind"], scope["key"] = "all", None
-        refresh_folders()
-        _persist_view()
-
-    def _select_root(value: str) -> None:
-        if value == "__all__":
-            folder_filter["path"] = None  # reset Library to all books
-            scope["kind"], scope["key"] = "all", None
-            view["cwd"] = None  # no scan path selected: show the pick-a-path prompt
-            refresh_folders()
-            _persist_view()
-        else:
-            _browse_to(Path(value))
 
     def _after_select() -> None:
         n = len(selected_ids)

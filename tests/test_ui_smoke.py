@@ -53,25 +53,3 @@ def test_state_panel_render_is_callable():
 
     rows = state_panel.phase_rows(BookUnit.new(source_folder=Path("/x")))
     assert len(rows) == 7
-
-
-def test_fosterable_plan_drives_attention_pane(tmp_path):
-    from colophon.controller import AppController
-    from colophon.core.models import BookUnit, DetectedWork
-    from tests.test_controller import _ctx
-
-    ctx = _ctx(tmp_path)
-    author = tmp_path / "ingest" / "Sarah Graves"
-    author.mkdir(parents=True)
-    (author / "Dead Cat Bounce.mp3").write_bytes(b"")
-    (author / "A Face at the Window.mp3").write_bytes(b"")
-    ctrl = AppController(ctx)
-    ctrl.scan([author])
-    book = ctx.books.get(BookUnit.id_for(author))
-    book.detected_works = [
-        DetectedWork(label="Dead Cat Bounce", files=[author / "Dead Cat Bounce.mp3"]),
-        DetectedWork(label="A Face at the Window", files=[author / "A Face at the Window.mp3"]),
-    ]
-    ctx.books.upsert(book)
-    plan = ctrl.fosterable_plan(book)
-    assert plan is not None and len(plan.works) == 2
