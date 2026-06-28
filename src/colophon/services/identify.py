@@ -21,6 +21,7 @@ from colophon.adapters.tags import read_embedded_tags
 from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import parse_filename
+from colophon.core.match import clean_match_title
 from colophon.core.models import (
     RESTRUCTURE_FINDINGS,
     BookUnit,
@@ -94,9 +95,13 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
 
 
 def normalize(book: BookUnit) -> None:
-    """Seam for identity normalization (cleaning the resolved title and work labels of
-    query/display noise). Currently a pass-through; the cleaning lands next."""
-    return None
+    """Clean a scan-derived title of query/display noise (year prefix, edition/format
+    parentheticals). Only directory/filename-sourced titles — tag, datafile, and manual
+    titles are left as-is. Idempotent."""
+    if book.provenance.get("title") in {Provenance.DIRECTORY.value, Provenance.FILENAME.value}:
+        cleaned = clean_match_title(book.title)
+        if cleaned and cleaned != book.title:
+            book.title = cleaned  # provenance unchanged
 
 
 def attribute(book: BookUnit, evidence: Evidence) -> None:
@@ -139,8 +144,8 @@ def run_identify(
     evidence = gather(book, root=root, pattern=pattern, scheme=scheme)
     seed_series(book)
     resolve(book, evidence)
-    normalize(book)
     attribute(book, evidence)
+    normalize(book)
     logger.debug(
         f"scan {book.source_folder}: IDENTIFY title={book.title!r}"
         f"({book.provenance.get('title')}) authors={book.authors}"

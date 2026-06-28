@@ -445,3 +445,18 @@ def test_plan_scan_graph_new_only_does_not_prune_known_folder(tmp_path: Path):
     # NEW_ONLY skips the known folder → it's not reconciled → container survives.
     assert author not in plan.reconciled_folders
     assert repo.get(BookUnit.id_for(author)) is not None
+
+
+def test_scan_cleans_gunslinger_title_and_label(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    folder = ingest / "1982 - The Gunslinger (DT1 - original edition)"
+    folder.mkdir(parents=True)
+    (folder / "1_ The Gunslinger.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    units = scan_ingest(repo, ingest, template="$Author - $Title")
+
+    assert len(units) == 1
+    book = units[0]
+    assert book.title == "The Gunslinger"                       # folder-name title cleaned
+    assert book.detected_works[0].label == "The Gunslinger"     # single-file label fixed

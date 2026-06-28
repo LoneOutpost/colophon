@@ -83,3 +83,39 @@ def test_attribute_is_noop_for_a_clean_single_book(tmp_path):
     book.authors = ["Brandon Sanderson"]
     attribute(book, Evidence(first_path=tmp_path / "Elantris" / "01.mp3"))
     assert book.authors == ["Brandon Sanderson"] and book.title == "Elantris"
+
+
+def test_normalize_cleans_directory_title(tmp_path):
+    from colophon.core.models import Provenance
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "1982 - The Gunslinger (DT1 - original edition)"
+    book.provenance["title"] = Provenance.DIRECTORY.value
+    normalize(book)
+    assert book.title == "The Gunslinger"
+    assert book.provenance["title"] == Provenance.DIRECTORY.value  # provenance unchanged
+
+
+def test_normalize_leaves_tag_and_manual_titles_untouched(tmp_path):
+    from colophon.core.models import Provenance
+    messy = "1982 - The Gunslinger (DT1 - original edition)"
+    tagged = BookUnit.new(source_folder=tmp_path / "t")
+    tagged.title = messy
+    tagged.provenance["title"] = Provenance.TAG.value
+    manual = BookUnit.new(source_folder=tmp_path / "m")
+    manual.title = messy
+    manual.provenance["title"] = Provenance.MANUAL.value
+    normalize(tagged)
+    normalize(manual)
+    assert tagged.title == messy
+    assert manual.title == messy
+
+
+def test_normalize_is_idempotent_and_clean_title_unchanged(tmp_path):
+    from colophon.core.models import Provenance
+    book = BookUnit.new(source_folder=tmp_path / "d")
+    book.title = "Dune"
+    book.provenance["title"] = Provenance.DIRECTORY.value
+    normalize(book)
+    assert book.title == "Dune"
+    normalize(book)  # idempotent
+    assert book.title == "Dune"

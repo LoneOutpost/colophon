@@ -144,3 +144,27 @@ def test_cluster_ragged_trailing_title_is_not_single():
     # The distinguishing title is in a trailing chunk past the shorter sibling.
     r = cluster(_paths("Series-1.mp3", "Series-2-Other Title.mp3"))
     assert r.content_kind is not ContentKind.SINGLE  # must not silently merge two books
+
+
+def test_title_chunks_drops_leading_number_chunks():
+    from colophon.core.filename_cluster import _title_chunks
+    assert _title_chunks(["1", "The Gunslinger"]) == ["The Gunslinger"]
+    assert _title_chunks(["Alpha Wolf", "Olento Research 1"]) == ["Alpha Wolf", "Olento Research 1"]
+    assert _title_chunks(["01"]) == ["01"]            # keeps the last chunk (degenerate)
+    assert _title_chunks([]) == []
+
+
+def test_single_file_label_uses_leading_text_chunk():
+    r = cluster([Path("1_ The Gunslinger.mp3")])
+    assert r.content_kind is ContentKind.SINGLE
+    assert r.detected_works[0].label == "The Gunslinger"
+
+
+def test_single_file_leading_text_label_unchanged():
+    r = cluster([Path("Alpha Wolf (Olento Research 1).mp3")])
+    assert r.detected_works[0].label == "Alpha Wolf"
+
+
+def test_single_file_lone_number_label_degenerate():
+    r = cluster([Path("01.mp3")])
+    assert r.detected_works[0].label == "01"
