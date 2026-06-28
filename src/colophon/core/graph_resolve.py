@@ -11,8 +11,13 @@ from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.models import BookUnit, Provenance
 from colophon.core.normalize import normalize_name
 
-_STRONG = {Provenance.TAG.value, Provenance.DATAFILE.value}
 _WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
+
+# Provenances that are NOT independent authorship evidence for AUTHOR classification:
+# directory/filename are read off the path itself (circular against a folder-name match),
+# and graphing is an author we already inferred (using it would feed the inference back
+# into itself). Everything else — tag, datafile, manual, and any match source — counts.
+_NOT_EVIDENCE = _WEAK | {Provenance.GRAPHING.value}
 
 
 def _name_key(name: str) -> str:
@@ -46,9 +51,9 @@ def _ancestors(graph: Graph, folder: Path, root: Path) -> list[DirectoryNode]:
 def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """Up: a dir whose name matches a TAG/DATAFILE author of a descendant book is AUTHOR.
     Down: fill each empty-or-weak-author book from its nearest AUTHOR ancestor (GRAPHING)."""
-    # Up — classify AUTHOR nodes from strong descendant evidence.
+    # Up — classify AUTHOR nodes from independent descendant evidence.
     for book in books:
-        if book.provenance.get("authors") not in _STRONG or not book.authors:
+        if not book.authors or book.provenance.get("authors") in _NOT_EVIDENCE:
             continue
         keys = {_name_key(a): a for a in book.authors}
         for node in _ancestors(graph, book.source_folder, root):
