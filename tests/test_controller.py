@@ -1450,8 +1450,21 @@ def test_source_label_maps_audnexus_to_audible(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
     assert ctrl.source_label("audnexus") == "Audible"
-    assert ctrl.source_label("manual") == "Manual"
+    assert ctrl.source_label("manual") == "Edited"          # local tier label
     assert ctrl.source_label("googlebooks") == "Google Books"
+    ctx.close()
+
+
+def test_source_label_and_tooltip_for_local_tiers(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    assert ctrl.source_label("graphing") == "Inferred"
+    assert ctrl.source_tooltip("graphing") == (
+        "Inferred from the author folder (a nearby tagged book named the author)."
+    )
+    # a match source falls through to its source label + a "Matched from" tooltip
+    assert ctrl.source_label("audnexus") == "Audible"
+    assert ctrl.source_tooltip("audnexus") == "Matched from Audible"
     ctx.close()
 
 
