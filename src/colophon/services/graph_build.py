@@ -10,9 +10,48 @@ from __future__ import annotations
 from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo
-from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph
-from colophon.core.models import BookUnit
+from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph, leaf_id_for
+from colophon.core.models import (
+    BookUnit,
+    ContentKind,
+    DetectedWork,
+    Provenance,
+    SeriesRef,
+)
 from colophon.services.ingest import plan_scan
+
+
+def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUnit:
+    """Project one detected work into a SINGLE-book leaf BookUnit. Title/author/series
+    come from the work (FILENAME provenance); `source_files` is left for `project` to
+    reconstruct from the leaf's owned FileNodes. Folder-name author inheritance for
+    untagged works is Phase 3 (GRAPHING), so an untagged work's leaf has no authors."""
+    leaf = BookUnit.new(source_folder=container.source_folder)
+    leaf.id = leaf_id
+    leaf.content_kind = ContentKind.SINGLE
+    leaf.title = work.label
+    leaf.provenance["title"] = Provenance.FILENAME.value
+    leaf.detected_works = [work]
+    if work.author:
+        leaf.authors = [work.author]
+        leaf.provenance["authors"] = Provenance.FILENAME.value
+    if work.series:
+        leaf.series = [SeriesRef(name=work.series, sequence=work.sequence)]
+        leaf.provenance["series"] = Provenance.FILENAME.value
+    return leaf
+
+
+def _leaves_for(book: BookUnit) -> list[tuple[BookUnit, list[Path]]]:
+    """The logical books a container yields, with the file paths each owns. A MULTI
+    folder with more than one detected work fans out into one leaf per work; anything
+    else is the single container book owning all its source files (Phase 1 behavior)."""
+    works = book.detected_works
+    if book.content_kind is ContentKind.MULTI and len(works) > 1:
+        return [
+            (_leaf_book(book, w, leaf_id_for(book.source_folder, w.files)), list(w.files))
+            for w in works
+        ]
+    return [(book, [sf.path for sf in book.source_files])]
 
 
 def build_graph(
@@ -26,17 +65,21 @@ def build_graph(
             DirectoryNode.id_for(book.source_folder),
             DirectoryNode(path=book.source_folder),
         )
-        owned: list[str] = []
+        file_id_by_path: dict[Path, str] = {}
         for sf in book.source_files:
-            fn = FileNode(path=sf.path, role=FileRole.AUDIO, source_file=sf, raw_stem=sf.path.stem)
+            fn = FileNode(
+                path=sf.path, role=FileRole.AUDIO, source_file=sf, raw_stem=sf.path.stem
+            )
             g.files[fn.id] = fn
-            owned.append(fn.id)
+            file_id_by_path[sf.path] = fn.id
             if fn.id not in d.child_files:
                 d.child_files.append(fn.id)
-        bn = BookNode(id=book.id, book=book, owns=owned, dir_id=d.id)
-        g.books[bn.id] = bn
-        if bn.id not in d.books:
-            d.books.append(bn.id)
+        for leaf, owned_paths in _leaves_for(book):
+            owned = [file_id_by_path[p] for p in owned_paths if p in file_id_by_path]
+            bn = BookNode(id=leaf.id, book=leaf, owns=owned, dir_id=d.id)
+            g.books[bn.id] = bn
+            if bn.id not in d.books:
+                d.books.append(bn.id)
     return g
 
 
