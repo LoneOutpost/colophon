@@ -76,6 +76,20 @@ def test_graph_tree_empty_when_root_absent():
     assert graph_tree(g, Path("/nowhere")) == []
 
 
+def test_graph_tree_sorts_dirs_case_insensitively():
+    root = Path("/lib")
+    g = Graph()
+    # Sibling dirs whose case-sensitive order (Zoo before apple, ASCII) differs from the
+    # natural one. graph_tree must order them case-insensitively: apple before Zoo.
+    for name in ("Zoo", "apple"):
+        g.directories[DirectoryNode.id_for(root / name)] = DirectoryNode(path=root / name)
+    g.directories[DirectoryNode.id_for(root)] = DirectoryNode(
+        path=root,
+        child_dirs=[DirectoryNode.id_for(root / "Zoo"), DirectoryNode.id_for(root / "apple")],
+    )
+    assert [n.label for n in graph_tree(g, root)] == ["apple", "Zoo"]
+
+
 def test_graph_summary_counts():
     g, _ = _build_graph()
     s = graph_summary(g)
