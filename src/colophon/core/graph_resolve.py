@@ -4,6 +4,7 @@ design. A pure pass over a built Graph and the scan's resolved books."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
@@ -15,12 +16,17 @@ _WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
 
 
 def _name_key(name: str) -> str:
-    """Comparison key tolerant of 'Last, First' vs 'First Last', case, and spacing."""
+    """Comparison key tolerant of 'Last, First' vs 'First Last', case, spacing, and
+    punctuation (periods in initials, etc.). A consistent transform applied to both the
+    directory name and the author, so it never invents a match."""
     s = name.strip()
     if "," in s:
         last, _, first = s.partition(",")
         s = f"{first.strip()} {last.strip()}"
-    return normalize_name(s).casefold()
+    s = normalize_name(s)
+    s = re.sub(r"[^\w\s]", " ", s)        # drop punctuation: 'Robert A.' -> 'Robert A'
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.casefold()
 
 
 def _ancestors(graph: Graph, folder: Path, root: Path) -> list[DirectoryNode]:

@@ -9,10 +9,32 @@ def _name_key_subject(s):
     return _name_key(s)
 
 
-def test_name_key_handles_order_case_and_spacing():
+def test_name_key_handles_order_case_spacing_and_punctuation():
     k = _name_key_subject
     assert k("Stephen King") == k("stephen king") == k("King, Stephen")
+    # punctuation in initials must not block the match (the confirmed real cause)
+    assert k("Robert A. Heinlein") == k("Robert A Heinlein") == k("Robert A.Heinlein")
+    assert k("J.R.R. Tolkien") == k("J R R Tolkien")
     assert k("Stephen King") != k("Brandon Sanderson")
+
+
+def test_period_in_tag_author_still_classifies_author(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    author_dir = root / "Robert A Heinlein"          # folder: no period
+    a = author_dir / "Stranger in a Strange Land"
+    b = author_dir / "Starship Troopers"
+    graph = _graph_with_dirs(a, b)
+
+    tagged = _book(a, ["Robert A. Heinlein"], Provenance.TAG.value)  # tag: with period
+    untagged = _book(b, [])
+    resolve_graph_authors(graph, [tagged, untagged], root=root)
+
+    node = graph.directories[DirectoryNode.id_for(author_dir)]
+    assert node.kind == "author" and node.author == "Robert A. Heinlein"
+    assert untagged.authors == ["Robert A. Heinlein"]
+    assert untagged.provenance["authors"] == Provenance.GRAPHING.value
 
 
 def _graph_with_dirs(*folders: Path) -> Graph:
