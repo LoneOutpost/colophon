@@ -7,6 +7,7 @@ from the structural nodes and returns the books. Round-trips to `plan_scan` outp
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo
@@ -77,11 +78,12 @@ def _ensure_ancestors(g: Graph, folder: Path, root: Path) -> None:
 def build_graph(
     repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
     options: ScanOptions | None = None, inference_root: Path | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> Graph:
     """Run a (non-persisting) scan and wrap each BookUnit in Directory/File/Book nodes."""
     plan = plan_scan(
         repo, root, template=template, directory_scheme=directory_scheme,
-        options=options, inference_root=inference_root,
+        options=options, inference_root=inference_root, progress=progress,
     )
     g = Graph()
     for book in plan.units:
