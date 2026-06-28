@@ -606,3 +606,14 @@ def test_plan_scan_graph_runs_coarse_classification(tmp_path: Path):
     repo = _repo(tmp_path)
     plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
     assert any(u.title == "Dune" for u in plan.units)
+
+
+def test_plan_scan_graph_runs_grouping_hint(tmp_path: Path):
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Dune"
+    dune.mkdir(parents=True)
+    (dune / "01.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
+    assert any(u.title == "Dune" for u in plan.units)

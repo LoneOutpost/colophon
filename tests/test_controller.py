@@ -2692,3 +2692,18 @@ def test_graph_for_runs_coarse_classification(tmp_path):
     dune = graph.directories[DirectoryNode.id_for(ingest / "Dune")]
     assert dune.kind == "title" and dune.kind_confidence == 1.0
     ctx.close()
+
+
+def test_graph_for_runs_grouping_hint(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+
+    graph = ctrl.graph_for(ingest)
+    root = graph.directories[DirectoryNode.id_for(ingest)]
+    assert root.kind == "grouping"               # root holds the Dune title
+    assert root.kind_hint == "author"            # one standalone title, no series
+    ctx.close()
