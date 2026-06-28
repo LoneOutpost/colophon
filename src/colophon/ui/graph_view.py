@@ -58,12 +58,7 @@ def render_graph(controller: AppController) -> None:
     summary = ui.label().classes("text-caption colophon-muted q-px-sm q-mb-sm")
     body = ui.column().classes("w-full q-px-sm")
 
-    async def _rebuild() -> None:
-        body.clear()
-        summary.set_text("Building…")
-        with body:
-            spinner = ui.spinner(size="lg")
-        graph = await asyncio.to_thread(controller.graph_for, Path(state["root"]))
+    def _show(graph) -> None:
         s = graph_summary(graph)
         roles = ", ".join(f"{n} {role}" for role, n in sorted(s.files_by_role.items()))
         summary.set_text(
@@ -71,7 +66,7 @@ def render_graph(controller: AppController) -> None:
             f"{s.books} books in {s.multi_book_dirs} multi-book folders · "
             f"files: {roles or 'none'}"
         )
-        spinner.delete()
+        body.clear()
         tree = graph_tree(graph, Path(state["root"]))
         with body:
             if not tree:
@@ -80,10 +75,26 @@ def render_graph(controller: AppController) -> None:
                 for node in tree:
                     _render_node(node)
 
+    async def _build() -> None:
+        body.clear()
+        summary.set_text("Building…")
+        with body:
+            spinner = ui.spinner(size="lg")
+        graph = await asyncio.to_thread(controller.graph_for, Path(state["root"]))
+        spinner.delete()
+        _show(graph)
+
+    async def _load() -> None:
+        cached = controller.cached_graph(Path(state["root"]))
+        if cached is not None:
+            _show(cached)
+        else:
+            await _build()
+
     async def _on_root(value: str) -> None:
         state["root"] = value
-        await _rebuild()
+        await _load()
 
     root_select.on_value_change(lambda e: _on_root(e.value))
-    rebuild_btn.on_click(_rebuild)
-    ui.timer(0.1, _rebuild, once=True)  # initial build after the page mounts
+    rebuild_btn.on_click(_build)
+    ui.timer(0.1, _load, once=True)  # initial: render the cached graph, or build the first time
