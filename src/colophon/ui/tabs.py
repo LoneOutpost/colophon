@@ -11,6 +11,7 @@ _BASE_TABS = [
     ("Library", "/", "library"),
     ("Manage", "/manage", "manage"),
     ("Stats", "/stats", "stats"),
+    ("Graph", "/graph", "graph"),
     ("Settings", "/settings", "settings"),
 ]
 

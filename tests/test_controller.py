@@ -2535,3 +2535,47 @@ def test_apply_identify_does_not_fill_inferred_author(tmp_path):
 
     ctrl.apply_identify(ctrl._identify_plan([p], skipped=0))
     assert ctx.books.get(book.id).authors == []
+
+
+def test_graph_roots_returns_configured_scan_paths(tmp_path):
+    from pathlib import Path
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [Path("/a"), Path("/b")]
+    ctrl = AppController(ctx)
+    assert ctrl.graph_roots() == [Path("/a"), Path("/b")]
+    ctx.close()
+
+
+def test_graph_for_builds_and_resolves_author_subtree(tmp_path):
+    from mutagen.id3 import ID3, TPE1
+
+    from colophon.core.graph_view import graph_tree
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ingest = tmp_path / "ingest"
+    coll = ingest / "Stephen King" / "-collection-"
+    tagged = coll / "The Gunslinger"
+    untagged = coll / "Wizard and Glass"
+    tagged.mkdir(parents=True)
+    untagged.mkdir(parents=True)
+    f = tagged / "01.mp3"
+    f.write_bytes(b"")
+    id3 = ID3()
+    id3.add(TPE1(encoding=3, text=["Stephen King"]))
+    id3.save(f)
+    (untagged / "01.mp3").write_bytes(b"")
+
+    # graph_for must run the resolution pass, so the AUTHOR classification appears.
+    top = graph_tree(ctrl.graph_for(ingest), ingest)
+    sk = top[0]
+    assert sk.label == "Stephen King"
+    assert sk.badges == ["AUTHOR → Stephen King"]
+    coll_node = sk.children[0]
+    book_titles = {
+        d.children[0].label
+        for d in coll_node.children
+        if d.children and d.children[0].node_kind == "book"
+    }
+    assert {"The Gunslinger", "Wizard and Glass"} <= book_titles
+    ctx.close()
