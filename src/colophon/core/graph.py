@@ -22,6 +22,19 @@ def _node_id(path: Path) -> str:
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
 
 
+def leaf_id_for(folder: Path, files: list[Path]) -> str:
+    """Stable id for a logical book owning `files` within `folder`.
+
+    Whole-folder ownership (no files listed) keeps `_node_id(folder)`, so single
+    books never change id. A subset — a multi-book leaf — gets a hash of the folder
+    plus its sorted file names, so each leaf is distinct and order-independent.
+    """
+    names = sorted({p.name for p in files})
+    if not names:
+        return _node_id(folder)
+    return _node_id(Path(str(folder) + "\x00" + "\x00".join(names)))
+
+
 class FileRole(StrEnum):
     AUDIO = "audio"        # owned by a Book; constitutes it
     DATAFILE = "datafile"  # metadata.json — auxiliary evidence
