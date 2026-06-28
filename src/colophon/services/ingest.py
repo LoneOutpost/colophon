@@ -22,6 +22,7 @@ from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
 from colophon.core.models import (
     BookUnit,
+    NodeOverride,
     Phase,
     PhaseState,
 )
@@ -389,14 +390,15 @@ def plan_scan_graph(
     repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
     options: ScanOptions | None = None, inference_root: Path | None = None,
     progress: Callable[[int, int, str], None] | None = None,
+    node_overrides: dict[str, NodeOverride] | None = None,
 ) -> ScanPlan:
     """Graph-routed planner: persist `project(build_graph(...))` — single containers and
     multi-book leaves — with per-leaf IDENTIFY and state preservation. `reconciled_folders`
     are the folders it fully recomputed, so commit can prune what their unit set replaced."""
     # Lazy import: graph_build imports plan_scan from this module, so a module-scope
     # import of build_graph would create an import cycle.
-    from colophon.core.graph_classify import classify_graph, hint_grouping_kinds
-    from colophon.core.graph_resolve import resolve_graph_authors
+    from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
+    from colophon.core.graph_resolve import propagate_overrides, resolve_graph_authors
     from colophon.services.graph_build import build_graph, project
 
     pattern = compile_template(template)
@@ -425,6 +427,9 @@ def plan_scan_graph(
     classify_graph(graph, root=root)
     resolve_graph_authors(graph, plan.units, root=root)
     hint_grouping_kinds(graph)
+    if node_overrides:
+        apply_overrides(graph, node_overrides)
+        propagate_overrides(graph, plan.units, root=root)
     return plan
 
 
