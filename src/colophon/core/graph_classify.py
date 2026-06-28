@@ -5,7 +5,7 @@ determination; later passes (and the user) refine a grouping into author or seri
 
 from __future__ import annotations
 
-from collections import Counter  # noqa: F401 - used by the shape prior (next task)
+from collections import Counter
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
@@ -62,9 +62,29 @@ def _classify_node(node: DirectoryNode, graph: Graph) -> None:
     node.kind_evidence = ["mixed/insufficient structure"]
 
 
+def _apply_shape_prior(graph: Graph, *, root: Path) -> None:
+    """The tree's consistency is itself evidence: boost groupings that sit at the typical
+    author depth (one above the modal title depth), flag the rest for review."""
+    title_depths = Counter(
+        _depth(d, root) for d in graph.directories.values() if d.kind == TITLE
+    )
+    if not title_depths:
+        return
+    modal = title_depths.most_common(1)[0][0]
+    for node in graph.directories.values():
+        if node.kind != GROUPING:
+            continue
+        if _depth(node, root) == modal - 1:
+            node.kind_confidence = round(min(1.0, node.kind_confidence + 0.1), 2)
+            node.kind_evidence.append("matches dominant Author/Title shape")
+        else:
+            node.kind_evidence.append("off-pattern: not at the typical author depth")
+
+
 def classify_graph(graph: Graph, *, root: Path) -> None:
     """Assign each DirectoryNode a coarse kind + confidence + evidence. Deepest-first so a
     parent sees its children classified ('book-like' is recursive)."""
     nodes = sorted(graph.directories.values(), key=lambda d: _depth(d, root), reverse=True)
     for node in nodes:
         _classify_node(node, graph)
+    _apply_shape_prior(graph, root=root)

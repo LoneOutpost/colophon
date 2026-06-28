@@ -138,3 +138,49 @@ def test_minority_book_like_children_is_unknown():
     classify_graph(g, root=root)
 
     assert g.directories[DirectoryNode.id_for(parent)].kind == "unknown"
+
+
+def test_shape_prior_boosts_conforming_grouping():
+    from colophon.core.graph_classify import classify_graph
+
+    root = Path("/lib")
+    g = _g()
+    # dominant shape: root / author / title  (titles at depth 2)
+    for author in ("A One", "A Two", "A Three"):
+        a = root / author
+        _link(g, root, a)
+        _link(g, a, a / "Book")
+        _book(g, a / "Book", "Book")
+
+    classify_graph(g, root=root)
+
+    a_one = g.directories[DirectoryNode.id_for(root / "A One")]
+    assert a_one.kind == "grouping"
+    assert "matches dominant Author/Title shape" in a_one.kind_evidence
+    assert a_one.kind_confidence == 1.0  # 1.0 book-like, capped after +0.1 boost
+
+
+def test_shape_prior_flags_off_pattern_grouping():
+    from colophon.core.graph_classify import classify_graph
+
+    root = Path("/lib")
+    g = _g()
+    # dominant: depth-2 titles for two authors
+    for author in ("A One", "A Two"):
+        a = root / author
+        _link(g, root, a)
+        _link(g, a, a / "Book")
+        _book(g, a / "Book", "Book")
+    # off-pattern: an author who organizes by series (titles at depth 3)
+    deep = root / "Deep Author"
+    series = deep / "Series"
+    _link(g, root, deep)
+    _link(g, deep, series)
+    _link(g, series, series / "Vol1")
+    _book(g, series / "Vol1", "Vol1")
+
+    classify_graph(g, root=root)
+
+    series_node = g.directories[DirectoryNode.id_for(series)]
+    assert series_node.kind == "grouping"
+    assert any("off-pattern" in e for e in series_node.kind_evidence)
