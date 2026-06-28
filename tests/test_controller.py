@@ -2678,3 +2678,17 @@ async def test_graph_for_streamed_returns_graph_and_emits_progress(tmp_path):
     assert [bn.book.title for bn in graph.books.values()] == ["Dune"]
     assert calls and calls[-1][1] == 1  # total == 1 folder
     ctx.close()
+
+
+def test_graph_for_runs_coarse_classification(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+
+    graph = ctrl.graph_for(ingest)
+    dune = graph.directories[DirectoryNode.id_for(ingest / "Dune")]
+    assert dune.kind == "title" and dune.kind_confidence == 1.0
+    ctx.close()

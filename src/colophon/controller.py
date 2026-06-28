@@ -26,6 +26,7 @@ from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
+from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_resolve import resolve_graph_authors
 from colophon.core.models import (
     BookState,
@@ -1216,6 +1217,7 @@ class AppController:
             directory_scheme=self.ctx.config.directory_scheme,
             fresh=fresh, progress=progress,
         )
+        classify_graph(graph, root=root)
         resolve_graph_authors(graph, [bn.book for bn in graph.books.values()], root=root)
         self._graph_cache[(str(root), fresh)] = graph
         return graph
