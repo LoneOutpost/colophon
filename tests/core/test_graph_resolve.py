@@ -277,3 +277,26 @@ def test_propagate_franchise_does_not_touch_books(tmp_path):
     propagate_overrides(graph, [book], root=root)
 
     assert book.authors == [] and "authors" not in book.provenance
+
+
+def test_ancestor_paths_nearest_first_inclusive(tmp_path):
+    from colophon.core.graph_resolve import _ancestor_paths
+
+    root = tmp_path / "lib"
+    leaf = root / "Author" / "Book"
+    assert list(_ancestor_paths(leaf, root)) == [leaf, root / "Author", root]
+
+
+def test_ancestor_paths_stops_outside_root(tmp_path):
+    from colophon.core.graph_resolve import _ancestor_paths
+
+    root = tmp_path / "lib"
+    outside = tmp_path / "elsewhere" / "Book"
+    assert list(_ancestor_paths(outside, root)) == [outside]
+
+
+def test_ancestor_paths_folder_is_root(tmp_path):
+    from colophon.core.graph_resolve import _ancestor_paths
+
+    root = tmp_path / "lib"
+    assert list(_ancestor_paths(root, root)) == [root]

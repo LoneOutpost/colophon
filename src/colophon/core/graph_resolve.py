@@ -5,6 +5,7 @@ design. A pure pass over a built Graph and the scan's resolved books."""
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
@@ -34,17 +35,25 @@ def _name_key(name: str) -> str:
     return s.casefold()
 
 
+def _ancestor_paths(folder: Path, root: Path) -> Iterator[Path]:
+    """Paths from `folder` up to and including `root`, nearest first. Yields `folder`
+    itself, then stops once it leaves `root` (so a folder outside `root` yields only
+    itself)."""
+    cur: Path | None = folder
+    while cur is not None:
+        yield cur
+        if cur == root:
+            return
+        cur = cur.parent if root in cur.parents else None
+
+
 def _ancestors(graph: Graph, folder: Path, root: Path) -> list[DirectoryNode]:
     """The DirectoryNodes from `folder` up to (and including) root, nearest first."""
     out: list[DirectoryNode] = []
-    cur: Path | None = folder
-    while cur is not None:
-        node = graph.directories.get(DirectoryNode.id_for(cur))
+    for path in _ancestor_paths(folder, root):
+        node = graph.directories.get(DirectoryNode.id_for(path))
         if node is not None:
             out.append(node)
-        if cur == root:
-            break
-        cur = cur.parent if root in cur.parents else None
     return out
 
 
