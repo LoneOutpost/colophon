@@ -379,15 +379,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             books = list(tree.needs_id)
         elif kind == "author":
             node = next((a for a in tree.authors if a.name == key), None)
-            books = [b for s in node.series for b in s.books] + node.standalone if node else []
+            # dedup by id: a book in two of this author's series is filed under each
+            books = list({b.id: b for s in node.series for b in s.books}.values()) + node.standalone if node else []
         elif kind == "series" and key:
-            books = [b for a in tree.authors for s in a.series if s.name == key for b in s.books]
+            books = list({b.id: b for a in tree.authors for s in a.series if s.name == key for b in s.books}.values())
+        elif kind == "franchise" and key:
+            books = [b for f in tree.franchises if f.name == key for b in f.books]
         elif kind == "phase" and key:
             books = controller.books_with_phase(Phase(key), PhaseState.FRESH)
         else:  # "all"
-            books = list(tree.needs_id)
-            for a in tree.authors:
-                books += [b for s in a.series for b in s.books] + a.standalone
+            books = list(tree.all_books)
         # The folder filter applies on top of every scope selection.
         return [b for b in books if _in_folder(b)]
 
@@ -1239,7 +1240,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 "Multiselect", value=view["multiselect"], on_change=lambda e: _set_multiselect(e.value)
             ).props("dense").classes("q-mb-sm")
             ui.toggle(
-                {"author": "By author", "series": "By series", "phase": "By phase"},
+                {"author": "By author", "series": "By series", "franchise": "By franchise", "phase": "By phase"},
                 value=view["group_by"],
                 on_change=lambda e: _set_group_by(e.value),
             ).props("dense no-caps").classes("w-full q-mb-sm")
@@ -1291,10 +1292,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         checkbox=_node_checkbox([b.id for b in attention]),
                     )
                 if view["group_by"] == "phase":
-                    universe = list(needs_id)
-                    for a in tree.authors:
-                        universe += [b for s in a.series for b in s.books if _in_folder(b)]
-                        universe += [b for b in a.standalone if _in_folder(b)]
+                    universe = [b for b in tree.all_books if _in_folder(b)]
                     membership = controller.phase_membership(universe)
                     for phase in Phase:
                         group = membership[phase]
@@ -1313,18 +1311,32 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             if ids:
                                 series_books.setdefault(s.name, []).extend(ids)
                     for name in sorted(series_books):
+                        ids = list(dict.fromkeys(series_books[name]))  # dedup, preserve order
                         _nav_item(
                             name,
                             "collections_bookmark",
                             kind == "series" and key == name,
                             lambda n=name: _set_scope("series", n),
-                            checkbox=_node_checkbox(series_books[name]),
+                            checkbox=_node_checkbox(ids),
+                        )
+                elif view["group_by"] == "franchise":
+                    for f in tree.franchises:
+                        ids = [b.id for b in f.books if _in_folder(b)]
+                        if not ids:
+                            continue
+                        _nav_item(
+                            f.name,
+                            "hub",
+                            kind == "franchise" and key == f.name,
+                            lambda n=f.name: _set_scope("franchise", n),
+                            checkbox=_node_checkbox(ids),
                         )
                 else:
                     for author in tree.authors:
-                        aids = [
-                            b.id for s in author.series for b in s.books if _in_folder(b)
-                        ] + [b.id for b in author.standalone if _in_folder(b)]
+                        aids = list(dict.fromkeys(  # dedup: a book may be in two of this author's series
+                            [b.id for s in author.series for b in s.books if _in_folder(b)]
+                            + [b.id for b in author.standalone if _in_folder(b)]
+                        ))
                         if not aids:
                             continue  # no books from this author in the current folder
                         _nav_item(
