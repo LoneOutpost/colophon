@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
@@ -27,7 +28,7 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
-from colophon.core.graph_resolve import resolve_graph_authors
+from colophon.core.graph_resolve import apply_confirmed_overrides, resolve_graph_authors
 from colophon.core.graph_view import grouping_cohort
 from colophon.core.models import (
     BookState,
@@ -982,14 +983,35 @@ class AppController:
     async def recheck_confidence(self, book: BookUnit) -> None:
         """Revert to auto confidence: re-query all sources, rescore, clear the
         manual flag, and persist."""
+        book = self._apply_confirmed([book])[0]
         results = await gather_matches(self.ctx.sources, query_for_book(book))
         self._rescore_after_match(book, results)
         book.touch()
         self.ctx.books.upsert(book)
 
     # --- match review / apply (FR-2.4, FR-3.3) ---
+    def _apply_confirmed(self, books: list[BookUnit]) -> list[BookUnit]:
+        """Return `books` with empty/weak author/series filled from confirmed (manual)
+        folder classifications, so the workbench's confirmations reach the provider query
+        without a fresh full scan. Books are returned as deep copies so the shared store
+        cache (which `list_all` hands out by reference) is never mutated in place. Read-only
+        callers (get_matches, identify_preview) persist nothing; where a persisting caller
+        exists (apply_identify / recheck) the confirmed fill rides its save, per the W4b
+        design."""
+        overrides = self.ctx.overrides.all()
+        if not overrides:
+            return books
+        copies = [b.model_copy(deep=True) for b in books]
+        by_root: dict[Path, list[BookUnit]] = defaultdict(list)
+        for book in copies:
+            by_root[self._scan_root_for_path(book.source_folder)].append(book)
+        for root, group in by_root.items():
+            apply_confirmed_overrides(group, overrides, root=root)
+        return copies
+
     async def get_matches(self, book: BookUnit) -> list[SourceResult]:
         """Re-query all sources for `book` and return candidate matches, best first."""
+        book = self._apply_confirmed([book])[0]
         results = await gather_matches(self.ctx.sources, query_for_book(book))
         return self._score(book, results).ranked
 
@@ -1011,6 +1033,7 @@ class AppController:
         """Query all sources for every candidate and partition by the review threshold,
         without persisting anything. `progress(book_id, kind)` streams per-book outcomes."""
         candidates = self.identify_candidates()
+        candidates = self._apply_confirmed(candidates)
         skipped = len(self.ctx.books.list_all()) - len(candidates)
         source_names = [s.name for s in self.ctx.sources]
         proposals = await self.quick_match_scan(candidates, source_names, progress=progress)
@@ -1036,6 +1059,7 @@ class AppController:
         the partition. Books not in `book_ids` keep their existing proposals."""
         wanted = set(book_ids)
         targets = [p.book for p in plan.proposals if p.book.id in wanted]
+        targets = self._apply_confirmed(targets)
         source_names = [s.name for s in self.ctx.sources]
         fresh = await self.quick_match_scan(targets, source_names, progress=progress)
         fresh_by_id = {p.book.id: p for p in fresh}

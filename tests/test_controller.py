@@ -7,7 +7,7 @@ from mutagen.id3 import ID3, TPE1
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
-from colophon.core.models import BookState, BookUnit
+from colophon.core.models import BookState, BookUnit, Provenance
 from colophon.core.sources import SourceResult
 
 
@@ -21,6 +21,17 @@ class _StubSource:
         self._results = results
 
     async def search(self, query):
+        return self._results
+
+
+class _RecordingSource:
+    def __init__(self, name="rec", results=None):
+        self.name = name
+        self._results = results or []
+        self.queries = []
+
+    async def search(self, query):
+        self.queries.append(query)
         return self._results
 
 
@@ -2780,3 +2791,125 @@ def test_scan_applies_author_override_to_books(tmp_path):
     assert book.authors == ["Brandon Sanderson"]
     assert book.provenance["authors"] == "manual"
     ctx.close()
+
+
+def test_identify_uses_confirmed_ancestor_author(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Elantris"
+    book_dir.mkdir(parents=True)
+    rec = _RecordingSource()
+    ctx = _ctx(tmp_path, sources=[rec])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Elantris"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    asyncio.run(ctrl.identify_preview())
+    assert rec.queries[0].author == "Brandon Sanderson"
+
+
+def test_confirmed_author_makes_proposal_not_inferred(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Elantris"
+    book_dir.mkdir(parents=True)
+    s1 = _StubSource("a", [SourceResult(provider="a", title="Elantris", authors=["Brandon Sanderson"])])
+    s2 = _StubSource("b", [SourceResult(provider="b", title="Elantris", authors=["Brandon Sanderson"])])
+    ctx = _ctx(tmp_path, sources=[s1, s2])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Elantris"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    before = asyncio.run(ctrl.identify_preview())
+    assert before.proposals[0].author_inferred is True
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    after = asyncio.run(ctrl.identify_preview())
+    assert after.proposals[0].author_inferred is False
+
+
+def test_get_matches_does_not_override_book_own_author(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Tagged"
+    book_dir.mkdir(parents=True)
+    rec = _RecordingSource()
+    ctx = _ctx(tmp_path, sources=[rec])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Tagged"
+    b.authors = ["Someone Else"]
+    b.provenance["authors"] = Provenance.TAG.value
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    asyncio.run(ctrl.get_matches(b))
+    assert rec.queries[0].author == "Someone Else"
+
+
+def test_recheck_confidence_persists_confirmed_author(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Elantris"
+    book_dir.mkdir(parents=True)
+    ctx = _ctx(tmp_path, sources=[_StubSource("a", [])])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Elantris"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    asyncio.run(ctrl.recheck_confidence(b))
+    reloaded = ctx.books.get(b.id)
+    assert reloaded.authors == ["Brandon Sanderson"]
+    assert reloaded.provenance["authors"] == Provenance.MANUAL.value
+
+
+def test_identify_preview_does_not_mutate_cached_book(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Elantris"
+    book_dir.mkdir(parents=True)
+    ctx = _ctx(tmp_path, sources=[_RecordingSource()])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Elantris"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    asyncio.run(ctrl.identify_preview())
+    cached = next(x for x in ctx.books.list_all() if x.id == b.id)
+    assert cached.authors == []  # preview must not persist or leak the confirmed fill
+
+
+def test_apply_identify_persists_confirmed_author(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Elantris"
+    book_dir.mkdir(parents=True)
+    ctx = _ctx(tmp_path, sources=[_StubSource("a", [])])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Elantris"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    plan = asyncio.run(ctrl.identify_preview())
+    ctrl.apply_identify(plan)
+    reloaded = ctx.books.get(b.id)
+    assert reloaded.authors == ["Brandon Sanderson"]
+    assert reloaded.provenance["authors"] == Provenance.MANUAL.value
+
+
+def test_retry_identify_uses_confirmed_ancestor_author(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Brandon Sanderson" / "Elantris"
+    book_dir.mkdir(parents=True)
+    rec = _RecordingSource()
+    ctx = _ctx(tmp_path, sources=[rec])
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Elantris"
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    plan = asyncio.run(ctrl.identify_preview())  # before any confirmation
+    ctrl.set_node_classification(root / "Brandon Sanderson", "author", "Brandon Sanderson")
+    rec.queries.clear()
+    asyncio.run(ctrl.retry_identify(plan, [b.id]))
+    assert rec.queries[0].author == "Brandon Sanderson"
