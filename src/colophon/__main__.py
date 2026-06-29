@@ -22,15 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 def configure_logging(level_name: str | None = None) -> int:
-    """Set the log level for application loggers from the process environment.
+    """Set the application log level from the process environment.
 
     Reads ``COLOPHON_LOG_LEVEL`` (default ``INFO``); set it to ``DEBUG`` to see
     the per-book per-phase scan decisions. An unknown value falls back to INFO.
-    Returns the numeric level applied.
+
+    Only the ``colophon`` logger tree honors the level: the root stays at INFO so
+    ``DEBUG`` does not unleash third-party noise (httpcore, httpx, nicegui). The
+    root handler installed by ``basicConfig`` has no level of its own, so it still
+    passes the colophon DEBUG records up to the console. Returns the level applied.
     """
     name = (level_name or os.environ.get("COLOPHON_LOG_LEVEL") or "INFO").upper()
     level = logging.getLevelNamesMapping().get(name, logging.INFO)
-    logging.basicConfig(level=level)
+    logging.basicConfig(level=logging.INFO)
     logging.getLogger("colophon").setLevel(level)
     return level
 
