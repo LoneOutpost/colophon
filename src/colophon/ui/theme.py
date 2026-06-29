@@ -145,6 +145,9 @@ body.body--dark { color: #ece4d8; }
 .colophon-toolbar { background: var(--colophon-surface); border-bottom: 1px solid var(--colophon-line);
   padding: 10px 16px; }
 .body--dark .colophon-toolbar { background: #262019; }
+/* Reading-column cap for form/prose pages: left-anchored (not centered), so the page
+   frame stays identical to full-bleed pages while fields keep a scannable width. */
+.colophon-measure-read { max-width: 768px; }
 /* AA helpers (#105): warm muted text, muted outline chips, dark filled-button ink
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }

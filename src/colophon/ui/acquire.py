@@ -12,7 +12,7 @@ from colophon.services.filetree import (
     build_file_tree,
     default_selection,
 )
-from colophon.ui.chrome import page_header
+from colophon.ui.chrome import page_body, page_header, page_toolbar
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def render_acquire(controller: AppController) -> None:
     candidates: list = []
     scan_prompt = {"shown": False}
 
-    with ui.column().classes("w-full q-pa-md gap-2"):
+    with page_toolbar():
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             magnet_input = (
                 ui.input(placeholder="Paste a magnet link").props('dense clearable aria-label="Magnet link"').classes("col")
@@ -89,8 +89,10 @@ def render_acquire(controller: AppController) -> None:
             ui.space()
             download_btn = ui.button("Download selected", icon="download")
             download_btn.set_enabled(False)
+
+    with page_body("full"):
         list_box = ui.column().classes("w-full gap-0")
-        with ui.row().classes("items-center w-full q-mt-md"):
+        with ui.row().classes("items-center w-full"):
             ui.label("Downloads").classes("text-subtitle1 text-weight-medium")
             ui.space()
             ui.button("Clear finished", icon="clear_all", on_click=lambda: _clear_finished()).props(
