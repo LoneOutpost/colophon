@@ -341,37 +341,81 @@ def plan_rescan_books(
     return plan
 
 
+# Durable app state carried across an id churn: a re-associated book keeps these from
+# its prior record regardless of how its content re-clustered. Identity fields (title,
+# authors, series, publisher, ...) are NOT here — they are re-derived every scan. Nor is
+# `state` — it is a derived cache that resync_state recomputes from phases after adoption.
+_DURABLE_APP_STATE = (
+    "cover_path", "cover_url", "output_path", "chapters", "genres", "tags",
+    "confidence", "confidence_signals", "manually_confirmed", "acknowledged_findings",
+    "skipped",
+)
+
+
+def _adopt_app_state(unit: BookUnit, matched: BookUnit) -> None:
+    """Transplant `matched`'s durable id and app state onto the freshly-derived `unit`
+    in place. Used when re-association matches a projected book to a prior record with a
+    *different* id (a true content churn): the durable record follows the content while
+    the projection's just-derived identity is kept. `created_at` is frozen, so the heir
+    keeps its own creation timestamp; the durable id and app state are what carry over."""
+    unit.id = matched.id
+    for name in _DURABLE_APP_STATE:
+        setattr(unit, name, getattr(matched, name))
+
+
 def _adopt_and_identify(
-    unit: BookUnit, repo: BookUnitRepo, *, root: Path, pattern: object, scheme: object,
-    rederive: bool = False,
+    unit: BookUnit, matched: BookUnit | None, *, root: Path, pattern: object,
+    scheme: object, rederive: bool = False,
 ) -> BookUnit:
-    """Return the unit to persist for one projected BookUnit.
+    """Return the unit to persist for one projected BookUnit, re-associated to its prior
+    record (`matched`, found by owned-file overlap) so its durable id and app state
+    survive a file-set churn.
 
-    A SINGLE/UNKNOWN container arrives already identified (plan_scan ran its phases and
-    merged existing state) — pass it through. A fresh leaf (IDENTIFY not FRESH) is
-    merged onto its persisted counterpart (by leaf id) so prior app state survives,
-    then identified on its own file subset. A leaf persists even if IDENTIFY fails."""
+    Two projection shapes are re-associated differently:
+
+    - A FRESH container (plan_scan already identified it, and — for a stable same-id
+      folder — already merged its prior state onto it) is authoritative on identity.
+      When `matched` is the same record plan_scan loaded (`matched.id == unit.id`) the
+      projection IS the merged record, so we keep it untouched (idempotent: no second
+      merge that could re-introduce a rederived-away field). When `matched` is a
+      different prior record (a true id churn, e.g. a single book that restructured into
+      MULTI and back), we transplant `matched`'s durable id and app state onto the
+      freshly-derived container so the durable record follows the content.
+    - A leaf (IDENTIFY not FRESH) is not yet identified at projection time, so `matched`
+      is the base: keep its state and filled identity, refresh structural fields, fill
+      empty identity, then run IDENTIFY on its own file subset.
+    """
+    if matched is not None and state_of(unit, Phase.IDENTIFY) is PhaseState.FRESH:
+        if matched.id != unit.id:
+            _adopt_app_state(unit, matched)  # true churn: carry the durable record over
+        unit.missing = False  # re-seen -> clear any stale missing flag
+        resync_state(unit)
+        unit.touch()
+        return unit
+
     if state_of(unit, Phase.IDENTIFY) is PhaseState.FRESH:
-        return unit  # already-identified container (the SINGLE path)
+        resync_state(unit)
+        unit.touch()
+        return unit
 
-    existing = repo.get(unit.id)
-    if existing is not None:
-        # Existing leaf is the base: keep cover/confidence/state/manual edits and any
-        # filled identity. Refresh only the structural fields the new split provides,
-        # and fill the seeded identity where the existing row left it empty.
-        existing.source_files = unit.source_files
-        existing.content_kind = unit.content_kind
-        existing.detected_works = unit.detected_works
-        if not existing.title and unit.title:
-            existing.title = unit.title
-            existing.provenance["title"] = unit.provenance.get("title", "")
-        if not existing.authors and unit.authors:
-            existing.authors = list(unit.authors)
-            existing.provenance["authors"] = unit.provenance.get("authors", "")
-        if not existing.series and unit.series:
-            existing.series = list(unit.series)
-            existing.provenance["series"] = unit.provenance.get("series", "")
-        unit = existing
+    if matched is not None:
+        # Leaf: `matched` is the base — keep its durable id, cover/confidence/state/manual
+        # edits and filled identity; refresh the structural fields the new projection
+        # brings and fill its empty identity from the projection.
+        matched.source_files = unit.source_files
+        matched.content_kind = unit.content_kind
+        matched.detected_works = unit.detected_works
+        if not matched.title and unit.title:
+            matched.title = unit.title
+            matched.provenance["title"] = unit.provenance.get("title", "")
+        if not matched.authors and unit.authors:
+            matched.authors = list(unit.authors)
+            matched.provenance["authors"] = unit.provenance.get("authors", "")
+        if not matched.series and unit.series:
+            matched.series = list(unit.series)
+            matched.provenance["series"] = unit.provenance.get("series", "")
+        matched.missing = False  # re-seen -> clear any stale missing flag
+        unit = matched
 
     mark(unit, Phase.SEARCH, PhaseState.FRESH)      # files were probed at container level
     mark(unit, Phase.CATEGORIZE, PhaseState.FRESH)  # being SINGLE is its categorization
@@ -397,8 +441,11 @@ def plan_scan_graph(
     are the folders it fully recomputed, so commit can prune what their unit set replaced."""
     # Lazy import: graph_build imports plan_scan from this module, so a module-scope
     # import of build_graph would create an import cycle.
+    from collections import defaultdict
+
     from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
     from colophon.core.graph_resolve import propagate_overrides, resolve_graph_authors
+    from colophon.core.reassociate import reassociate
     from colophon.services.graph_build import build_graph, project
 
     pattern = compile_template(template)
@@ -409,21 +456,29 @@ def plan_scan_graph(
         repo, root, template=template, directory_scheme=directory_scheme,
         options=options, inference_root=inference_root, progress=progress,
     )
+
+    projected = project(graph)
+    by_folder: dict[Path, list[BookUnit]] = defaultdict(list)
+    for unit in projected:
+        by_folder[unit.source_folder].append(unit)
+
     plan = ScanPlan()
-    for unit in project(graph):
-        existing = repo.get(unit.id)
-        before_empty = _empty_fields(existing) if existing is not None else set()
-        prior_paths = {sf.path for sf in existing.source_files} if existing is not None else set()
-        adopted = _adopt_and_identify(unit, repo, root=inf_root, pattern=pattern,
-                                      scheme=scheme, rederive=rederive)
-        if existing is not None:
-            plan.existing_books += 1
-            plan.fields_filled += len(before_empty - _empty_fields(adopted))
-        else:
-            plan.new_books += 1
-        plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
-        plan.units.append(adopted)
-        plan.reconciled_folders.add(adopted.source_folder)
+    for folder, units in by_folder.items():
+        # `repo.get` reads fresh from the DB (not the cache), so mutating `matched` is safe.
+        existing = [b for b in (repo.get(i) for i in repo.ids_in_folder(folder)) if b is not None]
+        for unit, matched in reassociate(units, existing):
+            before_empty = _empty_fields(matched) if matched is not None else set()
+            prior_paths = {sf.path for sf in matched.source_files} if matched is not None else set()
+            adopted = _adopt_and_identify(unit, matched, root=inf_root, pattern=pattern,
+                                          scheme=scheme, rederive=rederive)
+            if matched is not None:
+                plan.existing_books += 1
+                plan.fields_filled += len(before_empty - _empty_fields(adopted))
+            else:
+                plan.new_books += 1
+            plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
+            plan.units.append(adopted)
+            plan.reconciled_folders.add(folder)
     classify_graph(graph, root=root)
     resolve_graph_authors(graph, plan.units, root=root)
     hint_grouping_kinds(graph)
