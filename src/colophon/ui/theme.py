@@ -74,7 +74,7 @@ body {
   background: var(--colophon-page);
   color: #2c271f;
 }
-.body--dark body { color: #ece4d8; }
+body.body--dark { color: #ece4d8; }
 /* Warm page surface in light mode (dark uses Quasar's dark_page). */
 .q-page-container, .q-page { background: var(--colophon-page); }
 .body--dark .q-page-container, .body--dark .q-page { background: #1c1916; }
