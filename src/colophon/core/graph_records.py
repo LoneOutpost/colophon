@@ -28,7 +28,7 @@ class NodeRecord(_Base):
     physical: str | None       # 'directory' | 'file' | None (logical-only, e.g. a book)
     semantic: str | None       # 'book' | None (author/series/franchise arrive in slice 2)
     root: str
-    attrs: dict[str, str] = {}  # noqa: RUF012 - pydantic field default, copied per instance
+    attrs: dict[str, object] = {}  # noqa: RUF012 - pydantic field default, copied per instance
 
 
 class EdgeRecord(_Base):
@@ -36,7 +36,7 @@ class EdgeRecord(_Base):
     kind: str                  # 'contains' | 'owns'
     dst: str
     root: str
-    props: dict[str, str] = {}  # noqa: RUF012 - {} in slice 1; sequence/provenance later
+    props: dict[str, object] = {}  # noqa: RUF012 - {} structural; provenance/sequence on semantic edges
 
 
 def graph_records(

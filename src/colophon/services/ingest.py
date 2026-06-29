@@ -491,13 +491,13 @@ def plan_scan_graph(
             plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
             plan.units.append(adopted)
             plan.reconciled_folders.add(folder)
-    plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
     classify_graph(graph, root=root)
     resolve_graph_authors(graph, plan.units, root=root)
     hint_grouping_kinds(graph)
     if node_overrides:
         apply_overrides(graph, node_overrides)
         propagate_overrides(graph, plan.units, root=root)
+    plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
     return plan
 
 
