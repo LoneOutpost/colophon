@@ -86,6 +86,19 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
                 break
 
 
+def _fill_confirmed(book: BookUnit, *, author: str | None, series: str | None) -> None:
+    """Fill a book's empty-or-weak (directory/filename) author/series from a confirmed
+    (manual) classification, stamped MANUAL. A book that asserts its own author/series
+    (tag/datafile/match) is left untouched. Shared by propagate_overrides (scan path)
+    and apply_confirmed_overrides (match path)."""
+    if author and (not book.authors or book.provenance.get("authors") in _WEAK):
+        book.authors = [author]
+        book.provenance["authors"] = Provenance.MANUAL.value
+    if series and (not book.series or book.provenance.get("series") in _WEAK):
+        book.series = [SeriesRef(name=series)]
+        book.provenance["series"] = Provenance.MANUAL.value
+
+
 def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """Fill empty/weak author/series on each book from its nearest MANUAL author/series
     ancestor node (set by apply_overrides), stamped MANUAL. Authoritative + sticky; a book
@@ -99,9 +112,4 @@ def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> N
                 author = node.kind_value
             if series is None and node.kind == "series" and node.kind_value:
                 series = node.kind_value
-        if author and (not book.authors or book.provenance.get("authors") in _WEAK):
-            book.authors = [author]
-            book.provenance["authors"] = Provenance.MANUAL.value
-        if series and (not book.series or book.provenance.get("series") in _WEAK):
-            book.series = [SeriesRef(name=series)]
-            book.provenance["series"] = Provenance.MANUAL.value
+        _fill_confirmed(book, author=author, series=series)
