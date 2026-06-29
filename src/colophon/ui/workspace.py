@@ -611,6 +611,22 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 with ui.row().classes("q-gutter-xs"):
                                     ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
                                     ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
+                            if book.missing:
+                                with ui.element("div").classes("colophon-toolgroup"):
+                                    ui.label("Missing").classes("colophon-seccap")
+                                    with ui.row().classes("q-gutter-xs"):
+                                        def _remove_missing(b=book) -> None:
+                                            controller.remove_missing(b)
+                                            ui.notify("Removed missing book")
+                                            # The record is gone; show_detail(None-ish)
+                                            # renders the empty placeholder and clears
+                                            # editor state for the now-deleted id.
+                                            show_detail(b.id)
+                                            refresh_list()
+                                            refresh_status()
+                                        ui.button("Remove missing", icon="delete_outline", on_click=_remove_missing).props(
+                                            "flat dense no-caps color=negative"
+                                        ).tooltip("Delete this orphaned record (the folder is gone)")
 
                         # --- grouped fields ---
                         ui.label("Identity").classes("colophon-seccap")
@@ -937,6 +953,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         book.state, (book.state.value, "grey-6")
                     )
                     ui.badge(_slabel).props(f"color={_scolor} outline")
+                    if book.missing:
+                        ui.badge("Missing").props("color=warning outline").tooltip(
+                            "This book's folder is gone from disk. Remove it or "
+                            "restore the folder and rescan."
+                        )
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
                 line2 = f"{author} · {series}" if series else author

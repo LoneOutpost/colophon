@@ -28,6 +28,18 @@ def test_create_app_registers_pages_without_running(tmp_path):
     ctx.close()
 
 
+def test_missing_remove_contract_exists():
+    # The workspace's "Remove missing" control depends on these two surfaces:
+    # BookUnit.missing (gates the badge/button) and controller.remove_missing.
+    from pathlib import Path
+
+    from colophon.controller import AppController
+    from colophon.core.models import BookUnit
+
+    assert hasattr(BookUnit.new(source_folder=Path("/x")), "missing")
+    assert callable(AppController.remove_missing)
+
+
 def test_main_is_importable():
     import colophon.__main__ as m
 
