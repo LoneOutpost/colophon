@@ -15,7 +15,7 @@ import hashlib
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, FileNode, Graph
-from colophon.core.graph_resolve import _name_key
+from colophon.core.graph_resolve import _ancestor_paths, _name_key
 from colophon.core.models import BookUnit, _Base
 
 
@@ -36,6 +36,17 @@ def entity_node_id(kind: str, name: str, root: Path) -> str:
 _SEMANTIC_DIR_KINDS = {"author", "series", "franchise"}
 
 
+def _ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
+    """The franchise name of the nearest ancestor directory classified `franchise`, or
+    None. Franchise is never on a book field — only a directory classification (a manual
+    override) — so it's read from the ancestry."""
+    for path in _ancestor_paths(folder, root):
+        d = graph.directories.get(DirectoryNode.id_for(path))
+        if d is not None and d.kind == "franchise" and d.kind_value:
+            return d.kind_value
+    return None
+
+
 class NodeRecord(_Base):
     id: str
     physical: str | None       # 'directory' | 'file' | None (logical-only, e.g. a book)
@@ -46,7 +57,7 @@ class NodeRecord(_Base):
 
 class EdgeRecord(_Base):
     src: str
-    kind: str                  # 'contains' | 'owns' | 'author' | 'series'
+    kind: str                  # 'contains' | 'owns' | 'author' | 'series' | 'franchise'
     dst: str
     root: str
     props: dict[str, object] = {}  # noqa: RUF012 - {} structural; provenance/sequence on semantic edges
@@ -116,6 +127,9 @@ def graph_records(
             if s.sequence is not None:
                 props["sequence"] = s.sequence
             _semantic_edge(nid, "series", _entity("series", s.name), props)
+        fname = _ancestor_franchise(graph, u.source_folder, root)
+        if fname:
+            _semantic_edge(nid, "franchise", _entity("franchise", fname), {"provenance": "manual"})
 
     nodes.extend(entities.values())
     return nodes, edges

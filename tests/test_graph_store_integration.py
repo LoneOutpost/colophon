@@ -44,6 +44,34 @@ def test_full_scan_persists_structural_graph(tmp_path):
     assert (DirectoryNode.id_for(book_dir), "contains", bnode.id) in triples             # dir holds book
 
 
+def test_full_scan_persists_semantic_graph(tmp_path):
+    from mutagen.id3 import ID3, TPE1
+
+    root = tmp_path / "lib"
+    author = root / "Brandon Sanderson"
+    for title in ("Elantris", "Warbreaker"):
+        d = author / title
+        d.mkdir(parents=True)
+        f = d / "01.mp3"
+        f.write_bytes(b"\x00" * 16)
+        tags = ID3()
+        tags.add(TPE1(encoding=3, text=["Brandon Sanderson"]))
+        tags.save(f)
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [root]
+    ctrl = AppController(ctx)
+    ctrl.apply_scan(ctrl.scan_preview([root]))
+
+    nodes = ctx.graph.nodes_for(root)
+    # author entity nodes are logical-only (physical is None); the author *folder* also
+    # carries a semantic="author" facet, so filter to the entity to test dedup.
+    author_entities = [n for n in nodes if n.semantic == "author" and n.physical is None]
+    assert len(author_entities) == 1  # one shared "Brandon Sanderson" entity
+    eid = author_entities[0].id
+    author_edges = [e for e in ctx.graph.edges_for(root) if e.kind == "author"]
+    assert len(author_edges) == 2 and all(e.dst == eid for e in author_edges)  # both books -> it
+
+
 def test_rescan_after_removing_a_file_updates_the_store(tmp_path):
     root = tmp_path / "lib"
     _seed(root)

@@ -151,6 +151,27 @@ def test_series_edge_carries_sequence(tmp_path):
     assert e.props["sequence"] == 1.0 and e.props["provenance"] == "tag"
 
 
+def test_franchise_edge_from_ancestor_dir(tmp_path):
+    # a franchise-classified ancestor directory yields a book->franchise edge
+    g, folder, files = _graph_single_book(tmp_path)
+    fdir = tmp_path / "Author"  # pretend this ancestor was classified franchise
+    fnode = g.directories[DirectoryNode.id_for(fdir)]
+    fnode.kind = "franchise"
+    fnode.kind_value = "Cosmere"
+    u = _unit(folder, files, unit_id="b1")
+    _nodes, edges = graph_records(g, [u], root=tmp_path)
+    fid = entity_node_id("franchise", "Cosmere", tmp_path)
+    franchise_edges = [(e.src, e.dst, e.props.get("provenance")) for e in edges if e.kind == "franchise"]
+    assert (book_node_id("b1"), fid, "manual") in franchise_edges
+
+
+def test_no_franchise_edge_without_a_franchise_ancestor(tmp_path):
+    g, folder, files = _graph_single_book(tmp_path)
+    u = _unit(folder, files, unit_id="b1")
+    _nodes, edges = graph_records(g, [u], root=tmp_path)
+    assert not [e for e in edges if e.kind == "franchise"]
+
+
 def test_two_editions_share_one_series_entity(tmp_path):
     # the dedup-doesn't-merge-books guard: distinct book nodes, one shared series entity
     from colophon.core.models import SeriesRef
