@@ -1,11 +1,16 @@
-"""Classify AUTHOR directories from descendant evidence, then inherit the author into a
-subtree's empty-or-weak-author books (GRAPHING). Depth-independent; see the Phase 3b
-design. A pure pass over a built Graph and the scan's resolved books."""
+"""Confirmed/inferred author-series resolution shared by the scan and match paths.
+
+The scan path classifies AUTHOR directories from descendant evidence and inherits the
+author into a subtree's empty-or-weak-author books (GRAPHING; `resolve_graph_authors`),
+then propagates confirmed manual classifications onto books (`propagate_overrides`) — a
+pure pass over a built Graph. The match path reuses the same fill precedence graph-free,
+reading the override store directly (`apply_confirmed_overrides`). Depth-independent; see
+the Phase 3b design."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
@@ -86,17 +91,21 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
                 break
 
 
-def _fill_confirmed(book: BookUnit, *, author: str | None, series: str | None) -> None:
+def _fill_confirmed(book: BookUnit, *, author: str | None, series: str | None) -> bool:
     """Fill a book's empty-or-weak (directory/filename) author/series from a confirmed
     (manual) classification, stamped MANUAL. A book that asserts its own author/series
-    (tag/datafile/match) is left untouched. Shared by propagate_overrides (scan path)
-    and apply_confirmed_overrides (match path)."""
+    (tag/datafile/match) is left untouched. Returns whether the book was changed. Shared
+    by propagate_overrides (scan path) and apply_confirmed_overrides (match path)."""
+    changed = False
     if author and (not book.authors or book.provenance.get("authors") in _WEAK):
         book.authors = [author]
         book.provenance["authors"] = Provenance.MANUAL.value
+        changed = True
     if series and (not book.series or book.provenance.get("series") in _WEAK):
         book.series = [SeriesRef(name=series)]
         book.provenance["series"] = Provenance.MANUAL.value
+        changed = True
+    return changed
 
 
 def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
@@ -116,16 +125,24 @@ def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> N
 
 
 def apply_confirmed_overrides(
-    books: list[BookUnit], overrides: dict[str, NodeOverride], *, root: Path
-) -> None:
-    """Fill each book's empty/weak author/series from its nearest confirmed (manual)
-    ancestor classification in `overrides` (keyed by folder path), stamped MANUAL. The
-    graph-free, match-time analog of propagate_overrides; scope is confirmed (manual)
-    classifications only. franchise/container kinds have no book-field target and are
-    ignored."""
+    books: list[BookUnit],
+    overrides: dict[str, NodeOverride],
+    *,
+    root_for: Callable[[BookUnit], Path],
+) -> list[BookUnit]:
+    """Return `books` with each book's empty/weak author/series filled from its nearest
+    confirmed (manual) ancestor classification in `overrides` (keyed by folder path),
+    stamped MANUAL. The graph-free, match-time analog of propagate_overrides; scope is
+    confirmed (manual) classifications only (franchise/container have no book-field
+    target). `root_for` gives each book's scan root for the ancestry walk.
+
+    Inputs are never mutated: a book that receives a fill is returned as a deep copy,
+    an unaffected book is returned as-is. This keeps the caller's store-cache objects
+    clean while letting a persisting caller save the returned copy."""
+    out: list[BookUnit] = []
     for book in books:
         author = series = None
-        for path in _ancestor_paths(book.source_folder, root):
+        for path in _ancestor_paths(book.source_folder, root_for(book)):
             ov = overrides.get(str(path))
             if ov is None:
                 continue
@@ -133,4 +150,9 @@ def apply_confirmed_overrides(
                 author = ov.value
             if series is None and ov.kind == "series" and ov.value:
                 series = ov.value
-        _fill_confirmed(book, author=author, series=series)
+        if not author and not series:
+            out.append(book)
+            continue
+        candidate = book.model_copy(deep=True)
+        out.append(candidate if _fill_confirmed(candidate, author=author, series=series) else book)
+    return out

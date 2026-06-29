@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
@@ -993,21 +992,16 @@ class AppController:
     def _apply_confirmed(self, books: list[BookUnit]) -> list[BookUnit]:
         """Return `books` with empty/weak author/series filled from confirmed (manual)
         folder classifications, so the workbench's confirmations reach the provider query
-        without a fresh full scan. Books are returned as deep copies so the shared store
-        cache (which `list_all` hands out by reference) is never mutated in place. Read-only
-        callers (get_matches, identify_preview) persist nothing; where a persisting caller
-        exists (apply_identify / recheck) the confirmed fill rides its save, per the W4b
-        design."""
+        without a fresh full scan. A filled book is returned as a copy (the store cache,
+        which `list_all` hands out by reference, is never mutated); read-only callers
+        (get_matches, identify_preview) persist nothing, while a persisting caller
+        (apply_identify / recheck) saves the returned copy, per the W4b design."""
         overrides = self.ctx.overrides.all()
         if not overrides:
             return books
-        copies = [b.model_copy(deep=True) for b in books]
-        by_root: dict[Path, list[BookUnit]] = defaultdict(list)
-        for book in copies:
-            by_root[self._scan_root_for_path(book.source_folder)].append(book)
-        for root, group in by_root.items():
-            apply_confirmed_overrides(group, overrides, root=root)
-        return copies
+        return apply_confirmed_overrides(
+            books, overrides, root_for=lambda b: self._scan_root_for_path(b.source_folder)
+        )
 
     async def get_matches(self, book: BookUnit) -> list[SourceResult]:
         """Re-query all sources for `book` and return candidate matches, best first."""
