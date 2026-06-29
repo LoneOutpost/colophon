@@ -12,7 +12,7 @@ from nicegui import ui
 
 from colophon.controller import AppController
 from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
-from colophon.ui.chrome import page_header, page_toolbar
+from colophon.ui.chrome import body_column, page_header, page_toolbar
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def render_graph(controller: AppController) -> None:
             rebuild_btn = ui.button("Rebuild", icon="refresh").props("flat no-caps")
         worklist = ui.column().classes("w-full q-gutter-xs")
 
-    body = ui.column().classes("w-full q-px-sm q-pt-sm")
+    body = body_column("full")
 
     async def _open_classify_dialog(node, kind: str) -> None:
         with ui.dialog() as dialog, ui.card():

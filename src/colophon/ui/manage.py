@@ -10,7 +10,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from colophon.controller import AppController
-from colophon.ui.chrome import page_header
+from colophon.ui.chrome import page_body, page_header, page_toolbar
 
 logger = logging.getLogger(__name__)
 
@@ -163,21 +163,21 @@ def render_manage(controller: AppController) -> None:
         dialog.open()
 
     # --- page body ---
-    with ui.column().classes("w-full items-center q-pa-md"):
-        with ui.column().classes("w-full gap-3").style("max-width: 760px"):
-            ui.toggle(_KIND_LABELS, value="author", on_change=lambda e: _on_kind(e.value)).props(
-                "no-caps"
-            ).classes("colophon-seg")
-            with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                ui.input(placeholder="Filter").props('dense clearable outlined aria-label="Filter folders"').classes(
-                    "col"
-                ).on_value_change(lambda e: _on_filter(e.value))
-                merge_btn = ui.button(
-                    "Merge selected", icon="merge", on_click=_merge_dialog
-                ).props("flat")
-                undo_btn = ui.button("Undo", icon="undo", on_click=_do_undo).props("flat")
+    with page_toolbar():
+        ui.toggle(_KIND_LABELS, value="author", on_change=lambda e: _on_kind(e.value)).props(
+            "no-caps"
+        ).classes("colophon-seg")
+        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+            ui.input(placeholder="Filter").props('dense clearable outlined aria-label="Filter folders"').classes(
+                "col"
+            ).on_value_change(lambda e: _on_filter(e.value))
+            merge_btn = ui.button(
+                "Merge selected", icon="merge", on_click=_merge_dialog
+            ).props("flat")
+            undo_btn = ui.button("Undo", icon="undo", on_click=_do_undo).props("flat")
 
-            list_box = ui.column().classes("w-full gap-0")
+    with page_body("read"):
+        list_box = ui.column().classes("w-full gap-0")
 
     def _sync_buttons() -> None:
         merge_btn.set_enabled(len(_selected()) >= 2)
