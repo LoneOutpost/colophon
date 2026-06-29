@@ -139,6 +139,12 @@ body {
 .colophon-actionbar { position: sticky; bottom: 0; margin-top: 8px; padding: 8px 0;
   background: var(--colophon-surface); border-top: 1px solid var(--colophon-line); }
 .body--dark .colophon-actionbar { background: #262019; }
+/* Page sub-header band: a recessive surface zone with a hairline rule, separating a
+   page's controls + state-of-play from its body (the page -> surface -> line tonal
+   rule). Shared across pages via chrome.page_toolbar. */
+.colophon-toolbar { background: var(--colophon-surface); border-bottom: 1px solid var(--colophon-line);
+  padding: 10px 16px; }
+.body--dark .colophon-toolbar { background: #262019; }
 /* AA helpers (#105): warm muted text, muted outline chips, dark filled-button ink
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }
