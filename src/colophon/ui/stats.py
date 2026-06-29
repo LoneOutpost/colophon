@@ -34,7 +34,9 @@ def _fmt_size(num_bytes: int) -> str:
 
 
 def _stat_card(label: str, value: str) -> None:
-    with ui.card().classes("col q-pa-md"):
+    # A fixed-width metric tile, not a flex-grow card: three summary numbers should
+    # cluster at a natural size, not stretch edge-to-edge into hollow hero tiles.
+    with ui.card().classes("q-pa-md").style("width: 220px"):
         ui.label(value).classes("text-h5 text-weight-medium")
         ui.label(label).classes("text-caption colophon-muted")
 
@@ -55,7 +57,7 @@ def render_stats(controller: AppController) -> None:
                 )
             return
 
-        with ui.row().classes("w-full q-gutter-md no-wrap"):
+        with ui.row().classes("q-gutter-md"):
             _stat_card("Books", str(stats.total_books))
             _stat_card("Listening time", _fmt_hm(stats.total_duration_ms))
             _stat_card("Library size", _fmt_size(stats.total_bytes))
