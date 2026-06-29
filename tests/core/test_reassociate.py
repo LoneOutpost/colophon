@@ -1,0 +1,76 @@
+from pathlib import Path
+
+from colophon.core.models import BookUnit, SourceFile
+from colophon.core.reassociate import reassociate
+
+
+def _book(folder: Path, files: list[tuple[str, int, float]]) -> BookUnit:
+    b = BookUnit.new(source_folder=folder)
+    b.source_files = [
+        SourceFile(path=folder / name, size=size, duration_seconds=dur, ext=".mp3")
+        for name, size, dur in files
+    ]
+    return b
+
+
+def test_identical_sets_match_one_to_one(tmp_path):
+    e = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    p = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    assert reassociate([p], [e]) == [(p, e)]
+
+
+def test_file_added_still_matches(tmp_path):
+    e = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    p = _book(tmp_path, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0)])
+    assert reassociate([p], [e]) == [(p, e)]
+
+
+def test_file_removed_still_matches(tmp_path):
+    e = _book(tmp_path, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0)])
+    p = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    assert reassociate([p], [e]) == [(p, e)]
+
+
+def test_single_renamed_file_does_not_match(tmp_path):
+    # name differs, size+duration hold; with a SINGLE renamed file there is no shared
+    # (name,size,dur) tuple, so this is a genuine non-match.
+    e = _book(tmp_path, [("01 - intro.mp3", 100, 60.0)])
+    p = _book(tmp_path, [("intro.mp3", 100, 60.0)])
+    assert reassociate([p], [e]) == [(p, None)]
+
+
+def test_rename_with_another_shared_file_matches(tmp_path):
+    e = _book(tmp_path, [("01.mp3", 100, 60.0), ("02.mp3", 200, 70.0)])
+    p = _book(tmp_path, [("track01.mp3", 100, 60.0), ("02.mp3", 200, 70.0)])
+    assert reassociate([p], [e]) == [(p, e)]  # shares 02.mp3
+
+
+def test_split_dominant_leaf_inherits(tmp_path):
+    old = _book(tmp_path, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0), ("c.mp3", 300, 80.0)])
+    big = _book(tmp_path, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0)])  # 2 shared
+    small = _book(tmp_path, [("c.mp3", 300, 80.0)])  # 1 shared
+    pairs = reassociate([big, small], [old])  # returned in projected input order
+    assert pairs == [(big, old), (small, None)]
+
+
+def test_merge_highest_overlap_old_wins(tmp_path):
+    big = _book(tmp_path, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0)])
+    small = _book(tmp_path, [("c.mp3", 300, 80.0)])
+    new = _book(tmp_path, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0), ("c.mp3", 300, 80.0)])
+    pairs = reassociate([new], [big, small])
+    assert pairs == [(new, big)]  # big shares 2, small shares 1
+
+
+def test_unrelated_never_matches(tmp_path):
+    e = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    p = _book(tmp_path, [("z.mp3", 999, 12.0)])
+    assert reassociate([p], [e]) == [(p, None)]
+
+
+def test_existing_claimed_at_most_once(tmp_path):
+    old = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    p1 = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    p2 = _book(tmp_path, [("a.mp3", 100, 60.0)])
+    pairs = reassociate([p1, p2], [old])
+    matched = [p for p, m in pairs if m is old]
+    assert len(matched) == 1  # only one projected leaf can inherit old
