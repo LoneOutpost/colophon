@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import BookUnit, Provenance
+from colophon.core.models import BookUnit, Provenance, SeriesRef
 
 
 def _name_key_subject(s):
@@ -300,3 +300,124 @@ def test_ancestor_paths_folder_is_root(tmp_path):
 
     root = tmp_path / "lib"
     assert list(_ancestor_paths(root, root)) == [root]
+
+
+def _ov(kind, value):
+    from colophon.core.models import NodeOverride
+
+    return NodeOverride(kind=kind, value=value)
+
+
+def test_apply_confirmed_fills_empty_author(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    book = _book(author_dir / "Elantris", [])
+    overrides = {str(author_dir): _ov("author", "Brandon Sanderson")}
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["authors"] == Provenance.MANUAL.value
+
+
+def test_apply_confirmed_fills_weak_author(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    book = _book(author_dir / "Elantris", ["Elantris"], Provenance.DIRECTORY.value)
+    overrides = {str(author_dir): _ov("author", "Brandon Sanderson")}
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == ["Brandon Sanderson"]
+    assert book.provenance["authors"] == Provenance.MANUAL.value
+
+
+def test_apply_confirmed_does_not_overwrite_tag_author(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    book = _book(author_dir / "Tagged", ["Someone Else"], Provenance.TAG.value)
+    overrides = {str(author_dir): _ov("author", "Brandon Sanderson")}
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == ["Someone Else"]
+    assert book.provenance["authors"] == Provenance.TAG.value
+
+
+def test_apply_confirmed_nested_author_and_series_both(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    series_dir = author_dir / "Mistborn"
+    book = _book(series_dir / "Final Empire", [])
+    overrides = {
+        str(author_dir): _ov("author", "Brandon Sanderson"),
+        str(series_dir): _ov("series", "Mistborn"),
+    }
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == ["Brandon Sanderson"]
+    assert [s.name for s in book.series] == ["Mistborn"]
+
+
+def test_apply_confirmed_no_override_is_noop(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    book = _book(root / "Brandon Sanderson" / "Elantris", [])
+    apply_confirmed_overrides([book], {}, root=root)
+    assert book.authors == [] and "authors" not in book.provenance
+
+
+def test_apply_confirmed_franchise_does_not_touch_books(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    fdir = root / "Doctor Who"
+    book = _book(fdir / "Book", [])
+    overrides = {str(fdir): _ov("franchise", "DOCTOR WHO")}
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == [] and "authors" not in book.provenance
+
+
+def test_apply_confirmed_fills_weak_series(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    series_dir = root / "Mistborn"
+    book = _book(series_dir / "Final Empire", [])
+    book.series = [SeriesRef(name="Final Empire")]
+    book.provenance["series"] = Provenance.DIRECTORY.value
+    overrides = {str(series_dir): _ov("series", "Mistborn")}
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert [s.name for s in book.series] == ["Mistborn"]
+    assert book.provenance["series"] == Provenance.MANUAL.value
+
+
+def test_apply_confirmed_nearest_author_wins(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    root = tmp_path / "lib"
+    outer = root / "Anthologies"
+    inner = outer / "Brandon Sanderson"
+    book = _book(inner / "Elantris", [])
+    overrides = {
+        str(outer): _ov("author", "Various"),
+        str(inner): _ov("author", "Brandon Sanderson"),
+    }
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == ["Brandon Sanderson"]  # nearer ancestor wins
+
+
+def test_apply_confirmed_leaves_graphing_author_untouched(tmp_path):
+    from colophon.core.graph_resolve import apply_confirmed_overrides
+
+    # GRAPHING is not weak: a graph-inferred author is left alone on the match path
+    # (a confirmed override already reached it via propagate_overrides at scan time).
+    root = tmp_path / "lib"
+    author_dir = root / "Brandon Sanderson"
+    book = _book(author_dir / "Elantris", ["Inferred Author"], Provenance.GRAPHING.value)
+    overrides = {str(author_dir): _ov("author", "Brandon Sanderson")}
+    apply_confirmed_overrides([book], overrides, root=root)
+    assert book.authors == ["Inferred Author"]
+    assert book.provenance["authors"] == Provenance.GRAPHING.value

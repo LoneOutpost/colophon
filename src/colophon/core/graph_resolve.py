@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import BookUnit, Provenance, SeriesRef
+from colophon.core.models import BookUnit, NodeOverride, Provenance, SeriesRef
 from colophon.core.normalize import normalize_name
 
 _WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
@@ -112,4 +112,25 @@ def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> N
                 author = node.kind_value
             if series is None and node.kind == "series" and node.kind_value:
                 series = node.kind_value
+        _fill_confirmed(book, author=author, series=series)
+
+
+def apply_confirmed_overrides(
+    books: list[BookUnit], overrides: dict[str, NodeOverride], *, root: Path
+) -> None:
+    """Fill each book's empty/weak author/series from its nearest confirmed (manual)
+    ancestor classification in `overrides` (keyed by folder path), stamped MANUAL. The
+    graph-free, match-time analog of propagate_overrides; scope is confirmed (manual)
+    classifications only. franchise/container kinds have no book-field target and are
+    ignored."""
+    for book in books:
+        author = series = None
+        for path in _ancestor_paths(book.source_folder, root):
+            ov = overrides.get(str(path))
+            if ov is None:
+                continue
+            if author is None and ov.kind == "author" and ov.value:
+                author = ov.value
+            if series is None and ov.kind == "series" and ov.value:
+                series = ov.value
         _fill_confirmed(book, author=author, series=series)
