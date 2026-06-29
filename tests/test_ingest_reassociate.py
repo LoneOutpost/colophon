@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.core.models import BookUnit
+from colophon.core.models import BookUnit, Provenance
 from colophon.services.ingest import ScanPlan, commit_scan, plan_scan_graph
 
 _HAVE_FFMPEG = shutil.which("ffmpeg") is not None
@@ -161,6 +161,38 @@ def test_multi_to_single_carries_identity(tmp_path: Path) -> None:
     assert survivor.cover_path == Path("/x.jpg")
     assert survivor.confidence == 66.0
     assert survivor.manually_confirmed is True
+
+
+def test_manual_identity_edits_survive_multi_to_single(tmp_path: Path) -> None:
+    """A MULTI->SINGLE collapse must not silently wipe hand-curated identity. The
+    surviving single re-derives its identity but keeps every MANUAL-provenance edit
+    (and its provenance) from the heir leaf."""
+    repo = _repo(tmp_path)
+    author = tmp_path / "Author"
+    _album_track(author / "e01.mp3", "Elantris")
+    _album_track(author / "e02.mp3", "Elantris")
+    _album_track(author / "l01.mp3", "Legion")
+    _album_track(author / "l02.mp3", "Legion")
+    _scan(repo, author.parent)
+
+    leaf = _leaf_titled(repo, author, "Elantris")
+    original_id = leaf.id
+    leaf.description = "Hand-written blurb"
+    leaf.provenance["description"] = Provenance.MANUAL.value
+    leaf.asin = "B00MANUAL1"
+    leaf.provenance["asin"] = Provenance.MANUAL.value
+    repo.upsert(leaf)
+
+    (author / "l01.mp3").unlink()
+    (author / "l02.mp3").unlink()
+    _scan(repo, author.parent)
+
+    survivor = repo.get(original_id)
+    assert survivor is not None
+    assert survivor.description == "Hand-written blurb"  # manual edit survives the collapse
+    assert survivor.provenance.get("description") == Provenance.MANUAL.value
+    assert survivor.asin == "B00MANUAL1"
+    assert survivor.provenance.get("asin") == Provenance.MANUAL.value
 
 
 def test_new_leaf_fresh_id_and_merged_away_book_pruned(tmp_path: Path) -> None:

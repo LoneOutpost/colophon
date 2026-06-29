@@ -25,9 +25,10 @@ from colophon.core.models import (
     NodeOverride,
     Phase,
     PhaseState,
+    Provenance,
 )
 from colophon.core.phases import LOCAL, mark, resync_state, state_of
-from colophon.core.reassociate import is_missing
+from colophon.core.reassociate import is_missing, reassociate
 from colophon.services.identify import run_identify
 
 logger = logging.getLogger(__name__)
@@ -354,14 +355,22 @@ _DURABLE_APP_STATE = (
 
 
 def _adopt_app_state(unit: BookUnit, matched: BookUnit) -> None:
-    """Transplant `matched`'s durable id and app state onto the freshly-derived `unit`
-    in place. Used when re-association matches a projected book to a prior record with a
-    *different* id (a true content churn): the durable record follows the content while
-    the projection's just-derived identity is kept. `created_at` is frozen, so the heir
-    keeps its own creation timestamp; the durable id and app state are what carry over."""
+    """Transplant `matched`'s durable id, app state, and manual edits onto the freshly-
+    derived `unit` in place. Used when re-association matches a projected book to a prior
+    record with a *different* id (a true content churn): the durable record follows the
+    content while the projection's just-derived identity stands for non-manual fields.
+    `created_at` is frozen, so the heir keeps its own creation timestamp.
+
+    Every field `matched` marked MANUAL (its value + provenance) is carried so a re-cluster
+    never silently wipes a hand-curated title/author/asin/etc. Because only MANUAL fields
+    carry, a rederived-away datafile field is not resurrected."""
     unit.id = matched.id
     for name in _DURABLE_APP_STATE:
         setattr(unit, name, getattr(matched, name))
+    for key, src in matched.provenance.items():
+        if src == Provenance.MANUAL.value and hasattr(unit, key):
+            setattr(unit, key, getattr(matched, key))
+            unit.provenance[key] = src
 
 
 def _adopt_and_identify(
@@ -446,7 +455,6 @@ def plan_scan_graph(
 
     from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
     from colophon.core.graph_resolve import propagate_overrides, resolve_graph_authors
-    from colophon.core.reassociate import reassociate
     from colophon.services.graph_build import build_graph, project
 
     pattern = compile_template(template)
@@ -521,11 +529,11 @@ def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str, directory_sche
 def sweep_missing(repo: BookUnitRepo, roots: list[Path]) -> int:
     """Mark/unmark each persisted book's ``missing`` flag.
 
-    A not-yet-organised book whose source folder has vanished while its scan
-    root is still reachable is marked missing.  A book whose folder is back
-    (or that is already organised, or whose root is not reachable) is cleared.
-    Returns the count of books currently flagged missing.  Self-heals — a
-    returned folder clears the flag here (or on the next scan).
+    A not-yet-organized book whose source folder has vanished while its scan root is
+    still reachable is marked missing. A book whose folder is back (or that is already
+    organized, or whose root is not reachable) is cleared. Returns the count of books
+    currently flagged missing. Self-heals — a returned folder clears the flag here (or
+    on the next scan).
     """
     access: dict[Path, bool] = {}
     marked = 0
