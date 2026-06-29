@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from colophon.core.graph_records import EdgeRecord, NodeRecord
 from colophon.core.models import BookState, BookUnit, EditChange, NodeOverride, OperationRecord
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
@@ -337,3 +339,60 @@ class NodeOverrideRepo:
     def all(self) -> dict[str, NodeOverride]:
         rows = self.conn.execute("SELECT path, kind, value FROM node_overrides").fetchall()
         return {r["path"]: NodeOverride(kind=r["kind"], value=r["value"]) for r in rows}
+
+
+@dataclass
+class GraphStore:
+    """Persisted property-graph: generic nodes + typed edges. Slice 1 holds the
+    structural layer (directory/file/book nodes, contains/owns edges). Replace-by-root:
+    a full scan rebuilds a root's whole subgraph, so a re-scan replaces it wholesale.
+    Scan roots are assumed disjoint (a node belongs to one root)."""
+
+    conn: sqlite3.Connection
+
+    def replace_subgraph(
+        self, root: Path, nodes: list[NodeRecord], edges: list[EdgeRecord], commit: bool = True
+    ) -> None:
+        """Atomically replace `root`'s whole subgraph: delete its nodes/edges, insert the
+        new set. With `commit=True` the delete+insert run in one all-or-nothing
+        transaction (rolled back if any insert fails). With `commit=False` the caller owns
+        the surrounding transaction and its commit/rollback — the statements join it."""
+        r = str(root)
+
+        def _write() -> None:
+            self.conn.execute("DELETE FROM nodes WHERE root = ?", (r,))
+            self.conn.execute("DELETE FROM edges WHERE root = ?", (r,))
+            self.conn.executemany(
+                "INSERT INTO nodes (id, physical, semantic, root, attrs) VALUES (?, ?, ?, ?, ?)",
+                [(n.id, n.physical, n.semantic, n.root, json.dumps(n.attrs)) for n in nodes],
+            )
+            self.conn.executemany(
+                "INSERT INTO edges (src, kind, dst, root, props) VALUES (?, ?, ?, ?, ?)",
+                [(e.src, e.kind, e.dst, e.root, json.dumps(e.props)) for e in edges],
+            )
+
+        if commit:
+            with self.conn:  # one transaction, lock held throughout; commit/rollback on exit
+                _write()
+        else:
+            _write()
+
+    def nodes_for(self, root: Path) -> list[NodeRecord]:
+        rows = self.conn.execute(
+            "SELECT id, physical, semantic, root, attrs FROM nodes WHERE root = ?", (str(root),)
+        ).fetchall()
+        return [
+            NodeRecord(id=r["id"], physical=r["physical"], semantic=r["semantic"],
+                       root=r["root"], attrs=json.loads(r["attrs"]))
+            for r in rows
+        ]
+
+    def edges_for(self, root: Path) -> list[EdgeRecord]:
+        rows = self.conn.execute(
+            "SELECT src, kind, dst, root, props FROM edges WHERE root = ?", (str(root),)
+        ).fetchall()
+        return [
+            EdgeRecord(src=r["src"], kind=r["kind"], dst=r["dst"], root=r["root"],
+                       props=json.loads(r["props"]))
+            for r in rows
+        ]

@@ -24,7 +24,7 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     assert "book_units" in tables
     assert "schema_version" in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 4
+    assert version == 5
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -32,7 +32,7 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 4
+    assert version == 5
 
 
 def _repo(tmp_path: Path) -> BookUnitRepo:
