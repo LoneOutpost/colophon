@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from colophon.core.models import BookUnit, SourceFile
-from colophon.core.reassociate import reassociate
+from colophon.core.reassociate import is_missing, reassociate
 
 
 def _book(folder: Path, files: list[tuple[str, int, float]]) -> BookUnit:
@@ -74,3 +74,26 @@ def test_existing_claimed_at_most_once(tmp_path):
     pairs = reassociate([p1, p2], [old])
     matched = [p for p, m in pairs if m is old]
     assert len(matched) == 1  # only one projected leaf can inherit old
+
+
+def test_is_missing_folder_gone_root_accessible(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "gone")  # never created
+    assert is_missing(b, root_accessible=True) is True
+
+
+def test_is_missing_false_when_folder_exists(tmp_path):
+    folder = tmp_path / "here"
+    folder.mkdir()
+    b = BookUnit.new(source_folder=folder)
+    assert is_missing(b, root_accessible=True) is False
+
+
+def test_is_missing_false_when_organized(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "gone")
+    b.output_path = tmp_path / "library" / "out.m4b"
+    assert is_missing(b, root_accessible=True) is False
+
+
+def test_is_missing_false_when_root_inaccessible(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "gone")
+    assert is_missing(b, root_accessible=False) is False  # unmount guard

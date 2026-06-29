@@ -222,6 +222,7 @@ class BookUnit(_Base):
     detected_works: list[DetectedWork] = []
     acknowledged_findings: list[FindingCode] = []
     manually_confirmed: bool = False
+    missing: bool = False  # tracked folder vanished outside the app; surfaced for cleanup
     state: BookState = BookState.DETECTED
     phases: dict[Phase, PhaseRecord] = {}  # sparse: a missing key reads as PENDING
     skipped: bool = False
