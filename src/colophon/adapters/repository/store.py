@@ -243,6 +243,12 @@ class HistoryRepo:
         self.conn.execute("UPDATE edit_history SET reverted = 1 WHERE batch_id = ?", (batch_id,))
         self.conn.commit()
 
+    def delete_for_book(self, book_id: str, commit: bool = True) -> None:
+        """Remove all edit-history rows for a deleted book."""
+        self.conn.execute("DELETE FROM edit_history WHERE book_id = ?", (book_id,))
+        if commit:
+            self.conn.commit()
+
 
 @dataclass
 class OperationRepo:
@@ -285,6 +291,12 @@ class OperationRepo:
     def mark_reverted(self, batch_id: str) -> None:
         self.conn.execute("UPDATE operations SET reverted = 1 WHERE batch_id = ?", (batch_id,))
         self.conn.commit()
+
+    def delete_for_book(self, book_id: str, commit: bool = True) -> None:
+        """Remove all operation rows for a deleted book."""
+        self.conn.execute("DELETE FROM operations WHERE book_id = ?", (book_id,))
+        if commit:
+            self.conn.commit()
 
 
 @dataclass

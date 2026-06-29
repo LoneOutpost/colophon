@@ -98,6 +98,7 @@ from colophon.services.ingest import (
     plan_scan_graph,
     refresh_local,
     scan_ingest,
+    sweep_missing,
 )
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import organize_book
@@ -288,7 +289,20 @@ class AppController:
 
     def apply_scan(self, plan: ScanPlan) -> int:
         """Persist a previously-computed scan plan; returns the number written."""
-        return commit_scan(self.ctx.books, plan, reconcile=True)
+        written = commit_scan(self.ctx.books, plan, reconcile=True)
+        # Sweep the whole catalog, not just this plan's folders: a folder that vanished
+        # isn't walked by any scan, so a plan-scoped sweep would never see it. The
+        # per-root accessibility guard keeps this cheap and false-positive-safe.
+        sweep_missing(self.ctx.books, list(self.ctx.config.scan_paths))
+        return written
+
+    def remove_missing(self, book: BookUnit) -> None:
+        """Delete an orphaned (missing) book record and its history/operations rows.
+        The three deletes share one transaction (commit on the last) so the record and
+        its satellite rows can't be left half-removed."""
+        self.ctx.history.delete_for_book(book.id, commit=False)
+        self.ctx.operations.delete_for_book(book.id, commit=False)
+        self.ctx.books.delete(book.id)  # commits, flushing the two preceding deletes
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
@@ -1018,6 +1032,7 @@ class AppController:
             if not b.manually_confirmed
             and b.output_path is None
             and b.title
+            and not b.missing
             and state_of(b, Phase.MATCH) is not PhaseState.FRESH
         ]
 

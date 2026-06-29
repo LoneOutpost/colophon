@@ -2902,3 +2902,87 @@ def test_retry_identify_uses_confirmed_ancestor_author(tmp_path):
     rec.queries.clear()
     asyncio.run(ctrl.retry_identify(plan, [b.id]))
     assert rec.queries[0].author == "Brandon Sanderson"
+
+
+# ---------------------------------------------------------------------------
+# Missing-folder sweep tests
+# ---------------------------------------------------------------------------
+
+def test_sweep_marks_book_whose_folder_vanished(tmp_path):
+    import shutil
+
+    from colophon.services.ingest import sweep_missing
+
+    root = tmp_path / "lib"
+    folder = root / "Dune"
+    folder.mkdir(parents=True)
+    ctx = _ctx(tmp_path)
+    b = BookUnit.new(source_folder=folder)
+    b.title = "Dune"
+    ctx.books.upsert(b)
+    shutil.rmtree(folder)
+    sweep_missing(ctx.books, [root])
+    assert ctx.books.get(b.id).missing is True
+
+
+def test_sweep_skips_when_root_inaccessible(tmp_path):
+    from colophon.services.ingest import sweep_missing
+
+    root = tmp_path / "lib"  # never created -> not accessible
+    ctx = _ctx(tmp_path)
+    b = BookUnit.new(source_folder=root / "Dune")
+    ctx.books.upsert(b)
+    sweep_missing(ctx.books, [root])
+    assert ctx.books.get(b.id).missing is False  # unmount guard
+
+
+def test_sweep_leaves_book_under_no_root_untouched(tmp_path):
+    from colophon.services.ingest import sweep_missing
+
+    root = tmp_path / "lib"
+    root.mkdir()
+    ctx = _ctx(tmp_path)
+    # a book ingested from an ad-hoc path outside every scan root, folder gone
+    b = BookUnit.new(source_folder=tmp_path / "elsewhere" / "Dune")
+    ctx.books.upsert(b)
+    sweep_missing(ctx.books, [root])
+    assert ctx.books.get(b.id).missing is False  # not under a swept root -> not flagged
+
+
+def test_sweep_clears_missing_when_folder_returns(tmp_path):
+    from colophon.services.ingest import sweep_missing
+
+    root = tmp_path / "lib"
+    folder = root / "Dune"
+    folder.mkdir(parents=True)
+    ctx = _ctx(tmp_path)
+    b = BookUnit.new(source_folder=folder)
+    b.missing = True  # was previously marked
+    ctx.books.upsert(b)
+    sweep_missing(ctx.books, [root])  # folder exists now
+    assert ctx.books.get(b.id).missing is False  # self-heal
+
+
+def test_missing_book_excluded_from_identify_candidates(tmp_path):
+    root = tmp_path / "lib"
+    folder = root / "Dune"
+    folder.mkdir(parents=True)
+    ctx = _ctx(tmp_path)
+    b = BookUnit.new(source_folder=folder)
+    b.title = "Dune"
+    b.missing = True
+    ctx.books.upsert(b)
+    assert b.id not in {c.id for c in AppController(ctx).identify_candidates()}
+
+
+def test_remove_missing_deletes_record_and_history(tmp_path):
+    root = tmp_path / "lib"
+    folder = root / "Dune"
+    folder.mkdir(parents=True)
+    ctx = _ctx(tmp_path)
+    b = BookUnit.new(source_folder=folder)
+    b.title = "Dune"
+    b.missing = True
+    ctx.books.upsert(b)
+    AppController(ctx).remove_missing(b)
+    assert ctx.books.get(b.id) is None

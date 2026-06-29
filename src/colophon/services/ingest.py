@@ -27,6 +27,7 @@ from colophon.core.models import (
     PhaseState,
 )
 from colophon.core.phases import LOCAL, mark, resync_state, state_of
+from colophon.core.reassociate import is_missing
 from colophon.services.identify import run_identify
 
 logger = logging.getLogger(__name__)
@@ -515,3 +516,32 @@ def scan_ingest(repo: BookUnitRepo, root: Path, *, template: str, directory_sche
     plan = plan_scan_graph(repo, root, template=template, directory_scheme=directory_scheme)
     commit_scan(repo, plan, reconcile=True)
     return plan.units
+
+
+def sweep_missing(repo: BookUnitRepo, roots: list[Path]) -> int:
+    """Mark/unmark each persisted book's ``missing`` flag.
+
+    A not-yet-organised book whose source folder has vanished while its scan
+    root is still reachable is marked missing.  A book whose folder is back
+    (or that is already organised, or whose root is not reachable) is cleared.
+    Returns the count of books currently flagged missing.  Self-heals — a
+    returned folder clears the flag here (or on the next scan).
+    """
+    access: dict[Path, bool] = {}
+    marked = 0
+    for book in repo.list_all():
+        root = next(
+            (r for r in roots if r == book.source_folder or r in book.source_folder.parents),
+            None,
+        )
+        if root is None:
+            continue  # not under a swept root
+        root_ok = access.setdefault(root, root.exists())
+        want = is_missing(book, root_accessible=root_ok)
+        if book.missing != want:
+            book.missing = want
+            book.touch()
+            repo.upsert(book)
+        if want:
+            marked += 1
+    return marked
