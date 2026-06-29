@@ -124,6 +124,17 @@ def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> N
         _fill_confirmed(book, author=author, series=series)
 
 
+def franchise_for(source_folder: Path, overrides: dict[str, NodeOverride], *, root: Path) -> str | None:
+    """The franchise name of the nearest ancestor directory with a manual `franchise`
+    override, or None. The cheap path-walk the navigator uses to derive a book's
+    franchise live (no graph build, no store read)."""
+    for path in _ancestor_paths(source_folder, root):
+        ov = overrides.get(str(path))
+        if ov is not None and ov.kind == "franchise" and ov.value:
+            return ov.value
+    return None
+
+
 def apply_confirmed_overrides(
     books: list[BookUnit],
     overrides: dict[str, NodeOverride],

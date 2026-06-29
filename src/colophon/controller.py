@@ -27,7 +27,11 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
-from colophon.core.graph_resolve import apply_confirmed_overrides, resolve_graph_authors
+from colophon.core.graph_resolve import (
+    apply_confirmed_overrides,
+    franchise_for,
+    resolve_graph_authors,
+)
 from colophon.core.graph_view import grouping_cohort
 from colophon.core.models import (
     BookState,
@@ -533,8 +537,19 @@ class AppController:
 
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
-        """Group all books into Author -> Series/standalone, plus a needs-id list."""
-        return build_library_tree(self._hydrate(self.ctx.books.list_all()))
+        """Group all books into the entity-model tree (multi-membership, name-key dedup,
+        franchise tier from manual overrides), built from live books."""
+        books = self._hydrate(self.ctx.books.list_all())
+        overrides = self.ctx.overrides.all()
+        franchise_of: dict[str, str] = {}
+        if overrides:
+            for b in books:
+                name = franchise_for(
+                    b.source_folder, overrides, root=self._scan_root_for_path(b.source_folder)
+                )
+                if name:
+                    franchise_of[b.id] = name
+        return build_library_tree(books, franchise_of=franchise_of)
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.

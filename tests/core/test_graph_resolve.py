@@ -415,3 +415,33 @@ def test_apply_confirmed_leaves_graphing_author_untouched(tmp_path):
     assert result is book
     assert result.authors == ["Inferred Author"]
     assert result.provenance["authors"] == Provenance.GRAPHING.value
+
+
+def test_franchise_for_nearest_ancestor(tmp_path):
+    from colophon.core.graph_resolve import franchise_for
+    from colophon.core.models import NodeOverride
+
+    root = tmp_path / "lib"
+    book = root / "Doctor Who" / "Target Novels" / "Genesis"
+    overrides = {str(root / "Doctor Who"): NodeOverride(kind="franchise", value="DOCTOR WHO")}
+    assert franchise_for(book, overrides, root=root) == "DOCTOR WHO"
+
+
+def test_franchise_for_none_without_override(tmp_path):
+    from colophon.core.graph_resolve import franchise_for
+
+    root = tmp_path / "lib"
+    assert franchise_for(root / "Author" / "Book", {}, root=root) is None
+
+
+def test_franchise_for_nearest_wins_over_farther(tmp_path):
+    from colophon.core.graph_resolve import franchise_for
+    from colophon.core.models import NodeOverride
+
+    root = tmp_path / "lib"
+    book = root / "Doctor Who" / "Target Novels" / "Genesis"
+    overrides = {
+        str(root / "Doctor Who"): NodeOverride(kind="franchise", value="OUTER"),
+        str(root / "Doctor Who" / "Target Novels"): NodeOverride(kind="franchise", value="INNER"),
+    }
+    assert franchise_for(book, overrides, root=root) == "INNER"  # nearest ancestor wins

@@ -2986,3 +2986,33 @@ def test_remove_missing_deletes_record_and_history(tmp_path):
     ctx.books.upsert(b)
     AppController(ctx).remove_missing(b)
     assert ctx.books.get(b.id) is None
+
+
+def test_library_tree_franchise_from_override(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Doctor Who" / "Genesis"
+    book_dir.mkdir(parents=True)
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Genesis of the Daleks"
+    b.authors = ["Terrance Dicks"]
+    ctx.books.upsert(b)
+    ctrl = AppController(ctx)
+    ctrl.set_node_classification(root / "Doctor Who", "franchise", "DOCTOR WHO")
+    tree = ctrl.library_tree()
+    assert [f.name for f in tree.franchises] == ["DOCTOR WHO"]
+    assert b.id in {x.id for x in tree.franchises[0].books}
+
+
+def test_library_tree_no_franchise_without_override(tmp_path):
+    root = tmp_path / "lib"
+    book_dir = root / "Author" / "Book"
+    book_dir.mkdir(parents=True)
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [root]
+    b = BookUnit.new(source_folder=book_dir)
+    b.title = "Plain Book"
+    b.authors = ["Some Author"]
+    ctx.books.upsert(b)
+    assert AppController(ctx).library_tree().franchises == []
