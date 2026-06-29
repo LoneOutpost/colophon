@@ -34,3 +34,14 @@ def page_header(
         ui.space()
         yield
         dark_mode_button(dark)
+
+
+@contextmanager
+def page_toolbar() -> Iterator[None]:
+    """A recessive sub-header band for a page's controls and state-of-play, set off from
+    the body by a surface step and a hairline rule (the page -> surface -> line tonal
+    rule). Put the page's control row(s) and any summary/worklist inside the `with` body;
+    the page body that follows sits on the warm page background, so the two zones read as
+    distinct. Shared so every page gains the same hierarchy in one place."""
+    with ui.column().classes("colophon-toolbar w-full q-gutter-xs q-pa-none"):
+        yield
