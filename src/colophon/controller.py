@@ -265,6 +265,8 @@ class AppController:
             combined.fields_filled += plan.fields_filled
             combined.files_added += plan.files_added
             combined.reconciled_folders |= plan.reconciled_folders
+            combined.graph_nodes.extend(plan.graph_nodes)
+            combined.graph_edges.extend(plan.graph_edges)
         return combined
 
     async def scan_preview_streamed(
@@ -289,7 +291,7 @@ class AppController:
 
     def apply_scan(self, plan: ScanPlan) -> int:
         """Persist a previously-computed scan plan; returns the number written."""
-        written = commit_scan(self.ctx.books, plan, reconcile=True)
+        written = commit_scan(self.ctx.books, plan, graph_store=self.ctx.graph, reconcile=True)
         # Sweep the whole catalog, not just this plan's folders: a folder that vanished
         # isn't walked by any scan, so a plan-scoped sweep would never see it. The
         # per-root accessibility guard keeps this cheap and false-positive-safe.

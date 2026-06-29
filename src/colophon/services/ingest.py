@@ -14,12 +14,13 @@ from enum import StrEnum
 from pathlib import Path
 
 from colophon.adapters.audio import probe_audio_file
-from colophon.adapters.repository.store import BookUnitRepo
+from colophon.adapters.repository.store import BookUnitRepo, GraphStore
 from colophon.adapters.scan import group_book_units
 from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
+from colophon.core.graph_records import EdgeRecord, NodeRecord, graph_records
 from colophon.core.models import (
     BookUnit,
     NodeOverride,
@@ -47,6 +48,8 @@ class ScanPlan:
     fields_filled: int = 0
     files_added: int = 0
     reconciled_folders: set[Path] = field(default_factory=set)
+    graph_nodes: list[NodeRecord] = field(default_factory=list)
+    graph_edges: list[EdgeRecord] = field(default_factory=list)
 
 
 class ScanScope(StrEnum):
@@ -488,6 +491,7 @@ def plan_scan_graph(
             plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
             plan.units.append(adopted)
             plan.reconciled_folders.add(folder)
+    plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
     classify_graph(graph, root=root)
     resolve_graph_authors(graph, plan.units, root=root)
     hint_grouping_kinds(graph)
@@ -497,7 +501,10 @@ def plan_scan_graph(
     return plan
 
 
-def commit_scan(repo: BookUnitRepo, plan: ScanPlan, *, reconcile: bool = False) -> int:
+def commit_scan(
+    repo: BookUnitRepo, plan: ScanPlan, *, graph_store: GraphStore | None = None,
+    reconcile: bool = False,
+) -> int:
     """Persist a computed plan; returns the number of books written.
 
     With `reconcile`, for each folder the plan fully recomputed (`reconciled_folders`)
@@ -514,6 +521,12 @@ def commit_scan(repo: BookUnitRepo, plan: ScanPlan, *, reconcile: bool = False) 
                 repo.delete(stale_id)
     for book in plan.units:
         repo.upsert(book)
+    if graph_store is not None and plan.graph_nodes:
+        roots = {n.root for n in plan.graph_nodes}
+        for root in roots:
+            nodes = [n for n in plan.graph_nodes if n.root == root]
+            edges = [e for e in plan.graph_edges if e.root == root]
+            graph_store.replace_subgraph(Path(root), nodes, edges)
     return len(plan.units)
 
 
