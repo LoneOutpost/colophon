@@ -63,16 +63,15 @@ class EdgeRecord(_Base):
     props: dict[str, object] = {}  # noqa: RUF012 - {} structural; provenance/sequence on semantic edges
 
 
-def graph_records(
-    graph: Graph, units: list[BookUnit], *, root: Path
+def skeleton_records(
+    graph: Graph, *, root: Path
 ) -> tuple[list[NodeRecord], list[EdgeRecord]]:
-    """Structural records: directory/file nodes + `contains` edges from the graph;
-    book nodes + `dir contains book` and `book owns file` edges from `units` (whose ids
-    are the persisted, possibly re-associated ones). All stamped with `root`."""
+    """The filesystem skeleton: directory nodes (semantic facet from their classification)
+    + dir->dir / dir->file `contains` edges + file nodes. Needs the scan Graph; produced at
+    scan time. (The half of the graph an edit never changes.)"""
     r = str(root)
     nodes: list[NodeRecord] = []
     edges: list[EdgeRecord] = []
-
     for d in graph.directories.values():
         nodes.append(NodeRecord(
             id=d.id, physical="directory",
@@ -83,13 +82,25 @@ def graph_records(
             edges.append(EdgeRecord(src=d.id, kind="contains", dst=cid, root=r))
         for fid in d.child_files:
             edges.append(EdgeRecord(src=d.id, kind="contains", dst=fid, root=r))
-
     for f in graph.files.values():
         nodes.append(NodeRecord(
             id=f.id, physical="file", semantic=None, root=r,
             attrs={"path": str(f.path), "name": f.path.name, "ext": f.path.suffix, "role": f.role.value},
         ))
+    return nodes, edges
 
+
+def book_records(
+    units: list[BookUnit], *, root: Path, franchise_of: dict[str, str] | None = None
+) -> tuple[list[NodeRecord], list[EdgeRecord]]:
+    """Book + entity records from the units alone (no scan Graph): book nodes,
+    `dir contains book`, `book owns file`, entity nodes, and author/series/franchise edges.
+    `franchise_of` maps `book.id` to a franchise name (the only thing that used to need the
+    graph). Raw names, matching scan-time output. Re-derivable any time for write-through."""
+    r = str(root)
+    franchise_of = franchise_of or {}
+    nodes: list[NodeRecord] = []
+    edges: list[EdgeRecord] = []
     entities: dict[str, NodeRecord] = {}
     seen_edges: set[tuple[str, str, str]] = set()
 
@@ -127,9 +138,24 @@ def graph_records(
             if s.sequence is not None:
                 props["sequence"] = s.sequence
             _semantic_edge(nid, "series", _entity("series", s.name), props)
-        fname = _ancestor_franchise(graph, u.source_folder, root)
+        fname = franchise_of.get(u.id)
         if fname:
             _semantic_edge(nid, "franchise", _entity("franchise", fname), {"provenance": "manual"})
 
     nodes.extend(entities.values())
     return nodes, edges
+
+
+def graph_records(
+    graph: Graph, units: list[BookUnit], *, root: Path
+) -> tuple[list[NodeRecord], list[EdgeRecord]]:
+    """Full scan-time records = filesystem skeleton + book/entity records. Franchise comes
+    from the scan graph's ancestor classification (manual overrides)."""
+    franchise_of: dict[str, str] = {}
+    for u in units:
+        fname = _ancestor_franchise(graph, u.source_folder, root)
+        if fname:
+            franchise_of[u.id] = fname
+    sk_nodes, sk_edges = skeleton_records(graph, root=root)
+    bk_nodes, bk_edges = book_records(units, root=root, franchise_of=franchise_of)
+    return sk_nodes + bk_nodes, sk_edges + bk_edges

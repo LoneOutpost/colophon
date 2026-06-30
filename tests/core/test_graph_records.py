@@ -188,3 +188,24 @@ def test_two_editions_share_one_series_entity(tmp_path):
     assert book_nodes == {book_node_id("edition-A"), book_node_id("edition-B")}  # both editions survive
     series_srcs = {e.src for e in edges if e.kind == "series" and e.dst == eid}
     assert series_srcs == {book_node_id("edition-A"), book_node_id("edition-B")}
+
+
+def test_graph_records_equals_skeleton_plus_book_records(tmp_path):
+    from colophon.core.graph_records import (
+        _ancestor_franchise,
+        book_records,
+        skeleton_records,
+    )
+    g, folder, files = _graph_single_book(tmp_path)
+    unit = _unit(folder, files)
+    unit.authors = ["Frank Herbert"]
+    nodes, edges = graph_records(g, [unit], root=tmp_path)
+    franchise_of = {}
+    for u in [unit]:
+        fname = _ancestor_franchise(g, u.source_folder, tmp_path)
+        if fname:
+            franchise_of[u.id] = fname
+    sk_n, sk_e = skeleton_records(g, root=tmp_path)
+    bk_n, bk_e = book_records([unit], root=tmp_path, franchise_of=franchise_of)
+    assert (sk_n + bk_n) == nodes
+    assert (sk_e + bk_e) == edges
