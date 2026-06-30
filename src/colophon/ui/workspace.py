@@ -1242,9 +1242,23 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         with ui.menu():
                             menu()
 
-    def _entity_menu(kind: str, name: str) -> None:
+    def _entity_menu(kind: str, name: str, aliases: dict[tuple[str, str], str]) -> None:
         """Populate the kebab menu for an author/series/franchise nav node:
-        Rename, Merge into, and (when this node is an alias target) Unmerge entries."""
+        Rename, Merge into, and (when this node is an alias target) Unmerge entries.
+        `aliases` is the live alias map, fetched once per refresh by the caller."""
+
+        def _after_alias(canonical: str | None) -> None:
+            # An alias change can move books in/out of the scoped node. If the scoped
+            # node was just aliased away (merge/rename), follow it to the canonical so
+            # the main pane doesn't strand on a now-missing scope; otherwise just
+            # re-render (and refresh the books pane when this kind is in scope).
+            if canonical and scope["kind"] == kind and scope["key"] == name:
+                _set_scope(kind, canonical)
+            elif scope["kind"] == kind:
+                refresh_nav()
+                _render_middle()
+            else:
+                refresh_nav()
 
         def _apply_alias(value: str | None, dialog) -> None:
             canonical = (value or "").strip()
@@ -1252,11 +1266,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 return
             controller.set_entity_alias(kind, name, canonical)
             dialog.close()
-            refresh_nav()
+            _after_alias(canonical)
 
         def _clear_alias(source_key: str) -> None:
             controller.clear_entity_alias(kind, source_key)
-            refresh_nav()
+            _after_alias(None)
 
         def _rename() -> None:
             with ui.dialog() as dlg, ui.card().classes("w-80"):
@@ -1292,7 +1306,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         # Sources currently aliased to THIS node can be reset (unmerged).
         aliased = [
             src_key
-            for (k, src_key), canonical in controller.ctx.aliases.all().items()
+            for (k, src_key), canonical in aliases.items()
             if k == kind and _name_key(canonical) == _name_key(name)
         ]
         if aliased:
@@ -1305,6 +1319,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def refresh_nav() -> None:
         nav_container.clear()
         tree = controller.library_tree()
+        nav_aliases = controller.ctx.aliases.all()  # fetched once for every node's kebab
         kind, key = scope["kind"], scope["key"]
         with nav_container:
             ui.switch(
@@ -1389,7 +1404,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             kind == "series" and key == name,
                             lambda n=name: _set_scope("series", n),
                             checkbox=_node_checkbox(ids),
-                            menu=lambda n=name: _entity_menu("series", n),
+                            menu=lambda n=name: _entity_menu("series", n, nav_aliases),
                         )
                 elif view["group_by"] == "franchise":
                     for f in tree.franchises:
@@ -1402,7 +1417,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             kind == "franchise" and key == f.name,
                             lambda n=f.name: _set_scope("franchise", n),
                             checkbox=_node_checkbox(ids),
-                            menu=lambda n=f.name: _entity_menu("franchise", n),
+                            menu=lambda n=f.name: _entity_menu("franchise", n, nav_aliases),
                         )
                 else:
                     for author in tree.authors:
@@ -1418,7 +1433,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             kind == "author" and key == author.name,
                             lambda name=author.name: _set_scope("author", name),
                             checkbox=_node_checkbox(aids),
-                            menu=lambda n=author.name: _entity_menu("author", n),
+                            menu=lambda n=author.name: _entity_menu("author", n, nav_aliases),
                         )
 
     def _update_count() -> None:
