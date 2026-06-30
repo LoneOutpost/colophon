@@ -1,7 +1,8 @@
 from pathlib import Path
 
+from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookUnit, SeriesRef
-from colophon.core.navigator import build_library_tree
+from colophon.core.navigator import build_library_tree, resolve_alias
 
 
 def _book(bid: str, *, authors=None, series=None, title="", confidence=0.0) -> BookUnit:
@@ -98,3 +99,68 @@ def test_no_franchise_nodes_without_map():
     b = _book("b1", authors=["A"], title="One")
     tree = build_library_tree([b])
     assert tree.franchises == []
+
+
+def test_resolve_alias_passthrough_when_empty():
+    assert resolve_alias({}, "author", "Brandon Sanderson") == "Brandon Sanderson"
+    assert resolve_alias(None, "author", "Brandon Sanderson") == "Brandon Sanderson"
+
+
+def test_resolve_alias_single_hop():
+    aliases = {("author", _name_key("B. Sanderson")): "Brandon Sanderson"}
+    assert resolve_alias(aliases, "author", "B. Sanderson") == "Brandon Sanderson"
+
+
+def test_resolve_alias_follows_chain():
+    aliases = {("author", _name_key("A")): "B", ("author", _name_key("B")): "C"}
+    assert resolve_alias(aliases, "author", "A") == "C"
+
+
+def test_resolve_alias_terminates_on_cycle():
+    aliases = {("author", _name_key("A")): "B", ("author", _name_key("B")): "A"}
+    result = resolve_alias(aliases, "author", "A")
+    assert result in {"A", "B"}
+
+
+def test_build_library_tree_merges_aliased_authors():
+    books = [
+        _book("b1", title="A", authors=["Brandon Sanderson"]),
+        _book("b2", title="B", authors=["B. Sanderson"]),
+    ]
+    aliases = {("author", _name_key("B. Sanderson")): "Brandon Sanderson"}
+    tree = build_library_tree(books, aliases=aliases)
+    assert [a.name for a in tree.authors] == ["Brandon Sanderson"]
+    merged = tree.authors[0]
+    titles = [b.title for s in merged.series for b in s.books] + [b.title for b in merged.standalone]
+    assert sorted(titles) == ["A", "B"]
+
+
+def test_build_library_tree_renames_author():
+    books = [_book("b1", title="A", authors=["brandon sanderson"])]
+    aliases = {("author", _name_key("brandon sanderson")): "Brandon Sanderson"}
+    tree = build_library_tree(books, aliases=aliases)
+    assert [a.name for a in tree.authors] == ["Brandon Sanderson"]
+
+
+def test_build_library_tree_aliases_series():
+    books = [
+        _book("b1", title="A", authors=["x"], series=[SeriesRef(name="Mistborn", sequence=1.0)]),
+        _book(
+            "b2",
+            title="B",
+            authors=["x"],
+            series=[SeriesRef(name="Mistborn Era 1", sequence=2.0)],
+        ),
+    ]
+    aliases = {("series", _name_key("Mistborn Era 1")): "Mistborn"}
+    tree = build_library_tree(books, aliases=aliases)
+    author = tree.authors[0]
+    assert [s.name for s in author.series] == ["Mistborn"]
+    assert sorted(b.title for s in author.series for b in s.books) == ["A", "B"]
+
+
+def test_build_library_tree_aliases_franchise():
+    b = _book("b1", title="A", authors=["x"])
+    aliases = {("franchise", _name_key("cosmere")): "The Cosmere"}
+    tree = build_library_tree([b], franchise_of={b.id: "cosmere"}, aliases=aliases)
+    assert [f.name for f in tree.franchises] == ["The Cosmere"]

@@ -39,8 +39,36 @@ def _series_sequence(book: BookUnit, name_key: str) -> float:
     return 0.0
 
 
+def resolve_alias(
+    aliases: dict[tuple[str, str], str] | None, kind: str, name: str
+) -> str:
+    """Map an entity name to its canonical name, following alias chains (`A->B->C`)
+    with a self/cycle guard so it always terminates. `kind` is author/series/franchise;
+    keys are `(kind, _name_key(source))`. Returns `name` unchanged when there's no alias."""
+    if not aliases:
+        return name
+    seen: set[str] = set()
+    cur = name
+    while True:
+        ck = _name_key(cur)
+        nxt = aliases.get((kind, ck))
+        if nxt is None or ck in seen:
+            break
+        seen.add(ck)
+        if _name_key(nxt) == ck:
+            # Same-key rename (e.g. a pure casing fix): adopt the display, then stop
+            # so we don't re-resolve the identical key forever.
+            cur = nxt
+            break
+        cur = nxt
+    return cur
+
+
 def build_library_tree(
-    books: list[BookUnit], *, franchise_of: dict[str, str] | None = None
+    books: list[BookUnit],
+    *,
+    franchise_of: dict[str, str] | None = None,
+    aliases: dict[tuple[str, str], str] | None = None,
 ) -> LibraryTree:
     """Group books into the entity model over live books: each book under EVERY author
     (and series) it has, authors/series deduped by `_name_key`, plus a franchise tier
@@ -55,7 +83,8 @@ def build_library_tree(
     author_books: dict[str, list[BookUnit]] = {}
     author_display: dict[str, str] = {}
     for b in books:
-        keys = b.authors or ([b.series[0].name] if b.series else [])
+        raw_keys = b.authors or ([b.series[0].name] if b.series else [])
+        keys = [resolve_alias(aliases, "author", n) for n in raw_keys]
         seen_ak: set[str] = set()  # a name repeated on one book files it once
         for name in keys:
             k = _name_key(name)
@@ -74,18 +103,29 @@ def build_library_tree(
             if b.series:
                 seen_sk: set[str] = set()  # a series repeated on one book lists it once
                 for s in b.series:
-                    sk = _name_key(s.name)
+                    s_name = resolve_alias(aliases, "series", s.name)
+                    sk = _name_key(s_name)
                     if sk in seen_sk:
                         continue
                     seen_sk.add(sk)
-                    series_display.setdefault(sk, s.name)
+                    series_display.setdefault(sk, s_name)
                     in_series.setdefault(sk, []).append(b)
             else:
                 standalone.append(b)
         series_nodes = [
             SeriesNode(
                 name=series_display[sk],
-                books=sorted(in_series[sk], key=lambda b, sk=sk: _series_sequence(b, sk)),
+                books=sorted(
+                    in_series[sk],
+                    key=lambda b, sk=sk: max(
+                        (
+                            _series_sequence(b, _name_key(s.name))
+                            for s in b.series
+                            if _name_key(resolve_alias(aliases, "series", s.name)) == sk
+                        ),
+                        default=0.0,
+                    ),
+                ),
             )
             for sk in sorted(in_series, key=lambda sk: series_display[sk].casefold())
         ]
@@ -97,8 +137,9 @@ def build_library_tree(
     franchise_books: dict[str, list[BookUnit]] = {}
     franchise_display: dict[str, str] = {}
     for b in books:
-        name = franchise_of.get(b.id)
-        if name:
+        raw = franchise_of.get(b.id)
+        if raw:
+            name = resolve_alias(aliases, "franchise", raw)
             fk = _name_key(name)
             franchise_display.setdefault(fk, name)
             franchise_books.setdefault(fk, []).append(b)
