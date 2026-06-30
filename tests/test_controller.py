@@ -3252,3 +3252,47 @@ def test_library_tree_conservative_book_absent_from_graph(tmp_path):
     assert b.id not in {x.id for a in tree.authors for s in a.series for x in s.books}
     assert b.id not in {x.id for a in tree.authors for x in a.standalone}
     ctx.close()
+
+
+def test_rebuild_missing_graph_populates_from_books_without_scanning(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path]
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "Author" / "Book")
+    b.title, b.authors = "A Book", ["Some Author"]
+    ctx.books.upsert(b)
+    assert ctx.library_graph.nodes == {}
+    before = ctx.books.list_all()
+
+    healed = ctrl.rebuild_missing_graph()
+    assert healed == 1
+    authors = {
+        ctx.library_graph.nodes[e.dst].attrs["name"]
+        for e in ctx.library_graph.edges if e.kind == "author"
+    }
+    assert "Some Author" in authors
+    assert ctx.books.list_all() == before        # books untouched
+    assert ctrl.rebuild_missing_graph() == 0      # idempotent
+    ctx.close()
+
+
+def test_rebuild_missing_graph_noop_on_healthy_graph(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    assert ctrl.rebuild_missing_graph() == 0
+    ctx.close()
+
+
+def test_resync_seeds_book_only_root(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path]
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title, b.authors = "X", ["Y"]
+    ctx.books.upsert(b)
+    ctrl._resync_roots({ctrl._scan_root_for_path(b.source_folder)})
+    assert any(n.semantic == "book" for n in ctx.library_graph.nodes.values())
+    ctx.close()

@@ -29,7 +29,7 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
-from colophon.core.graph_records import book_records
+from colophon.core.graph_records import book_node_id, book_records
 from colophon.core.graph_resolve import (
     _name_key,
     apply_confirmed_overrides,
@@ -326,8 +326,9 @@ class AppController:
     def _resync_roots(self, roots: set[Path]) -> None:
         """Keep each root's filesystem skeleton (unchanged by an edit) and re-derive its
         book/entity records from current books + overrides, then write through to the
-        in-memory graph and the store. A root with no skeleton yet (never scanned) is
-        skipped — there's nothing to keep fresh until the first scan persists it.
+        in-memory graph and the store. A root with no books and no skeleton is skipped
+        (nothing to derive or keep); a book-only root is seeded from books (no skeleton
+        until a scan).
 
         Contract: callers must PERSIST the mutation (upsert/delete/override) BEFORE calling
         this — re-derivation reads `ctx.books.list_all()`/`ctx.overrides.all()`, not the
@@ -342,14 +343,19 @@ class AppController:
             skeleton_nodes = [
                 n for n in lib.nodes.values() if n.root == r and n.physical in ("directory", "file")
             ]
-            if not skeleton_nodes:
-                continue  # never scanned — no skeleton to keep
+            root_books = [
+                b for b in books if self._scan_root_for_path(b.source_folder) == root
+            ]
+            if not skeleton_nodes and not any(
+                book_node_id(b.id) not in lib.nodes for b in root_books
+            ):
+                # No skeleton to keep, and every book here is already represented in the
+                # graph (under a root the scan persisted): seeding would re-key those book
+                # nodes onto this root and collide. Truly empty roots also fall through here.
+                continue
             skeleton_edges = [
                 e for e in lib.edges
                 if e.root == r and e.kind == "contains" and not e.dst.startswith("book:")
-            ]
-            root_books = [
-                b for b in books if self._scan_root_for_path(b.source_folder) == root
             ]
             franchise_of: dict[str, str] = {}
             for b in root_books:
@@ -361,6 +367,22 @@ class AppController:
             edges = skeleton_edges + book_edges
             lib.replace_root(r, nodes, edges)
             self.ctx.graph.replace_subgraph(root, nodes, edges)
+
+    def rebuild_missing_graph(self) -> int:
+        """Self-heal: for any book not represented in the in-memory graph, rebuild its
+        scan root's entity records from the existing books (no scan, no filesystem walk,
+        no book changes). Returns the number of roots rebuilt. Idempotent — a healthy
+        graph rebuilds nothing."""
+        books = self.ctx.books.list_all()
+        present = set(self.ctx.library_graph.nodes)
+        missing_roots = {
+            self._scan_root_for_path(b.source_folder)
+            for b in books
+            if book_node_id(b.id) not in present
+        }
+        if missing_roots:
+            self._resync_roots(missing_roots)
+        return len(missing_roots)
 
     def scan_paths_missing_graph(self) -> list[Path]:
         """Configured scan paths with no subgraph in the in-memory graph (never scanned /
