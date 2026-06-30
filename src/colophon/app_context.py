@@ -13,6 +13,7 @@ from colophon.adapters.config import Config, default_config_path
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.repository.store import (
     BookUnitRepo,
+    EntityAliasRepo,
     GraphStore,
     HistoryRepo,
     NodeOverrideRepo,
@@ -51,6 +52,7 @@ class AppContext:
     history: HistoryRepo
     operations: OperationRepo
     overrides: NodeOverrideRepo
+    aliases: EntityAliasRepo
     graph: GraphStore
     sources: list[MetadataSource]
     patterns: AudiobookPatterns
@@ -83,6 +85,7 @@ class AppContext:
             history=HistoryRepo(conn),
             operations=OperationRepo(conn),
             overrides=NodeOverrideRepo(conn),
+            aliases=EntityAliasRepo(conn),
             graph=GraphStore(conn),
             sources=sources,
             patterns=patterns,

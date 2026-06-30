@@ -342,6 +342,40 @@ class NodeOverrideRepo:
 
 
 @dataclass
+class EntityAliasRepo:
+    """Persisted entity merge/rename facts, keyed by (kind, name_key).
+
+    The entity-shaped analog of NodeOverrideRepo: where node overrides are keyed by
+    a directory's path, entity nodes have no path, so an alias is keyed by the
+    normalized name (`_name_key`) of the source entity. The value is the canonical
+    display name. Merge (source -> existing name) and rename (source -> new name)
+    are the same row; clearing it reverts to the auto-derived entity. Callers pass
+    an already-normalized `name_key`."""
+
+    conn: sqlite3.Connection
+
+    def set(self, kind: str, name_key: str, canonical: str) -> None:
+        self.conn.execute(
+            "INSERT INTO entity_aliases (kind, name_key, canonical) VALUES (?, ?, ?) "
+            "ON CONFLICT(kind, name_key) DO UPDATE SET canonical = excluded.canonical",
+            (kind, name_key, canonical),
+        )
+        self.conn.commit()
+
+    def clear(self, kind: str, name_key: str) -> None:
+        self.conn.execute(
+            "DELETE FROM entity_aliases WHERE kind = ? AND name_key = ?", (kind, name_key)
+        )
+        self.conn.commit()
+
+    def all(self) -> dict[tuple[str, str], str]:
+        rows = self.conn.execute(
+            "SELECT kind, name_key, canonical FROM entity_aliases"
+        ).fetchall()
+        return {(r["kind"], r["name_key"]): r["canonical"] for r in rows}
+
+
+@dataclass
 class GraphStore:
     """Persisted property-graph: generic nodes + typed edges. Slice 1 holds the
     structural layer (directory/file/book nodes, contains/owns edges). Replace-by-root:

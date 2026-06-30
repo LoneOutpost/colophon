@@ -15,7 +15,7 @@ def test_migrate_creates_edit_history_table(tmp_path: Path):
     migrate(conn)
     names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "edit_history" in names
-    assert conn.execute("SELECT version FROM schema_version").fetchone()["version"] == 5
+    assert conn.execute("SELECT version FROM schema_version").fetchone()["version"] == 6
 
 
 def test_record_and_list_batch_round_trips(tmp_path: Path):

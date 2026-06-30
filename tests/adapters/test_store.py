@@ -2,6 +2,7 @@ from pathlib import Path
 
 from colophon.adapters.repository.store import (
     BookUnitRepo,
+    EntityAliasRepo,
     NodeOverrideRepo,
     OperationRepo,
     connect,
@@ -24,7 +25,7 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     assert "book_units" in tables
     assert "schema_version" in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 5
+    assert version == 6
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -32,7 +33,7 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 5
+    assert version == 6
 
 
 def _repo(tmp_path: Path) -> BookUnitRepo:
@@ -325,3 +326,37 @@ def test_node_override_repo_set_many(tmp_path: Path):
         "/lib/B": NodeOverride(kind="author", value="B"),
         "/lib/Old": NodeOverride(kind="author", value="Old"),
     }
+
+
+def test_migrate_creates_entity_aliases_table(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    assert "entity_aliases" in _table_names(conn)
+
+
+def test_entity_alias_repo_set_all_clear(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = EntityAliasRepo(conn)
+    repo.set("author", "bsanderson", "Brandon Sanderson")
+    assert repo.all() == {("author", "bsanderson"): "Brandon Sanderson"}
+    repo.clear("author", "bsanderson")
+    assert repo.all() == {}
+
+
+def test_entity_alias_repo_set_upserts(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = EntityAliasRepo(conn)
+    repo.set("series", "mistborn", "Mistborn")
+    repo.set("series", "mistborn", "Mistborn Era 1")
+    assert repo.all() == {("series", "mistborn"): "Mistborn Era 1"}
+
+
+def test_entity_alias_repo_keys_by_kind_and_name(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = EntityAliasRepo(conn)
+    repo.set("author", "dune", "Frank Herbert")
+    repo.set("series", "dune", "Dune")
+    assert repo.all() == {("author", "dune"): "Frank Herbert", ("series", "dune"): "Dune"}
