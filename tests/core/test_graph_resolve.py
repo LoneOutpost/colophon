@@ -477,3 +477,95 @@ def test_dominant_series_picks_most_common(tmp_path):
     ]
     assert _dominant_series(books) == "Liz Carlyle"
     assert _dominant_series([_book(d, [])]) is None   # no series at all
+
+
+def test_structural_author_for_untagged_single_series_container(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    author_dir = root / "stella Rimington"          # name does NOT resemble the series
+    a = author_dir / "Close Call"
+    b = author_dir / "Secret Asset"
+    graph = _graph_with_dirs(a, b)
+    graph.directories[DirectoryNode.id_for(author_dir)].kind = "container"
+
+    b1 = _book_with_series(author_dir, "Close Call", "Liz Carlyle", 8)
+    b2 = _book_with_series(author_dir, "Secret Asset", "Liz Carlyle", 2)
+    resolve_graph_authors(graph, [b1, b2], root=root)
+
+    node = graph.directories[DirectoryNode.id_for(author_dir)]
+    assert node.kind == "author" and node.author == "stella Rimington"
+    assert b1.authors == ["stella Rimington"]
+    assert b1.provenance["authors"] == Provenance.GRAPHING.value
+
+
+def test_series_named_folder_is_not_classified_author(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    series_dir = root / "Liz Carlyle"               # name DOES resemble the series -> guard trips
+    a = series_dir / "Close Call"
+    b = series_dir / "Secret Asset"
+    graph = _graph_with_dirs(a, b)
+    graph.directories[DirectoryNode.id_for(series_dir)].kind = "container"
+
+    b1 = _book_with_series(series_dir, "Close Call", "Liz Carlyle", 8)
+    b2 = _book_with_series(series_dir, "Secret Asset", "Liz Carlyle", 2)
+    resolve_graph_authors(graph, [b1, b2], root=root)
+
+    node = graph.directories[DirectoryNode.id_for(series_dir)]
+    assert node.kind == "container"      # NOT reclassified
+    assert b1.authors == []              # not filled with the series name
+
+
+def test_structural_author_skips_when_nothing_empty_or_weak(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    folder = root / "Mixed Bucket"
+    a = folder / "x"
+    b = folder / "y"
+    graph = _graph_with_dirs(a, b)
+    graph.directories[DirectoryNode.id_for(folder)].kind = "container"
+
+    # both books carry a strong (tag) author -> nothing to fill -> folder must stay a container
+    t1 = _book(a, ["Real Author"], Provenance.TAG.value)
+    t2 = _book(b, ["Real Author"], Provenance.TAG.value)
+    resolve_graph_authors(graph, [t1, t2], root=root)
+
+    assert graph.directories[DirectoryNode.id_for(folder)].kind == "container"
+    assert t1.authors == ["Real Author"]   # untouched
+
+
+def test_structural_author_never_classifies_root(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"               # loose books directly in root (a bucket)
+    a = root / "x"
+    b = root / "y"
+    graph = _graph_with_dirs(a, b)
+    graph.directories[DirectoryNode.id_for(root)].kind = "container"
+
+    b1 = _book_with_series(root, "x", "Some Series", 1)
+    b2 = _book(root, [])
+    resolve_graph_authors(graph, [b1, b2], root=root)
+
+    assert graph.directories[DirectoryNode.id_for(root)].kind == "container"  # root never author
+    assert b2.authors == []
+
+
+def test_structural_author_is_idempotent(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    author_dir = root / "stella Rimington"
+    a = author_dir / "Close Call"
+    graph = _graph_with_dirs(a)
+    graph.directories[DirectoryNode.id_for(author_dir)].kind = "container"
+    b1 = _book_with_series(author_dir, "Close Call", "Liz Carlyle", 8)
+
+    resolve_graph_authors(graph, [b1], root=root)
+    first = list(b1.authors)
+    resolve_graph_authors(graph, [b1], root=root)   # second pass must not change anything
+    assert b1.authors == first == ["stella Rimington"]
+    assert b1.provenance["authors"] == Provenance.GRAPHING.value

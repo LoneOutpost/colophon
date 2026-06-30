@@ -116,6 +116,26 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
                 node.kind = "author"
                 node.author = matched
 
+    # Up — structural author: a folder of loose untagged books (a `container`) is its own
+    # author, taken from its name. Unlike the tag/datafile pass above this DOES reclassify a
+    # container (that shape is exactly an author folder), but only when (a) it is not the scan
+    # root, (b) it actually has empty/weak-author books to fill, and (c) its name does not
+    # resemble the dominant series of its books — so a real series folder stays a series tier.
+    for node in graph.directories.values():
+        if node.path == root or node.kind != "container":
+            continue
+        under = [
+            b for b in books
+            if b.source_folder == node.path or node.path in b.source_folder.parents
+        ]
+        if not any(not b.authors or b.provenance.get("authors") in _WEAK for b in under):
+            continue  # nothing to fill -> don't claim the folder as an author
+        series = _dominant_series(under)
+        if series is not None and _resembles(node.path.name, series):
+            continue  # series tier, not an author folder
+        node.kind = "author"
+        node.author = node.path.name
+
     # Down — inherit into empty/weak-author books from the nearest AUTHOR ancestor.
     for book in books:
         prov = book.provenance.get("authors")
