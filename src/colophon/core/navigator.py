@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from colophon.core.entity_alias import resolve_alias
 from colophon.core.graph_resolve import _name_key  # shared name normalizer, not a graph coupling
 from colophon.core.models import BookUnit, _Base
 
@@ -37,31 +38,6 @@ def _series_sequence(book: BookUnit, name_key: str) -> float:
         if _name_key(s.name) == name_key and s.sequence is not None:
             return s.sequence
     return 0.0
-
-
-def resolve_alias(
-    aliases: dict[tuple[str, str], str] | None, kind: str, name: str
-) -> str:
-    """Map an entity name to its canonical name, following alias chains (`A->B->C`)
-    with a self/cycle guard so it always terminates. `kind` is author/series/franchise;
-    keys are `(kind, _name_key(source))`. Returns `name` unchanged when there's no alias."""
-    if not aliases:
-        return name
-    seen: set[str] = set()
-    cur = name
-    while True:
-        ck = _name_key(cur)
-        nxt = aliases.get((kind, ck))
-        if nxt is None or ck in seen:
-            break
-        seen.add(ck)
-        if _name_key(nxt) == ck:
-            # Same-key rename (e.g. a pure casing fix): adopt the display, then stop
-            # so we don't re-resolve the identical key forever.
-            cur = nxt
-            break
-        cur = nxt
-    return cur
 
 
 def build_library_tree(
