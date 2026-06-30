@@ -346,13 +346,8 @@ class AppController:
             root_books = [
                 b for b in books if self._scan_root_for_path(b.source_folder) == root
             ]
-            if not skeleton_nodes and not any(
-                book_node_id(b.id) not in lib.nodes for b in root_books
-            ):
-                # No skeleton to keep, and every book here is already represented in the
-                # graph (under a root the scan persisted): seeding would re-key those book
-                # nodes onto this root and collide. Truly empty roots also fall through here.
-                continue
+            if not root_books and not skeleton_nodes:
+                continue  # truly empty root — nothing to derive or keep
             skeleton_edges = [
                 e for e in lib.edges
                 if e.root == r and e.kind == "contains" and not e.dst.startswith("book:")

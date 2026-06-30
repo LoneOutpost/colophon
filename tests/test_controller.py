@@ -2712,6 +2712,7 @@ def test_graph_for_runs_grouping_hint(tmp_path):
 def test_node_classification_override_sticky_and_clear(tmp_path):
     ctx = _ctx(tmp_path)
     ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]  # so _scan_root_for_path resolves to the scanned root
     ctrl = AppController(ctx)
     ctrl.scan([ingest])
 
