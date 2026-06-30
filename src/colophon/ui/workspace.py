@@ -20,6 +20,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
+from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
@@ -1219,7 +1220,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     # --- navigator ---
     def _nav_item(
-        label: str, icon: str, active: bool, on_click, color: str | None = None, *, checkbox=None
+        label: str, icon: str, active: bool, on_click, color: str | None = None, *,
+        checkbox=None, menu=None,
     ) -> None:
         with ui.item(on_click=on_click).props("clickable" + (" active" if active else "")):
             if checkbox is not None:
@@ -1230,6 +1232,75 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.icon(icon, color=color) if color else ui.icon(icon)
             with ui.item_section():
                 ui.item_label(label)
+            if menu is not None:
+                with ui.item_section().props("side"):
+                    # Kebab opens its own menu; click.stop keeps the row's
+                    # on_click (scope navigation) from also firing.
+                    with ui.button(icon="more_vert").props(
+                        "flat dense round size=sm"
+                    ).on("click.stop", lambda: None):
+                        with ui.menu():
+                            menu()
+
+    def _entity_menu(kind: str, name: str) -> None:
+        """Populate the kebab menu for an author/series/franchise nav node:
+        Rename, Merge into, and (when this node is an alias target) Unmerge entries."""
+
+        def _apply_alias(value: str | None, dialog) -> None:
+            canonical = (value or "").strip()
+            if not canonical:  # never write an empty canonical name
+                return
+            controller.set_entity_alias(kind, name, canonical)
+            dialog.close()
+            refresh_nav()
+
+        def _clear_alias(source_key: str) -> None:
+            controller.clear_entity_alias(kind, source_key)
+            refresh_nav()
+
+        def _rename() -> None:
+            with ui.dialog() as dlg, ui.card().classes("w-80"):
+                ui.label("Rename entity").classes("text-subtitle1")
+                name_in = ui.input("Name", value=name).props("dense").classes("w-full")
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Cancel", on_click=dlg.close).props("flat")
+                    ui.button(
+                        "Rename", icon="edit",
+                        on_click=lambda: _apply_alias(name_in.value, dlg),
+                    )
+            dlg.open()
+
+        def _merge() -> None:
+            with ui.dialog() as dlg, ui.card().classes("w-80"):
+                ui.label("Merge into").classes("text-subtitle1")
+                ui.label(f"Merge '{name}' into another entity.").classes(
+                    "text-caption colophon-muted"
+                )
+                target_in = ui.input("Target name", placeholder="Target name").props(
+                    "dense"
+                ).classes("w-full")
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Cancel", on_click=dlg.close).props("flat")
+                    ui.button(
+                        "Merge", icon="merge",
+                        on_click=lambda: _apply_alias(target_in.value, dlg),
+                    )
+            dlg.open()
+
+        ui.menu_item("Rename…", on_click=_rename)
+        ui.menu_item("Merge into…", on_click=_merge)
+        # Sources currently aliased to THIS node can be reset (unmerged).
+        aliased = [
+            src_key
+            for (k, src_key), canonical in controller.ctx.aliases.all().items()
+            if k == kind and _name_key(canonical) == _name_key(name)
+        ]
+        if aliased:
+            ui.separator()
+            for src_key in sorted(aliased):
+                ui.menu_item(
+                    f"Unmerge {src_key}", on_click=lambda s=src_key: _clear_alias(s)
+                )
 
     def refresh_nav() -> None:
         nav_container.clear()
@@ -1318,6 +1389,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             kind == "series" and key == name,
                             lambda n=name: _set_scope("series", n),
                             checkbox=_node_checkbox(ids),
+                            menu=lambda n=name: _entity_menu("series", n),
                         )
                 elif view["group_by"] == "franchise":
                     for f in tree.franchises:
@@ -1330,6 +1402,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             kind == "franchise" and key == f.name,
                             lambda n=f.name: _set_scope("franchise", n),
                             checkbox=_node_checkbox(ids),
+                            menu=lambda n=f.name: _entity_menu("franchise", n),
                         )
                 else:
                     for author in tree.authors:
@@ -1345,6 +1418,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             kind == "author" and key == author.name,
                             lambda name=author.name: _set_scope("author", name),
                             checkbox=_node_checkbox(aids),
+                            menu=lambda n=author.name: _entity_menu("author", n),
                         )
 
     def _update_count() -> None:
