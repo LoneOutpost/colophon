@@ -115,5 +115,9 @@ def entity_graph_from_records(
         g.members.setdefault(ek, []).append(book)
         g.book_entities.setdefault(bid, []).append(ek)
 
+    # `g.books` carries the joined BookUnits so the navigator's view builders can read
+    # per-book fields (the series-but-no-author pseudo-author reads `b.series`). This
+    # relies on the invariant that a book node's edges mirror the book's current fields —
+    # held by write-through resyncing every mutation (see AppController._resync_books).
     g.books = [books_by_id[bid] for bid in book_of_node.values() if bid in books_by_id]
     return g

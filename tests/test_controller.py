@@ -3015,16 +3015,16 @@ def test_library_tree_franchise_from_override(tmp_path):
 
 
 def test_library_tree_no_franchise_without_override(tmp_path):
-    root = tmp_path / "lib"
-    book_dir = root / "Author" / "Book"
-    book_dir.mkdir(parents=True)
+    # Scan a real book (so it IS in the graph) but set no franchise override, so the
+    # empty-franchises assertion actually exercises "no override -> no franchise tier".
+    root = tmp_path / "ingest"
+    _seed_book(root, "Author", "Book", author="Some Author")
     ctx = _ctx(tmp_path)
     ctx.config.scan_paths = [root]
-    b = BookUnit.new(source_folder=book_dir)
-    b.title = "Plain Book"
-    b.authors = ["Some Author"]
-    ctx.books.upsert(b)
-    assert AppController(ctx).library_tree().franchises == []
+    ctrl = AppController(ctx)
+    ctrl.scan([root])
+    assert ctx.books.list_all()  # the book is scanned and in the graph
+    assert ctrl.library_tree().franchises == []
 
 
 def _two_author_books(tmp_path):
