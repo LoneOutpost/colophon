@@ -20,8 +20,9 @@ from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.controller import AppController
 from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
-from colophon.core.models import BookUnit, Phase
+from colophon.core.models import BookUnit
 from colophon.core.pathscheme import sample_target
+from colophon.core.phases import LOCAL
 from colophon.core.sources import SourceResult
 from colophon.services.ingest import ScanOptions, ScanScope
 from colophon.ui.batch_log import BatchItem, BatchLog
@@ -813,22 +814,6 @@ async def scan_dialog(
             body.clear()
             with body:
                 ui.label("Scan library").classes("text-subtitle1")
-                template = ui.input("Filename template", value=cfg.filename_template).props(
-                    "outlined dense"
-                ).classes("w-full")
-                attach_history_menu(
-                    template, cfg.recent_filename_templates,
-                    lambda p: p, lambda p: template.set_value(p),
-                    tooltip="Recent templates",
-                )
-                scheme = ui.input(
-                    "Directory scheme (blank disables)", value=cfg.directory_scheme
-                ).props("outlined dense").classes("w-full")
-                attach_history_menu(
-                    scheme, cfg.recent_directory_schemes,
-                    lambda p: p, lambda p: scheme.set_value(p),
-                    tooltip="Recent schemes",
-                )
 
                 selection = set(selected_ids or ())
                 if selection:
@@ -839,42 +824,25 @@ async def scan_dialog(
                     scope_text = f"folder: {folder.name}" if folder is not None else "all library paths"
                     ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
 
-                ui.label("Scope").classes("colophon-seccap")
-                if selection:
-                    scope_choice = ui.radio(
-                        {"update": "Update existing", "refresh": "Refresh existing"},
-                        value="update",
-                    ).props("dense")
-                    # A disabled stand-in for the "Only new" radio option (Quasar can't
-                    # disable a single option). Match the dense radio's dot size and label
-                    # font so it lines up as a greyed-out third option, not small/indented.
-                    with ui.row().classes("items-center q-gutter-sm").style("opacity: 0.5"):
-                        ui.icon("radio_button_unchecked", size="24px").classes("colophon-muted")
-                        ui.label("Only new — not applicable to a selection").classes("colophon-muted")
-                else:
-                    scope_choice = ui.radio(
-                        {"new_only": "Only new", "update": "Update existing",
-                         "refresh": "Refresh existing"},
-                        value="new_only",
-                    ).props("dense")
-
-                ui.label("Phases").classes("colophon-seccap")
-                phase_boxes = {
-                    Phase.SEARCH: ui.checkbox("Search", value=True),
-                    Phase.CATEGORIZE: ui.checkbox("Categorize", value=True),
-                    Phase.IDENTIFY: ui.checkbox("Identify", value=True),
-                }
+                ui.label("Depth").classes("colophon-seccap")
+                depth_choice = ui.radio(
+                    {"new_changed": "New & changed", "rebuild": "Rebuild all"},
+                    value="new_changed",
+                ).props("dense")
+                ui.label(
+                    "New & changed: add new books and re-process changed folders. "
+                    "Rebuild all: force a full re-derive of everything in scope."
+                ).classes("text-caption colophon-muted")
 
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _preview() -> None:
-                        used_template = template.value or cfg.filename_template
-                        chosen = frozenset(p for p, box in phase_boxes.items() if box.value)
-                        scope = {"new_only": ScanScope.NEW_ONLY, "update": ScanScope.UPDATE,
-                                 "refresh": ScanScope.REFRESH}[scope_choice.value]
-                        opts = ScanOptions(scope=scope, phases=chosen,
-                                           book_ids=selection or None)
+                        opts = ScanOptions(
+                            scope=_DEPTH_TO_SCOPE[depth_choice.value],
+                            phases=frozenset(LOCAL),
+                            book_ids=selection or None,
+                        )
                         body.clear()
                         with body:
                             ui.label("Scanning library").classes("text-subtitle1")
@@ -890,8 +858,8 @@ async def scan_dialog(
                         try:
                             plan = await controller.scan_preview_streamed(
                                 None if selection else ([folder] if folder is not None else None),
-                                template=used_template,
-                                directory_scheme=scheme.value,
+                                template=cfg.filename_template,
+                                directory_scheme=cfg.directory_scheme,
                                 options=opts,
                                 progress=_progress,
                             )
@@ -899,11 +867,11 @@ async def scan_dialog(
                             ui.notify(f"Invalid pattern: {e}", type="negative")
                             show_options()
                             return
-                        show_results(plan, used_template, scheme.value)
+                        show_results(plan)
 
                     ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
 
-        def show_results(plan, used_template: str, used_scheme: str) -> None:
+        def show_results(plan) -> None:
             body.clear()
             with body:
                 if plan.new_books == 0 and plan.existing_books == 0:
@@ -920,8 +888,6 @@ async def scan_dialog(
 
                 async def _apply() -> None:
                     dialog.close()
-                    controller.record_filename_template(used_template)
-                    controller.record_directory_scheme(used_scheme)  # blank-ignored
                     written = await asyncio.to_thread(controller.apply_scan, plan)
                     refresh_all()
                     ui.notify(f"Scan complete ({written} books)")
