@@ -53,3 +53,46 @@ def missing_fields(book: BookUnit) -> set[str]:
 def has_open_findings(book: BookUnit) -> bool:
     """True when the book has a structural finding the user hasn't acknowledged."""
     return any(f.code not in book.acknowledged_findings for f in book.findings)
+
+
+# The "no constraint" facet selection. Copy with dict(FACET_DEFAULTS) before mutating.
+FACET_DEFAULTS = {"state": [], "confidence": [], "trust": None, "missing": [], "findings": False}
+
+
+def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
+    """Keep books passing every active facet (AND across facets; OR within a multi-value facet).
+    An empty list / None / False for a facet means it imposes no constraint."""
+    state = set(facets.get("state") or ())
+    confidence = set(facets.get("confidence") or ())
+    trust = facets.get("trust")
+    missing = set(facets.get("missing") or ())
+    findings = bool(facets.get("findings"))
+
+    out: list[BookUnit] = []
+    for b in books:
+        if state and b.state.value not in state:
+            continue
+        if confidence and confidence_bucket(b) not in confidence:
+            continue
+        if trust == "weak" and not has_weak_identity(b):
+            continue
+        if trust == "trusted" and has_weak_identity(b):
+            continue
+        if missing and not (missing & missing_fields(b)):
+            continue
+        if findings and not has_open_findings(b):
+            continue
+        out.append(b)
+    return out
+
+
+def sort_books(books: list[BookUnit], key: str) -> list[BookUnit]:
+    """Order a book list. 'conf_asc' (worst first) / 'conf_desc' / 'title'; any other key
+    (e.g. 'none') leaves the order unchanged. Confidence ties break by title."""
+    if key == "conf_asc":
+        return sorted(books, key=lambda b: (b.confidence, (b.title or "").casefold()))
+    if key == "conf_desc":
+        return sorted(books, key=lambda b: (-b.confidence, (b.title or "").casefold()))
+    if key == "title":
+        return sorted(books, key=lambda b: (b.title or "").casefold())
+    return list(books)

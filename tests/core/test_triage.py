@@ -9,11 +9,14 @@ from colophon.core.models import (
     SeriesRef,
 )
 from colophon.core.triage import (
+    FACET_DEFAULTS,
+    apply_facets,
     confidence_bucket,
     has_open_findings,
     has_weak_identity,
     missing_fields,
     needs_human,
+    sort_books,
 )
 
 
@@ -65,3 +68,44 @@ def test_has_open_findings():
         _book(findings=[f], acknowledged_findings=[FindingCode.LOOSE_IN_AUTHOR])
     )
     assert not has_open_findings(_book())
+
+
+def test_facet_defaults_are_no_constraint():
+    assert FACET_DEFAULTS == {"state": [], "confidence": [], "trust": None,
+                              "missing": [], "findings": False}
+    books = [_book(confidence=10.0), _book(confidence=90.0)]
+    assert apply_facets(books, dict(FACET_DEFAULTS)) == books  # nothing filtered
+
+
+def test_apply_facets_state_confidence_trust():
+    low_weak = _book(state=BookState.NEEDS_REVIEW, confidence=20.0,
+                     provenance={"authors": "graphing"})
+    high_trusted = _book(state=BookState.READY, confidence=90.0,
+                         provenance={"authors": "tag"})
+    books = [low_weak, high_trusted]
+    assert apply_facets(books, {**FACET_DEFAULTS, "confidence": ["low"]}) == [low_weak]
+    assert apply_facets(books, {**FACET_DEFAULTS, "state": ["ready"]}) == [high_trusted]
+    assert apply_facets(books, {**FACET_DEFAULTS, "trust": "weak"}) == [low_weak]
+    assert apply_facets(books, {**FACET_DEFAULTS, "trust": "trusted"}) == [high_trusted]
+
+
+def test_apply_facets_missing_and_findings():
+    no_cover = _book(cover_path=None, cover_url=None, series=[SeriesRef(name="S")],
+                     asin="A", narrators=["N"], publish_year=2020)
+    has_cover = _book(cover_path=Path("/c.jpg"), series=[SeriesRef(name="S")],
+                      asin="A", narrators=["N"], publish_year=2020)
+    assert apply_facets([no_cover, has_cover], {**FACET_DEFAULTS, "missing": ["cover"]}) == [no_cover]
+
+    f = Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN, detail="x")
+    flagged = _book(findings=[f])
+    clean = _book()
+    assert apply_facets([flagged, clean], {**FACET_DEFAULTS, "findings": True}) == [flagged]
+
+
+def test_sort_books():
+    a = _book(confidence=20.0, title="B")
+    b = _book(confidence=80.0, title="A")
+    assert sort_books([a, b], "conf_asc") == [a, b]
+    assert sort_books([a, b], "conf_desc") == [b, a]
+    assert sort_books([a, b], "title") == [b, a]
+    assert sort_books([a, b], "none") == [a, b]   # unknown/none key -> unchanged order
