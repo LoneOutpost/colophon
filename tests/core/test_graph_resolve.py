@@ -569,3 +569,24 @@ def test_structural_author_is_idempotent(tmp_path):
     resolve_graph_authors(graph, [b1], root=root)   # second pass must not change anything
     assert b1.authors == first == ["stella Rimington"]
     assert b1.provenance["authors"] == Provenance.GRAPHING.value
+
+
+def test_title_named_folder_is_not_classified_author(tmp_path):
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "lib"
+    title_dir = root / "Legion"          # folder named after a book it holds -> title folder
+    a = title_dir / "Legion"
+    b = title_dir / "Elantris"
+    graph = _graph_with_dirs(a, b)
+    graph.directories[DirectoryNode.id_for(title_dir)].kind = "container"
+
+    b1 = BookUnit.new(source_folder=title_dir)
+    b1.title = "Legion"                  # resembles the folder name
+    b2 = BookUnit.new(source_folder=title_dir)
+    b2.title = "Elantris"
+    resolve_graph_authors(graph, [b1, b2], root=root)
+
+    node = graph.directories[DirectoryNode.id_for(title_dir)]
+    assert node.kind == "container"      # NOT reclassified to author
+    assert b1.authors == [] and b2.authors == []

@@ -49,15 +49,16 @@ def _series_tokens(name: str) -> frozenset[str]:
     return frozenset(re.sub(r"\s+", " ", s).strip().casefold().split())
 
 
-def _resembles(folder_name: str, series_name: str) -> bool:
-    """True when `folder_name` looks like `series_name` (so the folder is a series tier, not an
-    author): normalized token-set equality, or one name's tokens are a subset of the other's
-    (handles 'The Liz Carlyle Novels' ~ 'Liz Carlyle'). Empty on either side -> False."""
-    f = _series_tokens(folder_name)
-    s = _series_tokens(series_name)
-    if not f or not s:
+def _resembles(name: str, other: str) -> bool:
+    """True when `name` looks like `other` by normalized tokens: token-set equality, or one
+    name's tokens are a subset of the other's (handles 'The Liz Carlyle Novels' ~ 'Liz
+    Carlyle'). Used to spot a folder named after a series or a book title (so it is a content
+    tier, not an author). Empty on either side -> False."""
+    a = _series_tokens(name)
+    b = _series_tokens(other)
+    if not a or not b:
         return False
-    return f == s or f <= s or s <= f
+    return a == b or a <= b or b <= a
 
 
 def _dominant_series(books: list[BookUnit]) -> str | None:
@@ -133,6 +134,8 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
         series = _dominant_series(under)
         if series is not None and _resembles(node.path.name, series):
             continue  # series tier, not an author folder
+        if any(b.title and _resembles(node.path.name, b.title) for b in under):
+            continue  # title folder (named after one of its books), not an author folder
         node.kind = "author"
         node.author = node.path.name
 
