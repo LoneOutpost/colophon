@@ -3128,3 +3128,26 @@ def test_process_book_organizes_and_tags_with_canonical_name(tmp_path):
     assert "B. Sanderson" not in str(book.output_path)
     # the stored book stays raw
     assert ctrl.ctx.books.get(book.id).authors == ["B. Sanderson"]
+
+
+def test_apply_scan_syncs_library_graph(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctrl = AppController(ctx)
+    assert ctx.library_graph.nodes == {}          # nothing loaded yet
+    ctrl.scan([ingest])
+    persisted_ids = {n.id for n in ctx.graph.load_all()[0]}
+    assert persisted_ids
+    assert set(ctx.library_graph.nodes) == persisted_ids
+    ctx.close()
+
+
+def test_scan_paths_missing_graph_reports_then_clears(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    assert ctrl.scan_paths_missing_graph() == [ingest]   # configured but never scanned
+    ctrl.scan([ingest])
+    assert ctrl.scan_paths_missing_graph() == []         # present after scan
+    ctx.close()

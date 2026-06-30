@@ -298,11 +298,31 @@ class AppController:
     def apply_scan(self, plan: ScanPlan) -> int:
         """Persist a previously-computed scan plan; returns the number written."""
         written = commit_scan(self.ctx.books, plan, graph_store=self.ctx.graph, reconcile=True)
+        self._sync_library_graph(plan)
         # Sweep the whole catalog, not just this plan's folders: a folder that vanished
         # isn't walked by any scan, so a plan-scoped sweep would never see it. The
         # per-root accessibility guard keeps this cheap and false-positive-safe.
         sweep_missing(self.ctx.books, list(self.ctx.config.scan_paths))
         return written
+
+    def _sync_library_graph(self, plan: ScanPlan) -> None:
+        """Mirror what commit_scan persisted into the in-memory graph, per root. Partial
+        rescan plans carry no records, so they leave the graph untouched (as commit_scan
+        leaves the store untouched)."""
+        if not plan.graph_nodes:
+            return
+        roots = {n.root for n in plan.graph_nodes}
+        for root in roots:
+            nodes = [n for n in plan.graph_nodes if n.root == root]
+            edges = [e for e in plan.graph_edges if e.root == root]
+            self.ctx.library_graph.replace_root(root, nodes, edges)
+
+    def scan_paths_missing_graph(self) -> list[Path]:
+        """Configured scan paths with no subgraph in the in-memory graph (never scanned /
+        not yet persisted). A real scan always emits at least the root directory node, so
+        a scanned-but-empty folder is NOT reported (no re-scan loop)."""
+        present = {n.root for n in self.ctx.library_graph.nodes.values()}
+        return [p for p in self.ctx.config.scan_paths if str(p) not in present]
 
     def remove_missing(self, book: BookUnit) -> None:
         """Delete an orphaned (missing) book record and its history/operations rows.
