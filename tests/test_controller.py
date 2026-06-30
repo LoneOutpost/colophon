@@ -3055,3 +3055,55 @@ def test_clear_entity_alias_reverts(tmp_path):
         "B. Sanderson",
         "Brandon Sanderson",
     ]
+
+
+def _controller(tmp_path):
+    from colophon.adapters.lazylibrarian import AudiobookPatterns
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    # Folder pattern carries both $Author and $Series so canonical-projection
+    # assertions on the organize path are meaningful (the default omits $Series).
+    ctrl.ctx.patterns = AudiobookPatterns(folder="$Author/$Series/$Title", single_file="$Title")
+    return ctrl
+
+
+def _persist_book(ctrl, *, title, authors=None, series=None):
+    book = BookUnit.new(source_folder=ctrl.ctx.config.library_root / title)
+    book.title = title
+    book.authors = list(authors or [])
+    if series is not None:
+        book.series = list(series)
+    ctrl.ctx.books.upsert(book)
+    return book
+
+
+def test_organize_targets_uses_canonical_author(tmp_path):
+    ctrl = _controller(tmp_path)
+    book = _persist_book(ctrl, title="A Book", authors=["B. Sanderson"])
+    ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
+    [(_bid, target)] = ctrl.organize_targets([book])
+    assert "Brandon Sanderson" in str(target)
+    assert "B. Sanderson" not in str(target)
+
+
+def test_tag_plan_projects_canonical_author(tmp_path):
+    ctrl = _controller(tmp_path)
+    book = _persist_book(ctrl, title="A Book", authors=["B. Sanderson"])
+    ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
+    plan = ctrl.tag_plan(book)
+    assert plan.target.artist == "Brandon Sanderson"
+
+
+def test_canonical_series_flows_into_organize_and_tag(tmp_path):
+    from colophon.core.models import SeriesRef
+
+    ctrl = _controller(tmp_path)
+    book = _persist_book(
+        ctrl, title="A Book", authors=["x"],
+        series=[SeriesRef(name="Mistborn Era 1", sequence=1.0)],
+    )
+    ctrl.set_entity_alias("series", "Mistborn Era 1", "Mistborn")
+    assert ctrl.tag_plan(book).target.series == "Mistborn"
+    [(_, target)] = ctrl.organize_targets([book])
+    assert "Mistborn" in str(target) and "Era 1" not in str(target)

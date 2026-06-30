@@ -22,6 +22,7 @@ from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.chapters import Chapter, normalize_chapters, runtime_mismatch
 from colophon.core.confidence import IdentificationOutcome, score_identification
+from colophon.core.entity_alias import canonical_book
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
@@ -906,7 +907,7 @@ class AppController:
 
     def tag_plan(self, book: BookUnit) -> TagPlan:
         """The dry-run preview of writing this book's metadata into its files."""
-        return plan_tag(book)
+        return plan_tag(self._canonical_book(book))
 
     async def write_tags(self, book: BookUnit) -> TagCommitResult:
         """Write tags into one book's files. See write_tags_books."""
@@ -928,7 +929,8 @@ class AppController:
             await ensure_cached_cover(book, dest_dir=book.source_folder)
             self.ctx.books.upsert(book)
             result = await asyncio.to_thread(
-                commit_tag, book, operations=self.ctx.operations, batch_id=batch_id
+                commit_tag, self._canonical_book(book),
+                operations=self.ctx.operations, batch_id=batch_id,
             )
             results.append(result)
             if progress is not None:
@@ -1301,6 +1303,12 @@ class AppController:
         """Remove an entity alias (revert `source_name` to its auto-derived entity)."""
         self.ctx.aliases.clear(kind, _name_key(source_name))
 
+    def _canonical_book(self, book: BookUnit) -> BookUnit:
+        """The book as the graph names it: author/series names resolved to their
+        canonical entity names (merge/rename overrides). Non-destructive — for
+        projecting to disk, never persisted."""
+        return canonical_book(book, self.ctx.aliases.all())
+
     def confirm_hint_cohort(self, root: Path, hint: str) -> int:
         """Confirm every grouping under `root` hinted `hint` (author/series) as that kind,
         each with its folder name as the value. Excludes the root. Returns the count."""
@@ -1524,7 +1532,7 @@ class AppController:
         from `patterns` (or the saved patterns). Encodes/moves nothing."""
         pats = patterns or self.ctx.patterns
         root = self.ctx.config.library_root or (default_db_path().parent / "library")
-        return [(b.id, build_target_path(root, pats, b)) for b in books]
+        return [(b.id, build_target_path(root, pats, self._canonical_book(b))) for b in books]
 
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->
