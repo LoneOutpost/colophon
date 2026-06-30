@@ -45,13 +45,22 @@ def check_file_references(
     report = GraphValidity()
     missing_dir_paths: set[str] = set()
 
+    def present(path: str) -> bool:
+        # An unprobeable path (e.g. permission denied on a mount) is treated as
+        # present: we can't confirm it's gone, and a validity check must never crash
+        # startup. `Path.exists` re-raises non-ENOENT OSErrors, so guard them here.
+        try:
+            return exists(Path(path))
+        except OSError:
+            return True
+
     for n in graph.nodes.values():
         if n.physical != "directory":
             continue
         path = n.attrs.get("path")
         if not isinstance(path, str):
             continue
-        if not exists(Path(path)):
+        if not present(path):
             report.missing_dirs.append(n.id)
             report.missing_paths.append(path)
             missing_dir_paths.add(path)
@@ -65,7 +74,7 @@ def check_file_references(
         if str(Path(path).parent) in missing_dir_paths:
             report.missing_files.append(n.id)        # pruned: parent dir already gone
             report.missing_paths.append(path)
-        elif not exists(Path(path)):
+        elif not present(path):
             report.missing_files.append(n.id)
             report.missing_paths.append(path)
 

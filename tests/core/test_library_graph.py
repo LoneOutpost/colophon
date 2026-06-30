@@ -65,3 +65,31 @@ def test_validity_skips_book_and_entity_nodes():
     g = LibraryGraph.from_records([_book("bk")], [])
     report = check_file_references(g, exists=lambda p: False)
     assert report.missing_dirs == [] and report.missing_files == []
+
+
+def test_validity_treats_unprobeable_path_as_present_not_a_crash():
+    # A probe that raises (e.g. permission denied) must never crash the check; the
+    # path is treated as present so startup is not taken down by one unreadable dir.
+    def boom(p: Path) -> bool:
+        raise PermissionError("denied")
+
+    g = LibraryGraph.from_records([_dir("d", "/lib/a"), _file("f", "/lib/a/x.m4b")], [])
+    report = check_file_references(g, exists=boom)
+    assert report.missing_dirs == [] and report.missing_files == []
+
+
+def test_validity_real_filesystem_default(tmp_path):
+    # Exercise the production default (exists=Path.exists), which every other test injects.
+    present = tmp_path / "here.m4b"
+    present.write_bytes(b"\x00")
+    g = LibraryGraph.from_records(
+        [
+            _dir("d", str(tmp_path)),
+            _file("f_ok", str(present)),
+            _file("f_gone", str(tmp_path / "gone.m4b")),
+        ],
+        [],
+    )
+    report = check_file_references(g)  # no injection — real Path.exists
+    assert report.missing_dirs == []
+    assert report.missing_files == ["f_gone"]
