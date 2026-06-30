@@ -51,3 +51,29 @@ def test_node_attrs_facets_and_owns_edge_round_trip(tmp_path):
     bn = next(n for n in s.nodes_for(root) if n.id == "bk")
     assert bn.physical is None and bn.semantic == "book" and bn.attrs == {"book_id": "xyz"}
     assert {(e.src, e.kind, e.dst) for e in s.edges_for(root)} == {("bk", "owns", "f")}
+
+
+def test_load_all_returns_every_root(tmp_path):
+    s = _store(tmp_path)
+    r1, r2 = tmp_path / "one", tmp_path / "two"
+    s.replace_subgraph(r1, [_n("x", r1)], [])
+    s.replace_subgraph(r2, [_n("y", r2)], [_e("y", "y", r2)])
+    nodes, edges = s.load_all()
+    assert {n.id for n in nodes} == {"x", "y"}
+    assert {(e.src, e.kind, e.dst) for e in edges} == {("y", "contains", "y")}
+
+
+def test_load_all_empty_store(tmp_path):
+    s = _store(tmp_path)
+    nodes, edges = s.load_all()
+    assert nodes == [] and edges == []
+
+
+def test_load_all_preserves_facets_and_attrs(tmp_path):
+    s = _store(tmp_path)
+    root = tmp_path / "lib"
+    book = NodeRecord(id="bk", physical=None, semantic="book", root=str(root), attrs={"book_id": "xyz"})
+    s.replace_subgraph(root, [book], [])
+    nodes, _ = s.load_all()
+    (n,) = nodes
+    assert n.physical is None and n.semantic == "book" and n.attrs == {"book_id": "xyz"}

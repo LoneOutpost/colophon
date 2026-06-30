@@ -8,9 +8,13 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from colophon.core.graph_records import EdgeRecord, NodeRecord
 from colophon.core.models import BookState, BookUnit, EditChange, NodeOverride, OperationRecord
+
+if TYPE_CHECKING:
+    from colophon.core.library_graph import LibraryGraph
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -430,3 +434,35 @@ class GraphStore:
                        props=json.loads(r["props"]))
             for r in rows
         ]
+
+    def load_all(self) -> tuple[list[NodeRecord], list[EdgeRecord]]:
+        """Every node and edge across all roots — the whole persisted graph, for
+        materializing the in-memory LibraryGraph at startup."""
+        node_rows = self.conn.execute(
+            "SELECT id, physical, semantic, root, attrs FROM nodes"
+        ).fetchall()
+        edge_rows = self.conn.execute(
+            "SELECT src, kind, dst, root, props FROM edges"
+        ).fetchall()
+        nodes = [
+            NodeRecord(id=r["id"], physical=r["physical"], semantic=r["semantic"],
+                       root=r["root"], attrs=json.loads(r["attrs"]))
+            for r in node_rows
+        ]
+        edges = [
+            EdgeRecord(src=r["src"], kind=r["kind"], dst=r["dst"], root=r["root"],
+                       props=json.loads(r["props"]))
+            for r in edge_rows
+        ]
+        return nodes, edges
+
+
+def save_graph(store: GraphStore, graph: LibraryGraph) -> None:
+    """Persist the whole in-memory graph back to the store, replacing each root's
+    subgraph. (No production mutator yet — Slice 2 wires write-through; this is the
+    save half of load/save, exercised by round-trip tests in a later task.)"""
+    roots = {n.root for n in graph.nodes.values()} | {e.root for e in graph.edges}
+    for root in roots:
+        nodes = [n for n in graph.nodes.values() if n.root == root]
+        edges = [e for e in graph.edges if e.root == root]
+        store.replace_subgraph(Path(root), nodes, edges)
