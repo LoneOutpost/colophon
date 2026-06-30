@@ -370,9 +370,11 @@ class AppController:
         """Delete an orphaned (missing) book record and its history/operations rows.
         The three deletes share one transaction (commit on the last) so the record and
         its satellite rows can't be left half-removed."""
+        root = self._scan_root_for_path(book.source_folder)
         self.ctx.history.delete_for_book(book.id, commit=False)
         self.ctx.operations.delete_for_book(book.id, commit=False)
         self.ctx.books.delete(book.id)  # commits, flushing the two preceding deletes
+        self._resync_roots({root})
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
@@ -1356,11 +1358,13 @@ class AppController:
         cache so the next /graph load rebuilds with it applied."""
         self.ctx.overrides.set(str(path), kind, value)
         self._graph_cache.clear()
+        self._resync_roots({self._scan_root_for_path(path)})
 
     def clear_node_classification(self, path: Path) -> None:
         """Remove the manual classification for `path` (revert to auto) and invalidate cache."""
         self.ctx.overrides.clear(str(path))
         self._graph_cache.clear()
+        self._resync_roots({self._scan_root_for_path(path)})
 
     def set_entity_alias(self, kind: str, source_name: str, canonical_name: str) -> None:
         """Merge or rename an author/series/franchise entity: alias `source_name` to
@@ -1385,6 +1389,7 @@ class AppController:
         nodes = grouping_cohort(graph, root=root, hint=hint)
         self.ctx.overrides.set_many([(str(n.path), hint, n.path.name) for n in nodes])
         self._graph_cache.clear()
+        self._resync_roots({root})
         return len(nodes)
 
     def cached_graph(self, root: Path, *, fresh: bool = False) -> Graph | None:

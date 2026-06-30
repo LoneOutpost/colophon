@@ -3195,3 +3195,30 @@ def test_save_fields_writes_through_to_graph(tmp_path):
     }
     assert "Edited Author" in authors
     ctx.close()
+
+
+def test_remove_missing_drops_book_and_orphan_entity_from_graph(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = ctx.books.list_all()[0]
+    ctrl.remove_missing(book)
+    book_nodes = [n for n in ctx.library_graph.nodes.values() if n.semantic == "book"]
+    assert book_nodes == []                       # book node gone
+    assert [e for e in ctx.library_graph.edges if e.kind == "author"] == []  # orphan entity edge gone
+    ctx.close()
+
+
+def test_set_franchise_override_writes_through_franchise_edge(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = ctx.books.list_all()[0]
+    ctrl.set_node_classification(book.source_folder, "franchise", "My Franchise")
+    fr = [e for e in ctx.library_graph.edges if e.kind == "franchise"]
+    assert fr and ctx.library_graph.nodes[fr[0].dst].attrs["name"] == "My Franchise"
+    ctx.close()
