@@ -360,8 +360,10 @@ class AppController:
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
             nodes = skeleton_nodes + book_nodes
             edges = skeleton_edges + book_edges
-            lib.replace_root(r, nodes, edges)
+            # Store first: if the persist raises (e.g. a write conflict), leave the
+            # in-memory graph unchanged so the two never diverge.
             self.ctx.graph.replace_subgraph(root, nodes, edges)
+            lib.replace_root(r, nodes, edges)
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its

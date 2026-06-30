@@ -60,9 +60,16 @@ def main() -> None:
     else:
         logger.info(f"graph: {len(ctx.library_graph.nodes)} nodes, file references present")
     controller = AppController(ctx)
-    healed = controller.rebuild_missing_graph()
-    if healed:
-        logger.info(f"graph: rebuilt {healed} root(s) from existing books (self-heal)")
+    # The self-heal is an optimization, never a boot dependency: the navigator tolerates
+    # books absent from the graph (they show under "Needs identification"). So a failure
+    # here (e.g. a graph write conflict from an unusual scan-path config) must degrade to
+    # "not healed", never prevent startup.
+    try:
+        healed = controller.rebuild_missing_graph()
+        if healed:
+            logger.info(f"graph: rebuilt {healed} root(s) from existing books (self-heal)")
+    except Exception:
+        logger.exception("graph self-heal failed; starting with the graph as loaded")
     create_app(controller)
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:
