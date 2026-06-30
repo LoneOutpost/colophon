@@ -16,6 +16,7 @@ from colophon.adapters.config import (
 )
 from colophon.app_context import AppContext
 from colophon.controller import AppController
+from colophon.core.library_graph import check_file_references
 from colophon.ui import create_app
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,14 @@ def main() -> None:
         save_config(config, default_config_path())
         logger.info("generated a storage secret for per-tab view persistence")
     ctx = AppContext.create(config)
+    validity = check_file_references(ctx.library_graph)
+    if validity.missing_dirs or validity.missing_files:
+        logger.warning(
+            f"graph: {len(validity.missing_dirs)} directory and "
+            f"{len(validity.missing_files)} file references missing on disk"
+        )
+    else:
+        logger.info(f"graph: {len(ctx.library_graph.nodes)} nodes, file references present")
     create_app(AppController(ctx))
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:

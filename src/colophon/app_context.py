@@ -26,6 +26,7 @@ from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
 from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
+from colophon.core.library_graph import LibraryGraph
 from colophon.core.sources import MetadataSource, arrange_sources
 
 __all__ = ["AppContext", "arrange_sources", "build_all_sources", "default_db_path"]
@@ -54,6 +55,7 @@ class AppContext:
     overrides: NodeOverrideRepo
     aliases: EntityAliasRepo
     graph: GraphStore
+    library_graph: LibraryGraph
     sources: list[MetadataSource]
     patterns: AudiobookPatterns
     abs_client: AbsClient | None
@@ -78,6 +80,7 @@ class AppContext:
             if config.audiobookshelf_url and config.audiobookshelf_token
             else None
         )
+        graph_store = GraphStore(conn)
         return cls(
             config=config,
             conn=conn,
@@ -86,7 +89,8 @@ class AppContext:
             operations=OperationRepo(conn),
             overrides=NodeOverrideRepo(conn),
             aliases=EntityAliasRepo(conn),
-            graph=GraphStore(conn),
+            graph=graph_store,
+            library_graph=LibraryGraph.from_records(*graph_store.load_all()),
             sources=sources,
             patterns=patterns,
             abs_client=abs_client,

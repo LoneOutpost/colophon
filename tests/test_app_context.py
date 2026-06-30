@@ -109,3 +109,25 @@ def test_arrange_sources_ignores_stale_order_and_disabled():
     a = S("audnexus")
     arranged = arrange_sources([a], order=["ghost", "audnexus"], disabled=["alsogone"])
     assert [s.name for s in arranged] == ["audnexus"]
+
+
+def test_create_loads_empty_library_graph(tmp_path):
+    ctx = AppContext.create(Config(db_path=tmp_path / "c.db"))
+    assert ctx.library_graph.nodes == {}
+    ctx.close()
+
+
+def test_create_loads_persisted_graph(tmp_path):
+    from colophon.core.graph_records import NodeRecord
+    db = tmp_path / "c.db"
+    ctx = AppContext.create(Config(db_path=db))
+    root = tmp_path / "lib"
+    ctx.graph.replace_subgraph(
+        root,
+        [NodeRecord(id="d", physical="directory", semantic=None, root=str(root), attrs={"path": str(root)})],
+        [],
+    )
+    ctx.close()
+    ctx2 = AppContext.create(Config(db_path=db))  # fresh context loads the persisted graph
+    assert "d" in ctx2.library_graph.nodes
+    ctx2.close()
