@@ -1556,10 +1556,10 @@ class AppController:
 
         if options.organize:
             library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
-            org = organize_book(
-                self.ctx.books, book, book.output_path, root=library_root,
-                patterns=options.patterns or self.ctx.patterns,
+            target = build_target_path(
+                library_root, options.patterns or self.ctx.patterns, book
             )
+            org = organize_book(self.ctx.books, book, book.output_path, target=target)
             if not org.moved or org.target_path is None:
                 mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail=(org.error or "collision"))
                 resync_state(book)

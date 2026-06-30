@@ -4,6 +4,7 @@ from pathlib import Path
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
 from colophon.core.models import BookState, BookUnit
+from colophon.core.pathscheme import build_target_path
 from colophon.services.organize import organize_book
 
 
@@ -35,7 +36,8 @@ def test_organize_moves_and_marks_organized(tmp_path):
     library = tmp_path / "library"
     pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
 
-    result = organize_book(repo, book, m4b, root=library, patterns=pats)
+    target = build_target_path(library, pats, book)
+    result = organize_book(repo, book, m4b, target=target)
 
     assert result.moved is True and result.collision is False
     expected = library / "Frank Herbert" / "Dune" / "Dune.m4b"
@@ -58,7 +60,8 @@ def test_organize_detects_collision_and_does_not_overwrite(tmp_path):
     dest.parent.mkdir(parents=True)
     dest.write_bytes(b"existing")
 
-    result = organize_book(repo, book, m4b, root=library, patterns=pats)
+    target = build_target_path(library, pats, book)
+    result = organize_book(repo, book, m4b, target=target)
 
     assert result.collision is True and result.moved is False
     assert dest.read_bytes() == b"existing"   # untouched
@@ -79,7 +82,8 @@ def test_organize_move_failure_returns_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr("colophon.services.organize.shutil.move", _boom)
 
-    result = organize_book(repo, book, m4b, root=library, patterns=pats)
+    target = build_target_path(library, pats, book)
+    result = organize_book(repo, book, m4b, target=target)
 
     assert result.error is not None and result.moved is False
     assert repo.get(book.id).state != BookState.ORGANIZED
@@ -97,7 +101,8 @@ def test_organize_writes_destination_sidecar(tmp_path):
     library = tmp_path / "library"
     pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
 
-    result = organize_book(repo, book, m4b, root=library, patterns=pats)
+    target = build_target_path(library, pats, book)
+    result = organize_book(repo, book, m4b, target=target)
 
     assert result.moved is True
     sidecar = result.target_path.parent / "metadata.json"

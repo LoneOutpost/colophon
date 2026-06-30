@@ -7,11 +7,9 @@ import os
 import shutil
 from pathlib import Path
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.adapters.repository.store import BookUnitRepo
 from colophon.adapters.sidecar import write_datafile_sidecar
 from colophon.core.models import BookUnit, Phase, PhaseState, _Base
-from colophon.core.pathscheme import build_target_path
 from colophon.core.phases import mark, resync_state
 
 logger = logging.getLogger(__name__)
@@ -30,11 +28,12 @@ def organize_book(
     book: BookUnit,
     m4b_path: Path,
     *,
-    root: Path,
-    patterns: AudiobookPatterns,
+    target: Path,
 ) -> OrganizeResult:
-    """Move `m4b_path` to its target under `root`; never overwrite an existing file."""
-    target = build_target_path(root, patterns, book)
+    """Move `m4b_path` to `target` under the library; never overwrite an existing
+    file. `target` is precomputed by the caller (from the book's canonical entity
+    names), so this function owns the move and the book's phase/output_path mutation,
+    not the path grammar."""
     if target.exists():
         logger.warning(f"collision organizing {book.id}: {target} exists")
         return OrganizeResult(book_id=book.id, target_path=target, collision=True)
