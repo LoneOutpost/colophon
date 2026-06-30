@@ -23,6 +23,7 @@ from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.chapters import Chapter, normalize_chapters, runtime_mismatch
 from colophon.core.confidence import IdentificationOutcome, score_identification
 from colophon.core.entity_alias import canonical_book
+from colophon.core.entity_graph import entity_graph_from_records
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
@@ -607,22 +608,15 @@ class AppController:
 
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
-        """Group all books into the entity-model tree (multi-membership, name-key dedup,
-        franchise tier from manual overrides, entity merge/rename from aliases), built
-        from live books."""
+        """Group all books into the entity-model tree, read from the maintained graph
+        (`ctx.library_graph`). Conservative: `all_books`/`needs_id` come from `ctx.books`,
+        so a book the graph hasn't placed still shows (in All, and under Needs
+        identification) rather than vanishing."""
         books = self._hydrate(self.ctx.books.list_all())
-        overrides = self.ctx.overrides.all()
-        franchise_of: dict[str, str] = {}
-        if overrides:
-            for b in books:
-                name = franchise_for(
-                    b.source_folder, overrides, root=self._scan_root_for_path(b.source_folder)
-                )
-                if name:
-                    franchise_of[b.id] = name
-        return build_library_tree(
-            books, franchise_of=franchise_of, aliases=self.ctx.aliases.all()
-        )
+        books_by_id = {b.id: b for b in books}
+        aliases = self.ctx.aliases.all()
+        entity_graph = entity_graph_from_records(self.ctx.library_graph, books_by_id, aliases=aliases)
+        return build_library_tree(books, aliases=aliases, entity_graph=entity_graph)
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.

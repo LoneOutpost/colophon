@@ -2988,17 +2988,26 @@ def test_remove_missing_deletes_record_and_history(tmp_path):
     assert ctx.books.get(b.id) is None
 
 
+def _seed_book(root: Path, *parts: str, author: str) -> None:
+    """Write a tagged silent mp3 at root/<parts...>/01.mp3 so scan() ingests a book
+    with `author` and the maintained graph places it."""
+    d = root.joinpath(*parts)
+    d.mkdir(parents=True)
+    f = d / "01.mp3"
+    f.write_bytes(b"")
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=[author]))
+    tags.save(f)
+
+
 def test_library_tree_franchise_from_override(tmp_path):
-    root = tmp_path / "lib"
-    book_dir = root / "Doctor Who" / "Genesis"
-    book_dir.mkdir(parents=True)
+    root = tmp_path / "ingest"
+    _seed_book(root, "Doctor Who", "Genesis", author="Terrance Dicks")
     ctx = _ctx(tmp_path)
     ctx.config.scan_paths = [root]
-    b = BookUnit.new(source_folder=book_dir)
-    b.title = "Genesis of the Daleks"
-    b.authors = ["Terrance Dicks"]
-    ctx.books.upsert(b)
     ctrl = AppController(ctx)
+    ctrl.scan([root])
+    b = ctx.books.list_all()[0]
     ctrl.set_node_classification(root / "Doctor Who", "franchise", "DOCTOR WHO")
     tree = ctrl.library_tree()
     assert [f.name for f in tree.franchises] == ["DOCTOR WHO"]
@@ -3019,22 +3028,14 @@ def test_library_tree_no_franchise_without_override(tmp_path):
 
 
 def _two_author_books(tmp_path):
-    root = tmp_path / "lib"
+    root = tmp_path / "ingest"
+    _seed_book(root, "BrandonSanderson", "Mistborn", author="Brandon Sanderson")
+    _seed_book(root, "BSanderson", "Elantris", author="B. Sanderson")
     ctx = _ctx(tmp_path)
     ctx.config.scan_paths = [root]
-    a_dir = root / "BrandonSanderson" / "Mistborn"
-    b_dir = root / "BSanderson" / "Elantris"
-    a_dir.mkdir(parents=True)
-    b_dir.mkdir(parents=True)
-    a = BookUnit.new(source_folder=a_dir)
-    a.title = "Mistborn"
-    a.authors = ["Brandon Sanderson"]
-    b = BookUnit.new(source_folder=b_dir)
-    b.title = "Elantris"
-    b.authors = ["B. Sanderson"]
-    ctx.books.upsert(a)
-    ctx.books.upsert(b)
-    return AppController(ctx)
+    ctrl = AppController(ctx)
+    ctrl.scan([root])
+    return ctrl
 
 
 def test_set_entity_alias_merges_authors_in_library_tree(tmp_path):
@@ -3221,4 +3222,33 @@ def test_set_franchise_override_writes_through_franchise_edge(tmp_path):
     ctrl.set_node_classification(book.source_folder, "franchise", "My Franchise")
     fr = [e for e in ctx.library_graph.edges if e.kind == "franchise"]
     assert fr and ctx.library_graph.nodes[fr[0].dst].attrs["name"] == "My Franchise"
+    ctx.close()
+
+
+def test_library_tree_reads_authors_from_graph(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    tree = ctrl.library_tree()
+    assert "Frank Herbert" in [a.name for a in tree.authors]
+    book = ctx.books.list_all()[0]
+    assert book.id in {b.id for b in tree.all_books}
+    assert book.id not in {b.id for b in tree.needs_id}
+    ctx.close()
+
+
+def test_library_tree_conservative_book_absent_from_graph(tmp_path):
+    from colophon.core.models import BookUnit
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    b = BookUnit.new(source_folder=tmp_path / "orphan")
+    b.title, b.authors = "Orphan", ["Someone"]
+    ctx.books.upsert(b)                 # in the store, never scanned -> not in the graph
+    tree = ctrl.library_tree()
+    assert b.id in {x.id for x in tree.all_books}    # visible in All
+    assert b.id in {x.id for x in tree.needs_id}     # surfaces as needs_id (tripwire)
+    assert b.id not in {x.id for a in tree.authors for s in a.series for x in s.books}
+    assert b.id not in {x.id for a in tree.authors for x in a.standalone}
     ctx.close()
