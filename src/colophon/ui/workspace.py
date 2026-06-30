@@ -26,6 +26,7 @@ from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, Ph
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
+from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
 from colophon.ui.dialogs import (
     attach_history_menu,
@@ -1613,32 +1614,65 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _ui_safe(_refresh_all)
 
     async def _maybe_auto_scan() -> None:
-        """First-open bootstrap: if a configured scan path has no graph yet, scan it
-        automatically with a visible scanning state, then repaint. Guarded once per
-        process so reconnects / an unscannable path can't loop."""
+        """First-open bootstrap: if a configured scan path has no graph yet, scan it in the
+        background — progress shows in a slim footer chip (the nav/list/detail stay usable).
+        A result with no new books is applied silently; a result that discovers new books is
+        held for a one-click confirm so a library-size change never lands silently. Guarded
+        once per process so reconnects / an unscannable path can't loop."""
         global _auto_scan_attempted
         if _auto_scan_attempted:
             return
         missing = controller.scan_paths_missing_graph()
         if not missing:
             return
-        _auto_scan_attempted = True  # set before scanning so a reconnect can't double-fire
-        nav_container.clear()
-        with nav_container, ui.row().classes("items-center q-gutter-sm q-pa-md"):
-            ui.spinner(size="lg")
-            prog = ui.label("Scanning your library…").props(
-                "role=status aria-live=polite"
-            ).classes("text-caption colophon-muted")
+        _auto_scan_attempted = True
+
+        prog: dict = {}
+
+        def _show_scanning() -> None:
+            scan_status.clear()
+            with scan_status:
+                ui.spinner(size="sm")
+                prog["el"] = ui.label("Scanning library…").props(
+                    "role=status aria-live=polite"
+                ).classes("text-caption colophon-muted")
+
+        _ui_safe(_show_scanning)
 
         def _progress(done: int, total: int, label: str) -> None:
-            _ui_safe(lambda: prog.set_text(f"Scanning {done} / {total} · {label}"))
+            el = prog.get("el")
+            if el is not None:
+                _ui_safe(lambda: el.set_text(f"Scanning library… {done} / {total}"))
 
         try:
             plan = await controller.scan_preview_streamed(missing, progress=_progress)
-            await asyncio.to_thread(controller.apply_scan, plan)  # off-thread: DB write + sweep
-        except Exception:  # log and repaint either way (BLE001 intentional)
+        except Exception:  # log + clear; never block (BLE001 intentional)
             logger.exception("auto-scan on empty graph failed")
-        _ui_safe(_refresh_all)
+            _ui_safe(scan_status.clear)
+            return
+
+        if not auto_scan_needs_confirmation(plan):
+            await asyncio.to_thread(controller.apply_scan, plan)  # off-thread: DB write + sweep
+            _ui_safe(scan_status.clear)
+            _ui_safe(_refresh_all)
+            return
+
+        async def _do_import() -> None:
+            _ui_safe(scan_status.clear)
+            await asyncio.to_thread(controller.apply_scan, plan)
+            _ui_safe(_refresh_all)
+
+        def _show_notice() -> None:
+            scan_status.clear()
+            with scan_status:
+                ui.icon("library_add", color="primary")
+                ui.label(f"Found {plan.new_books} new audiobooks").classes("text-caption")
+                ui.button("Import", on_click=_do_import).props("flat dense no-caps color=primary")
+                ui.button("Dismiss", on_click=lambda: _ui_safe(scan_status.clear)).props(
+                    "flat dense no-caps"
+                )
+
+        _ui_safe(_show_notice)
 
     # --- application shell ---
     # Keyboard navigation for the Books list (ignored while typing in a field).
@@ -1740,7 +1774,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 detail_container = ui.column().classes("w-full gap-1")
 
     with ui.footer().classes("q-px-md q-py-xs"):
-        status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
+        with ui.column().classes("w-full gap-0"):
+            scan_status = ui.row().classes("items-center no-wrap q-gutter-xs")  # empty unless a scan-on-open is active
+            status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
     if _restored.open_book_id is not None:
