@@ -52,6 +52,13 @@ class ScanPlan:
     graph_edges: list[EdgeRecord] = field(default_factory=list)
 
 
+def auto_scan_needs_confirmation(plan: ScanPlan) -> bool:
+    """A scan-on-open result is auto-applied only when it adds no new books; a result that
+    discovers new books is held for the user to confirm (it changes the library's size).
+    Existing-book updates are non-destructive fill-empty, so they never need confirmation."""
+    return plan.new_books > 0
+
+
 class ScanScope(StrEnum):
     NEW_ONLY = "new_only"   # add newly-discovered books; skip already-known ones
     UPDATE = "update"       # known books: re-run selected phases where stale/pending

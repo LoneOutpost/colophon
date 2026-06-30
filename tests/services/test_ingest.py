@@ -647,3 +647,10 @@ def test_plan_scan_graph_without_overrides_unaffected(tmp_path: Path):
     plan = plan_scan_graph(repo, ingest, template="$Author - $Title")  # no node_overrides
     book = next(u for u in plan.units if u.source_folder == folder)
     assert book.provenance.get("authors") != "manual"
+
+
+def test_auto_scan_needs_confirmation_only_when_new_books():
+    from colophon.services.ingest import ScanPlan, auto_scan_needs_confirmation
+    assert auto_scan_needs_confirmation(ScanPlan(new_books=0)) is False
+    assert auto_scan_needs_confirmation(ScanPlan(new_books=3)) is True
+    assert auto_scan_needs_confirmation(ScanPlan(new_books=0, existing_books=10)) is False
