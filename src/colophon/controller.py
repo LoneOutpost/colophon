@@ -1564,8 +1564,9 @@ class AppController:
 
         if options.organize:
             library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
+            cbook = self._canonical_book(book)
             target = build_target_path(
-                library_root, options.patterns or self.ctx.patterns, book
+                library_root, options.patterns or self.ctx.patterns, cbook
             )
             org = organize_book(self.ctx.books, book, book.output_path, target=target)
             if not org.moved or org.target_path is None:
@@ -1584,7 +1585,10 @@ class AppController:
             batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
             target=str(resting), before=None, outcome="ok",
         ))
-        tag_file(resting, book, operations=self.ctx.operations, batch_id=batch_id)
+        tag_file(
+            resting, self._canonical_book(book),
+            operations=self.ctx.operations, batch_id=batch_id,
+        )
         return BookProcessResult(book_id=book.id, status="done")
 
     async def run_encode_job(

@@ -3107,3 +3107,24 @@ def test_canonical_series_flows_into_organize_and_tag(tmp_path):
     assert ctrl.tag_plan(book).target.series == "Mistborn"
     [(_, target)] = ctrl.organize_targets([book])
     assert "Mistborn" in str(target) and "Era 1" not in str(target)
+
+
+def test_process_book_organizes_and_tags_with_canonical_name(tmp_path):
+    from colophon.controller import EncodeJobOptions
+
+    ctrl = _controller(tmp_path)
+    src = tmp_path / "out.m4b"
+    src.write_bytes(b"\x00")
+    book = _persist_book(ctrl, title="A Book", authors=["B. Sanderson"])
+    book.output_path = src
+    ctrl.ctx.books.upsert(book)
+    ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
+    result = ctrl._process_book(book, EncodeJobOptions(
+        encode=False, organize=True, delete_sources=False,
+        patterns=ctrl.ctx.patterns,
+    ))
+    assert result.status == "done"
+    assert "Brandon Sanderson" in str(book.output_path)
+    assert "B. Sanderson" not in str(book.output_path)
+    # the stored book stays raw
+    assert ctrl.ctx.books.get(book.id).authors == ["B. Sanderson"]
