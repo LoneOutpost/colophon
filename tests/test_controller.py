@@ -3151,3 +3151,31 @@ def test_scan_paths_missing_graph_reports_then_clears(tmp_path):
     ctrl.scan([ingest])
     assert ctrl.scan_paths_missing_graph() == []         # present after scan
     ctx.close()
+
+
+def test_resync_roots_reflects_author_edit(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = ctx.books.list_all()[0]
+    assert book.authors == ["Frank Herbert"]   # seed author, dropped by re-derivation below
+    book.authors = ["Brand New Author"]
+    ctx.books.upsert(book)
+    ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
+    edges = [e for e in ctx.library_graph.edges if e.kind == "author"]
+    authors = {ctx.library_graph.nodes[e.dst].attrs["name"] for e in edges}
+    assert authors == {"Brand New Author"}
+    assert "Frank Herbert" not in authors      # re-derivation drops the old author
+    persisted = {n.attrs.get("name") for n in ctx.graph.load_all()[0] if n.semantic == "author"}
+    assert "Brand New Author" in persisted
+    ctx.close()
+
+
+def test_resync_skips_never_scanned_root(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl._resync_roots({tmp_path / "never"})   # no skeleton -> no-op, no crash
+    assert ctx.library_graph.nodes == {}
+    ctx.close()

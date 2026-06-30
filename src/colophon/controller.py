@@ -28,6 +28,7 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
+from colophon.core.graph_records import book_records
 from colophon.core.graph_resolve import (
     _name_key,
     apply_confirmed_overrides,
@@ -316,6 +317,45 @@ class AppController:
             nodes = [n for n in plan.graph_nodes if n.root == root]
             edges = [e for e in plan.graph_edges if e.root == root]
             self.ctx.library_graph.replace_root(root, nodes, edges)
+
+    def _resync_books(self, books: list[BookUnit]) -> None:
+        """Re-derive the graph for every scan root the given books belong to."""
+        self._resync_roots({self._scan_root_for_path(b.source_folder) for b in books})
+
+    def _resync_roots(self, roots: set[Path]) -> None:
+        """Keep each root's filesystem skeleton (unchanged by an edit) and re-derive its
+        book/entity records from current books + overrides, then write through to the
+        in-memory graph and the store. A root with no skeleton yet (never scanned) is
+        skipped — there's nothing to keep fresh until the first scan persists it."""
+        if not roots:
+            return
+        books = self.ctx.books.list_all()
+        overrides = self.ctx.overrides.all()
+        lib = self.ctx.library_graph
+        for root in roots:
+            r = str(root)
+            skeleton_nodes = [
+                n for n in lib.nodes.values() if n.root == r and n.physical in ("directory", "file")
+            ]
+            if not skeleton_nodes:
+                continue  # never scanned — no skeleton to keep
+            skeleton_edges = [
+                e for e in lib.edges
+                if e.root == r and e.kind == "contains" and not e.dst.startswith("book:")
+            ]
+            root_books = [
+                b for b in books if self._scan_root_for_path(b.source_folder) == root
+            ]
+            franchise_of: dict[str, str] = {}
+            for b in root_books:
+                fname = franchise_for(b.source_folder, overrides, root=root)
+                if fname:
+                    franchise_of[b.id] = fname
+            book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
+            nodes = skeleton_nodes + book_nodes
+            edges = skeleton_edges + book_edges
+            lib.replace_root(r, nodes, edges)
+            self.ctx.graph.replace_subgraph(root, nodes, edges)
 
     def scan_paths_missing_graph(self) -> list[Path]:
         """Configured scan paths with no subgraph in the in-memory graph (never scanned /
