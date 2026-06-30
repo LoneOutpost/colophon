@@ -383,7 +383,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             # dedup by id: a book in two of this author's series is filed under each
             books = list({b.id: b for s in node.series for b in s.books}.values()) + node.standalone if node else []
         elif kind == "series" and key:
-            books = list({b.id: b for a in tree.authors for s in a.series if s.name == key for b in s.books}.values())
+            books = [b for s in tree.series if s.name == key for b in s.books]
         elif kind == "franchise" and key:
             books = [b for f in tree.franchises if f.name == key for b in f.books]
         elif kind == "phase" and key:
@@ -1390,21 +1390,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             checkbox=_node_checkbox([b.id for b in group]),
                         )
                 elif view["group_by"] == "series":
-                    series_books: dict[str, list[str]] = {}
-                    for a in tree.authors:
-                        for s in a.series:
-                            ids = [b.id for b in s.books if _in_folder(b)]
-                            if ids:
-                                series_books.setdefault(s.name, []).extend(ids)
-                    for name in sorted(series_books):
-                        ids = list(dict.fromkeys(series_books[name]))  # dedup, preserve order
+                    for s in tree.series:
+                        ids = [b.id for b in s.books if _in_folder(b)]
+                        if not ids:
+                            continue
                         _nav_item(
-                            name,
+                            s.name,
                             "collections_bookmark",
-                            kind == "series" and key == name,
-                            lambda n=name: _set_scope("series", n),
+                            kind == "series" and key == s.name,
+                            lambda n=s.name: _set_scope("series", n),
                             checkbox=_node_checkbox(ids),
-                            menu=lambda n=name: _entity_menu("series", n, nav_aliases),
+                            menu=lambda n=s.name: _entity_menu("series", n, nav_aliases),
                         )
                 elif view["group_by"] == "franchise":
                     for f in tree.franchises:
