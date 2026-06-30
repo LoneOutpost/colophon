@@ -326,7 +326,11 @@ class AppController:
         """Keep each root's filesystem skeleton (unchanged by an edit) and re-derive its
         book/entity records from current books + overrides, then write through to the
         in-memory graph and the store. A root with no skeleton yet (never scanned) is
-        skipped — there's nothing to keep fresh until the first scan persists it."""
+        skipped — there's nothing to keep fresh until the first scan persists it.
+
+        Contract: callers must PERSIST the mutation (upsert/delete/override) BEFORE calling
+        this — re-derivation reads `ctx.books.list_all()`/`ctx.overrides.all()`, not the
+        passed objects."""
         if not roots:
             return
         books = self.ctx.books.list_all()
