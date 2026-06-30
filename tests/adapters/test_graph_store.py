@@ -1,5 +1,6 @@
-from colophon.adapters.repository.store import GraphStore, connect, migrate
+from colophon.adapters.repository.store import GraphStore, connect, migrate, save_graph
 from colophon.core.graph_records import EdgeRecord, NodeRecord
+from colophon.core.library_graph import LibraryGraph
 
 
 def _store(tmp_path) -> GraphStore:
@@ -77,3 +78,15 @@ def test_load_all_preserves_facets_and_attrs(tmp_path):
     nodes, _ = s.load_all()
     (n,) = nodes
     assert n.physical is None and n.semantic == "book" and n.attrs == {"book_id": "xyz"}
+
+
+def test_save_graph_round_trips_via_load_all(tmp_path):
+    s = _store(tmp_path)
+    r1, r2 = tmp_path / "one", tmp_path / "two"
+    s.replace_subgraph(r1, [_n("x", r1)], [])
+    s.replace_subgraph(r2, [_n("y", r2)], [_e("y", "y", r2)])
+    graph = LibraryGraph.from_records(*s.load_all())
+    save_graph(s, graph)
+    nodes2, edges2 = s.load_all()
+    assert {n.id for n in nodes2} == {"x", "y"}
+    assert {(e.src, e.kind, e.dst) for e in edges2} == {("y", "contains", "y")}
