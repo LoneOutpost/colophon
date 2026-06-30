@@ -28,6 +28,7 @@ from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
 from colophon.core.graph_resolve import (
+    _name_key,
     apply_confirmed_overrides,
     franchise_for,
     resolve_graph_authors,
@@ -538,7 +539,8 @@ class AppController:
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
         """Group all books into the entity-model tree (multi-membership, name-key dedup,
-        franchise tier from manual overrides), built from live books."""
+        franchise tier from manual overrides, entity merge/rename from aliases), built
+        from live books."""
         books = self._hydrate(self.ctx.books.list_all())
         overrides = self.ctx.overrides.all()
         franchise_of: dict[str, str] = {}
@@ -549,7 +551,9 @@ class AppController:
                 )
                 if name:
                     franchise_of[b.id] = name
-        return build_library_tree(books, franchise_of=franchise_of)
+        return build_library_tree(
+            books, franchise_of=franchise_of, aliases=self.ctx.aliases.all()
+        )
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
@@ -1286,6 +1290,16 @@ class AppController:
         """Remove the manual classification for `path` (revert to auto) and invalidate cache."""
         self.ctx.overrides.clear(str(path))
         self._graph_cache.clear()
+
+    def set_entity_alias(self, kind: str, source_name: str, canonical_name: str) -> None:
+        """Merge or rename an author/series/franchise entity: alias `source_name` to
+        `canonical_name`. Merge = canonical is an existing entity; rename = canonical is
+        a new display name. Honored live by the navigator; book fields are never rewritten."""
+        self.ctx.aliases.set(kind, _name_key(source_name), canonical_name)
+
+    def clear_entity_alias(self, kind: str, source_name: str) -> None:
+        """Remove an entity alias (revert `source_name` to its auto-derived entity)."""
+        self.ctx.aliases.clear(kind, _name_key(source_name))
 
     def confirm_hint_cohort(self, root: Path, hint: str) -> int:
         """Confirm every grouping under `root` hinted `hint` (author/series) as that kind,

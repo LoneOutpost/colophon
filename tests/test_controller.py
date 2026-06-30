@@ -3016,3 +3016,42 @@ def test_library_tree_no_franchise_without_override(tmp_path):
     b.authors = ["Some Author"]
     ctx.books.upsert(b)
     assert AppController(ctx).library_tree().franchises == []
+
+
+def _two_author_books(tmp_path):
+    root = tmp_path / "lib"
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [root]
+    a_dir = root / "BrandonSanderson" / "Mistborn"
+    b_dir = root / "BSanderson" / "Elantris"
+    a_dir.mkdir(parents=True)
+    b_dir.mkdir(parents=True)
+    a = BookUnit.new(source_folder=a_dir)
+    a.title = "Mistborn"
+    a.authors = ["Brandon Sanderson"]
+    b = BookUnit.new(source_folder=b_dir)
+    b.title = "Elantris"
+    b.authors = ["B. Sanderson"]
+    ctx.books.upsert(a)
+    ctx.books.upsert(b)
+    return AppController(ctx)
+
+
+def test_set_entity_alias_merges_authors_in_library_tree(tmp_path):
+    ctrl = _two_author_books(tmp_path)
+    before = ctrl.library_tree()
+    assert sorted(a.name for a in before.authors) == ["B. Sanderson", "Brandon Sanderson"]
+    ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
+    after = ctrl.library_tree()
+    assert [a.name for a in after.authors] == ["Brandon Sanderson"]
+
+
+def test_clear_entity_alias_reverts(tmp_path):
+    ctrl = _two_author_books(tmp_path)
+    ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
+    assert [a.name for a in ctrl.library_tree().authors] == ["Brandon Sanderson"]
+    ctrl.clear_entity_alias("author", "B. Sanderson")
+    assert sorted(a.name for a in ctrl.library_tree().authors) == [
+        "B. Sanderson",
+        "Brandon Sanderson",
+    ]
