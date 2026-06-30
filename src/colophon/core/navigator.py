@@ -47,16 +47,23 @@ def build_library_tree(
     *,
     franchise_of: dict[str, str] | None = None,
     aliases: dict[tuple[str, str], str] | None = None,
+    entity_graph: EntityGraph | None = None,
 ) -> LibraryTree:
-    """Assemble the library tree by traversing a live entity graph: author/series/
-    franchise nodes (deduped by `_name_key`) with membership edges to books. Each book
-    is reachable from every author and series it has (multi-membership). The author view
-    nests series under authors; the series view is rooted at series nodes; both honor
-    entity overrides. A book with neither author nor series is `needs_id`; a book with a
-    series but no author keeps its legacy pseudo-author home (first series name)."""
-    g = build_entity_graph(books, franchise_of=franchise_of, aliases=aliases)
+    """Assemble the library tree by traversing an entity graph. The graph is supplied
+    (sourced from the maintained persisted graph) or built live from `books` as a fallback.
+    `needs_id` = books with no author/series membership in the graph (so a book absent from
+    a supplied graph surfaces here — the conservative tripwire). The author view nests
+    series under authors; the series view is rooted at series nodes; both honor entity
+    overrides. A book with a series but no author keeps its legacy pseudo-author home."""
+    g = entity_graph if entity_graph is not None else build_entity_graph(
+        books, franchise_of=franchise_of, aliases=aliases
+    )
     needs_id = sorted(
-        (b for b in books if not b.authors and not b.series), key=lambda b: b.confidence
+        (
+            b for b in books
+            if not any(k in ("author", "series") for (k, _) in g.book_entities.get(b.id, []))
+        ),
+        key=lambda b: b.confidence,
     )
     return LibraryTree(
         needs_id=needs_id,

@@ -190,3 +190,20 @@ def test_series_view_honors_alias_merge():
     tree = build_library_tree([b1, b2], aliases=aliases)
     assert [s.name for s in tree.series] == ["Mistborn"]
     assert sorted(b.title for b in tree.series[0].books) == ["A", "B"]
+
+
+def test_build_library_tree_accepts_prebuilt_entity_graph():
+    from colophon.core.entity_graph import build_entity_graph
+
+    b = _book("b1", title="A", authors=["Alice"])
+    g = build_entity_graph([b])
+    tree = build_library_tree([b], entity_graph=g)
+    assert [a.name for a in tree.authors] == ["Alice"]
+    assert tree.needs_id == []
+
+
+def test_build_library_tree_needs_id_from_book_entities():
+    b_no = _book("b_no", title="N", authors=[], series=[])
+    b_yes = _book("b_yes", title="Y", authors=["Alice"])
+    tree = build_library_tree([b_no, b_yes])
+    assert [x.title for x in tree.needs_id] == ["N"]
