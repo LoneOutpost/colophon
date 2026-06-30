@@ -164,3 +164,29 @@ def test_build_library_tree_aliases_franchise():
     aliases = {("franchise", _name_key("cosmere")): "The Cosmere"}
     tree = build_library_tree([b], franchise_of={b.id: "cosmere"}, aliases=aliases)
     assert [f.name for f in tree.franchises] == ["The Cosmere"]
+
+
+def test_library_tree_has_series_node_rooted_view():
+    b1 = _book("b1", title="A", authors=["Alice"], series=[SeriesRef(name="Shared", sequence=1.0)])
+    b2 = _book("b2", title="B", authors=["Bob"], series=[SeriesRef(name="Shared", sequence=2.0)])
+    tree = build_library_tree([b1, b2])
+    assert [s.name for s in tree.series] == ["Shared"]
+    assert sorted(b.title for b in tree.series[0].books) == ["A", "B"]
+
+
+def test_series_view_sorted_by_sequence_across_authors():
+    b1 = _book("b1", title="A", authors=["Alice"], series=[SeriesRef(name="Shared", sequence=2.0)])
+    b2 = _book("b2", title="B", authors=["Bob"], series=[SeriesRef(name="Shared", sequence=1.0)])
+    tree = build_library_tree([b1, b2])
+    assert [b.title for b in tree.series[0].books] == ["B", "A"]
+
+
+def test_series_view_honors_alias_merge():
+    b1 = _book("b1", title="A", authors=["x"], series=[SeriesRef(name="Mistborn", sequence=1.0)])
+    b2 = _book(
+        "b2", title="B", authors=["x"], series=[SeriesRef(name="Mistborn Era 1", sequence=2.0)]
+    )
+    aliases = {("series", _name_key("Mistborn Era 1")): "Mistborn"}
+    tree = build_library_tree([b1, b2], aliases=aliases)
+    assert [s.name for s in tree.series] == ["Mistborn"]
+    assert sorted(b.title for b in tree.series[0].books) == ["A", "B"]
