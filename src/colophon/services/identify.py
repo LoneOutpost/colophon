@@ -12,12 +12,12 @@ import logging
 from pathlib import Path
 from re import Pattern
 
+from colophon.adapters.audio import read_audio_metadata
 from colophon.adapters.sidecar import (
     DatafileSidecar,
     is_container_datafile,
     read_datafile_sidecar,
 )
-from colophon.adapters.tags import read_embedded_tags
 from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import parse_filename
@@ -74,7 +74,7 @@ def gather(
     """Read all identity evidence for `book` and vet it: drop a datafile sidecar that
     describes a container (a MULTI folder) rather than a book."""
     first_path = book.source_files[0].path if book.source_files else None
-    embedded = read_embedded_tags(first_path) if first_path else None
+    embedded = read_audio_metadata(first_path)[1] if first_path else None  # cache hit from SEARCH
     filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
     datafile = read_datafile_sidecar(book.source_folder)
     if datafile is not None and is_container_datafile(

@@ -13,10 +13,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from colophon.adapters.audio import probe_audio_file
+from colophon.adapters.audio import read_audio_metadata
 from colophon.adapters.repository.store import BookUnitRepo, GraphStore
 from colophon.adapters.scan import group_book_units
-from colophon.adapters.tags import read_embedded_tags
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
@@ -103,19 +102,17 @@ def _run_local(
     if phase is Phase.SEARCH:
         if unit_files is None:
             raise ValueError("unit_files required for SEARCH phase")
-        book.source_files = [probe_audio_file(p) for p in unit_files]
+        book.source_files = [read_audio_metadata(p)[0] for p in unit_files]
         logger.debug(f"scan {book.source_folder}: SEARCH probed {len(book.source_files)} files")
 
     elif phase is Phase.CATEGORIZE:
-        first_path = book.source_files[0].path if book.source_files else None
-        embedded = read_embedded_tags(first_path) if first_path else None
-        features = []
-        for sf in book.source_files:
-            tags = embedded if sf.path == first_path else read_embedded_tags(sf.path)
-            features.append(
-                FileFeatures(path=sf.path, ext=sf.ext,
-                             duration_seconds=sf.duration_seconds, tags=tags)
+        features = [
+            FileFeatures(
+                path=sf.path, ext=sf.ext, duration_seconds=sf.duration_seconds,
+                tags=read_audio_metadata(sf.path)[1],  # cache hit from SEARCH
             )
+            for sf in book.source_files
+        ]
         result = classify(book.source_folder, root, features,
                           template_pattern=pattern, scheme_patterns=scheme)
         book.content_kind = result.content_kind

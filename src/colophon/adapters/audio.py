@@ -8,7 +8,7 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 from mutagen import MutagenError
 
-from colophon.adapters.tags import tags_from_loaded
+from colophon.adapters.tags import read_embedded_tags, tags_from_loaded
 from colophon.core.models import EmbeddedTags, SourceFile
 
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".m4b", ".mp4", ".aac", ".ogg", ".flac"}
@@ -40,7 +40,6 @@ def _read_audio_metadata(
     path_str: str, mtime_ns: int, size: int, path: Path
 ) -> tuple[SourceFile, EmbeddedTags]:
     duration = 0.0
-    tags = EmbeddedTags()
     try:
         audio = MutagenFile(path)
     except (MutagenError, OSError):
@@ -49,6 +48,12 @@ def _read_audio_metadata(
         if audio.info is not None:
             duration = float(getattr(audio.info, "length", 0.0))
         tags = tags_from_loaded(audio, path)
+    else:
+        # MutagenFile couldn't identify an audio stream (e.g. a tag-only file with no
+        # decodable audio). Tags may still be present, so read them via the direct
+        # tag-container open so they aren't lost. Real library files always carry a stream,
+        # so this fallback never fires on the hot path — the single load above stands.
+        tags = read_embedded_tags(path)
     sf = SourceFile(
         path=path,
         size=size,
