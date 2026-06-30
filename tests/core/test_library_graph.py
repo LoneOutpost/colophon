@@ -93,3 +93,33 @@ def test_validity_real_filesystem_default(tmp_path):
     report = check_file_references(g)  # no injection — real Path.exists
     assert report.missing_dirs == []
     assert report.missing_files == ["f_gone"]
+
+
+def _edge(src, dst, root="/lib", kind="contains"):
+    return EdgeRecord(src=src, kind=kind, dst=dst, root=root, props={})
+
+
+def test_replace_root_replaces_only_that_root():
+    g = LibraryGraph.from_records(
+        [_dir("a", "/lib/a", root="/lib"), _dir("x", "/other/x", root="/other")],
+        [_edge("a", "a", root="/lib"), _edge("x", "x", root="/other")],
+    )
+    g.replace_root("/lib", [_dir("a2", "/lib/a2", root="/lib")], [])
+    assert set(g.nodes) == {"a2", "x"}
+    assert [e.src for e in g.edges] == ["x"]
+
+
+def test_replace_root_can_shrink_to_fewer_nodes():
+    g = LibraryGraph.from_records(
+        [_dir("a", "/lib/a", root="/lib"), _file("b", "/lib/a/b.m4b", root="/lib")],
+        [_edge("a", "b", root="/lib")],
+    )
+    g.replace_root("/lib", [_dir("a", "/lib/a", root="/lib")], [])
+    assert set(g.nodes) == {"a"}
+    assert g.edges == []
+
+
+def test_replace_root_absent_root_just_adds():
+    g = LibraryGraph.from_records([], [])
+    g.replace_root("/lib", [_dir("a", "/lib/a", root="/lib")], [])
+    assert set(g.nodes) == {"a"}

@@ -25,6 +25,19 @@ class LibraryGraph:
         slice). Last node wins on a duplicate id (ids are unique in the store)."""
         return cls(nodes={n.id: n for n in nodes}, edges=list(edges))
 
+    def replace_root(
+        self, root: str, nodes: list[NodeRecord], edges: list[EdgeRecord]
+    ) -> None:
+        """Replace everything under `root`: drop all in-memory nodes/edges whose `root`
+        matches, then add the new set. The per-root primitive that keeps the in-memory
+        graph in lockstep with the store's replace_subgraph (a root emptied by reconcile
+        drops to no nodes — handled)."""
+        self.nodes = {nid: n for nid, n in self.nodes.items() if n.root != root}
+        self.edges = [e for e in self.edges if e.root != root]
+        for n in nodes:
+            self.nodes[n.id] = n
+        self.edges.extend(edges)
+
 
 @dataclass
 class GraphValidity:
