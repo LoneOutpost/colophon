@@ -662,6 +662,7 @@ class AppController:
         )
         self._sync_sidecar(book)
         self.invalidate(book, Phase.TAG)
+        self._resync_books([book])
         return batch
 
     # --- Real-Debrid acquisition (issue #11) ---
@@ -847,7 +848,7 @@ class AppController:
         Returns the number of books that received at least one real field change.
         Raises ValueError on a malformed template (validated before any writes)."""
         compile_template(template)  # validate up front; raises on bad placeholders
-        changed = 0
+        written: list[BookUnit] = []
         for book in books:
             updates = self.filename_parse_updates(book, template, fields)
             if not updates:
@@ -857,8 +858,10 @@ class AppController:
                 provenance=Provenance.FILENAME.value,
             )
             self._sync_sidecar(book)
-            changed += 1
-        return changed
+            written.append(book)
+        if written:
+            self._resync_books(written)
+        return len(written)
 
     def _push_history(self, items: list, value: object) -> None:
         """Move `value` to the front (dedup), cap the list, and persist the config."""
@@ -1181,6 +1184,8 @@ class AppController:
             ready = self._rescore_and_persist(p)
             if ready and p.best is not None and p.confidence >= plan.threshold:
                 auto += 1
+        if items:
+            self._resync_books([book for book, _updates, _provider in items])
         return IdentifySummary(
             auto_matched=auto, routed_to_review=len(plan.proposals) - auto, batch_id=batch,
         )
@@ -1235,6 +1240,8 @@ class AppController:
         batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
 
         now_ready = sum(self._rescore_and_persist(p) for p in applicable)
+
+        self._resync_books([p.book for p in applicable])
 
         return QuickMatchSummary(
             applied_count=len(applicable), now_ready_count=now_ready, batch_id=batch
@@ -1524,6 +1531,7 @@ class AppController:
         self.ctx.books.upsert(book)
         self._sync_sidecar(book)
         self.invalidate(book, Phase.TAG)
+        self._resync_books([book])
         return batch
 
     def apply_match(self, book: BookUnit, result: SourceResult) -> str:

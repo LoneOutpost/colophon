@@ -3179,3 +3179,19 @@ def test_resync_skips_never_scanned_root(tmp_path):
     ctrl._resync_roots({tmp_path / "never"})   # no skeleton -> no-op, no crash
     assert ctx.library_graph.nodes == {}
     ctx.close()
+
+
+def test_save_fields_writes_through_to_graph(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = _seed_ingest(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = ctx.books.list_all()[0]
+    ctrl.save_fields(book, {"author": "Edited Author"})
+    authors = {
+        ctx.library_graph.nodes[e.dst].attrs["name"]
+        for e in ctx.library_graph.edges if e.kind == "author"
+    }
+    assert "Edited Author" in authors
+    ctx.close()
