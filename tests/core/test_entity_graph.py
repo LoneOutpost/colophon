@@ -1,7 +1,18 @@
 from pathlib import Path
 
-from colophon.core.entity_graph import EntityGraph, build_entity_graph
+from colophon.core.entity_graph import (
+    EntityGraph,
+    build_entity_graph,
+    entity_graph_from_records,
+)
+from colophon.core.graph_records import (
+    EdgeRecord,
+    NodeRecord,
+    book_node_id,
+    entity_node_id,
+)
 from colophon.core.graph_resolve import _name_key
+from colophon.core.library_graph import LibraryGraph
 from colophon.core.models import BookUnit, SeriesRef
 
 
@@ -75,3 +86,58 @@ def test_alias_merges_two_author_spellings_to_one_node():
     authors = [n for (k, _), n in g.nodes.items() if k == "author"]
     assert len(authors) == 1
     assert g.members[("author", _name_key("Brandon Sanderson"))] == [b1, b2]
+
+
+def _book_node(book_id, root="/lib"):
+    return NodeRecord(id=book_node_id(book_id), physical=None, semantic="book",
+                      root=root, attrs={"book_id": book_id})
+
+
+def _entity_node(kind, name, root="/lib"):
+    return NodeRecord(id=entity_node_id(kind, name, Path(root)), physical=None, semantic=kind,
+                      root=root, attrs={"name": name, "name_key": _name_key(name)})
+
+
+def _author_edge(book_id, name, root="/lib"):
+    return EdgeRecord(src=book_node_id(book_id), kind="author",
+                      dst=entity_node_id("author", name, Path(root)), root=root, props={})
+
+
+def test_from_records_builds_author_membership():
+    b = _book(authors=["Brandon Sanderson"])
+    lg = LibraryGraph.from_records(
+        [_book_node(b.id), _entity_node("author", "Brandon Sanderson")],
+        [_author_edge(b.id, "Brandon Sanderson")],
+    )
+    g = entity_graph_from_records(lg, {b.id: b})
+    ek = ("author", _name_key("Brandon Sanderson"))
+    assert g.nodes[ek].name == "Brandon Sanderson"
+    assert g.members[ek] == [b]
+    assert ek in g.book_entities[b.id]
+    assert g.books == [b]
+
+
+def test_from_records_applies_aliases_at_read_time():
+    b = _book(authors=["B. Sanderson"])
+    lg = LibraryGraph.from_records(
+        [_book_node(b.id), _entity_node("author", "B. Sanderson")],
+        [_author_edge(b.id, "B. Sanderson")],
+    )
+    aliases = {("author", _name_key("B. Sanderson")): "Brandon Sanderson"}
+    g = entity_graph_from_records(lg, {b.id: b}, aliases=aliases)
+    ek = ("author", _name_key("Brandon Sanderson"))
+    assert ek in g.nodes and g.nodes[ek].name == "Brandon Sanderson"
+
+
+def test_from_records_skips_book_node_without_bookunit():
+    lg = LibraryGraph.from_records(
+        [_book_node("ghost"), _entity_node("author", "X")],
+        [_author_edge("ghost", "X")],
+    )
+    g = entity_graph_from_records(lg, {})
+    assert g.nodes == {} and g.members == {} and g.book_entities == {} and g.books == []
+
+
+def test_from_records_empty_graph():
+    g = entity_graph_from_records(LibraryGraph.from_records([], []), {})
+    assert g.nodes == {} and g.books == []

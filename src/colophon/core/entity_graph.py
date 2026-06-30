@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from colophon.core.entity_alias import resolve_alias
 from colophon.core.graph_resolve import _name_key
+from colophon.core.library_graph import LibraryGraph
 from colophon.core.models import BookUnit, _Base
 
 EntityKey = tuple[str, str]  # (kind, name_key)
@@ -65,4 +66,54 @@ def build_entity_graph(
         if raw_f:
             link("franchise", raw_f, b, seen)
 
+    return g
+
+
+def entity_graph_from_records(
+    library_graph: LibraryGraph,
+    books_by_id: dict[str, BookUnit],
+    *,
+    aliases: dict[tuple[str, str], str] | None = None,
+) -> EntityGraph:
+    """Build the navigator's EntityGraph from the maintained persisted graph instead of
+    live book fields: author/series/franchise entity nodes + book->entity edges, raw names
+    resolved through aliases at read time, book metadata joined via book_id. Same shape as
+    build_entity_graph, so the view builders consume it unchanged. A book node whose
+    book_id has no BookUnit is skipped (defensive)."""
+    g = EntityGraph()
+    entity_name: dict[str, tuple[str, str]] = {}   # entity node id -> (kind, raw name)
+    book_of_node: dict[str, str] = {}              # book node id -> book_id
+    for nid, n in library_graph.nodes.items():
+        if n.semantic in ("author", "series", "franchise"):
+            name = n.attrs.get("name")
+            if isinstance(name, str):
+                entity_name[nid] = (n.semantic, name)
+        elif n.semantic == "book":
+            bid = n.attrs.get("book_id")
+            if isinstance(bid, str):
+                book_of_node[nid] = bid
+
+    seen: dict[str, set[EntityKey]] = {}  # per-book-per-kind dedup, matching build_entity_graph
+    for e in library_graph.edges:
+        if e.kind not in ("author", "series", "franchise"):
+            continue
+        bid = book_of_node.get(e.src)
+        ent = entity_name.get(e.dst)
+        if bid is None or ent is None:
+            continue
+        book = books_by_id.get(bid)
+        if book is None:
+            continue  # graph book node with no BookUnit
+        kind, raw_name = ent
+        name = resolve_alias(aliases, kind, raw_name)
+        ek = (kind, _name_key(name))
+        bseen = seen.setdefault(bid, set())
+        if ek in bseen:
+            continue
+        bseen.add(ek)
+        g.nodes.setdefault(ek, EntityNode(kind=kind, name=name, key=ek[1]))
+        g.members.setdefault(ek, []).append(book)
+        g.book_entities.setdefault(bid, []).append(ek)
+
+    g.books = [books_by_id[bid] for bid in book_of_node.values() if bid in books_by_id]
     return g
