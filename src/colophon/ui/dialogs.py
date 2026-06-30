@@ -28,6 +28,10 @@ from colophon.ui.batch_log import BatchItem, BatchLog
 
 logger = logging.getLogger(__name__)
 
+# Scan-dialog "depth" choice -> scan scope. UPDATE = add new + re-process changed/stale;
+# REFRESH = force a full re-derive of everything in scope (the heal path).
+_DEPTH_TO_SCOPE = {"new_changed": ScanScope.UPDATE, "rebuild": ScanScope.REFRESH}
+
 
 def dialog_actions(
     dialog: ui.dialog,
