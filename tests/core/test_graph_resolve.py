@@ -445,3 +445,35 @@ def test_franchise_for_nearest_wins_over_farther(tmp_path):
         str(root / "Doctor Who" / "Target Novels"): NodeOverride(kind="franchise", value="INNER"),
     }
     assert franchise_for(book, overrides, root=root) == "INNER"  # nearest ancestor wins
+
+
+def _book_with_series(folder, title, series, seq=None):
+    b = BookUnit.new(source_folder=folder)
+    b.title = title
+    b.series = [SeriesRef(name=series, sequence=seq)]
+    return b
+
+
+def test_resembles_series_matches_title_not_person(tmp_path):
+    from colophon.core.graph_resolve import _resembles
+
+    assert _resembles("Liz Carlyle", "Liz Carlyle")
+    assert _resembles("The Liz Carlyle Novels", "Liz Carlyle")   # folder superset of series tokens
+    assert _resembles("liz  carlyle", "Liz Carlyle")             # case/spacing tolerant
+    assert not _resembles("stella Rimington", "Liz Carlyle")     # author folder, single series
+    assert not _resembles("Sarah Graves", "Home Repair is Homicide")
+    assert not _resembles("", "Liz Carlyle")
+    assert not _resembles("Liz Carlyle", "")
+
+
+def test_dominant_series_picks_most_common(tmp_path):
+    from colophon.core.graph_resolve import _dominant_series
+
+    d = tmp_path / "a"
+    books = [
+        _book_with_series(d, "Close Call", "Liz Carlyle", 8),
+        _book_with_series(d, "Secret Asset", "Liz Carlyle", 2),
+        _book_with_series(d, "One Off", "Other Series", 1),
+    ]
+    assert _dominant_series(books) == "Liz Carlyle"
+    assert _dominant_series([_book(d, [])]) is None   # no series at all

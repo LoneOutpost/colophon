@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
+from colophon.core.graph_classify import _series_label
 from colophon.core.models import BookUnit, NodeOverride, Provenance, SeriesRef
 from colophon.core.normalize import normalize_name
 
@@ -38,6 +39,43 @@ def _name_key(name: str) -> str:
     s = re.sub(r"[^\w\s]", " ", s)        # drop punctuation: 'Robert A.' -> 'Robert A'
     s = re.sub(r"\s+", " ", s).strip()
     return s.casefold()
+
+
+def _series_tokens(name: str) -> frozenset[str]:
+    """Normalized token set for series-vs-folder comparison: casefold, drop punctuation,
+    collapse whitespace. Mirrors `_name_key`'s normalization spirit."""
+    s = normalize_name(name)
+    s = re.sub(r"[^\w\s]", " ", s)
+    return frozenset(re.sub(r"\s+", " ", s).strip().casefold().split())
+
+
+def _resembles(folder_name: str, series_name: str) -> bool:
+    """True when `folder_name` looks like `series_name` (so the folder is a series tier, not an
+    author): normalized token-set equality, or one name's tokens are a subset of the other's
+    (handles 'The Liz Carlyle Novels' ~ 'Liz Carlyle'). Empty on either side -> False."""
+    f = _series_tokens(folder_name)
+    s = _series_tokens(series_name)
+    if not f or not s:
+        return False
+    return f == s or f <= s or s <= f
+
+
+def _dominant_series(books: list[BookUnit]) -> str | None:
+    """The most common series display-name across `books` (by normalized key; ties -> first
+    seen), or None if no book has a series."""
+    counts: dict[str, int] = {}
+    display: dict[str, str] = {}
+    for book in books:
+        label = _series_label(book)
+        if label is None:
+            continue
+        key, name, _ = label
+        counts[key] = counts.get(key, 0) + 1
+        display.setdefault(key, name)
+    if not counts:
+        return None
+    best = max(counts, key=lambda k: counts[k])
+    return display[best]
 
 
 def _ancestor_paths(folder: Path, root: Path) -> Iterator[Path]:
