@@ -319,8 +319,10 @@ class AppController:
 
     def scan_paths_missing_graph(self) -> list[Path]:
         """Configured scan paths with no subgraph in the in-memory graph (never scanned /
-        not yet persisted). A real scan always emits at least the root directory node, so
-        a scanned-but-empty folder is NOT reported (no re-scan loop)."""
+        not yet persisted). NOTE: a folder that scans to zero books persists no graph
+        nodes, so it keeps being reported here; the workspace's once-per-process guard
+        (not this method) is what stops an empty/unscannable path from re-scanning in a
+        loop."""
         present = {n.root for n in self.ctx.library_graph.nodes.values()}
         return [p for p in self.ctx.config.scan_paths if str(p) not in present]
 

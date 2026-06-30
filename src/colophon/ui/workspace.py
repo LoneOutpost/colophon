@@ -10,6 +10,7 @@ action, no dead controls, and a consistent spacing scale.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -1634,7 +1635,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
         try:
             plan = await controller.scan_preview_streamed(missing, progress=_progress)
-            controller.apply_scan(plan)
+            await asyncio.to_thread(controller.apply_scan, plan)  # off-thread: DB write + sweep
         except Exception:  # log and repaint either way (BLE001 intentional)
             logger.exception("auto-scan on empty graph failed")
         _ui_safe(_refresh_all)
