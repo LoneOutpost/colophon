@@ -60,6 +60,59 @@ def test_reads_tags_from_m4b(make_audio):
     assert tags.artist == "Frank Herbert"
 
 
+def test_tags_from_loaded_matches_read_embedded_tags_mp3(make_audio):
+    from mutagen import File as MutagenFile
+
+    from colophon.adapters.tags import tags_from_loaded
+
+    path = make_audio("ch01.mp3", seconds=1)  # real MP3 stream so MutagenFile().tags loads
+    id3 = ID3(path)
+    id3.add(TIT2(encoding=3, text=["The Way of Kings"]))
+    id3.add(TALB(encoding=3, text=["The Way of Kings"]))
+    id3.add(TPE1(encoding=3, text=["Brandon Sanderson"]))
+    id3.add(TXXX(encoding=3, desc="series", text=["Stormlight Archive"]))
+    id3.add(TXXX(encoding=3, desc="sequence", text=["1"]))
+    id3.save(path)
+
+    loaded = tags_from_loaded(MutagenFile(path), path)
+    assert loaded == read_embedded_tags(path)
+    assert loaded.title == "The Way of Kings"
+    assert loaded.series == "Stormlight Archive"
+
+
+def test_tags_from_loaded_matches_read_embedded_tags_m4b(make_audio):
+    from mutagen import File as MutagenFile
+    from mutagen.mp4 import MP4, MP4FreeForm
+
+    from colophon.adapters.tags import tags_from_loaded
+
+    path = make_audio("book.m4b", seconds=1)
+    m = MP4(path)
+    m["\xa9nam"] = ["Dune"]
+    m["\xa9ART"] = ["Frank Herbert"]
+    m["----:com.apple.iTunes:series"] = [MP4FreeForm(b"Dune Chronicles")]
+    m.save()
+
+    loaded = tags_from_loaded(MutagenFile(path), path)
+    assert loaded == read_embedded_tags(path)
+    assert loaded.title == "Dune"
+    assert loaded.series == "Dune Chronicles"
+
+
+def test_tags_from_loaded_empty_for_headerless_and_nonaudio():
+    from colophon.adapters.tags import tags_from_loaded
+
+    # An MP3 object with no ID3 header -> audio.tags is None -> empty.
+    class _FakeMp3:
+        tags = None
+
+    assert tags_from_loaded(_FakeMp3(), Path("x.mp3")) == EmbeddedTags()
+    # An unsupported extension -> empty regardless of the object.
+    assert tags_from_loaded(object(), Path("x.ogg")) == EmbeddedTags()
+    # A None object (MutagenFile failed to identify) -> empty.
+    assert tags_from_loaded(None, Path("x.m4b")) == EmbeddedTags()
+
+
 def test_write_then_read_roundtrips_mp3(tmp_path: Path):
     path = tmp_path / "ch01.mp3"
     path.write_bytes(b"")

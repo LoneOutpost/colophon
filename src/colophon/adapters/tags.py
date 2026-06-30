@@ -19,11 +19,41 @@ _MP4_EXTS = {".m4a", ".m4b", ".mp4", ".aac"}
 
 
 def read_embedded_tags(path: Path) -> EmbeddedTags:
+    """Open `path` and extract its embedded tags (used by non-scan callers and as the
+    parity oracle for `tags_from_loaded`). Opens the tag container directly, so it works
+    even for a frames-only file with no decodable audio stream."""
+    from mutagen import MutagenError
+
     ext = path.suffix.lower()
     if ext == _MP3_EXT:
-        return _read_mp3(path)
+        from mutagen.id3 import ID3, ID3NoHeaderError
+
+        try:
+            return _tags_from_id3(ID3(path))
+        except (ID3NoHeaderError, MutagenError, OSError):
+            return EmbeddedTags()
     if ext in _MP4_EXTS:
-        return _read_mp4(path)
+        from mutagen.mp4 import MP4
+
+        try:
+            return _tags_from_mp4(MP4(path))
+        except (MutagenError, OSError):
+            return EmbeddedTags()
+    return EmbeddedTags()
+
+
+def tags_from_loaded(audio, path: Path) -> EmbeddedTags:
+    """Extract EmbeddedTags from an object already loaded by `mutagen.File(path)`,
+    dispatched by extension (same routing the write path uses, so read/write cannot drift).
+    MP3: frames live on `audio.tags` (an ID3 object, or None when the file has no ID3
+    header). MP4: the loaded object IS the tag mapping. None / unsupported extension ->
+    empty tags."""
+    ext = path.suffix.lower()
+    if ext == _MP3_EXT:
+        id3 = getattr(audio, "tags", None)
+        return _tags_from_id3(id3) if id3 is not None else EmbeddedTags()
+    if ext in _MP4_EXTS:
+        return _tags_from_mp4(audio) if audio is not None else EmbeddedTags()
     return EmbeddedTags()
 
 
@@ -33,14 +63,9 @@ def _first(value: object) -> str | None:
     return None
 
 
-def _read_mp3(path: Path) -> EmbeddedTags:
-    from mutagen import MutagenError
-    from mutagen.id3 import ID3, ID3NoHeaderError
-
-    try:
-        tags = ID3(path)
-    except (ID3NoHeaderError, MutagenError, OSError):
-        return EmbeddedTags()
+def _tags_from_id3(tags) -> EmbeddedTags:
+    """Build EmbeddedTags from a loaded ID3 frames object (mutagen ID3 / MP3.tags).
+    Caller guarantees `tags` is not None."""
 
     def txxx(desc: str) -> str | None:
         frame = tags.get(f"TXXX:{desc}")
@@ -73,14 +98,9 @@ def _read_mp3(path: Path) -> EmbeddedTags:
     )
 
 
-def _read_mp4(path: Path) -> EmbeddedTags:
-    from mutagen import MutagenError
-    from mutagen.mp4 import MP4
-
-    try:
-        m = MP4(path)
-    except (MutagenError, OSError):
-        return EmbeddedTags()
+def _tags_from_mp4(m) -> EmbeddedTags:
+    """Build EmbeddedTags from a loaded MP4 object (mutagen MP4 / MutagenFile for .m4*).
+    Caller guarantees `m` is not None."""
 
     def freeform(name: str) -> str | None:
         key = f"----:com.apple.iTunes:{name}"
