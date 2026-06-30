@@ -47,6 +47,8 @@ from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
 
+_auto_scan_attempted = False  # once-per-process guard for the lazy scan-if-empty auto-scan
+
 # Sentinel marking a bulk-edit field whose selected books hold differing values.
 _MIXED = object()
 
@@ -1609,6 +1611,34 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         )
         _ui_safe(_refresh_all)
 
+    async def _maybe_auto_scan() -> None:
+        """First-open bootstrap: if a configured scan path has no graph yet, scan it
+        automatically with a visible scanning state, then repaint. Guarded once per
+        process so reconnects / an unscannable path can't loop."""
+        global _auto_scan_attempted
+        if _auto_scan_attempted:
+            return
+        missing = controller.scan_paths_missing_graph()
+        if not missing:
+            return
+        _auto_scan_attempted = True  # set before scanning so a reconnect can't double-fire
+        nav_container.clear()
+        with nav_container, ui.row().classes("items-center q-gutter-sm q-pa-md"):
+            ui.spinner(size="lg")
+            prog = ui.label("Scanning your library…").props(
+                "role=status aria-live=polite"
+            ).classes("text-caption colophon-muted")
+
+        def _progress(done: int, total: int, label: str) -> None:
+            _ui_safe(lambda: prog.set_text(f"Scanning {done} / {total} · {label}"))
+
+        try:
+            plan = await controller.scan_preview_streamed(missing, progress=_progress)
+            controller.apply_scan(plan)
+        except Exception:  # log and repaint either way (BLE001 intentional)
+            logger.exception("auto-scan on empty graph failed")
+        _ui_safe(_refresh_all)
+
     # --- application shell ---
     # Keyboard navigation for the Books list (ignored while typing in a field).
     ui.keyboard(on_key=_on_key)
@@ -1717,3 +1747,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         show_detail(_restored.open_book_id)  # reopen the book remembered for this tab
     else:
         show_detail("")  # initial empty-state in the detail pane
+
+    # Lazily bootstrap an unscanned library on first open (no-op if already scanned).
+    ui.timer(0.1, _maybe_auto_scan, once=True)

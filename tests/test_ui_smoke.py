@@ -21,6 +21,12 @@ def test_create_app_registers_pages_without_running(tmp_path):
     import colophon.ui.workspace as ws
 
     assert hasattr(ws, "render_workspace")
+    # Lazy scan-if-empty auto-scan: the once-per-process guard must exist and
+    # start unset, and the controller surface the bootstrap depends on must be present.
+    assert ws._auto_scan_attempted is False
+    assert callable(AppController.scan_paths_missing_graph)
+    assert callable(AppController.scan_preview_streamed)
+    assert callable(AppController.apply_scan)
 
     import colophon.ui.acquire as aq
 
