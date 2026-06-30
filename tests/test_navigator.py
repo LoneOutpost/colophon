@@ -1,6 +1,7 @@
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
+from colophon.core.graph_records import book_records
 from colophon.core.models import BookUnit, SeriesRef
 
 
@@ -18,14 +19,23 @@ def _book(tmp_path, name, *, author=None, series=None, seq=None) -> BookUnit:
     return b
 
 
+def _seed(ctx, tmp_path, books) -> None:
+    """Persist `books` and populate the maintained graph for them (the entity records a
+    scan would lay down), so `library_tree` — which now reads `ctx.library_graph` — sees
+    them with their exact fields, without the scan/identify pipeline's fallbacks."""
+    for b in books:
+        ctx.books.upsert(b)
+    nodes, edges = book_records(books, root=tmp_path)
+    ctx.library_graph.replace_root(str(tmp_path), nodes, edges)
+
+
 def test_library_tree_groups_authors_series_and_needs_id(tmp_path):
     ctx = _ctx(tmp_path)
     a = _book(tmp_path, "Way of Kings", author="Brandon Sanderson", series="Stormlight", seq=1.0)
     b = _book(tmp_path, "Words of Radiance", author="Brandon Sanderson", series="Stormlight", seq=2.0)
     standalone = _book(tmp_path, "Warbreaker", author="Brandon Sanderson")
     mystery = _book(tmp_path, "mystery")  # no author, no series
-    for x in (a, b, standalone, mystery):
-        ctx.books.upsert(x)
+    _seed(ctx, tmp_path, [a, b, standalone, mystery])
 
     tree = AppController(ctx).library_tree()
     assert [bk.id for bk in tree.needs_id] == [mystery.id]
@@ -44,8 +54,7 @@ def test_library_tree_author_with_series_and_standalone_and_series_only(tmp_path
     # A book with a series but NO author -> keyed under the series name as its own author node.
     series_only = _book(tmp_path, "Mistborn One", series="Mistborn", seq=1.0)
     created = [series_book, standalone, series_only]
-    for x in created:
-        ctx.books.upsert(x)
+    _seed(ctx, tmp_path, created)
 
     tree = AppController(ctx).library_tree()
 
