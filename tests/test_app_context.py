@@ -131,3 +131,22 @@ def test_create_loads_persisted_graph(tmp_path):
     ctx2 = AppContext.create(Config(db_path=db))  # fresh context loads the persisted graph
     assert "d" in ctx2.library_graph.nodes
     ctx2.close()
+
+
+def test_startup_heal_populates_graph_from_existing_books(tmp_path):
+    from colophon.controller import AppController
+    from colophon.core.models import BookUnit
+
+    db = tmp_path / "c.db"
+    ctx = AppContext.create(Config(db_path=db, scan_paths=[tmp_path]))
+    b = BookUnit.new(source_folder=tmp_path / "Author" / "Book")
+    b.title, b.authors = "A", ["Someone"]
+    ctx.books.upsert(b)            # book persisted, graph never written
+    ctx.close()
+
+    ctx2 = AppContext.create(Config(db_path=db, scan_paths=[tmp_path]))  # fresh load: empty graph
+    assert ctx2.library_graph.nodes == {}
+    healed = AppController(ctx2).rebuild_missing_graph()
+    assert healed == 1
+    assert any(n.semantic == "book" for n in ctx2.library_graph.nodes.values())
+    ctx2.close()

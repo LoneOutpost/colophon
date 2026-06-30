@@ -59,7 +59,11 @@ def main() -> None:
         )
     else:
         logger.info(f"graph: {len(ctx.library_graph.nodes)} nodes, file references present")
-    create_app(AppController(ctx))
+    controller = AppController(ctx)
+    healed = controller.rebuild_missing_graph()
+    if healed:
+        logger.info(f"graph: rebuilt {healed} root(s) from existing books (self-heal)")
+    create_app(controller)
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:
         run_kwargs["root_path"] = ctx.config.root_path
