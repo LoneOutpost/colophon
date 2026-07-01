@@ -120,33 +120,48 @@ def to_echart(
     graph: LibraryGraph, sub: Subgraph, focal_id: str, *,
     label_of: Callable[[NodeRecord], str],
     confidence_of: Callable[[NodeRecord], float | None],
+    hidden: frozenset[str] = frozenset(),
 ) -> dict:
-    """Project a Subgraph to an ECharts `graph`-series options dict (categories per kind, force
-    layout, roam). The focal node is enlarged; series/author/franchise edges are dashed."""
+    """Project a Subgraph to an ECharts `graph`-series options dict. Each node carries a per-kind
+    glyph (`symbol`) so kind is legible without color; a thin warm-neutral border and a label halo
+    keep nodes and labels readable on both the light and dark surfaces. Kinds in `hidden` are
+    dropped from the projection (the focal node is always kept). No built-in legend — the UI
+    renders its own bright-enabled / dim-struck-disabled legend."""
+    visible = [
+        nid for nid in sub.node_ids
+        if nid == focal_id or display_kind(graph.nodes[nid]) not in hidden
+    ]
+    visible_set = set(visible)
     data = []
-    for nid in sub.node_ids:
+    for nid in visible:
         node = graph.nodes[nid]
         kind = display_kind(node)
         base = 20 if kind in ("author", "series", "franchise") else 14
+        if nid == focal_id:
+            item_style = {"borderColor": _FOCAL_RING, "borderWidth": 3,
+                          "shadowColor": _FOCAL_GLOW, "shadowBlur": 10}
+        else:
+            item_style = {"borderColor": _NODE_BORDER, "borderWidth": 1}
         data.append({
             "id": nid,
             "name": label_of(node),
             "category": _KIND_INDEX[kind],
+            "symbol": _KIND_SYMBOL[kind],
             "symbolSize": 34 if nid == focal_id else base,
             "value": confidence_of(node),
-            "itemStyle": {"borderColor": "#ffffff", "borderWidth": 2} if nid == focal_id else {},
+            "itemStyle": item_style,
         })
     links = [{
         "source": e.src, "target": e.dst,
         "lineStyle": {"type": "dashed"} if e.kind in ("author", "series", "franchise") else {"type": "solid"},
-    } for e in sub.edges]
-    categories = [{"name": k, "itemStyle": {"color": _KIND_COLORS[k]}} for k in _KINDS]
+    } for e in sub.edges if e.src in visible_set and e.dst in visible_set]
+    categories = [{"name": k, "itemStyle": {"color": KIND_COLOR[k]}} for k in KINDS]
     return {
         "tooltip": {},
-        "legend": [{"data": list(_KINDS)}],
         "series": [{
             "type": "graph", "layout": "force", "roam": True, "draggable": True,
-            "label": {"show": True, "position": "right", "color": "#e6ddd2"},
+            "label": {"show": True, "position": "right", "color": "#ffffff",
+                      "textBorderColor": "rgba(28,25,22,0.85)", "textBorderWidth": 3},
             "force": {"repulsion": 130, "edgeLength": 80, "gravity": 0.05},
             "emphasis": {"focus": "adjacency"},
             "categories": categories, "data": data, "links": links,

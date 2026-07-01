@@ -108,3 +108,61 @@ def test_to_echart_structure():
     focal = next(d for d in series["data"] if d["id"] == "A")
     other = next(d for d in series["data"] if d["id"] == "b1")
     assert focal["symbolSize"] > other["symbolSize"]
+
+
+def test_to_echart_per_kind_symbols_and_no_legend():
+    from colophon.core.graph_explore import _KIND_SYMBOL
+
+    g = _graph()
+    sub = neighborhood(g, "A", hops=1)
+    opts = to_echart(g, sub, "A",
+                     label_of=lambda n: n.attrs.get("name", n.id),
+                     confidence_of=lambda n: None)
+    assert "legend" not in opts
+    data = opts["series"][0]["data"]
+    assert all(d["symbol"].startswith("path://") for d in data)
+    assert next(d for d in data if d["id"] == "A")["symbol"] == _KIND_SYMBOL["author"]
+    assert next(d for d in data if d["id"] == "b1")["symbol"] == _KIND_SYMBOL["book"]
+
+
+def test_to_echart_palette_border_and_label_halo():
+    from colophon.core.graph_explore import KIND_COLOR
+
+    g = _graph()
+    sub = neighborhood(g, "A", hops=1)
+    opts = to_echart(g, sub, "A",
+                     label_of=lambda n: n.attrs.get("name", n.id),
+                     confidence_of=lambda n: None)
+    series = opts["series"][0]
+    cats = {c["name"]: c["itemStyle"]["color"] for c in series["categories"]}
+    assert cats["author"] == KIND_COLOR["author"] == "#c15a38"
+    assert cats["book"] == "#2e8f80"
+    focal = next(d for d in series["data"] if d["id"] == "A")
+    other = next(d for d in series["data"] if d["id"] == "b1")
+    assert other["itemStyle"]["borderWidth"] == 1
+    assert focal["itemStyle"]["borderWidth"] == 3
+    assert "borderColor" in other["itemStyle"]
+    label = series["label"]
+    assert label["textBorderWidth"] >= 2
+    assert "textBorderColor" in label
+
+
+def test_to_echart_hidden_drops_kind_but_keeps_focal():
+    g = _graph()
+    sub = neighborhood(g, "A", hops=1)  # {A(author), root(folder), b1, b2, b3(book)}
+    opts = to_echart(g, sub, "A",
+                     label_of=lambda n: n.attrs.get("name", n.id),
+                     confidence_of=lambda n: None,
+                     hidden=frozenset({"book"}))
+    ids = {d["id"] for d in opts["series"][0]["data"]}
+    assert ids == {"A", "root"}
+    for link in opts["series"][0]["links"]:
+        assert link["source"] in ids and link["target"] in ids
+
+    sub_b = neighborhood(g, "b1", hops=1)  # {b1(book), A(author), S(series)}
+    opts_b = to_echart(g, sub_b, "b1",
+                       label_of=lambda n: n.attrs.get("name", n.id),
+                       confidence_of=lambda n: None,
+                       hidden=frozenset({"book"}))
+    ids_b = {d["id"] for d in opts_b["series"][0]["data"]}
+    assert "b1" in ids_b
