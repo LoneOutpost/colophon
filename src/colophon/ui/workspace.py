@@ -1529,7 +1529,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     {"conf_asc": "Worst first", "conf_desc": "Best first", "title": "Title A-Z"},
                     label="Sort", value=view["sort"],
                     on_change=lambda e: _set_sort(e.value),
-                ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")
+                ).props("dense outlined options-dense").style("min-width: 8.5rem; max-width: 11rem")
             ui.checkbox(
                 "Open findings", value=view["facets"]["findings"],
                 on_change=lambda e: _set_facet("findings", e.value),
