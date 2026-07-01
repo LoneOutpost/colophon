@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from colophon.adapters.lazylibrarian import AudiobookPatterns
@@ -92,7 +91,8 @@ def test_organize_move_failure_returns_error(tmp_path, monkeypatch):
     assert not target.exists()
 
 
-def test_organize_writes_destination_sidecar(tmp_path):
+def test_organize_does_not_write_destination_sidecar(tmp_path):
+    # colophon does not write metadata.json — that is AudiobookShelf's domain.
     repo = _repo(tmp_path)
     book = _book(tmp_path)
     book.authors = ["Frank Herbert"]
@@ -105,8 +105,4 @@ def test_organize_writes_destination_sidecar(tmp_path):
     result = organize_book(repo, book, m4b, target=target)
 
     assert result.moved is True
-    sidecar = result.target_path.parent / "metadata.json"
-    assert sidecar.exists()
-    data = json.loads(sidecar.read_text())
-    assert data["title"] == "Dune"
-    assert data["authors"] == ["Frank Herbert"]
+    assert not (result.target_path.parent / "metadata.json").exists()
