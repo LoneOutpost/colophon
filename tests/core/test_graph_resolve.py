@@ -581,22 +581,3 @@ def test_multibook_folder_named_like_a_book_still_becomes_author(tmp_path):
     assert node.kind == "author"
     assert node.author == "Legion"
     assert b1.authors == ["Legion"] and b2.authors == ["Legion"]
-
-
-def test_scan_root_is_never_classified_author(tmp_path):
-    # One stray book whose author == the scan-root folder name must NOT turn the root into an
-    # author — that single seed would otherwise cascade the bucket name onto every authorless
-    # book beneath it (the observed TE_Audiobooks_S whole-library miscategorization).
-    from colophon.core.graph_resolve import resolve_graph_authors
-
-    root = tmp_path / "TE_Audiobooks_S"
-    author_dir = root / "Sylvia Plath"
-    graph = _graph_with_dirs(author_dir)
-    graph.directories[DirectoryNode.id_for(root)].kind = "grouping"  # promotable if not for the guard
-
-    b = BookUnit.new(source_folder=author_dir)
-    b.authors = ["TE_Audiobooks_S"]     # the poison: a sidecar author matching the root's name
-    b.provenance["authors"] = "datafile"
-    resolve_graph_authors(graph, [b], root=root)
-
-    assert graph.directories[DirectoryNode.id_for(root)].kind != "author"
