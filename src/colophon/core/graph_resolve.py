@@ -93,11 +93,6 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
             continue
         keys = {_name_key(a): a for a in book.authors}
         for node in _ancestors(graph, book.source_folder, root):
-            # The scan root is the library bucket, never a book's author — excluding it stops one
-            # stray sidecar (a book whose author == the root's folder name) from classifying the
-            # root as author and cascading that bucket name onto every authorless book beneath it.
-            if node.path == root:
-                continue
             matched = keys.get(_name_key(node.path.name))
             # author refines a grouping (or a not-yet-classified node); never a
             # classified container/title — those are not author folders.
