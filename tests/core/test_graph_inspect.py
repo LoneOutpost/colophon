@@ -104,3 +104,32 @@ def test_provenance_passthrough():
     got = inspect(_graph(), "dir", name_of=_name, confidence_of=lambda n: None,
                   provenance_of=lambda n: ["Classified as author"])
     assert got.provenance == ["Classified as author"]
+
+
+def test_links_per_kind():
+    from colophon.core.graph_inspect import NodeLink, _links_for
+
+    author = _links_for("author", "Stella Rimington", "author:aa")
+    assert NodeLink("Open in Library", "/?filter=Stella%20Rimington") in author
+    assert NodeLink("Manage → Authors", "/manage?kind=author&filter=Stella%20Rimington") in author
+
+    series = _links_for("series", "Liz Carlyle", "series:ss")
+    assert NodeLink("Manage → Series", "/manage?kind=series&filter=Liz%20Carlyle") in series
+
+    # franchise gets a Library link but no Manage vocabulary
+    franchise = _links_for("franchise", "Cosmere", "franchise:cc")
+    assert any(link.url.startswith("/?filter=") for link in franchise)
+    assert not any("/manage" in link.url for link in franchise)
+
+    # a book opens in the library filtered by its title
+    book = _links_for("book", "Dune", "book:b1")
+    assert book == [NodeLink("Open in Library", "/?filter=Dune")]
+
+    # _links_for itself has no owner id, so it returns nothing for a file...
+    assert _links_for("file", "01.mp3", "f1") == []
+    # ...the file→book jump is added by inspect(), which knows the owning book:
+    got = _inspect(_graph(), "f1")
+    assert got.links == [NodeLink("Jump to its book", "/graph?focal=book%3Ab1")]
+
+    # a folder has no external link yet (classify lands in 3.2)
+    assert _links_for("folder", "Some Folder", "dir") == []

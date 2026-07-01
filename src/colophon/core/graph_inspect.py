@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from colophon.core.graph_explore import display_kind
 from colophon.core.graph_records import NodeRecord
@@ -146,6 +147,8 @@ def inspect(
         provenance = list(provenance_of(node))
 
     links = _links_for(disp, name_of(node), focal_id)
+    if pk == "file" and owner is not None:
+        links = [NodeLink("Jump to its book", f"/graph?focal={quote(owner)}")]
     return NodeInspection(
         id=focal_id, label=name_of(node), kind=disp, confidence=confidence_of(node),
         rows=rows, linked_folders=linked_folders, files=files, provenance=provenance,
@@ -154,5 +157,19 @@ def inspect(
 
 
 def _links_for(kind: str, label: str, focal_id: str) -> list[NodeLink]:
-    """Contextual page links per kind (implemented in Task 3)."""
+    """Contextual page links per kind. Every link resolves to a working view today: Library uses the
+    existing `?filter=`, Manage takes `kind`/`filter` params. Franchise has no Manage vocabulary, so
+    it gets a Library link only. Folders (classify in 3.2) get none; files get their book-jump from
+    `inspect`, which knows the owning book id."""
+    q = quote(label)
+    manage_label = {"author": "Manage → Authors", "series": "Manage → Series"}
+    if kind in ("author", "series"):
+        return [
+            NodeLink("Open in Library", f"/?filter={q}"),
+            NodeLink(manage_label[kind], f"/manage?kind={kind}&filter={q}"),
+        ]
+    if kind == "franchise":
+        return [NodeLink("Open in Library", f"/?filter={q}")]
+    if kind == "book":
+        return [NodeLink("Open in Library", f"/?filter={q}")]
     return []
