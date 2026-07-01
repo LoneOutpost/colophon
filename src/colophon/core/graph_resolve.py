@@ -10,6 +10,7 @@ the Phase 3b design."""
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -122,13 +123,22 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
     # container (that shape is exactly an author folder), but only when (a) it is not the scan
     # root, (b) it actually has empty/weak-author books to fill, and (c) its name does not
     # resemble the dominant series of its books — so a real series folder stays a series tier.
+    # Index books by every folder that contains them (the folder itself and each ancestor up
+    # to root) in one pass, so the per-container lookup below is O(1) instead of a full rescan
+    # of `books` per directory (which is O(dirs x books), ~21s on a 5k-book library).
+    books_under: dict[Path, list[BookUnit]] = defaultdict(list)
+    for b in books:
+        folder = b.source_folder
+        books_under[folder].append(b)
+        for parent in folder.parents:
+            books_under[parent].append(b)
+            if parent == root:
+                break
+
     for node in graph.directories.values():
         if node.path == root or node.kind != "container":
             continue
-        under = [
-            b for b in books
-            if b.source_folder == node.path or node.path in b.source_folder.parents
-        ]
+        under = books_under.get(node.path, [])
         if not any(not b.authors or b.provenance.get("authors") in _WEAK for b in under):
             continue  # nothing to fill -> don't claim the folder as an author
         series = _dominant_series(under)
