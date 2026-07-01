@@ -25,6 +25,7 @@ from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
+from colophon.core.triage import FACET_DEFAULTS, apply_facets, needs_human, sort_books
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
@@ -364,6 +365,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         book_filter["text"] = _restored.filter_text
     selected_ids.update(_restored.selected_ids)
 
+    # Triage view-state is ephemeral — always default to Triage on open (not persisted).
+    view["mode"] = "triage"
+    view["facets"] = dict(FACET_DEFAULTS)
+    view["sort"] = "conf_asc"
+
     def _selected_books() -> list:
         return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
 
@@ -404,12 +410,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         return all(term in hay for term in terms)
 
     def _visible_books() -> list:
-        """Books in the current scope, narrowed by the free-text filter."""
-        terms = book_filter["text"].lower().split()
+        """Scope ∧ folder ∧ text, then (Triage) the needs-a-human filter, the active facets,
+        and the chosen sort. Triage opens worst-confidence-first on the books needing attention."""
         books = _books_for_scope()
-        if not terms:
-            return books
-        return [b for b in books if _matches_filter(b, terms)]
+        terms = book_filter["text"].lower().split()
+        if terms:
+            books = [b for b in books if _matches_filter(b, terms)]
+        if view["mode"] == "triage":
+            books = [b for b in books if needs_human(b)]
+        books = apply_facets(books, view["facets"])
+        return sort_books(books, view["sort"])
 
     # --- attention pane (findings + guided actions) ---
     def render_attention_pane(book) -> None:
