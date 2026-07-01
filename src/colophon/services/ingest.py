@@ -8,6 +8,7 @@ fields; only empty fields are filled and the on-disk file list is refreshed.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -468,10 +469,20 @@ def plan_scan_graph(
     scheme = parse_scheme(directory_scheme)
     inf_root = inference_root or root
     rederive = options is not None and options.scope is ScanScope.REFRESH
+
+    _t0 = time.perf_counter()
+
+    def _phase(name: str) -> None:
+        nonlocal _t0
+        now = time.perf_counter()
+        logger.debug(f"plan_scan_graph[{root.name}]: {name} took {now - _t0:.2f}s")
+        _t0 = now
+
     graph = build_graph(
         repo, root, template=template, directory_scheme=directory_scheme,
         options=options, inference_root=inference_root, progress=progress,
     )
+    _phase("build_graph")
 
     projected = project(graph)
     by_folder: dict[Path, list[BookUnit]] = defaultdict(list)
@@ -495,13 +506,19 @@ def plan_scan_graph(
             plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
             plan.units.append(adopted)
             plan.reconciled_folders.add(folder)
+    _phase(f"adopt+identify ({len(plan.units)} units)")
     classify_graph(graph, root=root)
+    _phase("classify_graph")
     resolve_graph_authors(graph, plan.units, root=root)
+    _phase("resolve_graph_authors")
     hint_grouping_kinds(graph)
+    _phase("hint_grouping_kinds")
     if node_overrides:
         apply_overrides(graph, node_overrides)
         propagate_overrides(graph, plan.units, root=root)
+        _phase("apply+propagate_overrides")
     plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
+    _phase(f"graph_records ({len(plan.graph_nodes)} nodes, {len(plan.graph_edges)} edges)")
     return plan
 
 
