@@ -72,3 +72,15 @@ def test_state_panel_render_is_callable():
 
     rows = state_panel.phase_rows(BookUnit.new(source_folder=Path("/x")))
     assert len(rows) == 7
+
+
+def test_render_manage_accepts_kind_and_filter_params():
+    import inspect as _pyinspect
+
+    from colophon.ui.manage import _valid_kind, render_manage
+
+    sig = _pyinspect.signature(render_manage)
+    assert "initial_kind" in sig.parameters
+    assert "initial_filter" in sig.parameters
+    assert _valid_kind("series") == "series"
+    assert _valid_kind("bogus") == "author"

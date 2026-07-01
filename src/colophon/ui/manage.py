@@ -25,10 +25,16 @@ _KIND_LABELS = {
 }
 
 
-def render_manage(controller: AppController) -> None:
+def _valid_kind(kind: str | None) -> str:
+    """A safe manage vocabulary kind, defaulting to 'author' for anything unrecognized."""
+    return kind if kind in _KIND_LABELS else "author"
+
+
+def render_manage(controller: AppController, initial_kind: str | None = None,
+                  initial_filter: str = "") -> None:
     state: dict[str, object] = {
-        "kind": "author",
-        "filter": "",
+        "kind": _valid_kind(initial_kind),
+        "filter": initial_filter or "",
         "selected": set(),
         "last_batch": None,
     }
@@ -164,13 +170,13 @@ def render_manage(controller: AppController) -> None:
 
     # --- page body ---
     with page_toolbar():
-        ui.toggle(_KIND_LABELS, value="author", on_change=lambda e: _on_kind(e.value)).props(
+        ui.toggle(_KIND_LABELS, value=state["kind"], on_change=lambda e: _on_kind(e.value)).props(
             "no-caps"
         ).classes("colophon-seg")
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-            ui.input(placeholder="Filter").props('dense clearable outlined aria-label="Filter folders"').classes(
-                "col"
-            ).on_value_change(lambda e: _on_filter(e.value))
+            ui.input(placeholder="Filter", value=str(state["filter"])).props(
+                'dense clearable outlined aria-label="Filter folders"'
+            ).classes("col").on_value_change(lambda e: _on_filter(e.value))
             merge_btn = ui.button(
                 "Merge selected", icon="merge", on_click=_merge_dialog
             ).props("flat")

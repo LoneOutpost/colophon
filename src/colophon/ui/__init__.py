@@ -38,9 +38,9 @@ def create_app(controller: AppController) -> None:
         render_workspace(controller, initial_filter=filter)
 
     @ui.page("/manage")
-    def manage() -> None:
+    def manage(kind: str | None = None, filter: str = "") -> None:  # the URL query-param name is "filter"
         preload_theme_background()
-        render_manage(controller)
+        render_manage(controller, initial_kind=kind, initial_filter=filter)
 
     @ui.page("/stats")
     def stats() -> None:
