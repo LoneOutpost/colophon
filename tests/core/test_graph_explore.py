@@ -88,7 +88,7 @@ def test_kind_constants_are_consistent():
 
 
 def test_kind_symbols_are_echart_paths():
-    from colophon.core.graph_explore import KINDS, _KIND_SYMBOL
+    from colophon.core.graph_explore import _KIND_SYMBOL, KINDS
 
     assert set(_KIND_SYMBOL) == set(KINDS)
     assert all(v.startswith("path://") for v in _KIND_SYMBOL.values())
