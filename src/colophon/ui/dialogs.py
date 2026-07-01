@@ -816,12 +816,24 @@ async def scan_dialog(
                 ui.label("Scan library").classes("text-subtitle1")
 
                 selection = set(selected_ids or ())
+                scan_paths = list(cfg.scan_paths)
+                path_boxes: dict[Path, object] = {}
                 if selection:
                     ui.label(f"Scanning: {len(selection)} selected books").classes(
                         "text-caption colophon-muted"
                     )
+                elif folder is not None:
+                    ui.label(f"Scanning: folder {folder.name}").classes("text-caption colophon-muted")
+                elif len(scan_paths) > 1:
+                    # Pick which configured scan paths to walk (default all) so a rebuild can
+                    # target one path without re-touching confirmed ones.
+                    ui.label("Scan paths").classes("colophon-seccap")
+                    for p in scan_paths:
+                        cb = ui.checkbox(p.name or str(p), value=True).props("dense")
+                        cb.tooltip(str(p))
+                        path_boxes[p] = cb
                 else:
-                    scope_text = f"folder: {folder.name}" if folder is not None else "all library paths"
+                    scope_text = f"path: {scan_paths[0].name}" if scan_paths else "all library paths"
                     ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
 
                 ui.label("Depth").classes("colophon-seccap")
@@ -838,6 +850,15 @@ async def scan_dialog(
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _preview() -> None:
+                        if path_boxes:
+                            roots = [p for p, cb in path_boxes.items() if cb.value]
+                            if not roots:
+                                ui.notify("Select at least one scan path", type="warning")
+                                return
+                        elif folder is not None and not selection:
+                            roots = [folder]
+                        else:
+                            roots = None  # a selection uses book_ids; single/no path -> all
                         opts = ScanOptions(
                             scope=_DEPTH_TO_SCOPE[depth_choice.value],
                             phases=frozenset(LOCAL),
@@ -857,7 +878,7 @@ async def scan_dialog(
 
                         try:
                             plan = await controller.scan_preview_streamed(
-                                None if selection else ([folder] if folder is not None else None),
+                                roots,
                                 template=cfg.filename_template,
                                 directory_scheme=cfg.directory_scheme,
                                 options=opts,
