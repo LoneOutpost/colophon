@@ -1502,34 +1502,34 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             ).props("dense no-caps").tooltip(
                 "Triage: books needing attention, worst-confidence first. Browse: the whole scope."
             )
-            with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+            with ui.row().classes("items-center w-full q-gutter-xs"):
                 ui.select(
                     {"detected": "Detected", "needs_review": "Needs review",
                      "ready": "Ready", "failed": "Failed"},
                     multiple=True, label="State", value=view["facets"]["state"],
                     on_change=lambda e: _set_facet("state", e.value),
-                ).props("dense outlined options-dense").classes("col")
+                ).props("dense outlined options-dense").classes("col").style("min-width: 7rem")
                 ui.select(
                     {"low": "<40", "mid": "40-74", "high": "≥75"},
                     multiple=True, label="Confidence", value=view["facets"]["confidence"],
                     on_change=lambda e: _set_facet("confidence", e.value),
-                ).props("dense outlined options-dense").classes("col")
+                ).props("dense outlined options-dense").classes("col").style("min-width: 7rem")
                 ui.select(
                     {"weak": "Weak", "trusted": "Trusted"}, label="Trust", clearable=True,
                     value=view["facets"]["trust"],
                     on_change=lambda e: _set_facet("trust", e.value),
-                ).props("dense outlined options-dense").classes("col")
+                ).props("dense outlined options-dense").classes("col").style("min-width: 7rem")
                 ui.select(
                     {"series": "No series", "cover": "No cover", "ident": "No ASIN/ISBN",
                      "narrator": "No narrator", "year": "No year"},
                     multiple=True, label="Missing", value=view["facets"]["missing"],
                     on_change=lambda e: _set_facet("missing", e.value),
-                ).props("dense outlined options-dense").classes("col")
+                ).props("dense outlined options-dense").classes("col").style("min-width: 7rem")
                 ui.select(
                     {"conf_asc": "Worst first", "conf_desc": "Best first", "title": "Title A-Z"},
                     label="Sort", value=view["sort"],
                     on_change=lambda e: _set_sort(e.value),
-                ).props("dense outlined options-dense").classes("col")
+                ).props("dense outlined options-dense").classes("col").style("min-width: 7rem")
             ui.checkbox(
                 "Open findings", value=view["facets"]["findings"],
                 on_change=lambda e: _set_facet("findings", e.value),
