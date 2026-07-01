@@ -248,9 +248,9 @@ def test_foster_container_author_is_folder_name(tmp_path):
         assert leaf.provenance["authors"] == "directory"
 
 
-def test_title_folder_split_gets_no_guessed_author(tmp_path):
+def test_multibook_folder_split_gets_folder_name_author(tmp_path):
     incoming = tmp_path / "incoming"
-    folder = incoming / "Legion"  # a title folder holding two different works
+    folder = incoming / "Legion"  # a multibook folder holding two DISTINCT works
     folder.mkdir(parents=True)
     (folder / "Legion.mp3").write_bytes(b"")
     (folder / "Elantris.mp3").write_bytes(b"")
@@ -259,11 +259,11 @@ def test_title_folder_split_gets_no_guessed_author(tmp_path):
     units = scan_ingest(repo, incoming, template="$Author - $Title",
                         directory_scheme="$Title")
     leaves = [u for u in units if u.source_folder == folder]
-    # A title folder holding distinct works splits into per-work leaves; none gets a
-    # guessed author (the container-author carry is author-only, not title folders).
+    # A true multibook folder can't be a title folder, so it resolves to author (its own name);
+    # each split leaf inherits that author.
     assert len(leaves) == 2
     for leaf in leaves:
-        assert leaf.authors == []
+        assert leaf.authors == ["Legion"]
 
 
 def test_commit_scan_reconcile_prunes_replaced_books(tmp_path: Path):
