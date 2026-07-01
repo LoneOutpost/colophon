@@ -89,7 +89,6 @@ def _run_local(
     pattern: object,
     scheme: object,
     unit_files: list[Path] | None = None,
-    rederive: bool = False,
 ) -> None:
     """Execute one local phase's work for `book`.
 
@@ -130,7 +129,7 @@ def _run_local(
             )
 
     elif phase is Phase.IDENTIFY:
-        run_identify(book, root=root, pattern=pattern, scheme=scheme, rederive=rederive)
+        run_identify(book, root=root, pattern=pattern, scheme=scheme)
 
     else:
         raise ValueError(f"_run_local: unsupported phase {phase!r}")
@@ -157,7 +156,7 @@ def run_local_phases(
             continue
         try:
             _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
-                       unit_files=unit_files, rederive=force)
+                       unit_files=unit_files)
             mark(book, phase, PhaseState.FRESH)
         except Exception as e:  # a local phase must not crash the caller
             logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
@@ -383,7 +382,7 @@ def _adopt_app_state(unit: BookUnit, matched: BookUnit) -> None:
 
 def _adopt_and_identify(
     unit: BookUnit, matched: BookUnit | None, *, root: Path, pattern: object,
-    scheme: object, rederive: bool = False,
+    scheme: object,
 ) -> BookUnit:
     """Return the unit to persist for one projected BookUnit, re-associated to its prior
     record (`matched`, found by owned-file overlap) so its durable id and app state
@@ -438,7 +437,7 @@ def _adopt_and_identify(
     mark(unit, Phase.SEARCH, PhaseState.FRESH)      # files were probed at container level
     mark(unit, Phase.CATEGORIZE, PhaseState.FRESH)  # being SINGLE is its categorization
     try:
-        run_identify(unit, root=root, pattern=pattern, scheme=scheme, rederive=rederive)
+        run_identify(unit, root=root, pattern=pattern, scheme=scheme)
         mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
     except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
         logger.warning(f"leaf IDENTIFY failed for {unit.source_folder} [{unit.title!r}]: {e}")
@@ -468,7 +467,6 @@ def plan_scan_graph(
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
     inf_root = inference_root or root
-    rederive = options is not None and options.scope is ScanScope.REFRESH
 
     _t0 = time.perf_counter()
 
@@ -497,7 +495,7 @@ def plan_scan_graph(
             before_empty = _empty_fields(matched) if matched is not None else set()
             prior_paths = {sf.path for sf in matched.source_files} if matched is not None else set()
             adopted = _adopt_and_identify(unit, matched, root=inf_root, pattern=pattern,
-                                          scheme=scheme, rederive=rederive)
+                                          scheme=scheme)
             if matched is not None:
                 plan.existing_books += 1
                 plan.fields_filled += len(before_empty - _empty_fields(adopted))

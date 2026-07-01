@@ -466,19 +466,6 @@ def test_resembles_series_matches_title_not_person(tmp_path):
     assert not _resembles("Liz Carlyle", "")
 
 
-def test_dominant_series_picks_most_common(tmp_path):
-    from colophon.core.graph_resolve import _dominant_series
-
-    d = tmp_path / "a"
-    books = [
-        _book_with_series(d, "Close Call", "Liz Carlyle", 8),
-        _book_with_series(d, "Secret Asset", "Liz Carlyle", 2),
-        _book_with_series(d, "One Off", "Other Series", 1),
-    ]
-    assert _dominant_series(books) == "Liz Carlyle"
-    assert _dominant_series([_book(d, [])]) is None   # no series at all
-
-
 def test_structural_author_for_untagged_single_series_container(tmp_path):
     from colophon.core.graph_resolve import resolve_graph_authors
 
@@ -571,22 +558,45 @@ def test_structural_author_is_idempotent(tmp_path):
     assert b1.provenance["authors"] == Provenance.GRAPHING.value
 
 
-def test_title_named_folder_is_not_classified_author(tmp_path):
+def test_multibook_folder_named_like_a_book_still_becomes_author(tmp_path):
+    # A true multibook folder cannot be an accurately-named *title* folder (its books have
+    # distinct titles), so even when the folder name matches one of those titles it resolves to
+    # author — the only surviving candidate once title is ruled out and series is not unanimous.
     from colophon.core.graph_resolve import resolve_graph_authors
 
     root = tmp_path / "lib"
-    title_dir = root / "Legion"          # folder named after a book it holds -> title folder
-    a = title_dir / "Legion"
-    b = title_dir / "Elantris"
+    folder = root / "Legion"             # name matches one held book, but two DISTINCT books live here
+    a = folder / "Legion"
+    b = folder / "Elantris"
     graph = _graph_with_dirs(a, b)
-    graph.directories[DirectoryNode.id_for(title_dir)].kind = "container"
+    graph.directories[DirectoryNode.id_for(folder)].kind = "container"
 
-    b1 = BookUnit.new(source_folder=title_dir)
-    b1.title = "Legion"                  # resembles the folder name
-    b2 = BookUnit.new(source_folder=title_dir)
+    b1 = BookUnit.new(source_folder=folder)
+    b1.title = "Legion"
+    b2 = BookUnit.new(source_folder=folder)
     b2.title = "Elantris"
     resolve_graph_authors(graph, [b1, b2], root=root)
 
-    node = graph.directories[DirectoryNode.id_for(title_dir)]
-    assert node.kind == "container"      # NOT reclassified to author
-    assert b1.authors == [] and b2.authors == []
+    node = graph.directories[DirectoryNode.id_for(folder)]
+    assert node.kind == "author"
+    assert node.author == "Legion"
+    assert b1.authors == ["Legion"] and b2.authors == ["Legion"]
+
+
+def test_scan_root_is_never_classified_author(tmp_path):
+    # One stray book whose author == the scan-root folder name must NOT turn the root into an
+    # author — that single seed would otherwise cascade the bucket name onto every authorless
+    # book beneath it (the observed TE_Audiobooks_S whole-library miscategorization).
+    from colophon.core.graph_resolve import resolve_graph_authors
+
+    root = tmp_path / "TE_Audiobooks_S"
+    author_dir = root / "Sylvia Plath"
+    graph = _graph_with_dirs(author_dir)
+    graph.directories[DirectoryNode.id_for(root)].kind = "grouping"  # promotable if not for the guard
+
+    b = BookUnit.new(source_folder=author_dir)
+    b.authors = ["TE_Audiobooks_S"]     # the poison: a sidecar author matching the root's name
+    b.provenance["authors"] = "datafile"
+    resolve_graph_authors(graph, [b], root=root)
+
+    assert graph.directories[DirectoryNode.id_for(root)].kind != "author"

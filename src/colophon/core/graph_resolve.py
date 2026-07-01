@@ -62,24 +62,6 @@ def _resembles(name: str, other: str) -> bool:
     return a == b or a <= b or b <= a
 
 
-def _dominant_series(books: list[BookUnit]) -> str | None:
-    """The most common series display-name across `books` (by normalized key; ties -> first
-    seen), or None if no book has a series."""
-    counts: dict[str, int] = {}
-    display: dict[str, str] = {}
-    for book in books:
-        label = _series_label(book)
-        if label is None:
-            continue
-        key, name, _ = label
-        counts[key] = counts.get(key, 0) + 1
-        display.setdefault(key, name)
-    if not counts:
-        return None
-    best = max(counts, key=lambda k: counts[k])
-    return display[best]
-
-
 def _ancestor_paths(folder: Path, root: Path) -> Iterator[Path]:
     """Paths from `folder` up to and including `root`, nearest first. Yields `folder`
     itself, then stops once it leaves `root` (so a folder outside `root` yields only
@@ -111,6 +93,11 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
             continue
         keys = {_name_key(a): a for a in book.authors}
         for node in _ancestors(graph, book.source_folder, root):
+            # The scan root is the library bucket, never a book's author — excluding it stops one
+            # stray sidecar (a book whose author == the root's folder name) from classifying the
+            # root as author and cascading that bucket name onto every authorless book beneath it.
+            if node.path == root:
+                continue
             matched = keys.get(_name_key(node.path.name))
             # author refines a grouping (or a not-yet-classified node); never a
             # classified container/title — those are not author folders.
@@ -119,10 +106,12 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
                 node.author = matched
 
     # Up — structural author: a folder of loose untagged books (a `container`) is its own
-    # author, taken from its name. Unlike the tag/datafile pass above this DOES reclassify a
-    # container (that shape is exactly an author folder), but only when (a) it is not the scan
-    # root, (b) it actually has empty/weak-author books to fill, and (c) its name does not
-    # resemble the dominant series of its books — so a real series folder stays a series tier.
+    # author, taken from its name. A true multibook folder cannot be a *title* folder (distinct
+    # books can't share one title), so it only aligns to author/series/franchise. Franchise is
+    # undeterminable and series is eliminated unless EVERY book shares the one series the folder
+    # is named for — leaving author as the sole remaining candidate. So reclassify a container to
+    # author when (a) it is not the scan root, (b) it has empty/weak-author books to fill, and
+    # (c) it is not that single-series-named-after-itself case.
     # Index books by every folder that contains them (the folder itself and each ancestor up
     # to root) in one pass, so the per-container lookup below is O(1) instead of a full rescan
     # of `books` per directory (which is O(dirs x books), ~21s on a 5k-book library).
@@ -141,11 +130,12 @@ def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) ->
         under = books_under.get(node.path, [])
         if not any(not b.authors or b.provenance.get("authors") in _WEAK for b in under):
             continue  # nothing to fill -> don't claim the folder as an author
-        series = _dominant_series(under)
-        if series is not None and _resembles(node.path.name, series):
-            continue  # series tier, not an author folder
-        if any(b.title and _resembles(node.path.name, b.title) for b in under):
-            continue  # title folder (named after one of its books), not an author folder
+        labels = [_series_label(b) for b in under]
+        all_one_series = bool(labels) and all(labels) and len({lab[0] for lab in labels if lab}) == 1
+        if all_one_series:
+            _, series_name, _ = next(lab for lab in labels if lab)
+            if _resembles(node.path.name, series_name):
+                continue  # every book is the one series this folder is named for -> series tier
         node.kind = "author"
         node.author = node.path.name
 

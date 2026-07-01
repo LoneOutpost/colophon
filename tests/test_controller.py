@@ -2637,7 +2637,7 @@ def test_graph_for_fresh_ignores_persisted_state(tmp_path):
 
     book = ctx.books.list_all()[0]
     book.title = "POISONED"
-    book.provenance["title"] = "datafile"
+    book.provenance["title"] = "tag"  # a persisted embedded-tag title (survives a normal re-identify)
     ctx.books.upsert(book)
 
     normal = ctrl.graph_for(ingest)
