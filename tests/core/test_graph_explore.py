@@ -75,6 +75,25 @@ def test_search_ranks_semantic_before_directories():
     assert ranked.index("A") < ranked.index("root")
 
 
+def test_kind_constants_are_consistent():
+    from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
+
+    assert KINDS == ("author", "series", "franchise", "book", "folder", "file")
+    assert set(KIND_COLOR) == set(KINDS)
+    assert set(KIND_ICON) == set(KINDS)
+    assert KIND_ICON == {
+        "author": "person", "series": "layers", "franchise": "collections_bookmark",
+        "book": "menu_book", "folder": "folder", "file": "description",
+    }
+
+
+def test_kind_symbols_are_echart_paths():
+    from colophon.core.graph_explore import KINDS, _KIND_SYMBOL
+
+    assert set(_KIND_SYMBOL) == set(KINDS)
+    assert all(v.startswith("path://") for v in _KIND_SYMBOL.values())
+
+
 def test_to_echart_structure():
     g = _graph()
     sub = neighborhood(g, "A", hops=1)
