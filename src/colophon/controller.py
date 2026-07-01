@@ -29,7 +29,6 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
-from colophon.core.graph_explore import display_kind, neighborhood, search_nodes, to_echart
 from colophon.core.graph_records import book_node_id, book_records
 from colophon.core.graph_resolve import (
     _name_key,
@@ -71,6 +70,7 @@ from colophon.core.quickmatch import (
 )
 from colophon.core.sources import MetadataSource, SourceQuery, SourceResult, arrange_sources
 from colophon.services import files as file_ops
+from colophon.services import graph_inspect as graph_inspect_svc
 from colophon.services.acquire import (
     AcquireCandidate,
     AcquireResult,
@@ -483,64 +483,22 @@ class AppController:
         book = self.ctx.books.get(book_id)
         return self._hydrate([book])[0] if book is not None else None
 
-    def _graph_node_name(self, node) -> str:
-        book_id = node.attrs.get("book_id")
-        if book_id:
-            book = self.get_book(str(book_id))
-            if book is not None:
-                return book.title or Path(str(node.attrs.get("source_folder", ""))).name or node.id
-        return str(node.attrs.get("name") or node.id)
-
-    def _graph_node_confidence(self, node) -> float | None:
-        book_id = node.attrs.get("book_id")
-        if book_id:
-            book = self.get_book(str(book_id))
-            return book.confidence if book is not None else None
-        return None  # directory/entity node confidence is not persisted (spec)
-
     def graph_search(self, query: str) -> list[dict]:
         """Focal candidates for the explorer search box: [{id, label, kind}]."""
-        g = self.ctx.library_graph
-        ids = search_nodes(g, query, name_of=self._graph_node_name)
-        return [{"id": nid, "label": self._graph_node_name(g.nodes[nid]),
-                 "kind": display_kind(g.nodes[nid])} for nid in ids]
+        return graph_inspect_svc.search(self.ctx.library_graph, self.ctx.books, query)
 
     def graph_neighborhood(
         self, focal_id: str, *, hops: int = 1, hidden: frozenset[str] = frozenset()
     ) -> dict:
-        """Everything the explorer needs to render one view: the ECharts options for `focal_id`'s
-        neighborhood plus the focal node's inspect details (kind, confidence, connections, and —
-        for a book — its files and fields). `hidden` drops those display kinds from the chart."""
-        g = self.ctx.library_graph
-        sub = neighborhood(g, focal_id, hops=hops)
-        echart = to_echart(g, sub, focal_id, hidden=hidden,
-                           label_of=self._graph_node_name, confidence_of=self._graph_node_confidence)
-        return {"echart": echart, "focal": self._graph_focal_details(focal_id), "omitted": sub.omitted}
+        """The ECharts options + omitted count for `focal_id`'s `hops`-hop neighborhood (chart only;
+        the focal details are a separate `graph_inspect` call)."""
+        return graph_inspect_svc.neighborhood_view(
+            self.ctx.library_graph, self.ctx.books, focal_id, depth=hops, hidden=hidden)
 
-    def _graph_focal_details(self, focal_id: str) -> dict:
-        g = self.ctx.library_graph
-        node = g.nodes.get(focal_id)
-        if node is None:
-            return {}
-        parents = sum(1 for e in g.edges if e.dst == focal_id and e.kind == "contains")
-        children = sum(1 for e in g.edges if e.src == focal_id and e.kind == "contains")
-        series = sum(1 for e in g.edges if focal_id in (e.src, e.dst) and e.kind == "series")
-        details = {
-            "id": focal_id, "label": self._graph_node_name(node), "kind": display_kind(node),
-            "confidence": self._graph_node_confidence(node),
-            "connections": {"parents": parents, "children": children, "series": series},
-            "files": [], "fields": {},
-        }
-        book_id = node.attrs.get("book_id")
-        if book_id:
-            book = self.get_book(str(book_id))
-            if book is not None:
-                details["files"] = [sf.path.name for sf in book.source_files]
-                details["fields"] = {
-                    "title": book.title, "authors": list(book.authors),
-                    "series": [s.name for s in book.series], "asin": book.asin,
-                }
-        return details
+    def graph_inspect(self, focal_id: str):
+        """The per-kind inspect read-model for the panel (rows, linked folders, files, provenance,
+        links)."""
+        return graph_inspect_svc.inspect(self.ctx.library_graph, self.ctx.books, focal_id)
 
     async def book_cover(self, book_id: str, *, thumb: bool = False) -> tuple[bytes, str] | None:
         """A book's cover image as (bytes, mime): the cached file if present, else
