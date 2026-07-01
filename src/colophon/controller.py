@@ -505,13 +505,15 @@ class AppController:
         return [{"id": nid, "label": self._graph_node_name(g.nodes[nid]),
                  "kind": display_kind(g.nodes[nid])} for nid in ids]
 
-    def graph_neighborhood(self, focal_id: str, *, hops: int = 1) -> dict:
+    def graph_neighborhood(
+        self, focal_id: str, *, hops: int = 1, hidden: frozenset[str] = frozenset()
+    ) -> dict:
         """Everything the explorer needs to render one view: the ECharts options for `focal_id`'s
         neighborhood plus the focal node's inspect details (kind, confidence, connections, and —
-        for a book — its files and fields)."""
+        for a book — its files and fields). `hidden` drops those display kinds from the chart."""
         g = self.ctx.library_graph
         sub = neighborhood(g, focal_id, hops=hops)
-        echart = to_echart(g, sub, focal_id,
+        echart = to_echart(g, sub, focal_id, hidden=hidden,
                            label_of=self._graph_node_name, confidence_of=self._graph_node_confidence)
         return {"echart": echart, "focal": self._graph_focal_details(focal_id), "omitted": sub.omitted}
 

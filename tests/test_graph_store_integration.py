@@ -103,3 +103,27 @@ def test_two_roots_persist_and_replace_independently(tmp_path):
     r2_before = {n.id for n in ctx.graph.nodes_for(r2)}
     ctrl.apply_scan(ctrl.scan_preview([r1]))
     assert {n.id for n in ctx.graph.nodes_for(r2)} == r2_before
+
+
+def test_graph_neighborhood_hidden_filters_kind(tmp_path):
+    root = tmp_path / "lib"
+    _seed(root)  # root/Author/Dune with two mp3s
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [root]
+    ctrl = AppController(ctx)
+    ctrl.apply_scan(ctrl.scan_preview([root]))
+
+    from colophon.core.graph_explore import _KIND_INDEX
+
+    # Focus the book folder: its 1-hop neighborhood includes the two file nodes.
+    book_dir = DirectoryNode.id_for(root / "Author" / "Dune")
+    file_cat = _KIND_INDEX["file"]
+
+    full = ctrl.graph_neighborhood(book_dir)
+    full_data = full["echart"]["series"][0]["data"]
+    assert any(d["category"] == file_cat for d in full_data)  # files present unfiltered
+
+    hidden = ctrl.graph_neighborhood(book_dir, hidden=frozenset({"file"}))
+    hidden_data = hidden["echart"]["series"][0]["data"]
+    assert all(d["category"] != file_cat for d in hidden_data)  # files gone when hidden
+    assert hidden_data  # the focal folder itself is still shown
