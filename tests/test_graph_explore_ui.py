@@ -25,3 +25,27 @@ def test_legend_helper_is_callable():
     from colophon.ui.graph_view import _explorer_legend
 
     assert callable(_explorer_legend)
+
+
+def test_node_click_target_navigates_only_on_node():
+    from colophon.ui.graph_view import _node_click_target
+
+    none = frozenset()
+    # a graph node click -> navigate to that focal
+    assert _node_click_target(
+        {"componentType": "series", "dataType": "node", "data": {"id": "book:1"}}, none
+    ) == "/graph?focal=book%3A1"
+    # an edge click (ECharts omits 'value') -> ignored, never crashes
+    assert _node_click_target(
+        {"componentType": "series", "dataType": "edge", "data": {}}, none
+    ) is None
+    # a non-series click (e.g. roam/background) -> ignored
+    assert _node_click_target({"componentType": "grid"}, none) is None
+    # a node with no id -> ignored
+    assert _node_click_target(
+        {"componentType": "series", "dataType": "node", "data": {}}, none
+    ) is None
+    # the hidden set is preserved into the target URL
+    assert _node_click_target(
+        {"componentType": "series", "dataType": "node", "data": {"id": "a"}}, frozenset({"file"})
+    ) == "/graph?focal=a&hide=file"

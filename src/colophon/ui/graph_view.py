@@ -238,6 +238,19 @@ def _graph_url(focal_id: str, hidden: frozenset[str]) -> str:
     return url
 
 
+def _node_click_target(args: dict, hidden: frozenset[str]) -> str | None:
+    """The explorer URL to navigate to for an ECharts `componentClick`, or None to ignore it. Only
+    graph *node* clicks navigate; edge and background clicks are ignored. We read `args` defensively
+    (instead of NiceGUI's `on_point_click`) because ECharts omits `value` from edge-click payloads,
+    which makes NiceGUI's built-in handler raise `KeyError: 'value'`."""
+    if args.get("componentType") != "series" or args.get("dataType") != "node":
+        return None
+    data = args.get("data")
+    if isinstance(data, dict) and data.get("id"):
+        return _graph_url(str(data["id"]), hidden)
+    return None
+
+
 def _explorer_legend(focal_id: str, hidden: frozenset[str]) -> None:
     """A compact legend row under the chart: one glyph + label per kind. Enabled entries are bright;
     hidden entries are dimmed and struck through. Clicking an entry toggles that kind and re-renders
@@ -307,10 +320,11 @@ def render_explorer(controller: AppController, focal_id: str | None, hidden: fro
                 chart = ui.echart(view["echart"]).classes("w-full").style("height: 62vh")
 
                 def _on_node_click(e) -> None:
-                    if getattr(e, "data_type", None) == "node" and isinstance(e.data, dict) and e.data.get("id"):
-                        ui.navigate.to(_graph_url(e.data["id"], hidden))
+                    target = _node_click_target(e.args, hidden)
+                    if target:
+                        ui.navigate.to(target)
 
-                chart.on_point_click(_on_node_click)
+                chart.on("componentClick", _on_node_click, ["componentType", "dataType", "data"])
                 omitted = view["omitted"]
                 if omitted:
                     ui.label(f"Showing a capped neighborhood — {omitted} more not shown.").classes(
