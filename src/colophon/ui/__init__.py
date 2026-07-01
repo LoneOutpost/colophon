@@ -48,10 +48,10 @@ def create_app(controller: AppController) -> None:
         render_stats(controller)
 
     @ui.page("/graph")
-    async def graph(mode: str = "explorer", focal: str | None = None) -> None:
+    async def graph(mode: str = "explorer", focal: str | None = None, hide: str | None = None) -> None:
         preload_theme_background()
         await ui.context.client.connected()
-        render_graph(controller, mode=mode, focal=focal)
+        render_graph(controller, mode=mode, focal=focal, hide=hide)
 
     @ui.page("/settings")
     def settings() -> None:
