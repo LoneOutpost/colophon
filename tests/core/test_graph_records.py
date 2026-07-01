@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, FileNode, FileRole, Graph
-from colophon.core.graph_records import book_node_id, entity_node_id, graph_records, skeleton_records
+from colophon.core.graph_records import (
+    book_node_id,
+    entity_node_id,
+    graph_records,
+    skeleton_records,
+)
 from colophon.core.models import BookUnit, SourceFile
 
 
