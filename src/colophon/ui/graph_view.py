@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 from nicegui import ui
 
@@ -221,61 +222,68 @@ def render_classic_tree(controller: AppController) -> None:
     ui.timer(0.1, _load, once=True)  # initial: render the cached graph, or build the first time
 
 
-def render_explorer(controller: AppController) -> None:
-    """Read-only interactive neighborhood explorer over the library graph (ECharts)."""
+def _explorer_panel(focal: dict) -> None:
+    """Render one focal node's inspect details into the current container."""
+    if not focal:
+        ui.label("Search for an author, series, or book, then click a result to explore it.").classes(
+            "text-caption colophon-muted"
+        )
+        return
+    ui.label(focal["label"]).classes("text-subtitle1")
+    badge = focal["kind"].upper()
+    if focal.get("confidence") is not None:
+        badge += f" · {focal['confidence']:.0f}"
+    ui.label(badge).classes("colophon-seccap")
+    c = focal["connections"]
+    ui.label(
+        f"{c['parents']} parent · {c['children']} children · {c['series']} series"
+    ).classes("text-caption colophon-muted")
+    fields = focal.get("fields") or {}
+    if fields:
+        ui.label(f"author: {', '.join(fields.get('authors') or []) or '—'}").classes("text-caption")
+        ui.label(f"series: {', '.join(fields.get('series') or []) or '—'}").classes("text-caption")
+    files = focal.get("files") or []
+    if files:
+        ui.label(f"{len(files)} files").classes("colophon-seccap")
+        for name in files[:20]:
+            ui.label(name).classes("text-caption colophon-muted ellipsis")
+    with ui.row().classes("q-mt-sm").style("opacity:.45"):
+        ui.label("Operations · 3.2").classes("text-caption")
+
+
+def render_explorer(controller: AppController, focal_id: str | None) -> None:
+    """Read-only neighborhood explorer. URL-driven: the focal node is a `?focal=` query param, so
+    selecting a node navigates to a fresh render. This is required because NiceGUI's `ui.echart`
+    only renders a graph when built with data at page-construction time — post-build option updates
+    do not propagate (NiceGUI 3.13 + bundled ECharts 6). Every focal is therefore a full render."""
+    view = controller.graph_neighborhood(focal_id) if focal_id else None
+
     with ui.row().classes("w-full no-wrap gap-2"):
         with ui.column().classes("col"):
             search = ui.input(placeholder="Find author, series, or book…").props(
                 "dense outlined clearable debounce=300"
             ).classes("w-full")
             results = ui.column().classes("w-full gap-0")
-            chart = ui.echart({"series": [{"type": "graph", "data": [], "links": []}]}).classes(
-                "w-full"
-            ).style("height: 62vh")
-            note = ui.label("").classes("text-caption colophon-muted")
-        panel = ui.column().classes("col-4 gap-1")
+            if view is not None:
+                # Built WITH data at construction so ECharts actually renders a canvas.
+                chart = ui.echart(view["echart"]).classes("w-full").style("height: 62vh")
 
-    def _show_panel(focal: dict) -> None:
-        panel.clear()
-        with panel:
-            if not focal:
-                ui.label("Select a node to inspect it.").classes("text-caption colophon-muted")
-                return
-            ui.label(focal["label"]).classes("text-subtitle1")
-            badge = focal["kind"].upper()
-            if focal.get("confidence") is not None:
-                badge += f" · {focal['confidence']:.0f}"
-            ui.label(badge).classes("colophon-seccap")
-            c = focal["connections"]
-            ui.label(
-                f"{c['parents']} parent · {c['children']} children · {c['series']} series"
-            ).classes("text-caption colophon-muted")
-            fields = focal.get("fields") or {}
-            if fields:
-                ui.label(f"author: {', '.join(fields.get('authors') or []) or '—'}").classes("text-caption")
-                ui.label(f"series: {', '.join(fields.get('series') or []) or '—'}").classes("text-caption")
-            files = focal.get("files") or []
-            if files:
-                ui.label(f"{len(files)} files").classes("colophon-seccap")
-                for name in files[:20]:
-                    ui.label(name).classes("text-caption colophon-muted ellipsis")
-            with ui.row().classes("q-mt-sm").style("opacity:.45"):
-                ui.label("Operations · 3.2").classes("text-caption")
+                def _on_node_click(e) -> None:
+                    if getattr(e, "data_type", None) == "node" and isinstance(e.data, dict) and e.data.get("id"):
+                        ui.navigate.to(f"/graph?focal={quote(e.data['id'])}")
 
-    def _focus(focal_id: str) -> None:
-        view = controller.graph_neighborhood(focal_id)
-        chart.options = view["echart"]
-        chart.update()
-        _show_panel(view["focal"])
-        omitted = view["omitted"]
-        note.set_text(f"Showing a capped neighborhood — {omitted} more not shown." if omitted else "")
-
-    def _on_node_click(e) -> None:
-        # e.data is the clicked ECharts node dict; e.data_type distinguishes 'node' from 'edge'.
-        if getattr(e, "data_type", None) == "node" and isinstance(e.data, dict) and e.data.get("id"):
-            _focus(e.data["id"])
-
-    chart.on_point_click(_on_node_click)
+                chart.on_point_click(_on_node_click)
+                omitted = view["omitted"]
+                if omitted:
+                    ui.label(f"Showing a capped neighborhood — {omitted} more not shown.").classes(
+                        "text-caption colophon-muted"
+                    )
+            else:
+                ui.label("Nothing focused yet — search below.").classes(
+                    "text-caption colophon-muted q-pa-md"
+                )
+        with ui.column().classes("col-4 gap-1"):
+            _explorer_panel(view["focal"] if view is not None else {})
 
     def _run_search() -> None:
         results.clear()
@@ -283,28 +291,23 @@ def render_explorer(controller: AppController) -> None:
             for h in controller.graph_search(search.value or "")[:12]:
                 ui.button(
                     f"{h['label']}  ·  {h['kind']}",
-                    on_click=lambda _=None, i=h["id"]: _focus(i),
+                    on_click=lambda _=None, i=h["id"]: ui.navigate.to(f"/graph?focal={quote(i)}"),
                 ).props("flat dense no-caps align=left").classes("w-full")
 
     search.on("keydown.enter", lambda _=None: _run_search())
     search.on_value_change(lambda _=None: _run_search())
-    _show_panel({})
 
 
-def render_graph(controller: AppController) -> None:
-    """/graph: an interactive neighborhood Explorer (default) or the Classic classification tree."""
+def render_graph(controller: AppController, *, mode: str = "explorer", focal: str | None = None) -> None:
+    """/graph: an interactive neighborhood Explorer (default) or the Classic classification tree.
+    `mode` and `focal` come from the URL query string so both are stable full renders."""
     with page_header(controller, "graph", icon="account_tree"):
         pass
-    mode = {"v": "explorer"}
-
-    def _render() -> None:
-        holder.clear()
-        with holder:
-            (render_explorer if mode["v"] == "explorer" else render_classic_tree)(controller)
-
     ui.toggle(
-        {"explorer": "Explorer", "classic": "Classic tree"}, value=mode["v"],
-        on_change=lambda e: (mode.update(v=e.value), _render()),
+        {"explorer": "Explorer", "classic": "Classic tree"}, value=mode,
+        on_change=lambda e: ui.navigate.to(f"/graph?mode={e.value}"),
     ).props("dense no-caps").classes("q-ma-sm")
-    holder = ui.column().classes("w-full")
-    _render()
+    if mode == "classic":
+        render_classic_tree(controller)
+    else:
+        render_explorer(controller, focal)
