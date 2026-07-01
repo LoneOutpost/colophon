@@ -160,13 +160,12 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
 
 def run_identify(
     book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
-    rederive: bool = False,
 ) -> None:
-    """Run the IDENTIFY pipeline for `book`, mutating it in place. `rederive` (Refresh)
-    first drops fields orphaned by a removed/vetted datafile so they re-derive."""
+    """Run the IDENTIFY pipeline for `book`, mutating it in place. Fields orphaned by a
+    removed/vetted datafile are always dropped so they re-derive — the sidecar being gone
+    is the trigger, not the scan mode, so this holds on every scan (not just Refresh)."""
     evidence = gather(book, root=root, pattern=pattern, scheme=scheme)
-    if rederive:
-        drop_orphaned_datafile_fields(book, evidence)
+    drop_orphaned_datafile_fields(book, evidence)
     seed_series(book)
     resolve(book, evidence)
     attribute(book, evidence)

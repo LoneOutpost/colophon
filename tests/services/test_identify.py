@@ -189,7 +189,7 @@ def test_run_identify_rederive_refills_title_from_tag(tmp_path):
     book.provenance["title"] = Provenance.DATAFILE.value
 
     run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
-                 scheme=parse_scheme(""), rederive=True)
+                 scheme=parse_scheme(""))
 
     assert book.title == "Real Title"
     assert book.provenance["title"] == Provenance.TAG.value
@@ -209,7 +209,7 @@ def test_run_identify_rederive_clears_field_with_no_lower_tier(tmp_path):
     book.provenance["description"] = Provenance.DATAFILE.value
 
     run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
-                 scheme=parse_scheme(""), rederive=True)
+                 scheme=parse_scheme(""))
 
     assert book.description == ""
     assert "description" not in book.provenance
@@ -231,13 +231,15 @@ def test_run_identify_rederive_clears_when_datafile_vetted_as_container(tmp_path
     book.provenance["publisher"] = Provenance.DATAFILE.value
 
     run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
-                 scheme=parse_scheme(""), rederive=True)
+                 scheme=parse_scheme(""))
 
     assert book.publisher == ""
     assert "publisher" not in book.provenance
 
 
-def test_run_identify_without_rederive_keeps_orphaned_datafile_field(tmp_path):
+def test_run_identify_clears_orphaned_datafile_on_any_scan(tmp_path):
+    # The sidecar being gone is the trigger, not the scan mode: an orphaned DATAFILE field is
+    # dropped on every scan (not just Refresh), so a plain rescan heals stale sidecar data.
     from colophon.services.identify import run_identify
 
     folder = tmp_path / "Some Author" / "Some Book"
@@ -251,7 +253,7 @@ def test_run_identify_without_rederive_keeps_orphaned_datafile_field(tmp_path):
     book.provenance["description"] = Provenance.DATAFILE.value
 
     run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
-                 scheme=parse_scheme(""))  # rederive defaults False
+                 scheme=parse_scheme(""))
 
-    assert book.description == "Stale datafile blurb"
-    assert book.provenance["description"] == Provenance.DATAFILE.value
+    assert book.description == ""
+    assert "description" not in book.provenance
