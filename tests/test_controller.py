@@ -3322,12 +3322,16 @@ def test_graph_neighborhood_resolves_book_label_and_confidence(tmp_path):
     view = controller.graph_neighborhood("A")
     names = {n["name"] for n in view["echart"]["series"][0]["data"]}
     assert names == {"Stella Rimington", "Close Call"}
-    assert view["focal"]["label"] == "Stella Rimington"
-    assert view["focal"]["kind"] == "author"
+    assert set(view) == {"echart", "omitted"}
 
-    book_view = controller.graph_neighborhood("B")
-    assert book_view["focal"]["confidence"] == 42.0
-    assert book_view["focal"]["fields"]["title"] == "Close Call"
+    # focal details are now a separate inspect call
+    author_view = controller.graph_inspect("A")
+    assert author_view.label == "Stella Rimington"
+    assert author_view.kind == "author"
+
+    book_view = controller.graph_inspect("B")
+    assert book_view.confidence == 42.0
+    assert book_view.label == "Close Call"
 
     hits = controller.graph_search("close")
     assert any(h["id"] == "B" and h["label"] == "Close Call" for h in hits)

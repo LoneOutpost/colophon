@@ -73,10 +73,23 @@ def skeleton_records(
     nodes: list[NodeRecord] = []
     edges: list[EdgeRecord] = []
     for d in graph.directories.values():
+        attrs: dict[str, object] = {"path": str(d.path), "name": d.path.name, "kind": d.kind}
+        if d.kind_source:
+            attrs["kind_source"] = d.kind_source
+        if d.kind_confidence:
+            attrs["kind_confidence"] = d.kind_confidence
+        if d.kind_evidence:
+            attrs["kind_evidence"] = list(d.kind_evidence)
+        if d.kind_hint:
+            attrs["kind_hint"] = d.kind_hint
+        if d.kind_hint_confidence:
+            attrs["kind_hint_confidence"] = d.kind_hint_confidence
+        if d.kind_hint_evidence:
+            attrs["kind_hint_evidence"] = list(d.kind_hint_evidence)
         nodes.append(NodeRecord(
             id=d.id, physical="directory",
             semantic=d.kind if d.kind in _SEMANTIC_DIR_KINDS else None,
-            root=r, attrs={"path": str(d.path), "name": d.path.name},
+            root=r, attrs=attrs,
         ))
         for cid in d.child_dirs:
             edges.append(EdgeRecord(src=d.id, kind="contains", dst=cid, root=r))

@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, FileNode, FileRole, Graph
-from colophon.core.graph_records import book_node_id, entity_node_id, graph_records
+from colophon.core.graph_records import (
+    book_node_id,
+    entity_node_id,
+    graph_records,
+    skeleton_records,
+)
 from colophon.core.models import BookUnit, SourceFile
 
 
@@ -209,3 +214,33 @@ def test_graph_records_equals_skeleton_plus_book_records(tmp_path):
     bk_n, bk_e = book_records([unit], root=tmp_path, franchise_of=franchise_of)
     assert (sk_n + bk_n) == nodes
     assert (sk_e + bk_e) == edges
+
+
+def _dir_graph(**kw) -> tuple[Graph, str]:
+    g = Graph()
+    p = Path("/lib/Some Author")
+    d = DirectoryNode(path=p, **kw)
+    g.directories[d.id] = d
+    return g, d.id
+
+
+def test_skeleton_records_stamps_classification_provenance():
+    g, did = _dir_graph(
+        kind="author", kind_source="manual", kind_confidence=0.9,
+        kind_evidence=["3 child folders detected as books"],
+    )
+    nodes, _ = skeleton_records(g, root=Path("/lib"))
+    attrs = next(n.attrs for n in nodes if n.id == did)
+    assert attrs["kind"] == "author"
+    assert attrs["kind_source"] == "manual"
+    assert attrs["kind_confidence"] == 0.9
+    assert attrs["kind_evidence"] == ["3 child folders detected as books"]
+
+
+def test_skeleton_records_marks_unknown_but_omits_empty_detail():
+    g, did = _dir_graph()  # default kind="unknown", no evidence
+    nodes, _ = skeleton_records(g, root=Path("/lib"))
+    attrs = next(n.attrs for n in nodes if n.id == did)
+    assert attrs["kind"] == "unknown"          # marker always present
+    assert "kind_evidence" not in attrs         # empty detail omitted
+    assert "kind_source" not in attrs

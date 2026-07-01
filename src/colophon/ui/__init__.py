@@ -38,9 +38,9 @@ def create_app(controller: AppController) -> None:
         render_workspace(controller, initial_filter=filter)
 
     @ui.page("/manage")
-    def manage() -> None:
+    def manage(kind: str | None = None, filter: str = "") -> None:  # the URL query-param name is "filter"
         preload_theme_background()
-        render_manage(controller)
+        render_manage(controller, initial_kind=kind, initial_filter=filter)
 
     @ui.page("/stats")
     def stats() -> None:
@@ -48,10 +48,11 @@ def create_app(controller: AppController) -> None:
         render_stats(controller)
 
     @ui.page("/graph")
-    async def graph(mode: str = "explorer", focal: str | None = None, hide: str | None = None) -> None:
+    async def graph(mode: str = "explorer", focal: str | None = None,
+                    hide: str | None = None, depth: str | None = None) -> None:
         preload_theme_background()
         await ui.context.client.connected()
-        render_graph(controller, mode=mode, focal=focal, hide=hide)
+        render_graph(controller, mode=mode, focal=focal, hide=hide, depth=depth)
 
     @ui.page("/settings")
     def settings() -> None:

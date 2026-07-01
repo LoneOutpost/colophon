@@ -127,3 +127,23 @@ def test_graph_neighborhood_hidden_filters_kind(tmp_path):
     hidden_data = hidden["echart"]["series"][0]["data"]
     assert all(d["category"] != file_cat for d in hidden_data)  # files gone when hidden
     assert hidden_data  # the focal folder itself is still shown
+
+
+def test_controller_graph_inspect_and_depth(tmp_path):
+    root = tmp_path / "lib"
+    _seed(root)  # root/Author/Dune
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [root]
+    ctrl = AppController(ctx)
+    ctrl.apply_scan(ctrl.scan_preview([root]))
+
+    author_dir = DirectoryNode.id_for(root / "Author")
+    got = ctrl.graph_inspect(author_dir)
+    # a physical directory is always framed structurally (a "Contains" row), regardless of whether
+    # the scan classified it as an author (which would make display-kind "author").
+    assert any(label == "Contains" for label, _ in got.rows)
+
+    view1 = ctrl.graph_neighborhood(author_dir, hops=1)
+    assert set(view1) == {"echart", "omitted"}
+    view2 = ctrl.graph_neighborhood(author_dir, hops=2)
+    assert len(view2["echart"]["series"][0]["data"]) >= len(view1["echart"]["series"][0]["data"])

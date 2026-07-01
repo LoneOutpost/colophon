@@ -229,16 +229,41 @@ def _parse_hidden(hide: str | None) -> frozenset[str]:
     return frozenset(k for k in (hide or "").split(",") if k in known)
 
 
-def _graph_url(focal_id: str, hidden: frozenset[str]) -> str:
-    """The explorer URL for a focal node and hidden-kind set. `hide` is a sorted, comma-joined,
-    un-encoded CSV so `_parse_hidden` round-trips it; dropped entirely when empty (clean links)."""
+def _parse_depth(depth: str | float | None) -> int:
+    """Parse a depth (the `?depth=` query string or the spinner's numeric value), clamped to
+    [1, 3]; anything invalid falls back to 1."""
+    try:
+        return max(1, min(3, int(depth)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _graph_url(focal_id: str, hidden: frozenset[str], *, depth: int = 1) -> str:
+    """The explorer URL for a focal node, hidden-kind set, and depth. `depth` is omitted when 1 and
+    `hide` when empty, for clean links; `hide` is a sorted, un-encoded CSV so `_parse_hidden` round-
+    trips it."""
     url = f"/graph?focal={quote(focal_id)}"
+    if depth != 1:
+        url += f"&depth={depth}"
     if hidden:
         url += f"&hide={','.join(sorted(hidden))}"
     return url
 
 
-def _explorer_legend(focal_id: str, hidden: frozenset[str]) -> None:
+def _node_click_target(args: dict, hidden: frozenset[str], *, depth: int = 1) -> str | None:
+    """The explorer URL to navigate to for an ECharts `componentClick`, or None to ignore it. Only
+    graph *node* clicks navigate; edge and background clicks are ignored. We read `args` defensively
+    (instead of NiceGUI's `on_point_click`) because ECharts omits `value` from edge-click payloads,
+    which makes NiceGUI's built-in handler raise `KeyError: 'value'`."""
+    if args.get("componentType") != "series" or args.get("dataType") != "node":
+        return None
+    data = args.get("data")
+    if isinstance(data, dict) and data.get("id"):
+        return _graph_url(str(data["id"]), hidden, depth=depth)
+    return None
+
+
+def _explorer_legend(focal_id: str, hidden: frozenset[str], depth: int = 1) -> None:
     """A compact legend row under the chart: one glyph + label per kind. Enabled entries are bright;
     hidden entries are dimmed and struck through. Clicking an entry toggles that kind and re-renders
     via the URL (in-place ECharts updates don't propagate in this NiceGUI/ECharts combo)."""
@@ -246,7 +271,7 @@ def _explorer_legend(focal_id: str, hidden: frozenset[str]) -> None:
         for kind in KINDS:
             is_hidden = kind in hidden
             new_hidden = (hidden - {kind}) if is_hidden else (hidden | {kind})
-            target = _graph_url(focal_id, new_hidden)
+            target = _graph_url(focal_id, new_hidden, depth=depth)
             entry = ui.row().classes("items-center gap-1 cursor-pointer").style(
                 "opacity:.4" if is_hidden else "opacity:1"
             )
@@ -259,70 +284,85 @@ def _explorer_legend(focal_id: str, hidden: frozenset[str]) -> None:
                     label.style("text-decoration: line-through")
 
 
-def _explorer_panel(focal: dict) -> None:
-    """Render one focal node's inspect details into the current container."""
-    if not focal:
+def _explorer_panel(view) -> None:
+    """Render one focal node's inspect read-model (a NodeInspection) into the current container."""
+    if not view or not view.kind:
         ui.label("Search for an author, series, or book, then click a result to explore it.").classes(
             "text-caption colophon-muted"
         )
         return
-    ui.label(focal["label"]).classes("text-subtitle1")
-    badge = focal["kind"].upper()
-    if focal.get("confidence") is not None:
-        badge += f" · {focal['confidence']:.0f}"
-    ui.label(badge).classes("colophon-seccap")
-    c = focal["connections"]
-    ui.label(
-        f"{c['parents']} parent · {c['children']} children · {c['series']} series"
-    ).classes("text-caption colophon-muted")
-    fields = focal.get("fields") or {}
-    if fields:
-        ui.label(f"author: {', '.join(fields.get('authors') or []) or '—'}").classes("text-caption")
-        ui.label(f"series: {', '.join(fields.get('series') or []) or '—'}").classes("text-caption")
-    files = focal.get("files") or []
-    if files:
-        ui.label(f"{len(files)} files").classes("colophon-seccap")
-        for name in files[:20]:
+    ui.label(view.label).classes("text-subtitle1")
+    cap = view.kind.upper()
+    if view.confidence is not None:
+        cap += f" · {view.confidence:.0%}"
+    ui.label(cap).classes("colophon-seccap")
+    for label, value in view.rows:
+        ui.label(f"{label}: {value}").classes("text-caption")
+    if view.linked_folders:
+        ui.label(f"Linked folders: {', '.join(view.linked_folders)}").classes("text-caption")
+    if view.files:
+        ui.label(f"{len(view.files)} files").classes("colophon-seccap q-mt-sm")
+        for name in view.files[:20]:
             ui.label(name).classes("text-caption colophon-muted ellipsis")
+    if view.provenance:
+        ui.label("Provenance").classes("colophon-seccap q-mt-sm")
+        for line in view.provenance:
+            ui.label(line).classes("text-caption colophon-muted")
+    if view.links:
+        with ui.row().classes("q-mt-sm gap-2 flex-wrap"):
+            for link in view.links:
+                ui.button(link.label, on_click=lambda _=None, u=link.url: ui.navigate.to(u)).props(
+                    "flat dense no-caps"
+                )
     with ui.row().classes("q-mt-sm").style("opacity:.45"):
         ui.label("Operations · 3.2").classes("text-caption")
 
 
-def render_explorer(controller: AppController, focal_id: str | None, hidden: frozenset[str] = frozenset()) -> None:
-    """Read-only neighborhood explorer. URL-driven: the focal node is a `?focal=` query param and the
-    hidden-kind set is `?hide=`, so selecting a node or toggling the legend navigates to a fresh
-    render. This is required because NiceGUI's `ui.echart` only renders a graph when built with data
-    at page-construction time — post-build option updates do not propagate (NiceGUI 3.13 + bundled
-    ECharts 6). Every focal/filter change is therefore a full render."""
-    view = controller.graph_neighborhood(focal_id, hidden=hidden) if focal_id else None
+def render_explorer(controller: AppController, focal_id: str | None,
+                    hidden: frozenset[str] = frozenset(), depth: int = 1) -> None:
+    """Read-only neighborhood explorer. URL-driven: focal (`?focal=`), depth (`?depth=`), and the
+    hidden-kind set (`?hide=`) all live in the query string, so every change is a fresh full render
+    (NiceGUI's `ui.echart` only renders a graph built with data at construction; NiceGUI 3.13 +
+    bundled ECharts 6). Every focal/filter change is therefore a full render."""
+    chart_view = controller.graph_neighborhood(focal_id, hops=depth, hidden=hidden) if focal_id else None
 
     with ui.row().classes("w-full no-wrap gap-2"):
         with ui.column().classes("col"):
-            search = ui.input(placeholder="Find author, series, or book…").props(
-                "dense outlined clearable debounce=300"
-            ).classes("w-full")
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                search = ui.input(placeholder="Find author, series, or book…").props(
+                    "dense outlined clearable debounce=300"
+                ).classes("col")
+                depth_input = ui.number(value=depth, min=1, max=3, step=1).props(
+                    'dense outlined label="Depth"'
+                ).style("width:6rem")
+                depth_input.on_value_change(
+                    lambda e: focal_id and ui.navigate.to(
+                        _graph_url(focal_id, hidden, depth=_parse_depth(e.value))
+                    )
+                )
             results = ui.column().classes("w-full gap-0")
-            if view is not None:
+            if chart_view is not None:
                 # Built WITH data at construction so ECharts actually renders a canvas.
-                chart = ui.echart(view["echart"]).classes("w-full").style("height: 62vh")
+                chart = ui.echart(chart_view["echart"]).classes("w-full").style("height: 62vh")
 
                 def _on_node_click(e) -> None:
-                    if getattr(e, "data_type", None) == "node" and isinstance(e.data, dict) and e.data.get("id"):
-                        ui.navigate.to(_graph_url(e.data["id"], hidden))
+                    target = _node_click_target(e.args, hidden, depth=depth)
+                    if target:
+                        ui.navigate.to(target)
 
-                chart.on_point_click(_on_node_click)
-                omitted = view["omitted"]
+                chart.on("componentClick", _on_node_click, ["componentType", "dataType", "data"])
+                omitted = chart_view["omitted"]
                 if omitted:
                     ui.label(f"Showing a capped neighborhood — {omitted} more not shown.").classes(
                         "text-caption colophon-muted"
                     )
-                _explorer_legend(focal_id, hidden)
+                _explorer_legend(focal_id, hidden, depth)
             else:
                 ui.label("Nothing focused yet — search below.").classes(
                     "text-caption colophon-muted q-pa-md"
                 )
         with ui.column().classes("col-4 gap-1"):
-            _explorer_panel(view["focal"] if view is not None else {})
+            _explorer_panel(controller.graph_inspect(focal_id) if focal_id else None)
 
     def _run_search() -> None:
         results.clear()
@@ -330,7 +370,7 @@ def render_explorer(controller: AppController, focal_id: str | None, hidden: fro
             for h in controller.graph_search(search.value or "")[:12]:
                 ui.button(
                     f"{h['label']}  ·  {h['kind']}",
-                    on_click=lambda _=None, i=h["id"]: ui.navigate.to(_graph_url(i, hidden)),
+                    on_click=lambda _=None, i=h["id"]: ui.navigate.to(_graph_url(i, hidden, depth=depth)),
                 ).props("flat dense no-caps align=left").classes("w-full")
 
     search.on("keydown.enter", lambda _=None: _run_search())
@@ -339,10 +379,11 @@ def render_explorer(controller: AppController, focal_id: str | None, hidden: fro
 
 def render_graph(
     controller: AppController, *, mode: str = "explorer",
-    focal: str | None = None, hide: str | None = None,
+    focal: str | None = None, hide: str | None = None, depth: str | None = None,
 ) -> None:
     """/graph: an interactive neighborhood Explorer (default) or the Classic classification tree.
-    `mode`, `focal`, and `hide` come from the URL query string so every view is a stable full render."""
+    `mode`, `focal`, `hide`, and `depth` come from the URL query string so every view is a stable
+    full render."""
     with page_header(controller, "graph", icon="account_tree"):
         pass
     ui.toggle(
@@ -352,4 +393,4 @@ def render_graph(
     if mode == "classic":
         render_classic_tree(controller)
     else:
-        render_explorer(controller, focal, _parse_hidden(hide))
+        render_explorer(controller, focal, _parse_hidden(hide), _parse_depth(depth))
