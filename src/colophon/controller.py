@@ -16,7 +16,6 @@ from colophon.adapters.downloader import (
 )
 from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
-from colophon.adapters.sidecar import write_datafile_sidecar
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
@@ -540,7 +539,6 @@ class AppController:
         book.cover_path = None
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
 
     def set_cover_upload(
         self, book: BookUnit, data: bytes, filename: str | None = None
@@ -561,7 +559,6 @@ class AppController:
         book.cover_url = None
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
         return CoverSetResult(ok=True)
 
     def set_abridged(self, book: BookUnit, value: bool | None) -> None:
@@ -570,7 +567,6 @@ class AppController:
         book.abridged = value
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
 
     async def cover_candidates(self, book: BookUnit) -> list[str]:
         """Distinct cover URLs from a match search, best-ranked first."""
@@ -588,7 +584,6 @@ class AppController:
         book.cover_path = None
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
 
     def books_all(self) -> list[BookUnit]:
         """All persisted books (used by callers that need the full set)."""
@@ -624,10 +619,6 @@ class AppController:
 
     def _catalog_apply(self, kind: str, mapping: dict[str, str | None]) -> CatalogResult:
         affected, batch_id = apply_catalog_mapping(self.ctx.books, self.ctx.history, kind, mapping)
-        for book_id in affected:
-            book = self.ctx.books.get(book_id)
-            if book is not None:
-                self._sync_sidecar(book)
         return CatalogResult(affected_count=len(affected), affected_ids=affected, batch_id=batch_id)
 
     def rename_catalog_entry(self, kind: str, old: str, new: str) -> CatalogResult:
@@ -674,20 +665,11 @@ class AppController:
         return DirectoryListing(path=path, entries=entries)
 
     # --- editing / undo ---
-    def _sync_sidecar(self, book: BookUnit) -> None:
-        """Best-effort: mirror a book's saved metadata into its source sidecar.
-
-        Catches broadly on purpose: this is a non-critical side effect that must
-        never propagate and lose the already-persisted DB edit.
-        """
-        try:
-            write_datafile_sidecar(book.source_folder, book)
-        except Exception as e:  # broad on purpose: best-effort side effect, must not lose the DB edit
-            logger.warning(f"sidecar write failed for {book.id}: {e}")
-
+    # NOTE: colophon does not write metadata.json — that file is AudiobookShelf's domain.
+    # `adapters.sidecar.write_datafile_sidecar` is kept for a future, explicit "export to ABS"
+    # utility, but is deliberately not called as an edit-time side effect anymore.
     def edit_field(self, book: BookUnit, field: str, value: str | None) -> str:
         batch = set_field_value(self.ctx.books, self.ctx.history, book, field, value)
-        self._sync_sidecar(book)
         self.invalidate(book, Phase.TAG)
         return batch
 
@@ -697,7 +679,6 @@ class AppController:
         batch = apply_fields(
             self.ctx.books, self.ctx.history, book, updates, provenance=Provenance.MANUAL.value
         )
-        self._sync_sidecar(book)
         self.invalidate(book, Phase.TAG)
         self._resync_books([book])
         return batch
@@ -894,7 +875,6 @@ class AppController:
                 self.ctx.books, self.ctx.history, book, updates,
                 provenance=Provenance.FILENAME.value,
             )
-            self._sync_sidecar(book)
             written.append(book)
         if written:
             self._resync_books(written)
@@ -1049,13 +1029,10 @@ class AppController:
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)
-        self._sync_sidecar(book)
         return batch
 
     def bulk_edit(self, books: list[BookUnit], field: str, value: str | None) -> str:
         batch = _svc_bulk_set_field(self.ctx.books, self.ctx.history, books, field, value)
-        for book in books:
-            self._sync_sidecar(book)
         for book in books:
             self.invalidate(book, Phase.TAG)
         return batch
@@ -1066,15 +1043,11 @@ class AppController:
             self.ctx.books, self.ctx.history, books, fields, genre_policy=self.genre_policy()
         )
         for book in books:
-            self._sync_sidecar(book)
-        for book in books:
             self.invalidate(book, Phase.TAG)
         return batch
 
     def bulk_remap(self, books: list[BookUnit], *, src: str, dst: str, clear_source: bool) -> str:
         batch = _svc_bulk_remap(self.ctx.books, self.ctx.history, books, src=src, dst=dst, clear_source=clear_source)
-        for book in books:
-            self._sync_sidecar(book)
         for book in books:
             self.invalidate(book, Phase.TAG)
         return batch
@@ -1084,12 +1057,7 @@ class AppController:
         return self.ctx.history.list_batch(batch_id)
 
     def undo(self, batch_id: str) -> None:
-        affected_ids = {c.book_id for c in self.ctx.history.list_batch(batch_id)}
         undo_batch(self.ctx.books, self.ctx.history, batch_id)
-        for book_id in affected_ids:
-            restored = self.ctx.books.get(book_id)
-            if restored is not None:
-                self._sync_sidecar(restored)
 
     def undo_last(self) -> bool:
         batch_id = self.ctx.history.latest_batch_id()
@@ -1301,7 +1269,6 @@ class AppController:
         )
         proposal.book.touch()
         self.ctx.books.upsert(proposal.book)
-        self._sync_sidecar(proposal.book)
         return ready
 
     def _rescore_after_match(
@@ -1569,7 +1536,6 @@ class AppController:
         self._rescore_after_match(book, [result])
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
         self.invalidate(book, Phase.TAG)
         self._resync_books([book])
         return batch
@@ -1600,7 +1566,6 @@ class AppController:
         book.chapters = fetch.chapters
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
         source_runtime_ms = book.duration_ms
         return ChapterApplyResult(
             ok=True,
@@ -1615,7 +1580,6 @@ class AppController:
         book.chapters = []
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
 
     def save_chapters(self, book: BookUnit, chapters: list[Chapter]) -> None:
         """Persist hand-edited chapters, sorting by start and recomputing the ends
@@ -1623,7 +1587,6 @@ class AppController:
         book.chapters = normalize_chapters(chapters, book.duration_ms)
         book.touch()
         self.ctx.books.upsert(book)
-        self._sync_sidecar(book)
 
     # --- encode + organize ---
     def ready_books(self) -> list[BookUnit]:

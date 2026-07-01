@@ -8,7 +8,6 @@ import shutil
 from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo
-from colophon.adapters.sidecar import write_datafile_sidecar
 from colophon.core.models import BookUnit, Phase, PhaseState, _Base
 from colophon.core.phases import mark, resync_state
 
@@ -60,8 +59,6 @@ def organize_book(
     resync_state(book)
     book.touch()
     repo.upsert(book)
-    try:
-        write_datafile_sidecar(target.parent, book)
-    except Exception as e:  # destination sidecar is secondary to the completed move
-        logger.warning(f"destination sidecar write failed for {book.id}: {e}")
+    # colophon does not write a destination metadata.json — that is AudiobookShelf's domain.
+    # A future explicit "export to ABS" utility can opt into writing sidecars.
     return OrganizeResult(book_id=book.id, target_path=target, moved=True)

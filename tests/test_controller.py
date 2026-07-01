@@ -1,5 +1,4 @@
 import asyncio
-import json as _json
 from pathlib import Path
 
 from mutagen.id3 import ID3, TPE1
@@ -192,13 +191,14 @@ def _book_in(ctx, folder):
     return b
 
 
-def test_edit_field_writes_sidecar(tmp_path):
+def test_edit_field_does_not_write_sidecar(tmp_path):
+    # colophon no longer mirrors edits into metadata.json — that file is AudiobookShelf's domain.
     ctx = _ctx(tmp_path)
     b = _book_in(ctx, tmp_path / "ingest" / "x")
     ctrl = AppController(ctx)
     ctrl.edit_field(b, "title", "Right")
-    raw = _json.loads((b.source_folder / "metadata.json").read_text())
-    assert raw["title"] == "Right"
+    assert ctx.books.get(b.id).title == "Right"                # DB is updated
+    assert not (b.source_folder / "metadata.json").exists()    # no sidecar written
     ctx.close()
 
 
@@ -232,66 +232,14 @@ def test_bulk_normalize_skips_empty_and_unchanged(tmp_path):
     ctx.close()
 
 
-def test_bulk_edit_writes_each_sidecar(tmp_path):
+def test_bulk_edit_does_not_write_sidecar(tmp_path):
     ctx = _ctx(tmp_path)
     a = _book_in(ctx, tmp_path / "ingest" / "a")
     b = _book_in(ctx, tmp_path / "ingest" / "b")
     AppController(ctx).bulk_edit([a, b], "publisher", "Tor")
     for book in (a, b):
-        raw = _json.loads((book.source_folder / "metadata.json").read_text())
-        assert raw["publisher"] == "Tor"
-    ctx.close()
-
-
-def test_undo_rewrites_sidecar_to_restored_value(tmp_path):
-    ctx = _ctx(tmp_path)
-    b = _book_in(ctx, tmp_path / "ingest" / "x")
-    ctrl = AppController(ctx)
-    batch = ctrl.edit_field(b, "title", "Right")
-    ctrl.undo(batch)
-    raw = _json.loads((b.source_folder / "metadata.json").read_text())
-    assert raw["title"] == "Wrong"  # sidecar reflects the undo
-    ctx.close()
-
-
-def test_sidecar_write_failure_does_not_break_edit(tmp_path, monkeypatch):
-    ctx = _ctx(tmp_path)
-    b = _book_in(ctx, tmp_path / "ingest" / "x")
-    ctrl = AppController(ctx)
-    monkeypatch.setattr("colophon.controller.write_datafile_sidecar", lambda *a, **k: (_ for _ in ()).throw(OSError("nfs down")))
-    # edit must still persist to the DB despite the sidecar write failing
-    ctrl.edit_field(b, "title", "Right")
-    assert ctx.books.get(b.id).title == "Right"
-    ctx.close()
-
-
-def test_sidecar_typeerror_does_not_break_edit(tmp_path, monkeypatch):
-    ctx = _ctx(tmp_path)
-    b = _book_in(ctx, tmp_path / "ingest" / "x")
-    ctrl = AppController(ctx)
-    monkeypatch.setattr(
-        "colophon.controller.write_datafile_sidecar",
-        lambda *a, **k: (_ for _ in ()).throw(TypeError("not serializable")),
-    )
-    # a non-OSError from the sidecar write must still not lose the DB edit
-    ctrl.edit_field(b, "title", "Right")
-    assert ctx.books.get(b.id).title == "Right"
-    ctx.close()
-
-
-def test_edit_preserves_scanned_sidecar_field(tmp_path):
-    ctx = _ctx(tmp_path)
-    folder = tmp_path / "ingest" / "withdesc"
-    folder.mkdir(parents=True, exist_ok=True)
-    b = BookUnit.new(source_folder=folder)
-    b.title = "Old Title"
-    b.authors = ["Frank Herbert"]
-    b.description = "A desert planet epic."
-    ctx.books.upsert(b)
-    AppController(ctx).edit_field(b, "title", "New Title")
-    raw = _json.loads((folder / "metadata.json").read_text())
-    assert raw["title"] == "New Title"
-    assert raw["description"] == "A desert planet epic."
+        assert ctx.books.get(book.id).publisher == "Tor"             # DB updated
+        assert not (book.source_folder / "metadata.json").exists()   # no sidecar written
     ctx.close()
 
 
@@ -616,10 +564,7 @@ def test_apply_match_sets_fields_with_provider_provenance(tmp_path):
     assert persisted.asin == "B002V1A0WE"
     assert persisted.provenance["title"] == "audnexus"
     assert persisted.provenance["authors"] == "audnexus"  # list field stored under model key
-    # sidecar written to source folder
-    import json
-    raw = json.loads((book.source_folder / "metadata.json").read_text())
-    assert raw["title"] == "Dune"
+    assert not (book.source_folder / "metadata.json").exists()  # colophon does not write sidecars
     ctx.close()
 
 
