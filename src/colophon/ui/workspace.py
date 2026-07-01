@@ -1464,6 +1464,21 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         refresh_list()
         _persist_view()
 
+    def _set_facet(name: str, value) -> None:
+        view["facets"][name] = value
+        _update_count()
+        refresh_list()
+
+    def _set_sort(value: str) -> None:
+        view["sort"] = value or "none"
+        _update_count()
+        refresh_list()
+
+    def _set_mode(value: str) -> None:
+        view["mode"] = value
+        view["sort"] = "conf_asc" if value == "triage" else "title"
+        _render_middle()  # rebuild so the sort control reflects the new default, then refreshes
+
     def _render_middle() -> None:
         middle_title.text = "Books"
         # Show a folder-filter indicator in the Books header.
@@ -1478,9 +1493,47 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.button(icon="close", on_click=_clear_folder_filter).props(
                     'flat dense round size=sm color=primary aria-label="Clear folder filter"'
                 ).tooltip("Clear folder filter")
-        # Books toolbar: free-text filter + selection controls.
+        # Books toolbar: triage/browse mode + facet bar + free-text filter + selection controls.
         middle_toolbar.clear()
         with middle_toolbar:
+            ui.toggle(
+                {"triage": "Triage", "browse": "Browse"}, value=view["mode"],
+                on_change=lambda e: _set_mode(e.value),
+            ).props("dense no-caps").tooltip(
+                "Triage: books needing attention, worst-confidence first. Browse: the whole scope."
+            )
+            with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                ui.select(
+                    {"detected": "Detected", "needs_review": "Needs review",
+                     "ready": "Ready", "failed": "Failed"},
+                    multiple=True, label="State", value=view["facets"]["state"],
+                    on_change=lambda e: _set_facet("state", e.value),
+                ).props("dense outlined options-dense").classes("col")
+                ui.select(
+                    {"low": "<40", "mid": "40-74", "high": "≥75"},
+                    multiple=True, label="Confidence", value=view["facets"]["confidence"],
+                    on_change=lambda e: _set_facet("confidence", e.value),
+                ).props("dense outlined options-dense").classes("col")
+                ui.select(
+                    {"weak": "Weak", "trusted": "Trusted"}, label="Trust", clearable=True,
+                    value=view["facets"]["trust"],
+                    on_change=lambda e: _set_facet("trust", e.value),
+                ).props("dense outlined options-dense").classes("col")
+                ui.select(
+                    {"series": "No series", "cover": "No cover", "ident": "No ASIN/ISBN",
+                     "narrator": "No narrator", "year": "No year"},
+                    multiple=True, label="Missing", value=view["facets"]["missing"],
+                    on_change=lambda e: _set_facet("missing", e.value),
+                ).props("dense outlined options-dense").classes("col")
+                ui.select(
+                    {"conf_asc": "Worst first", "conf_desc": "Best first", "title": "Title A-Z"},
+                    label="Sort", value=view["sort"],
+                    on_change=lambda e: _set_sort(e.value),
+                ).props("dense outlined options-dense").classes("col")
+            ui.checkbox(
+                "Open findings", value=view["facets"]["findings"],
+                on_change=lambda e: _set_facet("findings", e.value),
+            ).props("dense")
             search = ui.input(
                 placeholder="Filter title, author, series, narrator, genre, tag, filename",
                 value=book_filter["text"],
