@@ -3297,3 +3297,37 @@ def test_resync_seeds_book_only_root(tmp_path):
     ctrl._resync_roots({ctrl._scan_root_for_path(b.source_folder)})
     assert any(n.semantic == "book" for n in ctx.library_graph.nodes.values())
     ctx.close()
+
+
+def test_graph_neighborhood_resolves_book_label_and_confidence(tmp_path):
+    from colophon.core.graph_records import EdgeRecord, NodeRecord
+    from colophon.core.library_graph import LibraryGraph
+
+    ctx = _ctx(tmp_path)
+    controller = AppController(ctx)
+
+    book = BookUnit.new(source_folder=tmp_path / "lib" / "Stella Rimington")
+    book.title = "Close Call"
+    book.confidence = 42.0
+    ctx.books.upsert(book)
+
+    author = NodeRecord(id="A", physical="directory", semantic="author",
+                        root="/lib", attrs={"name": "Stella Rimington"})
+    bnode = NodeRecord(id="B", physical=None, semantic="book",
+                       root="/lib", attrs={"book_id": book.id})
+    ctx.library_graph = LibraryGraph.from_records(
+        [author, bnode], [EdgeRecord(src="A", kind="contains", dst="B", root="/lib")]
+    )
+
+    view = controller.graph_neighborhood("A")
+    names = {n["name"] for n in view["echart"]["series"][0]["data"]}
+    assert names == {"Stella Rimington", "Close Call"}
+    assert view["focal"]["label"] == "Stella Rimington"
+    assert view["focal"]["kind"] == "author"
+
+    book_view = controller.graph_neighborhood("B")
+    assert book_view["focal"]["confidence"] == 42.0
+    assert book_view["focal"]["fields"]["title"] == "Close Call"
+
+    hits = controller.graph_search("close")
+    assert any(h["id"] == "B" and h["label"] == "Close Call" for h in hits)
