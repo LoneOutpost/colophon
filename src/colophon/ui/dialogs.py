@@ -804,8 +804,8 @@ async def scan_dialog(
     folder: Path | None = None,
     selected_ids: set[str] | None = None,
 ) -> None:
-    """Preview a filesystem scan with per-run pattern overrides, scope, and phase
-    controls, then apply it (merge new books/files, fill empties)."""
+    """Scan the filesystem with per-run pattern overrides, scope, and phase controls,
+    review the resulting changes, then apply them (merge new books/files, fill empties)."""
     cfg = controller.ctx.config
     with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
         body = ui.column().classes("w-full")
@@ -849,7 +849,7 @@ async def scan_dialog(
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
-                    async def _preview() -> None:
+                    async def _run_scan() -> None:
                         if path_boxes:
                             roots = [p for p, cb in path_boxes.items() if cb.value]
                             if not roots:
@@ -890,18 +890,18 @@ async def scan_dialog(
                             return
                         show_results(plan)
 
-                    ui.button("Preview", icon="search", on_click=_preview).props("unelevated")
+                    ui.button("Scan", icon="search", on_click=_run_scan).props("unelevated")
 
         def show_results(plan) -> None:
             body.clear()
             with body:
                 if plan.new_books == 0 and plan.existing_books == 0:
-                    ui.label("Nothing to scan").classes("text-subtitle1")
+                    ui.label("No changes found").classes("text-subtitle1")
                     with ui.row().classes("w-full justify-end q-mt-sm"):
                         ui.button("Back", on_click=show_options).props("flat")
                         ui.button("Close", on_click=dialog.close).props("flat")
                     return
-                ui.label("Scan preview").classes("text-subtitle1")
+                ui.label("Scan results").classes("text-subtitle1")
                 ui.label(
                     f"{plan.new_books} new · {plan.existing_books} updated · "
                     f"{plan.files_added} files added"
@@ -911,11 +911,11 @@ async def scan_dialog(
                     dialog.close()
                     written = await asyncio.to_thread(controller.apply_scan, plan)
                     refresh_all()
-                    ui.notify(f"Scan complete ({written} books)")
+                    ui.notify(f"Applied {written} books to the library")
 
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Back", on_click=show_options).props("flat")
-                    ui.button("Scan", icon="search", on_click=_apply).props("unelevated")
+                    ui.button("Apply", icon="check", on_click=_apply).props("unelevated")
 
         dialog.open()
         show_options()
