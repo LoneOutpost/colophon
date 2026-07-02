@@ -3,6 +3,7 @@ from pathlib import Path
 from colophon.adapters.repository.store import (
     BookUnitRepo,
     EntityAliasRepo,
+    KnownFranchiseRepo,
     NodeOverrideRepo,
     OperationRepo,
     connect,
@@ -393,3 +394,20 @@ def test_entity_alias_repo_keys_by_kind_and_name(tmp_path: Path):
     repo.set("author", "dune", "Frank Herbert")
     repo.set("series", "dune", "Dune")
     assert repo.all() == {("author", "dune"): "Frank Herbert", ("series", "dune"): "Dune"}
+
+
+def test_known_franchise_add_list_remove(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = KnownFranchiseRepo(conn)
+
+    repo.add("Star Trek")
+    repo.add("Doctor Who")
+    assert repo.all() == {"star trek": "Star Trek", "doctor who": "Doctor Who"}
+
+    # re-adding the same (normalized) name updates the display, never duplicates
+    repo.add("STAR TREK")
+    assert repo.all() == {"star trek": "STAR TREK", "doctor who": "Doctor Who"}
+
+    repo.remove("star trek")
+    assert repo.all() == {"doctor who": "Doctor Who"}

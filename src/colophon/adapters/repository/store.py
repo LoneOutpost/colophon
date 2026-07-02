@@ -380,6 +380,39 @@ class EntityAliasRepo:
 
 
 @dataclass
+class KnownFranchiseRepo:
+    """User-declared franchises the classifier should treat as a franchise tier rather than
+    infer as an author. Rows live in `known_entities` with kind='franchise', keyed by the
+    normalized name (`_name_key`) so matching tolerates case/spacing/punctuation. The display
+    value is the canonical name shown in the UI and used as the classification value."""
+
+    conn: sqlite3.Connection
+
+    def add(self, name: str) -> None:
+        from colophon.core.graph_resolve import _name_key
+        self.conn.execute(
+            "INSERT INTO known_entities (kind, name_key, display) VALUES ('franchise', ?, ?) "
+            "ON CONFLICT(kind, name_key) DO UPDATE SET display = excluded.display",
+            (_name_key(name), name),
+        )
+        self.conn.commit()
+
+    def remove(self, name: str) -> None:
+        from colophon.core.graph_resolve import _name_key
+        self.conn.execute(
+            "DELETE FROM known_entities WHERE kind = 'franchise' AND name_key = ?",
+            (_name_key(name),),
+        )
+        self.conn.commit()
+
+    def all(self) -> dict[str, str]:
+        rows = self.conn.execute(
+            "SELECT name_key, display FROM known_entities WHERE kind = 'franchise'"
+        ).fetchall()
+        return {r["name_key"]: r["display"] for r in rows}
+
+
+@dataclass
 class GraphStore:
     """Persisted property-graph: generic nodes + typed edges. Slice 1 holds the
     structural layer (directory/file/book nodes, contains/owns edges). Replace-by-root:
