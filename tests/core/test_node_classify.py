@@ -197,3 +197,22 @@ def test_classify_nodes_worked_cases(tmp_path):
     assert g.directories[DirectoryNode.id_for(root)].kind == "container"   # no cascade
     assert all(b.authors == ["star trek"] for b in st)                     # Down-fill
     assert poison[0].authors == [root.name]                                # own author kept
+
+
+def test_known_franchise_axiom_and_resolution():
+    from colophon.core.node_classify import Evidence, _Ctx, ax_known_franchise, resolve
+
+    g = Graph()
+    root = Path("/lib")
+    st = _dir(g, "/lib/Star Trek")
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={}, known_franchises={"star trek": "Star Trek"})
+    ev = ax_known_franchise(st, ctx)
+    assert ev and ev[0].kind == "franchise" and ev[0].value == "Star Trek"
+
+    other = _dir(g, "/lib/Isaac Asimov")
+    assert ax_known_franchise(other, ctx) == []
+
+    # franchise (4.0) beats a lone grouping-author vote (2.0)
+    got = resolve([Evidence("author", 2.0, "grouping"), *ev], fallback_value="Star Trek")
+    assert got.kind == "franchise" and got.value == "Star Trek"

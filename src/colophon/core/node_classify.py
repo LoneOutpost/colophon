@@ -100,6 +100,7 @@ class _Ctx:
     book_like_children: dict[str, int]            # node id -> count of content (container/grouping) child dirs
     direct_books: dict[Path, list[BookUnit]] = field(default_factory=dict)   # a folder's own loose books
     overrides: dict[str, object] = field(default_factory=dict)               # path str -> NodeOverride
+    known_franchises: dict[str, str] = field(default_factory=dict)   # name_key -> display
 
 
 def _depth(path: Path, root: Path) -> int:
@@ -189,6 +190,17 @@ def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  
     from colophon.core.graph_classify import GROUPING
     if node.kind == GROUPING:
         return [Evidence("author", 2.0, "a folder of title subfolders (author/series grouping)")]
+    return []
+
+
+def ax_known_franchise(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A folder whose name exactly matches a user-declared franchise votes franchise — soft,
+    competing evidence (weight 4.0) that beats a structural author guess but yields to a match
+    (hard 10.0) or a manual override (hard 100.0), and to a genuine single-book title (5.0)."""
+    from colophon.core.graph_resolve import _name_key
+    display = ctx.known_franchises.get(_name_key(node.path.name))
+    if display:
+        return [Evidence("franchise", 4.0, f"declared franchise '{display}'", value=display)]
     return []
 
 
@@ -289,12 +301,12 @@ _AXIOMS = (
     ax_manual_override, ax_matched_identity,          # hard
     ax_artist_consensus, ax_tag_author_match,         # author (name-bearing)
     ax_leaf_title,                                     # title (book-identity leaf)
-    ax_author_structure, ax_author_from_grouping, ax_series_ramp,   # author/series (structural)
+    ax_author_structure, ax_author_from_grouping, ax_known_franchise, ax_series_ramp,   # author/series/franchise (structural)
     ax_container_shape, ax_bucket_word,               # container
 )
 
 
-def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object]) -> _Ctx:
+def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object], known_franchises: dict[str, str]) -> _Ctx:
     from collections import Counter
 
     from colophon.core.graph_classify import CONTAINER, GROUPING, TITLE, _subtree_books
@@ -313,15 +325,17 @@ def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object]) -> _Ctx:
         for d in graph.directories.values()
     }
     return _Ctx(graph=graph, root=root, books_by_folder=books_by_folder, modal_author_depth=modal,
-                book_like_children=book_like, direct_books=direct_books, overrides=overrides)
+                book_like_children=book_like, direct_books=direct_books, overrides=overrides,
+                known_franchises=known_franchises)
 
 
 def classify_nodes(
     graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, object],
+    known_franchises: dict[str, str] | None = None,
 ) -> None:
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
     then fill empty/weak-author books from the nearest author node (GRAPHING)."""
-    ctx = _build_ctx(graph, root, overrides)
+    ctx = _build_ctx(graph, root, overrides, known_franchises or {})
     evidenced: dict[str, bool] = {}
     for node in graph.directories.values():
         evidence: list[Evidence] = []
