@@ -54,10 +54,12 @@ def test_migration_007_heals_legacy_sidecar_provenance(tmp_path: Path):
     b.provenance["narrators"] = "tag"   # control: a non-sidecar provenance must not change
     repo.upsert(b)
 
-    # rewind past migration 007 and re-run it against the legacy row
-    conn.execute("UPDATE schema_version SET version = 6")
+    # apply migration 007 in isolation against the legacy row (re-running the full migrate()
+    # would replay later CREATE-TABLE migrations, which are not idempotent)
+    from colophon.adapters.repository.store import _MIGRATIONS_DIR
+    sql = (_MIGRATIONS_DIR / "007_provenance_sidecar_to_datafile.sql").read_text(encoding="utf-8")
+    conn.executescript(sql)
     conn.commit()
-    migrate(conn)
 
     healed = repo.get(b.id)
     assert healed is not None
