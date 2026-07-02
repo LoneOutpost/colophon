@@ -3,6 +3,7 @@ from pathlib import Path
 from colophon.adapters.repository.store import (
     BookUnitRepo,
     EntityAliasRepo,
+    KnownFranchiseRepo,
     NodeOverrideRepo,
     OperationRepo,
     connect,
@@ -23,9 +24,10 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     migrate(conn)
     tables = _table_names(conn)
     assert "book_units" in tables
+    assert "known_entities" in tables
     assert "schema_version" in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 7
+    assert version == 8
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -33,7 +35,7 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 7
+    assert version == 8
 
 
 def test_migration_007_heals_legacy_sidecar_provenance(tmp_path: Path):
@@ -53,10 +55,12 @@ def test_migration_007_heals_legacy_sidecar_provenance(tmp_path: Path):
     b.provenance["narrators"] = "tag"   # control: a non-sidecar provenance must not change
     repo.upsert(b)
 
-    # rewind past migration 007 and re-run it against the legacy row
-    conn.execute("UPDATE schema_version SET version = 6")
+    # apply migration 007 in isolation against the legacy row (re-running the full migrate()
+    # would replay later CREATE-TABLE migrations, which are not idempotent)
+    from colophon.adapters.repository.store import _MIGRATIONS_DIR
+    sql = (_MIGRATIONS_DIR / "007_provenance_sidecar_to_datafile.sql").read_text(encoding="utf-8")
+    conn.executescript(sql)
     conn.commit()
-    migrate(conn)
 
     healed = repo.get(b.id)
     assert healed is not None
@@ -390,3 +394,20 @@ def test_entity_alias_repo_keys_by_kind_and_name(tmp_path: Path):
     repo.set("author", "dune", "Frank Herbert")
     repo.set("series", "dune", "Dune")
     assert repo.all() == {("author", "dune"): "Frank Herbert", ("series", "dune"): "Dune"}
+
+
+def test_known_franchise_add_list_remove(tmp_path: Path):
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = KnownFranchiseRepo(conn)
+
+    repo.add("Star Trek")
+    repo.add("Doctor Who")
+    assert repo.all() == {"star trek": "Star Trek", "doctor who": "Doctor Who"}
+
+    # re-adding the same (normalized) name updates the display, never duplicates
+    repo.add("STAR TREK")
+    assert repo.all() == {"star trek": "STAR TREK", "doctor who": "Doctor Who"}
+
+    repo.remove("Star Trek")   # remove by display name (normalized internally), as the UI does
+    assert repo.all() == {"doctor who": "Doctor Who"}

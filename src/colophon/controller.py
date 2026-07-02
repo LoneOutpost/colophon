@@ -266,6 +266,7 @@ class AppController:
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
                 options=options, inference_root=self._scan_root_for_path(root), progress=progress,
                 node_overrides=self.ctx.overrides.all(),
+                known_franchises=self.ctx.franchises.all(),
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -1350,7 +1351,8 @@ class AppController:
         )
         classify_graph(graph, root=root)
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
-                       overrides=self.ctx.overrides.all())
+                       overrides=self.ctx.overrides.all(),
+                       known_franchises=self.ctx.franchises.all())
         self._graph_cache[(str(root), fresh)] = graph
         return graph
 
@@ -1392,6 +1394,23 @@ class AppController:
         self._graph_cache.clear()
         self._resync_roots({root})
         return len(nodes)
+
+    def list_franchises(self) -> list[str]:
+        """Declared franchise display names, sorted case-insensitively."""
+        return sorted(self.ctx.franchises.all().values(), key=str.casefold)
+
+    def add_franchise(self, name: str) -> None:
+        """Declare a franchise; invalidate the graph cache so the next build reclassifies."""
+        name = name.strip()
+        if not name:
+            return
+        self.ctx.franchises.add(name)
+        self._graph_cache.clear()
+
+    def remove_franchise(self, name: str) -> None:
+        """Undeclare a franchise; invalidate the graph cache so the next build reclassifies."""
+        self.ctx.franchises.remove(name)
+        self._graph_cache.clear()
 
     def cached_graph(self, root: Path, *, fresh: bool = False) -> Graph | None:
         """The previously-built graph for `(root, fresh)`, or None if not built this

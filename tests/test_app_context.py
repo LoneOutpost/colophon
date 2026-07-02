@@ -1,5 +1,16 @@
+from pathlib import Path
+
 from colophon.adapters.config import Config
+from colophon.adapters.repository.store import KnownFranchiseRepo
 from colophon.app_context import AppContext
+
+
+def test_context_exposes_known_franchise_repo(tmp_path: Path):
+    ctx = AppContext.create(Config(db_path=tmp_path / "c.db"))
+    assert isinstance(ctx.franchises, KnownFranchiseRepo)
+    ctx.franchises.add("Star Trek")
+    assert ctx.franchises.all() == {"star trek": "Star Trek"}
+    ctx.conn.close()
 
 
 def test_create_wires_db_repos_and_sources(tmp_path):
