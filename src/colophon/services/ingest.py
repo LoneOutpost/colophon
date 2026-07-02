@@ -452,6 +452,7 @@ def plan_scan_graph(
     options: ScanOptions | None = None, inference_root: Path | None = None,
     progress: Callable[[int, int, str], None] | None = None,
     node_overrides: dict[str, NodeOverride] | None = None,
+    known_franchises: dict[str, str] | None = None,
 ) -> ScanPlan:
     """Graph-routed planner: persist `project(build_graph(...))` — single containers and
     multi-book leaves — with per-leaf IDENTIFY and state preservation. `reconciled_folders`
@@ -508,7 +509,8 @@ def plan_scan_graph(
     _phase(f"adopt+identify ({len(plan.units)} units)")
     classify_graph(graph, root=root)
     _phase("classify_graph")
-    classify_nodes(graph, plan.units, root=root, overrides=node_overrides or {})
+    classify_nodes(graph, plan.units, root=root, overrides=node_overrides or {},
+                   known_franchises=known_franchises or {})
     _phase("classify_nodes")
     if node_overrides:
         propagate_overrides(graph, plan.units, root=root)

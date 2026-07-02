@@ -2340,7 +2340,8 @@ async def test_scan_preview_honors_template_override(tmp_path, monkeypatch):
     captured = {}
 
     def fake_plan_scan(repo, root, *, template, directory_scheme="", options=None,
-                       inference_root=None, progress=None, node_overrides=None):
+                       inference_root=None, progress=None, node_overrides=None,
+                       known_franchises=None):
         captured["template"] = template
         captured["scheme"] = directory_scheme
         return ScanPlan()

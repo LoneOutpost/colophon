@@ -266,6 +266,7 @@ class AppController:
                 self.ctx.books, root, template=template, directory_scheme=directory_scheme,
                 options=options, inference_root=self._scan_root_for_path(root), progress=progress,
                 node_overrides=self.ctx.overrides.all(),
+                known_franchises=self.ctx.franchises.all(),
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -1350,7 +1351,8 @@ class AppController:
         )
         classify_graph(graph, root=root)
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
-                       overrides=self.ctx.overrides.all())
+                       overrides=self.ctx.overrides.all(),
+                       known_franchises=self.ctx.franchises.all())
         self._graph_cache[(str(root), fresh)] = graph
         return graph
 

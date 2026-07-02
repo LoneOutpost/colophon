@@ -216,3 +216,25 @@ def test_known_franchise_axiom_and_resolution():
     # franchise (4.0) beats a lone grouping-author vote (2.0)
     got = resolve([Evidence("author", 2.0, "grouping"), *ev], fallback_value="Star Trek")
     assert got.kind == "franchise" and got.value == "Star Trek"
+
+
+def test_declared_franchise_classifies_folder_franchise(tmp_path):
+    from colophon.core.graph import DirectoryNode
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Star Trek")
+    # two DISTINCT-author books loose in one folder -> a container, no author consensus
+    books = [_book(folder, authors=["Judith Reeves-Stevens"], prov="tag"),
+             _book(folder, authors=["Diane Duane"], prov="tag")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    def kind_of(declared):
+        classify_graph(g, root=root)
+        classify_nodes(g, allbooks, root=root, overrides={}, known_franchises=declared)
+        return g.directories[DirectoryNode.id_for(root / "Star Trek")].kind
+
+    assert kind_of({}) == "author"                              # structural author guess
+    assert kind_of({"star trek": "Star Trek"}) == "franchise"   # declaration wins (4.0 > 2.0)
