@@ -38,6 +38,13 @@ class Classification:
     source: str                        # "" (auto/soft) | "manual" | "matched"
     settled: bool
     evidence: list[Evidence] = field(default_factory=list)
+    value_evidenced: bool = False      # value came from book evidence, not the folder-name fallback
+
+
+def _valued(kind: str, evidence: list[Evidence]) -> bool:
+    """Whether any evidence of `kind` carries a concrete value (a book-derived name) — i.e. the
+    resolved value will come from evidence rather than the folder-name fallback."""
+    return any(e.kind == kind and e.value for e in evidence)
 
 
 def _value_for(kind: str, evidence: list[Evidence], fallback_value: str | None) -> str | None:
@@ -67,6 +74,7 @@ def resolve(
         return Classification(
             kind=winner.kind, value=winner.value or _value_for(winner.kind, evidence, fallback_value),
             confidence=1.0, source=source, settled=True, evidence=list(evidence),
+            value_evidenced=bool(winner.value or _valued(winner.kind, evidence)),
         )
     if not evidence:
         return Classification("container", None, 0.0, "", False, [])
@@ -79,6 +87,7 @@ def resolve(
     return Classification(
         kind=best, value=_value_for(best, evidence, fallback_value),
         confidence=confidence, source="", settled=False, evidence=list(evidence),
+        value_evidenced=_valued(best, evidence),
     )
 
 
@@ -110,7 +119,11 @@ def ax_container_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     if node.child_files and node.child_dirs:
         out.append(Evidence("container", 1.0, f"loose audio beside {len(node.child_dirs)} subfolders"))
     if node.path == ctx.root:
-        out.append(Evidence("container", 1.0, "the scan root is usually a library bucket"))
+        # a strong (but soft) prior: the scan path is usually a library bucket, not one author's
+        # folder. Enough to outweigh a lone structural-author vote so a bare root does not get
+        # named after the upload folder — but still yields to real author evidence (a tag
+        # consensus or a match), so a genuine single-author root can emerge.
+        out.append(Evidence("container", 2.5, "the scan root is usually a library bucket"))
     return out
 
 
@@ -309,6 +322,7 @@ def classify_nodes(
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
     then fill empty/weak-author books from the nearest author node (GRAPHING)."""
     ctx = _build_ctx(graph, root, overrides)
+    evidenced: dict[str, bool] = {}
     for node in graph.directories.values():
         evidence: list[Evidence] = []
         for axiom in _AXIOMS:
@@ -324,31 +338,39 @@ def classify_nodes(
         node.kind_confidence = c.confidence
         node.kind_source = c.source
         node.kind_evidence = [e.reason for e in c.evidence]
-    _fill_down(graph, books, root=root)
+        evidenced[node.id] = c.value_evidenced
+    _fill_down(graph, books, evidenced, root=root)
 
 
-def _fill_down(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
-    """Inherit the nearest author-node's name into each empty/weak-author book (GRAPHING); never
-    overwrite a book's own hard (tag/datafile/match/manual) author."""
+def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *, root: Path) -> None:
+    """Inherit an author-node's name into each empty/weak-author book (GRAPHING); never overwrite a
+    book's own hard (tag/datafile/match/manual) author. Among the author ancestors, prefer the
+    nearest one whose name came from book evidence (tag/consensus/match/manual) over a structural
+    grouping that only has its folder-name fallback — otherwise an intermediate grouping (e.g.
+    Author/-collection-/Title) would shadow the real author."""
     from colophon.core.models import Provenance
     for book in books:
         prov = book.provenance.get("authors")
         if book.authors and prov not in _WEAK:
             continue
+        seen: list[DirectoryNode] = []          # author ancestors, nearest first
         cur = book.source_folder
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
             if node is not None and node.kind == "author" and node.author:
-                # only (re)stamp when we actually introduce the value, so a book's own more-specific
-                # weak provenance (directory/filename) survives when it already agrees with the node.
-                # A user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING.
-                if book.authors != [node.author]:
-                    book.authors = [node.author]
-                    book.provenance["authors"] = (
-                        Provenance.MANUAL.value if node.kind_source == "manual"
-                        else Provenance.GRAPHING.value
-                    )
-                break
+                seen.append(node)
             if cur == root or root not in cur.parents:
                 break
             cur = cur.parent
+        if not seen:
+            continue
+        chosen = next((n for n in seen if evidenced.get(n.id)), seen[0])
+        # only (re)stamp when we actually introduce the value, so a book's own more-specific weak
+        # provenance (directory/filename) survives when it already agrees with the chosen node.
+        # A user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING.
+        if book.authors != [chosen.author]:
+            book.authors = [chosen.author]
+            book.provenance["authors"] = (
+                Provenance.MANUAL.value if chosen.kind_source == "manual"
+                else Provenance.GRAPHING.value
+            )

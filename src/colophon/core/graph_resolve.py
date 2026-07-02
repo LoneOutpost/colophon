@@ -1,31 +1,23 @@
-"""Confirmed/inferred author-series resolution shared by the scan and match paths.
+"""Confirmed manual author-series propagation shared by the scan and match paths.
 
-The scan path classifies AUTHOR directories from descendant evidence and inherits the
-author into a subtree's empty-or-weak-author books (GRAPHING; `resolve_graph_authors`),
-then propagates confirmed manual classifications onto books (`propagate_overrides`) — a
-pure pass over a built Graph. The match path reuses the same fill precedence graph-free,
-reading the override store directly (`apply_confirmed_overrides`). Depth-independent; see
-the Phase 3b design."""
+The evidence engine (node_classify) now classifies AUTHOR directories and inherits inferred
+authors into books. This module propagates confirmed *manual* classifications onto books —
+on the scan path over a built Graph (`propagate_overrides`), and on the match path graph-free
+by reading the override store directly (`apply_confirmed_overrides`). It also hosts the shared
+name/series comparison helpers (`_name_key`, `_resembles`) the engine reuses. Depth-independent;
+see the Phase 3b design."""
 
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.graph_classify import _series_label
 from colophon.core.models import BookUnit, NodeOverride, Provenance, SeriesRef
 from colophon.core.normalize import normalize_name
 
 _WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
-
-# Provenances that are NOT independent authorship evidence for AUTHOR classification:
-# directory/filename are read off the path itself (circular against a folder-name match),
-# and graphing is an author we already inferred (using it would feed the inference back
-# into itself). Everything else — tag, datafile, manual, and any match source — counts.
-_NOT_EVIDENCE = _WEAK | {Provenance.GRAPHING.value}
 
 
 def _name_key(name: str) -> str:
@@ -82,69 +74,6 @@ def _ancestors(graph: Graph, folder: Path, root: Path) -> list[DirectoryNode]:
         if node is not None:
             out.append(node)
     return out
-
-
-def resolve_graph_authors(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
-    """Up: a dir whose name matches a TAG/DATAFILE author of a descendant book is AUTHOR.
-    Down: fill each empty-or-weak-author book from its nearest AUTHOR ancestor (GRAPHING)."""
-    # Up — classify AUTHOR nodes from independent descendant evidence.
-    for book in books:
-        if not book.authors or book.provenance.get("authors") in _NOT_EVIDENCE:
-            continue
-        keys = {_name_key(a): a for a in book.authors}
-        for node in _ancestors(graph, book.source_folder, root):
-            matched = keys.get(_name_key(node.path.name))
-            # author refines a grouping (or a not-yet-classified node); never a
-            # classified container/title — those are not author folders.
-            if matched is not None and node.kind in ("grouping", "unknown"):
-                node.kind = "author"
-                node.author = matched
-
-    # Up — structural author: a folder of loose untagged books (a `container`) is its own
-    # author, taken from its name. A true multibook folder cannot be a *title* folder (distinct
-    # books can't share one title), so it only aligns to author/series/franchise. Franchise is
-    # undeterminable and series is eliminated unless EVERY book shares the one series the folder
-    # is named for — leaving author as the sole remaining candidate. So reclassify a container to
-    # author when (a) it is not the scan root, (b) it has empty/weak-author books to fill, and
-    # (c) it is not that single-series-named-after-itself case.
-    # Index books by every folder that contains them (the folder itself and each ancestor up
-    # to root) in one pass, so the per-container lookup below is O(1) instead of a full rescan
-    # of `books` per directory (which is O(dirs x books), ~21s on a 5k-book library).
-    books_under: dict[Path, list[BookUnit]] = defaultdict(list)
-    for b in books:
-        folder = b.source_folder
-        books_under[folder].append(b)
-        for parent in folder.parents:
-            books_under[parent].append(b)
-            if parent == root:
-                break
-
-    for node in graph.directories.values():
-        if node.path == root or node.kind != "container":
-            continue
-        under = books_under.get(node.path, [])
-        if not any(not b.authors or b.provenance.get("authors") in _WEAK for b in under):
-            continue  # nothing to fill -> don't claim the folder as an author
-        labels = [_series_label(b) for b in under]
-        all_one_series = bool(labels) and all(labels) and len({lab[0] for lab in labels if lab}) == 1
-        if all_one_series:
-            _, series_name, _ = next(lab for lab in labels if lab)
-            if _resembles(node.path.name, series_name):
-                continue  # every book is the one series this folder is named for -> series tier
-        node.kind = "author"
-        node.author = node.path.name
-
-    # Down — inherit into empty/weak-author books from the nearest AUTHOR ancestor.
-    for book in books:
-        prov = book.provenance.get("authors")
-        if book.authors and prov not in _WEAK:
-            continue  # keep TAG/DATAFILE/GRAPHING/MANUAL authors untouched
-        for node in _ancestors(graph, book.source_folder, root):
-            if node.kind == "author" and node.author:
-                if book.authors != [node.author]:
-                    book.authors = [node.author]
-                    book.provenance["authors"] = Provenance.GRAPHING.value
-                break
 
 
 def _fill_confirmed(book: BookUnit, *, author: str | None, series: str | None) -> bool:

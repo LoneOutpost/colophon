@@ -82,7 +82,7 @@ def test_contains_and_owns_edges(tmp_path):
 
 
 def _classified_author_dir(g, folder, *, name):
-    """Mark the folder's DirectoryNode as a resolved author (as resolve_graph_authors would)."""
+    """Mark the folder's DirectoryNode as a resolved author (as classify_nodes would)."""
     d = g.directories[DirectoryNode.id_for(folder)]
     d.kind = "author"
     d.author = name

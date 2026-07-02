@@ -19,8 +19,6 @@ def test_name_key_handles_order_case_spacing_and_punctuation():
 
 
 def test_period_in_tag_author_still_classifies_author(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
     root = tmp_path / "lib"
     author_dir = root / "Robert A Heinlein"          # folder: no period
     a = author_dir / "Stranger in a Strange Land"
@@ -29,7 +27,7 @@ def test_period_in_tag_author_still_classifies_author(tmp_path):
 
     tagged = _book(a, ["Robert A. Heinlein"], Provenance.TAG.value)  # tag: with period
     untagged = _book(b, [])
-    resolve_graph_authors(graph, [tagged, untagged], root=root)
+    _resolve(graph, [tagged, untagged], root)
 
     node = graph.directories[DirectoryNode.id_for(author_dir)]
     assert node.kind == "author" and node.author == "Robert A. Heinlein"
@@ -56,9 +54,29 @@ def _book(folder: Path, authors, prov=None) -> BookUnit:
     return b
 
 
-def test_up_classifies_and_down_fills(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
+def _resolve(graph: Graph, books, root: Path, overrides=None) -> None:
+    """Wire the books into the graph and run the production classification pipeline
+    (classify_graph -> classify_nodes), the pair that replaced resolve_graph_authors."""
+    from colophon.core.graph import BookNode
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
 
+    for d in list(graph.directories.values()):
+        parent = graph.directories.get(DirectoryNode.id_for(d.path.parent))
+        if parent is not None and parent is not d and d.id not in parent.child_dirs:
+            parent.child_dirs.append(d.id)
+    for i, b in enumerate(books):
+        did = DirectoryNode.id_for(b.source_folder)
+        if did not in graph.directories:
+            graph.directories[did] = DirectoryNode(path=b.source_folder)
+        bid = f"bk{i}"
+        graph.books[bid] = BookNode(id=bid, book=b, owns=[], dir_id=did)
+        graph.directories[did].books.append(bid)
+    classify_graph(graph, root=root)
+    classify_nodes(graph, books, root=root, overrides=overrides or {})
+
+
+def test_up_classifies_and_down_fills(tmp_path):
     root = tmp_path / "lib"
     author_dir = root / "up" / "Stephen King"
     coll = author_dir / "-collection-"
@@ -68,30 +86,28 @@ def test_up_classifies_and_down_fills(tmp_path):
 
     tagged = _book(a, ["Stephen King"], Provenance.TAG.value)
     untagged = _book(b, [])
-    resolve_graph_authors(graph, [tagged, untagged], root=root)
+    _resolve(graph, [tagged, untagged], root)
 
     assert graph.directories[DirectoryNode.id_for(author_dir)].kind == "author"
     assert graph.directories[DirectoryNode.id_for(author_dir)].author == "Stephen King"
+    # the intermediate -collection- grouping must not shadow the real author on the down-fill
     assert untagged.authors == ["Stephen King"]
     assert untagged.provenance["authors"] == Provenance.GRAPHING.value
     assert tagged.provenance["authors"] == Provenance.TAG.value  # strong author untouched
 
 
 def test_graphing_replaces_weak_author_but_not_manual(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
     root = tmp_path / "lib"
     author_dir = root / "Stephen King"
     weak = author_dir / "BookFolder"
     manual = author_dir / "Manual"
-    graph = _graph_with_dirs(weak, manual)
+    graph = _graph_with_dirs(weak, manual, author_dir / "Tagged")
 
     tag_sib = _book(author_dir / "Tagged", ["Stephen King"], Provenance.TAG.value)
-    graph.directories[DirectoryNode.id_for(author_dir / "Tagged")] = DirectoryNode(path=author_dir / "Tagged")
     weak_book = _book(weak, ["BookFolder"], Provenance.DIRECTORY.value)
     manual_book = _book(manual, ["Someone Else"], Provenance.MANUAL.value)
 
-    resolve_graph_authors(graph, [tag_sib, weak_book, manual_book], root=root)
+    _resolve(graph, [tag_sib, weak_book, manual_book], root)
 
     assert weak_book.authors == ["Stephen King"]              # weak DIRECTORY replaced
     assert weak_book.provenance["authors"] == Provenance.GRAPHING.value
@@ -99,25 +115,24 @@ def test_graphing_replaces_weak_author_but_not_manual(tmp_path):
     assert manual_book.provenance["authors"] == Provenance.MANUAL.value
 
 
-def test_no_classification_without_matching_dir(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
+def test_book_folder_named_unlike_author_is_not_promoted(tmp_path):
     root = tmp_path / "lib"
     a = root / "Dune"            # folder name does not match the author
-    graph = _graph_with_dirs(a)
+    b = root / "Foundation"
+    graph = _graph_with_dirs(a, b)
     book = _book(a, ["Frank Herbert"], Provenance.TAG.value)
-    sibling = _book(root / "Other", [])
-    graph.directories[DirectoryNode.id_for(root / "Other")] = DirectoryNode(path=root / "Other")
+    other = _book(b, ["Isaac Asimov"], Provenance.TAG.value)
 
-    resolve_graph_authors(graph, [book, sibling], root=root)
+    _resolve(graph, [book, other], root)
 
-    assert graph.directories[DirectoryNode.id_for(a)].kind == "unknown"
-    assert sibling.authors == []   # nothing classified -> nothing inherited
+    # a single tagged book leaf is that book's title folder (its one book's author names the book,
+    # not the folder), so the folder is not promoted to author and keeps the book's own tag author
+    assert graph.directories[DirectoryNode.id_for(a)].kind == "title"
+    assert book.authors == ["Frank Herbert"]
+    assert book.provenance["authors"] == Provenance.TAG.value
 
 
 def test_match_source_author_classifies_and_fills(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
     root = tmp_path / "lib"
     author_dir = root / "Robert A Heinlein"
     a = author_dir / "Stranger in a Strange Land"
@@ -127,64 +142,54 @@ def test_match_source_author_classifies_and_fills(tmp_path):
     # author resolved from a match source (audnexus), not a tag
     tagged = _book(a, ["Robert A. Heinlein"], "audnexus")
     untagged = _book(b, [])
-    resolve_graph_authors(graph, [tagged, untagged], root=root)
+    _resolve(graph, [tagged, untagged], root)
 
     node = graph.directories[DirectoryNode.id_for(author_dir)]
     assert node.kind == "author" and node.author == "Robert A. Heinlein"
+    assert node.kind_source == "matched"
     assert untagged.authors == ["Robert A. Heinlein"]
     assert untagged.provenance["authors"] == Provenance.GRAPHING.value
 
 
 def test_manual_author_classifies(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
     root = tmp_path / "lib"
     author_dir = root / "Brandon Sanderson"
-    book = _book(author_dir / "Elantris", ["Brandon Sanderson"], Provenance.MANUAL.value)
-    graph = _graph_with_dirs(author_dir / "Elantris")
+    a = author_dir / "Elantris"
+    b = author_dir / "Mistborn"
+    book = _book(a, ["Brandon Sanderson"], Provenance.MANUAL.value)
+    other = _book(b, [])
+    graph = _graph_with_dirs(a, b)
 
-    resolve_graph_authors(graph, [book], root=root)
+    _resolve(graph, [book, other], root)
+    # a folder of title subfolders is an author grouping
     assert graph.directories[DirectoryNode.id_for(author_dir)].kind == "author"
 
 
-def test_directory_provenance_author_does_not_classify(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
+def test_directory_provenance_author_uses_structure_not_the_book_tag(tmp_path):
     root = tmp_path / "lib"
     author_dir = root / "Some Folder"
-    # author was derived from the folder name itself (directory inference) — circular,
-    # so it must NOT classify the folder AUTHOR on its own.
+    # The book's only author is the folder name (circular directory inference). The engine does
+    # not treat that as author *evidence* (ax_tag_author_match/consensus ignore directory
+    # provenance), so the folder's author name comes from its structure, not the circular tag:
+    # a folder of title subfolders is an author grouping named after itself.
     book = _book(author_dir / "Book", ["Some Folder"], Provenance.DIRECTORY.value)
-    graph = _graph_with_dirs(author_dir / "Book")
+    other = _book(author_dir / "Other", [])
+    graph = _graph_with_dirs(author_dir / "Book", author_dir / "Other")
 
-    resolve_graph_authors(graph, [book], root=root)
-    assert graph.directories[DirectoryNode.id_for(author_dir)].kind == "unknown"
+    _resolve(graph, [book, other], root)
+    node = graph.directories[DirectoryNode.id_for(author_dir)]
+    assert node.kind == "author" and node.author == "Some Folder"  # value is the fallback folder name
 
 
-def test_container_node_is_not_upgraded_to_author(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
+def test_single_book_leaf_stays_a_title_not_author(tmp_path):
+    # A single-book leaf is that book's title folder, even when its one book's tag author would
+    # otherwise name it — the engine keeps it a title rather than promoting it to author.
     root = tmp_path / "lib"
     folder = root / "Stephen King"
-    book = _book(folder / "Book", ["Stephen King"], Provenance.TAG.value)
-    graph = _graph_with_dirs(folder / "Book")
-    graph.directories[DirectoryNode.id_for(folder)].kind = "container"
+    book = _book(folder, ["Stephen King"], Provenance.TAG.value)
+    graph = _graph_with_dirs(folder)
 
-    resolve_graph_authors(graph, [book], root=root)
-
-    assert graph.directories[DirectoryNode.id_for(folder)].kind == "container"
-
-
-def test_title_node_is_not_upgraded_to_author(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
-    root = tmp_path / "lib"
-    folder = root / "Stephen King"
-    book = _book(folder / "Book", ["Stephen King"], Provenance.TAG.value)
-    graph = _graph_with_dirs(folder / "Book")
-    graph.directories[DirectoryNode.id_for(folder)].kind = "title"
-
-    resolve_graph_authors(graph, [book], root=root)
+    _resolve(graph, [book], root)
 
     assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"
 
@@ -467,18 +472,13 @@ def test_resembles_series_matches_title_not_person(tmp_path):
 
 
 def test_structural_author_for_untagged_single_series_container(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
     root = tmp_path / "lib"
     author_dir = root / "stella Rimington"          # name does NOT resemble the series
-    a = author_dir / "Close Call"
-    b = author_dir / "Secret Asset"
-    graph = _graph_with_dirs(a, b)
-    graph.directories[DirectoryNode.id_for(author_dir)].kind = "container"
+    graph = _graph_with_dirs(author_dir)
 
     b1 = _book_with_series(author_dir, "Close Call", "Liz Carlyle", 8)
     b2 = _book_with_series(author_dir, "Secret Asset", "Liz Carlyle", 2)
-    resolve_graph_authors(graph, [b1, b2], root=root)
+    _resolve(graph, [b1, b2], root)
 
     node = graph.directories[DirectoryNode.id_for(author_dir)]
     assert node.kind == "author" and node.author == "stella Rimington"
@@ -486,74 +486,62 @@ def test_structural_author_for_untagged_single_series_container(tmp_path):
     assert b1.provenance["authors"] == Provenance.GRAPHING.value
 
 
-def test_series_named_folder_is_not_classified_author(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
+def test_series_named_folder_is_classified_series_not_author(tmp_path):
     root = tmp_path / "lib"
-    series_dir = root / "Liz Carlyle"               # name DOES resemble the series -> guard trips
-    a = series_dir / "Close Call"
-    b = series_dir / "Secret Asset"
-    graph = _graph_with_dirs(a, b)
-    graph.directories[DirectoryNode.id_for(series_dir)].kind = "container"
+    series_dir = root / "Liz Carlyle"               # name DOES resemble the series
+    graph = _graph_with_dirs(series_dir)
 
     b1 = _book_with_series(series_dir, "Close Call", "Liz Carlyle", 8)
     b2 = _book_with_series(series_dir, "Secret Asset", "Liz Carlyle", 2)
-    resolve_graph_authors(graph, [b1, b2], root=root)
+    _resolve(graph, [b1, b2], root)
 
     node = graph.directories[DirectoryNode.id_for(series_dir)]
-    assert node.kind == "container"      # NOT reclassified
-    assert b1.authors == []              # not filled with the series name
+    assert node.kind == "series"         # one series with a ramp, folder matches -> series, not author
+    assert b1.authors == []              # a series fill never invents an author name
 
 
-def test_structural_author_skips_when_nothing_empty_or_weak(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
+def test_folder_of_tagged_books_resolves_to_their_author(tmp_path):
     root = tmp_path / "lib"
     folder = root / "Mixed Bucket"
-    a = folder / "x"
-    b = folder / "y"
-    graph = _graph_with_dirs(a, b)
-    graph.directories[DirectoryNode.id_for(folder)].kind = "container"
+    graph = _graph_with_dirs(folder)
 
-    # both books carry a strong (tag) author -> nothing to fill -> folder must stay a container
-    t1 = _book(a, ["Real Author"], Provenance.TAG.value)
-    t2 = _book(b, ["Real Author"], Provenance.TAG.value)
-    resolve_graph_authors(graph, [t1, t2], root=root)
+    # both books carry a strong (tag) author -> the folder resolves to that consensus author,
+    # and the books, already strongly authored, are left untouched by the down-fill
+    t1 = _book(folder, ["Real Author"], Provenance.TAG.value)
+    t2 = _book(folder, ["Real Author"], Provenance.TAG.value)
+    _resolve(graph, [t1, t2], root)
 
-    assert graph.directories[DirectoryNode.id_for(folder)].kind == "container"
-    assert t1.authors == ["Real Author"]   # untouched
+    node = graph.directories[DirectoryNode.id_for(folder)]
+    assert node.kind == "author" and node.author == "Real Author"
+    assert t1.authors == ["Real Author"] and t1.provenance["authors"] == Provenance.TAG.value
 
 
-def test_structural_author_never_classifies_root(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
-
+def test_scan_root_of_loose_books_stays_container(tmp_path):
     root = tmp_path / "lib"               # loose books directly in root (a bucket)
-    a = root / "x"
-    b = root / "y"
-    graph = _graph_with_dirs(a, b)
-    graph.directories[DirectoryNode.id_for(root)].kind = "container"
+    graph = _graph_with_dirs(root)
 
+    # the scan-root container prior outweighs a lone structural-author vote, so a bare root of
+    # loose books is not named after the upload folder and no book inherits that name
     b1 = _book_with_series(root, "x", "Some Series", 1)
     b2 = _book(root, [])
-    resolve_graph_authors(graph, [b1, b2], root=root)
+    _resolve(graph, [b1, b2], root)
 
-    assert graph.directories[DirectoryNode.id_for(root)].kind == "container"  # root never author
+    assert graph.directories[DirectoryNode.id_for(root)].kind == "container"
     assert b2.authors == []
 
 
 def test_structural_author_is_idempotent(tmp_path):
-    from colophon.core.graph_resolve import resolve_graph_authors
+    from colophon.core.node_classify import classify_nodes
 
     root = tmp_path / "lib"
     author_dir = root / "stella Rimington"
-    a = author_dir / "Close Call"
-    graph = _graph_with_dirs(a)
-    graph.directories[DirectoryNode.id_for(author_dir)].kind = "container"
+    graph = _graph_with_dirs(author_dir)
     b1 = _book_with_series(author_dir, "Close Call", "Liz Carlyle", 8)
+    b2 = _book_with_series(author_dir, "Secret Asset", "Liz Carlyle", 2)
 
-    resolve_graph_authors(graph, [b1], root=root)
+    _resolve(graph, [b1, b2], root)
     first = list(b1.authors)
-    resolve_graph_authors(graph, [b1], root=root)   # second pass must not change anything
+    classify_nodes(graph, [b1, b2], root=root, overrides={})   # second pass must not change anything
     assert b1.authors == first == ["stella Rimington"]
     assert b1.provenance["authors"] == Provenance.GRAPHING.value
 
@@ -562,20 +550,15 @@ def test_multibook_folder_named_like_a_book_still_becomes_author(tmp_path):
     # A true multibook folder cannot be an accurately-named *title* folder (its books have
     # distinct titles), so even when the folder name matches one of those titles it resolves to
     # author — the only surviving candidate once title is ruled out and series is not unanimous.
-    from colophon.core.graph_resolve import resolve_graph_authors
-
     root = tmp_path / "lib"
     folder = root / "Legion"             # name matches one held book, but two DISTINCT books live here
-    a = folder / "Legion"
-    b = folder / "Elantris"
-    graph = _graph_with_dirs(a, b)
-    graph.directories[DirectoryNode.id_for(folder)].kind = "container"
+    graph = _graph_with_dirs(folder)
 
     b1 = BookUnit.new(source_folder=folder)
     b1.title = "Legion"
     b2 = BookUnit.new(source_folder=folder)
     b2.title = "Elantris"
-    resolve_graph_authors(graph, [b1, b2], root=root)
+    _resolve(graph, [b1, b2], root)
 
     node = graph.directories[DirectoryNode.id_for(folder)]
     assert node.kind == "author"
