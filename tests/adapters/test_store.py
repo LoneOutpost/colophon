@@ -25,7 +25,7 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     assert "book_units" in tables
     assert "schema_version" in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 6
+    assert version == 7
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -33,7 +33,37 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 6
+    assert version == 7
+
+
+def test_migration_007_heals_legacy_sidecar_provenance(tmp_path: Path):
+    # A record written before the SIDECAR->DATAFILE rename stores provenance "sidecar".
+    # Migration 007 must rewrite it to "datafile" (only the provenance, not the value) so the
+    # scan's orphan-cleanup can heal it, while leaving non-sidecar provenances untouched.
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = BookUnitRepo(conn)
+
+    b = BookUnit.new(source_folder=Path("/lib/Sara Paretsky/Blacklist"))
+    b.title = "Blacklist"
+    b.provenance["title"] = "sidecar"
+    b.authors = ["TE_Audiobooks_S"]
+    b.provenance["authors"] = "sidecar"
+    b.narrators = ["A Reader"]
+    b.provenance["narrators"] = "tag"   # control: a non-sidecar provenance must not change
+    repo.upsert(b)
+
+    # rewind past migration 007 and re-run it against the legacy row
+    conn.execute("UPDATE schema_version SET version = 6")
+    conn.commit()
+    migrate(conn)
+
+    healed = repo.get(b.id)
+    assert healed is not None
+    assert healed.provenance["authors"] == "datafile"   # legacy sidecar -> datafile
+    assert healed.provenance["title"] == "datafile"
+    assert healed.provenance["narrators"] == "tag"       # untouched
+    assert healed.authors == ["TE_Audiobooks_S"]         # only provenance moved, value intact
 
 
 def _repo(tmp_path: Path) -> BookUnitRepo:
