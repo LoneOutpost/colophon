@@ -242,3 +242,12 @@ def test_declared_franchise_classifies_folder_franchise(tmp_path):
     # author tier) — each book keeps its own tag author
     assert books[0].authors == ["Judith Reeves-Stevens"]
     assert books[1].authors == ["Diane Duane"]
+
+
+def test_author_depth_from_scheme():
+    from colophon.core.node_classify import _author_depth
+    assert _author_depth("") == 1                       # blank -> Root/Author convention
+    assert _author_depth("$Author/$Title") == 1
+    assert _author_depth("$Author/$Series/$Title") == 1
+    assert _author_depth("$Series/$Author") == 2
+    assert _author_depth("$Title") is None              # scheme with no author level

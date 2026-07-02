@@ -101,6 +101,7 @@ class _Ctx:
     direct_books: dict[Path, list[BookUnit]] = field(default_factory=dict)   # a folder's own loose books
     overrides: dict[str, object] = field(default_factory=dict)               # path str -> NodeOverride
     known_franchises: dict[str, str] = field(default_factory=dict)   # name_key -> display
+    author_depth: int | None = None   # scheme depth (1-based) whose folder is the author, or None
 
 
 def _depth(path: Path, root: Path) -> int:
@@ -108,6 +109,20 @@ def _depth(path: Path, root: Path) -> int:
         return len(path.relative_to(root).parts)
     except ValueError:
         return 0
+
+
+def _author_depth(scheme: str) -> int | None:
+    """The 1-based directory depth at which the configured scheme places the author, or 1 for a
+    blank scheme (the near-universal Root/Author/... convention). None when the scheme is set but
+    has no $Author level, so we make no directory-author assumption."""
+    from colophon.core.dirinfer import parse_scheme
+    patterns = parse_scheme(scheme)
+    if not patterns:
+        return 1
+    for i, pat in enumerate(patterns, start=1):
+        if "author" in pat.groupindex:
+            return i
+    return None
 
 
 def ax_container_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
@@ -306,7 +321,8 @@ _AXIOMS = (
 )
 
 
-def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object], known_franchises: dict[str, str]) -> _Ctx:
+def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object],
+               known_franchises: dict[str, str], directory_scheme: str = "") -> _Ctx:
     from collections import Counter
 
     from colophon.core.graph_classify import CONTAINER, GROUPING, TITLE, _subtree_books
@@ -326,16 +342,16 @@ def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object], known_fra
     }
     return _Ctx(graph=graph, root=root, books_by_folder=books_by_folder, modal_author_depth=modal,
                 book_like_children=book_like, direct_books=direct_books, overrides=overrides,
-                known_franchises=known_franchises)
+                known_franchises=known_franchises, author_depth=_author_depth(directory_scheme))
 
 
 def classify_nodes(
     graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, object],
-    known_franchises: dict[str, str] | None = None,
+    known_franchises: dict[str, str] | None = None, directory_scheme: str = "",
 ) -> None:
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
     then fill empty/weak-author books from the nearest author node (GRAPHING)."""
-    ctx = _build_ctx(graph, root, overrides, known_franchises or {})
+    ctx = _build_ctx(graph, root, overrides, known_franchises or {}, directory_scheme)
     evidenced: dict[str, bool] = {}
     for node in graph.directories.values():
         evidence: list[Evidence] = []
