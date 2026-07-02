@@ -6,9 +6,18 @@ imperative resolve_graph_authors/hint_grouping_kinds passes."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from colophon.core.graph import DirectoryNode, Graph
+from colophon.core.models import BookUnit
 
 # Fixed candidate order — used to break exact soft ties deterministically.
 _KIND_ORDER = ("author", "series", "franchise", "container")
+
+_BUCKET_WORDS = frozenset({
+    "incoming", "downloads", "download", "audiobooks", "audiobook", "books", "misc",
+    "unsorted", "new", "temp", "tmp", "media", "library", "import", "imports",
+})
 
 
 @dataclass(frozen=True)
@@ -70,3 +79,46 @@ def resolve(
         kind=best, value=_value_for(best, evidence, fallback_value),
         confidence=confidence, source="", settled=False, evidence=list(evidence),
     )
+
+
+@dataclass
+class _Ctx:
+    graph: Graph
+    root: Path
+    books_by_folder: dict[Path, list[BookUnit]]   # subtree books per folder path
+    modal_author_depth: int | None                # from the TITLE-depth mode (author = mode - 1)
+    book_like_children: dict[str, int]            # node id -> count of child dirs that hold books
+    overrides: dict[str, object] = field(default_factory=dict)   # path str -> NodeOverride
+
+
+def _depth(path: Path, root: Path) -> int:
+    try:
+        return len(path.relative_to(root).parts)
+    except ValueError:
+        return 0
+
+
+def ax_container_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """Structural container evidence: a folder-of-folders is a bucket (weight grows with the count),
+    loose audio beside subfolders is mixed, and the scan root is usually a library bucket."""
+    out: list[Evidence] = []
+    m = ctx.book_like_children.get(node.id, 0)
+    if m >= 2:
+        out.append(Evidence("container", 1.0 + 0.5 * m, f"{m} book-like child folders (a bucket)"))
+    if node.child_files and node.child_dirs:
+        out.append(Evidence("container", 1.0, f"loose audio beside {len(node.child_dirs)} subfolders"))
+    if node.path == ctx.root:
+        out.append(Evidence("container", 1.0, "the scan root is usually a library bucket"))
+    return out
+
+
+def ax_bucket_word(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform axiom signature
+    """A bucket/stop word or a numeric name is not an author. Capitalization and single-token names
+    are intentionally ignored (noisy here; single-name/alias authors are legitimate)."""
+    name = node.path.name
+    low = name.strip().casefold()
+    if low in _BUCKET_WORDS:
+        return [Evidence("container", 2.0, f"'{name}' is a bucket/staging folder name")]
+    if low.replace(" ", "").isdigit():
+        return [Evidence("container", 1.5, f"'{name}' is numeric, not a person/author name")]
+    return []
