@@ -192,3 +192,53 @@ def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
         return [Evidence("author", min(3.0, 1.0 + 0.5 * top_n),
                          f"{top_n} books agree on tagged author '{display}'", value=display)]
     return []
+
+
+_MATCH_SOURCES = frozenset({"audnexus", "audible", "hardcover", "openlibrary"})
+_SERIES_COVERAGE = 0.6
+
+
+def ax_series_ramp(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """All/most books one series with a sequence ramp AND the folder name resembles it -> series."""
+    from colophon.core.graph_classify import _series_label
+    from colophon.core.graph_resolve import _resembles
+    books = ctx.books_by_folder.get(node.path, [])
+    if not books:
+        return []
+    by_series = _distinct_series(books)
+    if len(by_series) != 1:
+        return []
+    (_key, seqs), = by_series.items()
+    if len(seqs) / len(books) < _SERIES_COVERAGE:
+        return []
+    ramp = sorted({s for s in seqs if s is not None})
+    display = next(_series_label(b)[1] for b in books if _series_label(b))
+    if len(ramp) >= 2 and _resembles(node.path.name, display):
+        return [Evidence("series", 3.0,
+                         f"all books in series '{display}' (seq {ramp[0]:g}-{ramp[-1]:g}), folder matches",
+                         value=display)]
+    return []
+
+
+def ax_matched_identity(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """Books positively identified by a match source that agree on an author equal to the folder
+    name settle the node as that author (hard)."""
+    from colophon.core.graph_resolve import _name_key
+    key = _name_key(node.path.name)
+    matched_authors = [
+        a for b in ctx.books_by_folder.get(node.path, [])
+        if b.provenance.get("authors") in _MATCH_SOURCES for a in b.authors
+    ]
+    for author in matched_authors:
+        if _name_key(author) == key:
+            return [Evidence("author", 10.0, f"matched book(s) author '{author}' == folder name",
+                             hard=True, value=author)]
+    return []
+
+
+def ax_manual_override(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A persisted user classification settles the node (hard), whatever kind they chose."""
+    ov = ctx.overrides.get(str(node.path))
+    if ov is None:
+        return []
+    return [Evidence(ov.kind, 100.0, "you classified this folder", hard=True, value=ov.value)]

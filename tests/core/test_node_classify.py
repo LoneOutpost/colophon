@@ -121,3 +121,33 @@ def test_author_name_and_consensus_axioms():
     lone = _dir(g, "/lib/Lone")
     ctx.books_by_folder[lone.path] = [_book("/lib/Lone", authors=["Solo"], prov="tag")]
     assert ax_artist_consensus(lone, ctx) == []
+
+
+def test_series_and_hard_axioms():
+    from colophon.core.models import NodeOverride
+    from colophon.core.node_classify import (
+        _Ctx,
+        ax_manual_override,
+        ax_matched_identity,
+        ax_series_ramp,
+    )
+
+    g = Graph()
+    root = Path("/lib")
+    mist = _dir(g, "/lib/Mistborn")
+    books = [_book("/lib/Mistborn", series="Mistborn", seq=float(i)) for i in (1, 2, 3)]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={mist.path: books},
+               modal_author_depth=None, book_like_children={})
+    sev = ax_series_ramp(mist, ctx)
+    assert sev and sev[0].kind == "series"
+
+    hb = _dir(g, "/lib/Robert Jordan")
+    ctx.books_by_folder[hb.path] = [_book("/lib/Robert Jordan", authors=["Robert Jordan"], prov="audnexus")]
+    mev = ax_matched_identity(hb, ctx)
+    assert mev and mev[0].hard is True and mev[0].kind == "author" and mev[0].value == "Robert Jordan"
+
+    node = _dir(g, "/lib/Anything")
+    ctx_ov = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+                  book_like_children={}, overrides={"/lib/Anything": NodeOverride(kind="series", value="The Expanse")})
+    oev = ax_manual_override(node, ctx_ov)
+    assert oev and oev[0].hard is True and oev[0].kind == "series" and oev[0].value == "The Expanse"
