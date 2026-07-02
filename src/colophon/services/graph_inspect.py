@@ -58,11 +58,6 @@ def _provenance_of(books: BookUnitRepo):
                 return ["Re-scan to compute provenance"]
             k = str(node.attrs.get("kind"))
             if k == "unknown":
-                hint = node.attrs.get("kind_hint")
-                if hint:
-                    out = [f"Suggested: {hint}"]
-                    out.extend(str(x) for x in (node.attrs.get("kind_hint_evidence") or []))
-                    return out
                 return ["Unclassified"]
             manual = node.attrs.get("kind_source") == "manual"
             conf = node.attrs.get("kind_confidence")

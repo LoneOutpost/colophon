@@ -153,9 +153,8 @@ def test_dir_badges_manual_override():
     node.kind_source = "manual"
     assert _dir_badges(node) == ["FRANCHISE → DOCTOR WHO · manual"]
 
-    # a manual node shows no auto/hint chip even if those fields are set
+    # a manual node shows its source, not a confidence chip, even if confidence is set
     node.kind_confidence = 0.9
-    node.kind_hint = "series"
     assert _dir_badges(node) == ["FRANCHISE → DOCTOR WHO · manual"]
 
 

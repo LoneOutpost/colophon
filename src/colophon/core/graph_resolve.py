@@ -166,8 +166,9 @@ def _fill_confirmed(book: BookUnit, *, author: str | None, series: str | None) -
 
 def propagate_overrides(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """Fill empty/weak author/series on each book from its nearest MANUAL author/series
-    ancestor node (set by apply_overrides), stamped MANUAL. Authoritative + sticky; a book
-    that asserts its own author/series (tag/match/datafile) is left untouched."""
+    ancestor node (classify_nodes stamps kind_source='manual' from an override), stamped
+    MANUAL. Authoritative + sticky; a book that asserts its own author/series
+    (tag/match/datafile) is left untouched."""
     for book in books:
         author = series = None
         for node in _ancestors(graph, book.source_folder, root):

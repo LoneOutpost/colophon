@@ -1,7 +1,8 @@
 """Coarse, decision-support classification of DirectoryNodes: grouping / container /
 title / unknown, each with a confidence and human-readable evidence. A pure, bottom-up
 pass over a built Graph. This is a triage layer — it does NOT make the final author/series
-determination; later passes (and the user) refine a grouping into author or series."""
+determination; the evidence engine (node_classify) consumes these coarse kinds and refines
+a grouping into author or series."""
 
 from __future__ import annotations
 
@@ -9,18 +10,12 @@ from collections import Counter
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import NodeOverride
 from colophon.core.normalize import normalize_name
 
 GROUPING = "grouping"
 CONTAINER = "container"
 TITLE = "title"
 UNKNOWN = "unknown"
-
-HINT_AUTHOR = "author"
-HINT_SERIES = "series"
-HINT_AMBIGUOUS = "ambiguous"
-_SERIES_COVERAGE = 0.6      # dominant series must cover this fraction of leaf books
 
 _BOOK_LIKE = {TITLE, GROUPING}
 
@@ -121,63 +116,3 @@ def _series_label(book) -> tuple[str, str, float | None] | None:
     return normalize_name(name).casefold(), name, seq
 
 
-def _hint_for(books: list) -> tuple[str, float, list[str]]:
-    """Author/series hint for a grouping from its subtree leaf books. One dominant series
-    with a sequence ramp -> series; multiple series or standalone titles -> author; one
-    series without a ramp -> ambiguous."""
-    n = len(books)
-    if n == 0:
-        return "", 0.0, []
-    by_series: dict[str, list[float | None]] = {}
-    display: dict[str, str] = {}
-    for book in books:
-        label = _series_label(book)
-        if label is None:
-            continue
-        key, name, seq = label
-        by_series.setdefault(key, []).append(seq)
-        display.setdefault(key, name)
-    if not by_series:
-        return HINT_AUTHOR, 0.6, [f"{n} titles, no series information"]
-    dominant = max(by_series, key=lambda k: len(by_series[k]))
-    coverage = len(by_series[dominant]) / n
-    seqs = sorted({s for s in by_series[dominant] if s is not None})
-    if len(by_series) == 1 and coverage >= _SERIES_COVERAGE:
-        if len(seqs) >= 2:
-            return HINT_SERIES, round(coverage, 2), [
-                f"{len(by_series[dominant])} of {n} books in series "
-                f"'{display[dominant]}' (seq {seqs[0]:g}–{seqs[-1]:g})"  # noqa: RUF001 - en dash for numeric range
-            ]
-        return HINT_AMBIGUOUS, 0.3, [
-            f"one series '{display[dominant]}' but no clear sequence ramp"
-        ]
-    return HINT_AUTHOR, round(min(0.9, 0.5 + 0.1 * len(by_series)), 2), [
-        f"spans {len(by_series)} series across {n} titles"
-    ]
-
-
-def hint_grouping_kinds(graph: Graph) -> None:
-    """Write an advisory author/series hint onto each still-unresolved grouping (kind ==
-    'grouping'). Runs after author resolution; never changes `kind`."""
-    for node in graph.directories.values():
-        if node.kind != GROUPING:
-            continue
-        hint, conf, evidence = _hint_for(_subtree_books(graph, node))
-        node.kind_hint = hint
-        node.kind_hint_confidence = conf
-        node.kind_hint_evidence = evidence
-
-
-def apply_overrides(graph: Graph, overrides: dict[str, NodeOverride]) -> None:
-    """Stamp persisted user classifications onto the graph, keyed by folder path. Runs LAST
-    (after the auto-passes) so a human assignment wins and is re-applied on every rebuild —
-    the node-level analog of MANUAL provenance. Never inferred; only ever set here."""
-    for node in graph.directories.values():
-        ov = overrides.get(str(node.path))
-        if ov is None:
-            continue
-        node.kind = ov.kind
-        node.kind_value = ov.value
-        node.kind_source = "manual"
-        if ov.kind == "author":
-            node.author = ov.value

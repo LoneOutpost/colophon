@@ -80,12 +80,6 @@ def skeleton_records(
             attrs["kind_confidence"] = d.kind_confidence
         if d.kind_evidence:
             attrs["kind_evidence"] = list(d.kind_evidence)
-        if d.kind_hint:
-            attrs["kind_hint"] = d.kind_hint
-        if d.kind_hint_confidence:
-            attrs["kind_hint_confidence"] = d.kind_hint_confidence
-        if d.kind_hint_evidence:
-            attrs["kind_hint_evidence"] = list(d.kind_hint_evidence)
         nodes.append(NodeRecord(
             id=d.id, physical="directory",
             semantic=d.kind if d.kind in _SEMANTIC_DIR_KINDS else None,
