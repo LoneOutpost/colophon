@@ -157,3 +157,27 @@ def test_canonical_display_prefers_authoritative_source():
     # a lone weak spelling is still used; empty -> ""
     assert _canonical_display([("Sean Flynn", "directory")]) == "Sean Flynn"
     assert _canonical_display([]) == ""
+
+
+def test_build_entity_graph_canonicalizes_display():
+    from colophon.core.entity_graph import build_entity_graph
+    from colophon.core.graph_resolve import _name_key
+    from colophon.core.models import BookUnit
+
+    def _b(name, prov):
+        b = BookUnit.new(source_folder=Path("/lib") / name)
+        b.authors = [name]
+        b.provenance["authors"] = prov
+        return b
+
+    # same author, two spellings: the tagged one must win the display
+    folder = _b("Robert A Heinlein", "directory")
+    tagged = _b("Robert A. Heinlein", "tag")
+    g = build_entity_graph([folder, tagged])
+    node = g.nodes[("author", _name_key("Robert A Heinlein"))]
+    assert node.name == "Robert A. Heinlein"
+
+    # an alias still wins (resolve_alias unifies before keying)
+    aliases = {("author", _name_key("Robert A. Heinlein")): "Bob Heinlein"}
+    g2 = build_entity_graph([folder, tagged], aliases=aliases)
+    assert g2.nodes[("author", _name_key("Bob Heinlein"))].name == "Bob Heinlein"

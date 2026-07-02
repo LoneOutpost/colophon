@@ -39,6 +39,30 @@ def _canonical_display(candidates: list[tuple[str, str]]) -> str:
     return max(counts, key=lambda name: (counts[name], -first[name]))
 
 
+def _entity_field_values(book: BookUnit, kind: str) -> list[tuple[str, str]]:
+    """The (spelling, provenance) pairs a book contributes for `kind`. Franchise is not a book
+    field (it comes from the folder), so it yields nothing and the declared display is kept."""
+    if kind == "author":
+        return [(a, book.provenance.get("authors", "")) for a in book.authors]
+    if kind == "series":
+        return [(s.name, book.provenance.get("series", "")) for s in book.series]
+    return []
+
+
+def _canonicalize_displays(g: EntityGraph, aliases: dict[tuple[str, str], str] | None) -> None:
+    """Set each entity node's display to the most-authoritative spelling among its member books
+    (view-only). Aliases resolve first, so an aliased cluster keeps its canonical name."""
+    for (kind, key), node in g.nodes.items():
+        cands: list[tuple[str, str]] = []
+        for book in g.members.get((kind, key), []):
+            for spelling, prov in _entity_field_values(book, kind):
+                resolved = resolve_alias(aliases, kind, spelling)
+                if _name_key(resolved) == key:
+                    cands.append((resolved, prov))
+        if cands:
+            node.name = _canonical_display(cands)
+
+
 class EntityNode(_Base):
     kind: str   # "author" | "series" | "franchise"
     name: str   # canonical display name — first spelling encountered
@@ -90,6 +114,7 @@ def build_entity_graph(
         if raw_f:
             link("franchise", raw_f, b, seen)
 
+    _canonicalize_displays(g, aliases)
     return g
 
 
@@ -144,4 +169,5 @@ def entity_graph_from_records(
     # relies on the invariant that a book node's edges mirror the book's current fields —
     # held by write-through resyncing every mutation (see AppController._resync_books).
     g.books = [books_by_id[bid] for bid in book_of_node.values() if bid in books_by_id]
+    _canonicalize_displays(g, aliases)
     return g
