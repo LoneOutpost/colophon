@@ -141,3 +141,19 @@ def test_from_records_skips_book_node_without_bookunit():
 def test_from_records_empty_graph():
     g = entity_graph_from_records(LibraryGraph.from_records([], []), {})
     assert g.nodes == {} and g.books == []
+
+
+def test_canonical_display_prefers_authoritative_source():
+    from colophon.core.entity_graph import _canonical_display
+    # tag spelling beats a folder-derived one
+    assert _canonical_display([("Robert A Heinlein", "directory"),
+                               ("Robert A. Heinlein", "tag")]) == "Robert A. Heinlein"
+    # a match source beats a tag
+    assert _canonical_display([("Robert A. Heinlein", "tag"),
+                               ("Robert Anson Heinlein", "audnexus")]) == "Robert Anson Heinlein"
+    # equal authority -> most frequent, then first-seen
+    assert _canonical_display([("A B", "tag"), ("A. B.", "tag"), ("A B", "tag")]) == "A B"
+    assert _canonical_display([("A B", "tag"), ("A. B.", "tag")]) == "A B"   # tie -> first-seen
+    # a lone weak spelling is still used; empty -> ""
+    assert _canonical_display([("Sean Flynn", "directory")]) == "Sean Flynn"
+    assert _canonical_display([]) == ""

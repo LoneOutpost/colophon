@@ -5,6 +5,7 @@ franchise views. NOT the persisted graph store (which is scan-time and stale on 
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 from colophon.core.entity_alias import resolve_alias
@@ -13,6 +14,29 @@ from colophon.core.library_graph import LibraryGraph
 from colophon.core.models import BookUnit, _Base
 
 EntityKey = tuple[str, str]  # (kind, name_key)
+
+
+# How authoritative a source's *spelling* of a name is, for choosing the display. Mirrors the
+# reconcile precedence: a user value or a match/tag beats a folder-derived guess.
+_DISPLAY_AUTHORITY = {
+    "manual": 5,
+    "audnexus": 4, "audible": 4, "hardcover": 4, "openlibrary": 4, "googlebooks": 4,
+    "tag": 3, "datafile": 3,
+    "directory": 2, "filename": 2,
+    "graphing": 1,
+}
+
+
+def _canonical_display(candidates: list[tuple[str, str]]) -> str:
+    """Pick an entity's display spelling from its (spelling, provenance) candidates: keep the
+    highest-authority spellings, then the most frequent, breaking ties by first-seen order."""
+    if not candidates:
+        return ""
+    best = max(_DISPLAY_AUTHORITY.get(prov, 0) for _, prov in candidates)
+    top = [name for name, prov in candidates if _DISPLAY_AUTHORITY.get(prov, 0) == best]
+    counts = Counter(top)
+    first = {name: i for i, name in enumerate(top)}  # first-seen index among top-authority spellings
+    return max(counts, key=lambda name: (counts[name], -first[name]))
 
 
 class EntityNode(_Base):
