@@ -1,6 +1,7 @@
 from colophon.core.normalize import (
     FIELD_NORMALIZERS,
     normalize_description,
+    normalize_key,
     normalize_name,
     normalize_text,
 )
@@ -138,3 +139,26 @@ def test_merge_preserve_existing_first_dedupe_order():
     assert merge_preserve([], ["x", "x"]) == ["x"]
     assert merge_preserve(["Keep"], []) == ["Keep"]
     assert merge_preserve(["a"], ["  ", "a", "d"]) == ["a", "d"]
+
+
+def test_normalize_key_folds_formatting_and_diacritics():
+    k = normalize_key
+    # order, case, spacing, punctuation (existing _name_key behavior preserved)
+    assert k("Stephen King") == k("stephen king") == k("King, Stephen")
+    assert k("Robert A. Heinlein") == k("Robert A Heinlein") == k("Robert A.Heinlein")
+    assert k("J.R.R. Tolkien") == k("J R R Tolkien")
+    # diacritics fold
+    assert k("Sinéad Crowley") == k("Sinead Crowley")
+    assert k("Beyoncé") == k("Beyonce")
+    # underscore -> space
+    assert k("Robert_Heinlein") == k("Robert Heinlein")
+    # guarded PascalCase: run-together names split, name particles do not
+    assert k("SueEllen Welfonder") == k("Sue-Ellen Welfonder")
+    assert k("MacDonald") == k("Macdonald")      # 'Mac' particle: NOT split
+    assert k("Siobhán MacDonald") == k("Siobhan Macdonald")
+    # non-Latin scripts are preserved, not emptied
+    assert k("村上春樹") == "村上春樹"
+    # idempotent
+    assert k(k("Robert A. Heinlein")) == k("Robert A. Heinlein")
+    # distinct names stay distinct
+    assert k("Stephen King") != k("Brandon Sanderson")
