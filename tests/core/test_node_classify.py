@@ -238,3 +238,7 @@ def test_declared_franchise_classifies_folder_franchise(tmp_path):
 
     assert kind_of({}) == "author"                              # structural author guess
     assert kind_of({"star trek": "Star Trek"}) == "franchise"   # declaration wins (4.0 > 2.0)
+    # a franchise node never bleeds its name into the books beneath it (franchise is not an
+    # author tier) — each book keeps its own tag author
+    assert books[0].authors == ["Judith Reeves-Stevens"]
+    assert books[1].authors == ["Diane Duane"]

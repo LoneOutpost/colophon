@@ -409,5 +409,5 @@ def test_known_franchise_add_list_remove(tmp_path: Path):
     repo.add("STAR TREK")
     assert repo.all() == {"star trek": "STAR TREK", "doctor who": "Doctor Who"}
 
-    repo.remove("star trek")
+    repo.remove("Star Trek")   # remove by display name (normalized internally), as the UI does
     assert repo.all() == {"doctor who": "Doctor Who"}
