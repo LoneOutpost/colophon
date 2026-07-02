@@ -2540,7 +2540,9 @@ def test_scan_preview_forwards_progress(tmp_path):
 
     calls: list[tuple[int, int, str]] = []
     ctrl.scan_preview(progress=lambda d, t, label: calls.append((d, t, label)))
-    assert {label for _, _, label in calls} == {"Dune", "Legion"}
+    labels = {label for _, _, label in calls}
+    assert {"Dune", "Legion"} <= labels                              # folder walk
+    assert {"Identifying: Dune", "Identifying: Legion"} <= labels    # per-book identify phase
     ctx.close()
 
 
