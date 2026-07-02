@@ -85,10 +85,11 @@ def resolve(
 class _Ctx:
     graph: Graph
     root: Path
-    books_by_folder: dict[Path, list[BookUnit]]   # subtree books per folder path
+    books_by_folder: dict[Path, list[BookUnit]]   # SUBTREE books per folder (for tag/consensus/match)
     modal_author_depth: int | None                # from the TITLE-depth mode (author = mode - 1)
-    book_like_children: dict[str, int]            # node id -> count of child dirs that hold books
-    overrides: dict[str, object] = field(default_factory=dict)   # path str -> NodeOverride
+    book_like_children: dict[str, int]            # node id -> count of content (container/grouping) child dirs
+    direct_books: dict[Path, list[BookUnit]] = field(default_factory=dict)   # a folder's own loose books
+    overrides: dict[str, object] = field(default_factory=dict)               # path str -> NodeOverride
 
 
 def _depth(path: Path, root: Path) -> int:
@@ -136,21 +137,30 @@ def _distinct_series(books: list[BookUnit]) -> dict[str, list[float | None]]:
 
 
 def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """A folder spanning multiple series/titles, or holding loose books with no series, reads as an
-    author; a node at the modal author depth gets a small tree-consistency nudge."""
-    books = ctx.books_by_folder.get(node.path, [])
-    if not books:
-        return []
+    """A folder holding its OWN loose books that span multiple series, or have no series at all,
+    reads as an author (uses direct books, not the subtree — a folder-of-folders is a bucket, not a
+    multi-series author). A node at the modal author depth gets a small tree-consistency nudge."""
+    books = ctx.direct_books.get(node.path, [])
     out: list[Evidence] = []
-    by_series = _distinct_series(books)
-    if len(by_series) >= 2:
-        out.append(Evidence("author", 1.0 + 0.5 * len(by_series),
-                            f"spans {len(by_series)} series across {len(books)} titles"))
-    elif not by_series:
-        out.append(Evidence("author", 1.5, f"{len(books)} loose books, no series information"))
+    if books:
+        by_series = _distinct_series(books)
+        if len(by_series) >= 2:
+            out.append(Evidence("author", 1.0 + 0.5 * len(by_series),
+                                f"spans {len(by_series)} series across {len(books)} loose titles"))
+        elif not by_series:
+            out.append(Evidence("author", 1.5, f"{len(books)} loose books, no series information"))
     if ctx.modal_author_depth is not None and _depth(node.path, ctx.root) == ctx.modal_author_depth:
         out.append(Evidence("author", 0.5, "sits at the library's typical author depth"))
     return out
+
+
+def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
+    """A GROUPING (classify_graph found its children are mostly title folders) is an author/series
+    folder — vote author; a genuine single-series grouping is pulled to series by ax_series_ramp."""
+    from colophon.core.graph_classify import GROUPING
+    if node.kind == GROUPING:
+        return [Evidence("author", 2.0, "a folder of title subfolders (author/series grouping)")]
+    return []
 
 
 _SOFT_AUTHOR_PROV = frozenset({"tag", "datafile"})

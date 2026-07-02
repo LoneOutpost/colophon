@@ -91,11 +91,11 @@ def test_author_structural_axioms():
     root = Path("/lib")
     node = _dir(g, "/lib/star trek")
     books = [_book("/lib/star trek", series=s) for s in ("TOS", "TNG", "DS9")] + [_book("/lib/star trek")]
-    ctx = _Ctx(graph=g, root=root, books_by_folder={node.path: books},
-               modal_author_depth=2, book_like_children={})
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=2,
+               book_like_children={}, direct_books={node.path: books})
     assert any(e.kind == "author" for e in ax_author_structure(node, ctx))   # spans series -> author
     node2 = _dir(g, "/lib/Sidney Sheldon")
-    ctx.books_by_folder[node2.path] = [_book("/lib/Sidney Sheldon") for _ in range(4)]
+    ctx.direct_books[node2.path] = [_book("/lib/Sidney Sheldon") for _ in range(4)]
     assert any(e.kind == "author" for e in ax_author_structure(node2, ctx))  # loose, no series -> author
 
 
