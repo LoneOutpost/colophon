@@ -369,38 +369,50 @@ def classify_nodes(
         node.kind_source = c.source
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
-    _fill_down(graph, books, evidenced, root=root)
+    _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
 
 
-def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *, root: Path) -> None:
-    """Inherit an author-node's name into each empty/weak-author book (GRAPHING); never overwrite a
-    book's own hard (tag/datafile/match/manual) author. Among the author ancestors, prefer the
-    nearest one whose name came from book evidence (tag/consensus/match/manual) over a structural
-    grouping that only has its folder-name fallback — otherwise an intermediate grouping (e.g.
-    Author/-collection-/Title) would shadow the real author."""
+def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *,
+               root: Path, author_depth: int | None) -> None:
+    """Inherit an author into each empty/weak-author book, walking leaf->root. Prefer the nearest
+    classified author node (evidence-named over a folder-name fallback, so an intermediate grouping
+    can't shadow the real author); failing that, fall back to the folder at the directory scheme's
+    author depth (the declared layout) — but never a folder classified franchise/series/container,
+    whose name is not an author. Never overwrite a book's own hard (tag/datafile/match/manual)
+    author."""
     from colophon.core.models import Provenance
+    non_author = {"franchise", "series", "container"}
     for book in books:
         prov = book.provenance.get("authors")
         if book.authors and prov not in _WEAK:
             continue
-        seen: list[DirectoryNode] = []          # author ancestors, nearest first
+        seen: list[DirectoryNode] = []          # classified-author ancestors, nearest first
+        layout: DirectoryNode | None = None     # the ancestor at the scheme's author depth
         cur = book.source_folder
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
-            if node is not None and node.kind == "author" and node.author:
-                seen.append(node)
+            if node is not None:
+                if node.kind == "author" and node.author:
+                    seen.append(node)
+                if (author_depth is not None and _depth(cur, root) == author_depth
+                        and node.kind not in non_author):
+                    layout = node
             if cur == root or root not in cur.parents:
                 break
             cur = cur.parent
-        if not seen:
+        chosen = next((n for n in seen if evidenced.get(n.id)), seen[0] if seen else None)
+        if chosen is not None:
+            # a user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING
+            name = chosen.author
+            provenance = (Provenance.MANUAL.value if chosen.kind_source == "manual"
+                          else Provenance.GRAPHING.value)
+        elif layout is not None:
+            name = layout.path.name
+            provenance = Provenance.DIRECTORY.value
+        else:
             continue
-        chosen = next((n for n in seen if evidenced.get(n.id)), seen[0])
         # only (re)stamp when we actually introduce the value, so a book's own more-specific weak
-        # provenance (directory/filename) survives when it already agrees with the chosen node.
-        # A user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING.
-        if book.authors != [chosen.author]:
-            book.authors = [chosen.author]
-            book.provenance["authors"] = (
-                Provenance.MANUAL.value if chosen.kind_source == "manual"
-                else Provenance.GRAPHING.value
-            )
+        # provenance (directory/filename) survives when it already agrees.
+        if book.authors != [name]:
+            book.authors = [name]
+            book.provenance["authors"] = provenance
