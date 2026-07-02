@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import re
+import unicodedata
 from collections.abc import Callable
 
 # Words kept lowercase in title case (except as the first/last word or after a colon):
@@ -160,3 +161,42 @@ FIELD_NORMALIZERS = {
 }
 
 NORMALIZABLE_FIELDS = list(FIELD_NORMALIZERS)
+
+
+# Name particles that must stay attached to the following capital in a run-together token, so
+# "MacDonald" is not split into "Mac Donald" (which would fail to match a lowercase "Macdonald").
+_NAME_PARTICLES = frozenset({
+    "mc", "mac", "o", "de", "di", "du", "la", "le", "van", "von", "der", "den", "st", "fitz",
+})
+
+
+def _split_pascal(token: str) -> str:
+    """Split a spaceless run-together token at each lower->upper transition ('SueEllen' ->
+    'Sue Ellen'), except immediately after a name particle ('MacDonald' stays whole). A matching
+    aid, never a display; knowingly imperfect for rarer particles."""
+    parts: list[str] = []
+    start = 0
+    for i in range(1, len(token)):
+        if token[i - 1].islower() and token[i].isupper():
+            if token[start:i].casefold() in _NAME_PARTICLES:
+                continue  # keep the particle glued to what follows
+            parts.append(token[start:i])
+            start = i
+    parts.append(token[start:])
+    return " ".join(parts)
+
+
+def normalize_key(name: str) -> str:
+    """Canonical comparison key for entity names (author/series/narrator/franchise): tolerant of
+    'Last, First' order, case, spacing, punctuation, underscores, Latin diacritics, and guarded
+    run-together PascalCase. Non-Latin scripts are preserved. Answers 'are these the same name?' —
+    it is not a display value."""
+    s = name.strip()
+    if "," in s:
+        last, _, first = s.partition(",")
+        s = f"{first.strip()} {last.strip()}"
+    # fold Latin diacritics; non-Latin letters have no combining marks and are kept below
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    s = " ".join(_split_pascal(tok) for tok in s.split())
+    s = re.sub(r"[\W_]+", " ", s)          # drop punctuation and underscore; keep Unicode letters/digits
+    return re.sub(r"\s+", " ", s).strip().casefold()
