@@ -151,3 +151,48 @@ def test_series_and_hard_axioms():
                   book_like_children={}, overrides={"/lib/Anything": NodeOverride(kind="series", value="The Expanse")})
     oev = ax_manual_override(node, ctx_ov)
     assert oev and oev[0].hard is True and oev[0].kind == "series" and oev[0].value == "The Expanse"
+
+
+def _graph_with(paths_books, root):
+    from colophon.core.graph import BookNode
+    g = Graph()
+    rootnode = DirectoryNode(path=root)
+    g.directories[rootnode.id] = rootnode
+    for folder, books in paths_books.items():
+        d = DirectoryNode(path=Path(folder))
+        g.directories[d.id] = d
+        rootnode.child_dirs.append(d.id)
+        for i, b in enumerate(books):
+            bid = f"{d.id}:{i}"
+            g.books[bid] = BookNode(id=bid, book=b, owns=[], dir_id=d.id)
+            d.books.append(bid)
+    return g
+
+
+def test_classify_nodes_worked_cases(tmp_path):
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    st = [_book(str(root / "star trek"), series=s) for s in ("TOS", "TNG", "DS9", "VOY")]
+    mist = [_book(str(root / "Mistborn"), series="Mistborn", seq=float(i)) for i in (1, 2, 3)]
+    ss = [_book(str(root / "Sidney Sheldon")) for _ in range(4)]
+    poison = [_book(str(root / "Sylvia Plath"), authors=[root.name], prov="datafile")]
+    g = _graph_with({
+        str(root / "star trek"): st, str(root / "Mistborn"): mist,
+        str(root / "Sidney Sheldon"): ss, str(root / "Sylvia Plath"): poison,
+    }, root)
+    books = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, books, root=root, overrides={})
+
+    def kind(name):
+        return g.directories[DirectoryNode.id_for(root / name)].kind
+
+    assert kind("star trek") == "author"
+    assert kind("Mistborn") == "series"
+    assert kind("Sidney Sheldon") == "author"
+    assert g.directories[DirectoryNode.id_for(root)].kind == "container"   # no cascade
+    assert all(b.authors == ["star trek"] for b in st)                     # Down-fill
+    assert poison[0].authors == [root.name]                                # own author kept

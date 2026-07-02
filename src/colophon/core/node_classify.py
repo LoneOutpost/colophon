@@ -252,3 +252,79 @@ def ax_manual_override(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     if ov is None:
         return []
     return [Evidence(ov.kind, 100.0, "you classified this folder", hard=True, value=ov.value)]
+
+
+_WEAK = frozenset({"directory", "filename"})
+_AXIOMS = (
+    ax_manual_override, ax_matched_identity,          # hard
+    ax_artist_consensus, ax_tag_author_match,         # author (name-bearing)
+    ax_author_structure, ax_author_from_grouping, ax_series_ramp,   # author/series (structural)
+    ax_container_shape, ax_bucket_word,               # container
+)
+
+
+def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object]) -> _Ctx:
+    from collections import Counter
+
+    from colophon.core.graph_classify import CONTAINER, GROUPING, TITLE, _subtree_books
+    books_by_folder = {d.path: _subtree_books(graph, d) for d in graph.directories.values()}
+    direct_books = {
+        d.path: [graph.books[b].book for b in d.books if b in graph.books]
+        for d in graph.directories.values()
+    }
+    title_depths = Counter(_depth(d.path, root) for d in graph.directories.values() if d.kind == TITLE)
+    modal = (title_depths.most_common(1)[0][0] - 1) if title_depths else None
+    # A "book-like child" for the bucket signal is a child dir classify_graph coarse-typed as content
+    # (container/grouping) — NOT a title child (a folder of titles is an author grouping, not a bucket).
+    book_like = {
+        d.id: sum(1 for c in d.child_dirs
+                  if c in graph.directories and graph.directories[c].kind in (CONTAINER, GROUPING))
+        for d in graph.directories.values()
+    }
+    return _Ctx(graph=graph, root=root, books_by_folder=books_by_folder, modal_author_depth=modal,
+                book_like_children=book_like, direct_books=direct_books, overrides=overrides)
+
+
+def classify_nodes(
+    graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, object],
+) -> None:
+    """Classify every directory node from accumulated axiom evidence, write the result onto the node,
+    then fill empty/weak-author books from the nearest author node (GRAPHING)."""
+    ctx = _build_ctx(graph, root, overrides)
+    for node in graph.directories.values():
+        evidence: list[Evidence] = []
+        for axiom in _AXIOMS:
+            evidence.extend(axiom(node, ctx))
+        ov = ctx.overrides.get(str(node.path))
+        manual_kinds = {ov.kind} if ov is not None else set()
+        matched_kinds = {e.kind for e in evidence if e.hard} - manual_kinds
+        c = resolve(evidence, fallback_value=node.path.name,
+                    manual_kinds=manual_kinds, matched_kinds=matched_kinds)
+        node.kind = c.kind
+        node.author = c.value if c.kind == "author" else None
+        node.kind_value = c.value
+        node.kind_confidence = c.confidence
+        node.kind_source = c.source
+        node.kind_evidence = [e.reason for e in c.evidence]
+    _fill_down(graph, books, root=root)
+
+
+def _fill_down(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
+    """Inherit the nearest author-node's name into each empty/weak-author book (GRAPHING); never
+    overwrite a book's own hard (tag/datafile/match/manual) author."""
+    from colophon.core.models import Provenance
+    for book in books:
+        prov = book.provenance.get("authors")
+        if book.authors and prov not in _WEAK:
+            continue
+        cur = book.source_folder
+        while True:
+            node = graph.directories.get(DirectoryNode.id_for(cur))
+            if node is not None and node.kind == "author" and node.author:
+                if book.authors != [node.author]:
+                    book.authors = [node.author]
+                    book.provenance["authors"] = Provenance.GRAPHING.value
+                break
+            if cur == root or root not in cur.parents:
+                break
+            cur = cur.parent
