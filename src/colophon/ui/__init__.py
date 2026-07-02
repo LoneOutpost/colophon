@@ -9,6 +9,7 @@ from nicegui import app, ui
 
 from colophon.controller import AppController
 from colophon.ui.acquire import render_acquire
+from colophon.ui.franchises import render_franchises
 from colophon.ui.graph_view import render_graph
 from colophon.ui.manage import render_manage
 from colophon.ui.settings import render_settings
@@ -46,6 +47,11 @@ def create_app(controller: AppController) -> None:
     def stats() -> None:
         preload_theme_background()
         render_stats(controller)
+
+    @ui.page("/franchises")
+    def franchises() -> None:
+        preload_theme_background()
+        render_franchises(controller)
 
     @ui.page("/graph")
     async def graph(mode: str = "explorer", focal: str | None = None,
