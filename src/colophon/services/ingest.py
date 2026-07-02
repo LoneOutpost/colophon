@@ -460,8 +460,9 @@ def plan_scan_graph(
     # import of build_graph would create an import cycle.
     from collections import defaultdict
 
-    from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
-    from colophon.core.graph_resolve import propagate_overrides, resolve_graph_authors
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.graph_resolve import propagate_overrides
+    from colophon.core.node_classify import classify_nodes
     from colophon.services.graph_build import build_graph, project
 
     pattern = compile_template(template)
@@ -507,14 +508,11 @@ def plan_scan_graph(
     _phase(f"adopt+identify ({len(plan.units)} units)")
     classify_graph(graph, root=root)
     _phase("classify_graph")
-    resolve_graph_authors(graph, plan.units, root=root)
-    _phase("resolve_graph_authors")
-    hint_grouping_kinds(graph)
-    _phase("hint_grouping_kinds")
+    classify_nodes(graph, plan.units, root=root, overrides=node_overrides or {})
+    _phase("classify_nodes")
     if node_overrides:
-        apply_overrides(graph, node_overrides)
         propagate_overrides(graph, plan.units, root=root)
-        _phase("apply+propagate_overrides")
+        _phase("propagate_overrides")
     plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
     _phase(f"graph_records ({len(plan.graph_nodes)} nodes, {len(plan.graph_edges)} edges)")
     return plan

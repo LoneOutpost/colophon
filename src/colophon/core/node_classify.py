@@ -11,8 +11,9 @@ from pathlib import Path
 from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.models import BookUnit
 
-# Fixed candidate order — used to break exact soft ties deterministically.
-_KIND_ORDER = ("author", "series", "franchise", "container")
+# Fixed candidate order — used to break exact soft ties deterministically. `title` is the most
+# specific (a book-identity leaf) so it wins ties.
+_KIND_ORDER = ("title", "author", "series", "franchise", "container")
 
 _BUCKET_WORDS = frozenset({
     "incoming", "downloads", "download", "audiobooks", "audiobook", "books", "misc",
@@ -160,6 +161,15 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     return out
 
 
+def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
+    """A single-book leaf (classify_graph's TITLE) is that book's title folder — a strong structural
+    vote that keeps it from being pulled up to author/series by a lone tag on its one book."""
+    from colophon.core.graph_classify import TITLE
+    if node.kind == TITLE:
+        return [Evidence("title", 5.0, "single-book leaf (a title folder)")]
+    return []
+
+
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
     """A GROUPING (classify_graph found its children are mostly title folders) is an author/series
     folder — vote author; a genuine single-series grouping is pulled to series by ax_series_ramp."""
@@ -265,6 +275,7 @@ _WEAK = frozenset({"directory", "filename"})
 _AXIOMS = (
     ax_manual_override, ax_matched_identity,          # hard
     ax_artist_consensus, ax_tag_author_match,         # author (name-bearing)
+    ax_leaf_title,                                     # title (book-identity leaf)
     ax_author_structure, ax_author_from_grouping, ax_series_ramp,   # author/series (structural)
     ax_container_shape, ax_bucket_word,               # container
 )
@@ -328,11 +339,15 @@ def _fill_down(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
             if node is not None and node.kind == "author" and node.author:
-                # a user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING
-                prov_val = Provenance.MANUAL.value if node.kind_source == "manual" else Provenance.GRAPHING.value
-                if book.authors != [node.author] or book.provenance.get("authors") != prov_val:
+                # only (re)stamp when we actually introduce the value, so a book's own more-specific
+                # weak provenance (directory/filename) survives when it already agrees with the node.
+                # A user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING.
+                if book.authors != [node.author]:
                     book.authors = [node.author]
-                    book.provenance["authors"] = prov_val
+                    book.provenance["authors"] = (
+                        Provenance.MANUAL.value if node.kind_source == "manual"
+                        else Provenance.GRAPHING.value
+                    )
                 break
             if cur == root or root not in cur.parents:
                 break

@@ -39,6 +39,7 @@ def _build_graph() -> tuple[Graph, Path]:
         path=root, child_dirs=[DirectoryNode.id_for(author)])
     g.directories[DirectoryNode.id_for(author)] = DirectoryNode(
         path=author, kind="author", author="Brandon Sanderson",
+        kind_value="Brandon Sanderson", kind_confidence=0.75,
         child_dirs=[DirectoryNode.id_for(multi)])
     g.directories[DirectoryNode.id_for(multi)] = DirectoryNode(
         path=multi, child_files=[legion.id, elantris.id, meta.id],
@@ -54,7 +55,7 @@ def test_graph_tree_nests_dirs_books_and_loose_files():
     author = top[0]
     assert author.node_kind == "dir"
     assert author.label == "Brandon Sanderson"
-    assert author.badges == ["AUTHOR → Brandon Sanderson"]
+    assert author.badges == ["AUTHOR → Brandon Sanderson · 0.75"]   # auto -> shows confidence
 
     multi = author.children[0]
     assert multi.node_kind == "dir" and multi.label == "Collection"
@@ -112,51 +113,35 @@ def test_dir_badges_show_coarse_kind_and_confidence():
     assert _dir_badges(container) == ["CONTAINER · 0.90"]
 
 
-def test_graph_summary_counts_coarse_kinds():
+def test_graph_summary_counts_resolved_kinds():
     g = Graph()
-    for name, kind in [("a", "grouping"), ("b", "grouping"), ("c", "container"),
+    for name, kind in [("a", "author"), ("b", "series"), ("c", "container"),
                        ("d", "title"), ("e", "unknown")]:
         n = DirectoryNode(path=Path("/lib") / name)
         n.kind = kind
         g.directories[n.id] = n
 
     s = graph_summary(g)
-    assert s.grouping_dirs == 2
+    assert s.author_dirs == 1
+    assert s.series_dirs == 1
     assert s.container_dirs == 1
     assert s.title_dirs == 1
     assert s.unknown_dirs == 1
 
 
-def test_dir_badges_show_grouping_hint_chip():
-    from colophon.core.graph_view import _dir_badges
-
-    node = DirectoryNode(path=Path("/lib/Mistborn"))
-    node.kind = "grouping"
-    node.kind_confidence = 0.86
-    node.kind_hint = "series"
-    node.kind_hint_confidence = 0.74
-    assert _dir_badges(node) == ["GROUPING · 0.86", "series? · 0.74"]
-
-    no_hint = DirectoryNode(path=Path("/lib/A"))
-    no_hint.kind = "grouping"
-    no_hint.kind_confidence = 0.9
-    assert _dir_badges(no_hint) == ["GROUPING · 0.90"]
-
-
-def test_graph_summary_splits_grouping_hints():
-    from colophon.core.graph_view import graph_summary
-
+def test_graph_summary_counts_auto_unconfirmed():
+    # auto (source == "") author/series nodes are the confirm-cohort review queue
     g = Graph()
-    for name, hint in [("a", "author"), ("b", "series"), ("c", "series"), ("d", "ambiguous")]:
+    for name, kind, src in [("a", "author", ""), ("b", "author", "manual"),
+                            ("c", "series", ""), ("d", "series", "")]:
         n = DirectoryNode(path=Path("/lib") / name)
-        n.kind = "grouping"
-        n.kind_hint = hint
+        n.kind = kind
+        n.kind_source = src
         g.directories[n.id] = n
 
     s = graph_summary(g)
-    assert s.grouping_author_hint == 1
-    assert s.grouping_series_hint == 2
-    assert s.grouping_ambiguous_hint == 1
+    assert s.auto_author == 1     # only the source == "" author
+    assert s.auto_series == 2
 
 
 def test_dir_badges_manual_override():
@@ -186,24 +171,25 @@ def test_graph_summary_counts_manual_dirs():
     assert graph_summary(g).manual_dirs == 2
 
 
-def test_grouping_cohort_excludes_root_and_filters_hint():
+def test_grouping_cohort_selects_auto_of_kind_excluding_root():
     from colophon.core.graph_view import grouping_cohort
 
     root = Path("/lib")
     g = Graph()
 
-    def _n(path, kind, hint=""):
+    def _n(path, kind, source=""):
         n = DirectoryNode(path=path)
         n.kind = kind
-        n.kind_hint = hint
+        n.kind_source = source
         g.directories[n.id] = n
         return n
 
-    _n(root, "grouping", "author")              # the root itself -> excluded
-    _n(root / "A1", "grouping", "author")
-    _n(root / "A2", "grouping", "author")
-    _n(root / "S1", "grouping", "series")        # different hint
-    _n(root / "C", "container")                   # not a grouping
+    _n(root, "author")                       # the root itself -> excluded
+    _n(root / "A1", "author")
+    _n(root / "A2", "author")
+    _n(root / "A3", "author", "manual")      # already confirmed -> not in the cohort
+    _n(root / "S1", "series")                # different kind
+    _n(root / "C", "container")              # not author
 
     cohort = grouping_cohort(g, root=root, hint="author")
     assert {n.path for n in cohort} == {root / "A1", root / "A2"}

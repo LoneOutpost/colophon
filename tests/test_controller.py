@@ -2516,7 +2516,7 @@ def test_graph_for_builds_and_resolves_author_subtree(tmp_path):
     top = graph_tree(ctrl.graph_for(ingest), ingest)
     sk = top[0]
     assert sk.label == "Stephen King"
-    assert sk.badges == ["AUTHOR → Stephen King"]
+    assert sk.badges[0].startswith("AUTHOR → Stephen King · ")   # auto -> name + confidence
     coll_node = sk.children[0]
     book_titles = {
         d.children[0].label
@@ -2635,11 +2635,12 @@ def test_graph_for_runs_coarse_classification(tmp_path):
 
     graph = ctrl.graph_for(ingest)
     dune = graph.directories[DirectoryNode.id_for(ingest / "Dune")]
-    assert dune.kind == "title" and dune.kind_confidence == 1.0
+    # single-book leaf -> title; the one book's tagged author is a competing (soft) author vote
+    assert dune.kind == "title" and dune.kind_confidence == 0.83
     ctx.close()
 
 
-def test_graph_for_runs_grouping_hint(tmp_path):
+def test_graph_for_resolves_grouping_to_author(tmp_path):
     ctx = _ctx(tmp_path)
     ingest = _seed_ingest(tmp_path)
     ctrl = AppController(ctx)
@@ -2649,8 +2650,9 @@ def test_graph_for_runs_grouping_hint(tmp_path):
 
     graph = ctrl.graph_for(ingest)
     root = graph.directories[DirectoryNode.id_for(ingest)]
-    assert root.kind == "grouping"               # root holds the Dune title
-    assert root.kind_hint == "author"            # one standalone title, no series
+    # the engine resolves the grouping (one standalone title) straight to author, no separate hint
+    assert root.kind == "author"
+    assert root.kind_source == ""                # auto -> unconfirmed, eligible for the cohort
     ctx.close()
 
 

@@ -27,13 +27,12 @@ from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
-from colophon.core.graph_classify import apply_overrides, classify_graph, hint_grouping_kinds
+from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_records import book_node_id, book_records
 from colophon.core.graph_resolve import (
     _name_key,
     apply_confirmed_overrides,
     franchise_for,
-    resolve_graph_authors,
 )
 from colophon.core.graph_view import grouping_cohort
 from colophon.core.models import (
@@ -57,6 +56,7 @@ from colophon.core.navigator import (
     LibraryTree,
     build_library_tree,
 )
+from colophon.core.node_classify import classify_nodes
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
 from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
@@ -1349,9 +1349,8 @@ class AppController:
             fresh=fresh, progress=progress,
         )
         classify_graph(graph, root=root)
-        resolve_graph_authors(graph, [bn.book for bn in graph.books.values()], root=root)
-        hint_grouping_kinds(graph)
-        apply_overrides(graph, self.ctx.overrides.all())
+        classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
+                       overrides=self.ctx.overrides.all())
         self._graph_cache[(str(root), fresh)] = graph
         return graph
 

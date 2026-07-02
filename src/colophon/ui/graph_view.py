@@ -60,8 +60,8 @@ def _settled_line(s) -> str:
         parts.append(n(s.books, "book"))
     if s.author_dirs:
         parts.append(n(s.author_dirs, "author"))
-    if s.grouping_dirs:
-        parts.append(n(s.grouping_dirs, "grouping"))
+    if s.series_dirs:
+        parts.append(n(s.series_dirs, "series"))
     if s.container_dirs:
         parts.append(n(s.container_dirs, "container"))
     if s.manual_dirs:
