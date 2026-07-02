@@ -117,10 +117,11 @@ def test_author_name_and_consensus_axioms():
     ctx.books_by_folder[mixed.path] = [_book("/lib/Mixed", authors=["A"], prov="tag"),
                                        _book("/lib/Mixed", authors=["B"], prov="tag")]
     assert ax_artist_consensus(mixed, ctx) == []
-    # a lone authored book is not a consensus
+    # a lone tagged book still names its author (weakly); disagreeing tags produce no consensus
     lone = _dir(g, "/lib/Lone")
     ctx.books_by_folder[lone.path] = [_book("/lib/Lone", authors=["Solo"], prov="tag")]
-    assert ax_artist_consensus(lone, ctx) == []
+    lc = ax_artist_consensus(lone, ctx)
+    assert lc and lc[0].value == "Solo"
 
 
 def test_series_and_hard_axioms():

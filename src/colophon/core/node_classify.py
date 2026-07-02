@@ -137,18 +137,24 @@ def _distinct_series(books: list[BookUnit]) -> dict[str, list[float | None]]:
 
 
 def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """A folder holding its OWN loose books that span multiple series, or have no series at all,
-    reads as an author (uses direct books, not the subtree — a folder-of-folders is a bucket, not a
-    multi-series author). A node at the modal author depth gets a small tree-consistency nudge."""
+    """A folder holding >= 2 of its OWN loose books reads as an author — UNLESS those books are all
+    one series whose name matches the folder (a genuine series folder, which ax_series_ramp votes).
+    Uses direct books (a folder-of-folders is a bucket, not a multi-series author); a single book is
+    a title, not an author. A node at the modal author depth gets a small tree-consistency nudge."""
+    from colophon.core.graph_classify import _series_label
+    from colophon.core.graph_resolve import _resembles
     books = ctx.direct_books.get(node.path, [])
     out: list[Evidence] = []
-    if books:
+    if len(books) >= 2:
         by_series = _distinct_series(books)
-        if len(by_series) >= 2:
-            out.append(Evidence("author", 1.0 + 0.5 * len(by_series),
-                                f"spans {len(by_series)} series across {len(books)} loose titles"))
-        elif not by_series:
-            out.append(Evidence("author", 1.5, f"{len(books)} loose books, no series information"))
+        single_matching = False
+        if len(by_series) == 1:
+            display = next(_series_label(b)[1] for b in books if _series_label(b))
+            single_matching = _resembles(node.path.name, display)
+        if not single_matching:
+            reason = (f"spans {len(by_series)} series across {len(books)} loose titles" if by_series
+                      else f"{len(books)} loose books, no series information")
+            out.append(Evidence("author", 1.0 + 0.5 * max(len(by_series), 1), reason))
     if ctx.modal_author_depth is not None and _depth(node.path, ctx.root) == ctx.modal_author_depth:
         out.append(Evidence("author", 0.5, "sits at the library's typical author depth"))
     return out
@@ -187,20 +193,21 @@ def ax_tag_author_match(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 
 
 def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """When the folder's books agree on one tag/datafile author, that value IS the author — even if
-    it differs from the folder name. Requires >= 2 agreeing books (a lone book is not a consensus)."""
+    """When the folder's tagged books agree on one author, that value IS the author — even if it
+    differs from the folder name (a lone tag is weak but still names the author; container weight
+    outvotes a stray tag at a bucket root). No vote when tag authors disagree."""
     from collections import Counter
 
     from colophon.core.graph_resolve import _name_key
     authors = _tag_authors(ctx.books_by_folder.get(node.path, []))
-    if len(authors) < 2:
+    if not authors:
         return []
     counts = Counter(_name_key(a) for a in authors)
     (top_key, top_n), = counts.most_common(1)
-    if top_n >= 2 and (len(counts) == 1 or top_n >= 0.75 * len(authors)):
+    if top_n == len(authors) or top_n >= 0.75 * len(authors):   # agreement, no rival tag author
         display = next(a for a in authors if _name_key(a) == top_key)
-        return [Evidence("author", min(3.0, 1.0 + 0.5 * top_n),
-                         f"{top_n} books agree on tagged author '{display}'", value=display)]
+        return [Evidence("author", min(3.0, 0.5 + 0.5 * top_n),
+                         f"{top_n} book(s) tagged author '{display}'", value=display)]
     return []
 
 
@@ -321,9 +328,11 @@ def _fill_down(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
             if node is not None and node.kind == "author" and node.author:
-                if book.authors != [node.author]:
+                # a user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING
+                prov_val = Provenance.MANUAL.value if node.kind_source == "manual" else Provenance.GRAPHING.value
+                if book.authors != [node.author] or book.provenance.get("authors") != prov_val:
                     book.authors = [node.author]
-                    book.provenance["authors"] = Provenance.GRAPHING.value
+                    book.provenance["authors"] = prov_val
                 break
             if cur == root or root not in cur.parents:
                 break
