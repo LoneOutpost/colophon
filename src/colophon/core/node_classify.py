@@ -122,3 +122,32 @@ def ax_bucket_word(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: un
     if low.replace(" ", "").isdigit():
         return [Evidence("container", 1.5, f"'{name}' is numeric, not a person/author name")]
     return []
+
+
+def _distinct_series(books: list[BookUnit]) -> dict[str, list[float | None]]:
+    """Map normalized-series-key -> sequences, across `books` that carry a series."""
+    from colophon.core.graph_classify import _series_label
+    by: dict[str, list[float | None]] = {}
+    for b in books:
+        label = _series_label(b)
+        if label is not None:
+            by.setdefault(label[0], []).append(label[2])
+    return by
+
+
+def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A folder spanning multiple series/titles, or holding loose books with no series, reads as an
+    author; a node at the modal author depth gets a small tree-consistency nudge."""
+    books = ctx.books_by_folder.get(node.path, [])
+    if not books:
+        return []
+    out: list[Evidence] = []
+    by_series = _distinct_series(books)
+    if len(by_series) >= 2:
+        out.append(Evidence("author", 1.0 + 0.5 * len(by_series),
+                            f"spans {len(by_series)} series across {len(books)} titles"))
+    elif not by_series:
+        out.append(Evidence("author", 1.5, f"{len(books)} loose books, no series information"))
+    if ctx.modal_author_depth is not None and _depth(node.path, ctx.root) == ctx.modal_author_depth:
+        out.append(Evidence("author", 0.5, "sits at the library's typical author depth"))
+    return out

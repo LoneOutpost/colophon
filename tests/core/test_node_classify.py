@@ -70,3 +70,30 @@ def test_container_axioms():
     assert any(e.kind == "container" for e in ax_bucket_word(_dir(g, "/lib/downloads"), ctx))
     assert any(e.kind == "container" for e in ax_bucket_word(_dir(g, "/lib/01"), ctx))
     assert ax_bucket_word(_dir(g, "/lib/Sidney Sheldon"), ctx) == []
+
+
+def _book(folder, *, authors=(), prov=None, series=None, seq=None):
+    from colophon.core.models import BookUnit, SeriesRef
+    b = BookUnit.new(source_folder=Path(folder))
+    if authors:
+        b.authors = list(authors)
+        if prov:
+            b.provenance["authors"] = prov
+    if series:
+        b.series = [SeriesRef(name=series, sequence=seq)]
+    return b
+
+
+def test_author_structural_axioms():
+    from colophon.core.node_classify import _Ctx, ax_author_structure
+
+    g = Graph()
+    root = Path("/lib")
+    node = _dir(g, "/lib/star trek")
+    books = [_book("/lib/star trek", series=s) for s in ("TOS", "TNG", "DS9")] + [_book("/lib/star trek")]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={node.path: books},
+               modal_author_depth=2, book_like_children={})
+    assert any(e.kind == "author" for e in ax_author_structure(node, ctx))   # spans series -> author
+    node2 = _dir(g, "/lib/Sidney Sheldon")
+    ctx.books_by_folder[node2.path] = [_book("/lib/Sidney Sheldon") for _ in range(4)]
+    assert any(e.kind == "author" for e in ax_author_structure(node2, ctx))  # loose, no series -> author
