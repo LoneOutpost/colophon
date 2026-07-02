@@ -15,23 +15,15 @@ from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.models import BookUnit, NodeOverride, Provenance, SeriesRef
-from colophon.core.normalize import normalize_name
+from colophon.core.normalize import normalize_key, normalize_name
 
 _WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
 
 
 def _name_key(name: str) -> str:
-    """Comparison key tolerant of 'Last, First' vs 'First Last', case, spacing, and
-    punctuation (periods in initials, etc.). A consistent transform applied to both the
-    directory name and the author, so it never invents a match."""
-    s = name.strip()
-    if "," in s:
-        last, _, first = s.partition(",")
-        s = f"{first.strip()} {last.strip()}"
-    s = normalize_name(s)
-    s = re.sub(r"[^\w\s]", " ", s)        # drop punctuation: 'Robert A.' -> 'Robert A'
-    s = re.sub(r"\s+", " ", s).strip()
-    return s.casefold()
+    """Canonical entity-name comparison key. Delegates to the shared `normalize_key` so every
+    caller shares one normalization (see core/normalize.py)."""
+    return normalize_key(name)
 
 
 def _series_tokens(name: str) -> frozenset[str]:
