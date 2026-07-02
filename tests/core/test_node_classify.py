@@ -97,3 +97,27 @@ def test_author_structural_axioms():
     node2 = _dir(g, "/lib/Sidney Sheldon")
     ctx.books_by_folder[node2.path] = [_book("/lib/Sidney Sheldon") for _ in range(4)]
     assert any(e.kind == "author" for e in ax_author_structure(node2, ctx))  # loose, no series -> author
+
+
+def test_author_name_and_consensus_axioms():
+    from colophon.core.node_classify import _Ctx, ax_artist_consensus, ax_tag_author_match
+
+    g = Graph()
+    root = Path("/lib")
+    node = _dir(g, "/lib/Brandon Sanderson")
+    books = [_book("/lib/Brandon Sanderson", authors=["Brandon Sanderson"], prov="tag") for _ in range(3)]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={node.path: books},
+               modal_author_depth=None, book_like_children={})
+    assert any(e.kind == "author" for e in ax_tag_author_match(node, ctx))
+    misc = _dir(g, "/lib/Misc SF")
+    ctx.books_by_folder[misc.path] = [_book("/lib/Misc SF", authors=["Isaac Asimov"], prov="tag") for _ in range(3)]
+    cons = ax_artist_consensus(misc, ctx)
+    assert cons and cons[0].kind == "author" and cons[0].value == "Isaac Asimov"
+    mixed = _dir(g, "/lib/Mixed")
+    ctx.books_by_folder[mixed.path] = [_book("/lib/Mixed", authors=["A"], prov="tag"),
+                                       _book("/lib/Mixed", authors=["B"], prov="tag")]
+    assert ax_artist_consensus(mixed, ctx) == []
+    # a lone authored book is not a consensus
+    lone = _dir(g, "/lib/Lone")
+    ctx.books_by_folder[lone.path] = [_book("/lib/Lone", authors=["Solo"], prov="tag")]
+    assert ax_artist_consensus(lone, ctx) == []

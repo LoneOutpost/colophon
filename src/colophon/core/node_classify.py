@@ -151,3 +151,44 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     if ctx.modal_author_depth is not None and _depth(node.path, ctx.root) == ctx.modal_author_depth:
         out.append(Evidence("author", 0.5, "sits at the library's typical author depth"))
     return out
+
+
+_SOFT_AUTHOR_PROV = frozenset({"tag", "datafile"})
+
+
+def _tag_authors(books: list[BookUnit]) -> list[str]:
+    """Authors on books whose author provenance is a soft, independent tier (tag/datafile)."""
+    out: list[str] = []
+    for b in books:
+        if b.authors and b.provenance.get("authors") in _SOFT_AUTHOR_PROV:
+            out.extend(b.authors)
+    return out
+
+
+def ax_tag_author_match(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A descendant book's tag/datafile author equals the folder name -> a soft author vote."""
+    from colophon.core.graph_resolve import _name_key
+    key = _name_key(node.path.name)
+    for author in _tag_authors(ctx.books_by_folder.get(node.path, [])):
+        if _name_key(author) == key:
+            return [Evidence("author", 1.5, f"a tagged author matches the folder name '{author}'",
+                             value=author)]
+    return []
+
+
+def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """When the folder's books agree on one tag/datafile author, that value IS the author — even if
+    it differs from the folder name. Requires >= 2 agreeing books (a lone book is not a consensus)."""
+    from collections import Counter
+
+    from colophon.core.graph_resolve import _name_key
+    authors = _tag_authors(ctx.books_by_folder.get(node.path, []))
+    if len(authors) < 2:
+        return []
+    counts = Counter(_name_key(a) for a in authors)
+    (top_key, top_n), = counts.most_common(1)
+    if top_n >= 2 and (len(counts) == 1 or top_n >= 0.75 * len(authors)):
+        display = next(a for a in authors if _name_key(a) == top_key)
+        return [Evidence("author", min(3.0, 1.0 + 0.5 * top_n),
+                         f"{top_n} books agree on tagged author '{display}'", value=display)]
+    return []
