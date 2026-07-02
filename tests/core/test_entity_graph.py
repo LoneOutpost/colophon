@@ -141,3 +141,43 @@ def test_from_records_skips_book_node_without_bookunit():
 def test_from_records_empty_graph():
     g = entity_graph_from_records(LibraryGraph.from_records([], []), {})
     assert g.nodes == {} and g.books == []
+
+
+def test_canonical_display_prefers_authoritative_source():
+    from colophon.core.entity_graph import _canonical_display
+    # tag spelling beats a folder-derived one
+    assert _canonical_display([("Robert A Heinlein", "directory"),
+                               ("Robert A. Heinlein", "tag")]) == "Robert A. Heinlein"
+    # a match source beats a tag
+    assert _canonical_display([("Robert A. Heinlein", "tag"),
+                               ("Robert Anson Heinlein", "audnexus")]) == "Robert Anson Heinlein"
+    # equal authority -> most frequent, then first-seen
+    assert _canonical_display([("A B", "tag"), ("A. B.", "tag"), ("A B", "tag")]) == "A B"
+    assert _canonical_display([("A B", "tag"), ("A. B.", "tag")]) == "A B"   # tie -> first-seen
+    # a lone weak spelling is still used; empty -> ""
+    assert _canonical_display([("Sean Flynn", "directory")]) == "Sean Flynn"
+    assert _canonical_display([]) == ""
+
+
+def test_build_entity_graph_canonicalizes_display():
+    from colophon.core.entity_graph import build_entity_graph
+    from colophon.core.graph_resolve import _name_key
+    from colophon.core.models import BookUnit
+
+    def _b(name, prov):
+        b = BookUnit.new(source_folder=Path("/lib") / name)
+        b.authors = [name]
+        b.provenance["authors"] = prov
+        return b
+
+    # same author, two spellings: the tagged one must win the display
+    folder = _b("Robert A Heinlein", "directory")
+    tagged = _b("Robert A. Heinlein", "tag")
+    g = build_entity_graph([folder, tagged])
+    node = g.nodes[("author", _name_key("Robert A Heinlein"))]
+    assert node.name == "Robert A. Heinlein"
+
+    # an alias still wins (resolve_alias unifies before keying)
+    aliases = {("author", _name_key("Robert A. Heinlein")): "Bob Heinlein"}
+    g2 = build_entity_graph([folder, tagged], aliases=aliases)
+    assert g2.nodes[("author", _name_key("Bob Heinlein"))].name == "Bob Heinlein"
