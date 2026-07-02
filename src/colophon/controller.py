@@ -1395,6 +1395,23 @@ class AppController:
         self._resync_roots({root})
         return len(nodes)
 
+    def list_franchises(self) -> list[str]:
+        """Declared franchise display names, sorted case-insensitively."""
+        return sorted(self.ctx.franchises.all().values(), key=str.casefold)
+
+    def add_franchise(self, name: str) -> None:
+        """Declare a franchise; invalidate the graph cache so the next build reclassifies."""
+        name = name.strip()
+        if not name:
+            return
+        self.ctx.franchises.add(name)
+        self._graph_cache.clear()
+
+    def remove_franchise(self, name: str) -> None:
+        """Undeclare a franchise; invalidate the graph cache so the next build reclassifies."""
+        self.ctx.franchises.remove(name)
+        self._graph_cache.clear()
+
     def cached_graph(self, root: Path, *, fresh: bool = False) -> Graph | None:
         """The previously-built graph for `(root, fresh)`, or None if not built this
         session. A snapshot — not invalidated by scans/edits; Rebuild refreshes it."""

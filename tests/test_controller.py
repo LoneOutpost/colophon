@@ -3283,3 +3283,27 @@ def test_graph_neighborhood_resolves_book_label_and_confidence(tmp_path):
 
     hits = controller.graph_search("close")
     assert any(h["id"] == "B" and h["label"] == "Close Call" for h in hits)
+
+
+def test_add_franchise_reclassifies_and_remove_reverts(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    for t, a in [("Prime Directive", "Judith Reeves-Stevens"), ("Spock's World", "Diane Duane")]:
+        d = ingest / "Star Trek" / t
+        d.mkdir(parents=True)
+        (d / "01.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+    st_id = DirectoryNode.id_for(ingest / "Star Trek")
+
+    assert ctrl.graph_for(ingest).directories[st_id].kind == "author"
+
+    ctrl.add_franchise("Star Trek")
+    assert "Star Trek" in ctrl.list_franchises()
+    assert ctrl.graph_for(ingest).directories[st_id].kind == "franchise"   # cache invalidated
+
+    ctrl.remove_franchise("Star Trek")
+    assert ctrl.graph_for(ingest).directories[st_id].kind == "author"      # reverted
+    ctx.close()
