@@ -16,6 +16,7 @@ from colophon.adapters.repository.store import (
     EntityAliasRepo,
     GraphStore,
     HistoryRepo,
+    KnownFranchiseRepo,
     NodeOverrideRepo,
     OperationRepo,
     connect,
@@ -54,6 +55,7 @@ class AppContext:
     operations: OperationRepo
     overrides: NodeOverrideRepo
     aliases: EntityAliasRepo
+    franchises: KnownFranchiseRepo
     graph: GraphStore
     library_graph: LibraryGraph
     sources: list[MetadataSource]
@@ -89,6 +91,7 @@ class AppContext:
             operations=OperationRepo(conn),
             overrides=NodeOverrideRepo(conn),
             aliases=EntityAliasRepo(conn),
+            franchises=KnownFranchiseRepo(conn),
             graph=graph_store,
             library_graph=LibraryGraph.from_records(*graph_store.load_all()),
             sources=sources,
