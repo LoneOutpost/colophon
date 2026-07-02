@@ -526,7 +526,9 @@ def test_plan_scan_graph_forwards_progress(tmp_path: Path):
     plan_scan_graph(_repo(tmp_path), ingest, template="$Author - $Title",
                     progress=lambda d, t, label: calls.append((d, t, label)))
 
-    assert {label for _, _, label in calls} == {"Dune", "Legion"}
+    labels = {label for _, _, label in calls}
+    assert {"Dune", "Legion"} <= labels                                   # folder walk
+    assert {"Identifying: Dune", "Identifying: Legion"} <= labels         # per-book identify phase
     assert max(t for _, t, _ in calls) == 2
 
 

@@ -488,6 +488,9 @@ def plan_scan_graph(
     for unit in projected:
         by_folder[unit.source_folder].append(unit)
 
+    # The folder walk (build_graph) reported its own progress; identify is the long per-book phase,
+    # so keep the bar moving through it — otherwise it sits at N/N folders for the whole identify.
+    identify_total = len(projected)
     plan = ScanPlan()
     for folder, units in by_folder.items():
         # `repo.get` reads fresh from the DB (not the cache), so mutating `matched` is safe.
@@ -505,6 +508,9 @@ def plan_scan_graph(
             plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
             plan.units.append(adopted)
             plan.reconciled_folders.add(folder)
+            if progress is not None:
+                progress(len(plan.units), identify_total,
+                         f"Identifying: {adopted.title or adopted.source_folder.name}")
     _phase(f"adopt+identify ({len(plan.units)} units)")
     classify_graph(graph, root=root)
     _phase("classify_graph")
