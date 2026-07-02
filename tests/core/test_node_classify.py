@@ -242,3 +242,40 @@ def test_declared_franchise_classifies_folder_franchise(tmp_path):
     # author tier) — each book keeps its own tag author
     assert books[0].authors == ["Judith Reeves-Stevens"]
     assert books[1].authors == ["Diane Duane"]
+
+
+def test_author_depth_from_scheme():
+    from colophon.core.node_classify import _author_depth
+    assert _author_depth("") == 1                       # blank -> Root/Author convention
+    assert _author_depth("$Author/$Title") == 1
+    assert _author_depth("$Author/$Series/$Title") == 1
+    assert _author_depth("$Series/$Author") == 2
+    assert _author_depth("$Title") is None              # scheme with no author level
+
+
+def test_depth_flexible_author_fallback(tmp_path):
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    # Sean Flynn: one untagged book directly in the author folder (a title leaf, not a franchise)
+    sean = _book(str(root / "Sean Flynn"))
+    # a declared-franchise folder of untagged books -> must NOT bind the franchise name as author
+    trek = [_book(str(root / "Star Trek")) for _ in range(2)]
+    # tagged books -> their own author is authoritative, never overwritten (multi-book so the root
+    # reads as a container, as a real many-folder library would, not a lone-consensus author)
+    tagged = [_book(str(root / "Diane Duane"), authors=["Diane Duane"], prov="tag") for _ in range(2)]
+    g = _graph_with({str(root / "Sean Flynn"): [sean],
+                     str(root / "Star Trek"): trek,
+                     str(root / "Diane Duane"): tagged}, root)
+    books = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, books, root=root, overrides={},
+                   known_franchises={"star trek": "Star Trek"}, directory_scheme="")
+
+    assert sean.authors == ["Sean Flynn"]                          # bound from the depth-1 folder
+    assert sean.provenance["authors"] == "directory"
+    assert all(b.authors == [] for b in trek)                      # franchise folder never authors its books
+    assert all(b.authors == ["Diane Duane"] for b in tagged)       # tag author untouched
+    assert all(b.provenance["authors"] == "tag" for b in tagged)

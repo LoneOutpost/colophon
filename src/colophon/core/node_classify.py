@@ -101,6 +101,7 @@ class _Ctx:
     direct_books: dict[Path, list[BookUnit]] = field(default_factory=dict)   # a folder's own loose books
     overrides: dict[str, object] = field(default_factory=dict)               # path str -> NodeOverride
     known_franchises: dict[str, str] = field(default_factory=dict)   # name_key -> display
+    author_depth: int | None = None   # scheme depth (1-based) whose folder is the author, or None
 
 
 def _depth(path: Path, root: Path) -> int:
@@ -108,6 +109,20 @@ def _depth(path: Path, root: Path) -> int:
         return len(path.relative_to(root).parts)
     except ValueError:
         return 0
+
+
+def _author_depth(scheme: str) -> int | None:
+    """The 1-based directory depth at which the configured scheme places the author, or 1 for a
+    blank scheme (the near-universal Root/Author/... convention). None when the scheme is set but
+    has no $Author level, so we make no directory-author assumption."""
+    from colophon.core.dirinfer import parse_scheme
+    patterns = parse_scheme(scheme)
+    if not patterns:
+        return 1
+    for i, pat in enumerate(patterns, start=1):
+        if "author" in pat.groupindex:
+            return i
+    return None
 
 
 def ax_container_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
@@ -306,7 +321,8 @@ _AXIOMS = (
 )
 
 
-def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object], known_franchises: dict[str, str]) -> _Ctx:
+def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object],
+               known_franchises: dict[str, str], directory_scheme: str = "") -> _Ctx:
     from collections import Counter
 
     from colophon.core.graph_classify import CONTAINER, GROUPING, TITLE, _subtree_books
@@ -326,16 +342,16 @@ def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object], known_fra
     }
     return _Ctx(graph=graph, root=root, books_by_folder=books_by_folder, modal_author_depth=modal,
                 book_like_children=book_like, direct_books=direct_books, overrides=overrides,
-                known_franchises=known_franchises)
+                known_franchises=known_franchises, author_depth=_author_depth(directory_scheme))
 
 
 def classify_nodes(
     graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, object],
-    known_franchises: dict[str, str] | None = None,
+    known_franchises: dict[str, str] | None = None, directory_scheme: str = "",
 ) -> None:
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
     then fill empty/weak-author books from the nearest author node (GRAPHING)."""
-    ctx = _build_ctx(graph, root, overrides, known_franchises or {})
+    ctx = _build_ctx(graph, root, overrides, known_franchises or {}, directory_scheme)
     evidenced: dict[str, bool] = {}
     for node in graph.directories.values():
         evidence: list[Evidence] = []
@@ -353,38 +369,50 @@ def classify_nodes(
         node.kind_source = c.source
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
-    _fill_down(graph, books, evidenced, root=root)
+    _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
 
 
-def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *, root: Path) -> None:
-    """Inherit an author-node's name into each empty/weak-author book (GRAPHING); never overwrite a
-    book's own hard (tag/datafile/match/manual) author. Among the author ancestors, prefer the
-    nearest one whose name came from book evidence (tag/consensus/match/manual) over a structural
-    grouping that only has its folder-name fallback — otherwise an intermediate grouping (e.g.
-    Author/-collection-/Title) would shadow the real author."""
+def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *,
+               root: Path, author_depth: int | None) -> None:
+    """Inherit an author into each empty/weak-author book, walking leaf->root. Prefer the nearest
+    classified author node (evidence-named over a folder-name fallback, so an intermediate grouping
+    can't shadow the real author); failing that, fall back to the folder at the directory scheme's
+    author depth (the declared layout) — but never a folder classified franchise/series/container,
+    whose name is not an author. Never overwrite a book's own hard (tag/datafile/match/manual)
+    author."""
     from colophon.core.models import Provenance
+    non_author = {"franchise", "series", "container"}
     for book in books:
         prov = book.provenance.get("authors")
         if book.authors and prov not in _WEAK:
             continue
-        seen: list[DirectoryNode] = []          # author ancestors, nearest first
+        seen: list[DirectoryNode] = []          # classified-author ancestors, nearest first
+        layout: DirectoryNode | None = None     # the ancestor at the scheme's author depth
         cur = book.source_folder
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
-            if node is not None and node.kind == "author" and node.author:
-                seen.append(node)
+            if node is not None:
+                if node.kind == "author" and node.author:
+                    seen.append(node)
+                if (author_depth is not None and _depth(cur, root) == author_depth
+                        and node.kind not in non_author):
+                    layout = node
             if cur == root or root not in cur.parents:
                 break
             cur = cur.parent
-        if not seen:
+        chosen = next((n for n in seen if evidenced.get(n.id)), seen[0] if seen else None)
+        if chosen is not None:
+            # a user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING
+            name = chosen.author
+            provenance = (Provenance.MANUAL.value if chosen.kind_source == "manual"
+                          else Provenance.GRAPHING.value)
+        elif layout is not None:
+            name = layout.path.name
+            provenance = Provenance.DIRECTORY.value
+        else:
             continue
-        chosen = next((n for n in seen if evidenced.get(n.id)), seen[0])
         # only (re)stamp when we actually introduce the value, so a book's own more-specific weak
-        # provenance (directory/filename) survives when it already agrees with the chosen node.
-        # A user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING.
-        if book.authors != [chosen.author]:
-            book.authors = [chosen.author]
-            book.provenance["authors"] = (
-                Provenance.MANUAL.value if chosen.kind_source == "manual"
-                else Provenance.GRAPHING.value
-            )
+        # provenance (directory/filename) survives when it already agrees.
+        if book.authors != [name]:
+            book.authors = [name]
+            book.provenance["authors"] = provenance
