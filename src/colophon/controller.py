@@ -1352,7 +1352,8 @@ class AppController:
         classify_graph(graph, root=root)
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
                        overrides=self.ctx.overrides.all(),
-                       known_franchises=self.ctx.franchises.all())
+                       known_franchises=self.ctx.franchises.all(),
+                       directory_scheme=self.ctx.config.directory_scheme)
         self._graph_cache[(str(root), fresh)] = graph
         return graph
 
