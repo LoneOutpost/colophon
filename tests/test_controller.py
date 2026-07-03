@@ -3309,3 +3309,27 @@ def test_add_franchise_reclassifies_and_remove_reverts(tmp_path):
     ctrl.remove_franchise("Star Trek")
     assert ctrl.graph_for(ingest).directories[st_id].kind == "author"      # reverted
     ctx.close()
+
+
+def test_numbered_series_folder_classifies_series_and_cleans_titles(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    series = ingest / "Steven Brust" / "Vlad Taltos"
+    for n, title in [("01", "Jhereg"), ("02", "Yendi"), ("03", "Teckla"), ("05", "Phoenix")]:
+        d = series / f"{n} - {title}"
+        d.mkdir(parents=True)
+        (d / f"{n} - {title} - Steven Brust.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+    g = ctrl.graph_for(ingest)
+    vlad_id = DirectoryNode.id_for(series)
+    assert g.directories[vlad_id].kind == "series"                      # not author
+
+    books = {b.title: b for b in ctx.books.list_all()}
+    assert "Yendi" in books                                             # title cleaned
+    assert books["Yendi"].series and books["Yendi"].series[0].name == "Vlad Taltos"
+    assert books["Yendi"].series[0].sequence == 2.0
+    assert books["Yendi"].authors != ["Vlad Taltos"]                    # the series name is no longer the author
+    ctx.close()
