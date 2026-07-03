@@ -136,17 +136,16 @@ def test_known_authors_memoized_and_invalidated(tmp_path):
     ctx.close()
 
 
-def test_navigator_view_filters_authors_by_name(tmp_path):
+def test_navigator_view_narrows_to_book_ids(tmp_path):
     ctx = _ctx(tmp_path)
-    _seed(ctx, tmp_path, [
-        _book(tmp_path, "A", author="Brandon Sanderson"),
-        _book(tmp_path, "B", author="Robin Hobb"),
-    ])
+    a = _book(tmp_path, "A", author="Brandon Sanderson")
+    b = _book(tmp_path, "B", author="Robin Hobb")
+    _seed(ctx, tmp_path, [a, b])
     ctrl = AppController(ctx)
-    assert len(ctrl.navigator_view(filter_text="").authors) == 2       # blank -> all
-    filtered = ctrl.navigator_view(filter_text="san")                  # case-insensitive substring
-    assert [n.name for n in filtered.authors] == ["Brandon Sanderson"]
-    assert filtered.all_books == ctrl.library_tree().all_books         # All/needs-id unaffected
+    assert len(ctrl.navigator_view(None).authors) == 2        # None -> full tree
+    view = ctrl.navigator_view({a.id})                        # narrow to one book's entities
+    assert [n.name for n in view.authors] == ["Brandon Sanderson"]
+    assert {bk.id for bk in view.all_books} == {a.id}         # nav's book set matches the filter
     ctx.close()
 
 

@@ -74,19 +74,30 @@ def build_library_tree(
     )
 
 
-def filter_library_tree(tree: LibraryTree, filter_text: str) -> LibraryTree:
-    """A navigator view narrowed to entities whose display name contains `filter_text`
-    (case-insensitive substring). Blank text returns `tree` unchanged. `needs_id` and `all_books`
-    are preserved so the All and Needs-identification affordances still work; only the
-    author/series/franchise entity lists are narrowed. Pure; never mutates `tree`."""
-    q = filter_text.strip().casefold()
-    if not q:
+def filter_library_tree(tree: LibraryTree, book_ids: set[str] | None) -> LibraryTree:
+    """Narrow the navigator tree to `book_ids`, dropping any entity left with no books. `book_ids`
+    is None when no filter is active, returning `tree` unchanged. Pure; never mutates `tree`. The
+    one place the tree is narrowed — shared by the folder filter and the cross-panel text filter —
+    so the navigator always reflects the same book set as the list."""
+    if book_ids is None:
         return tree
-    return tree.model_copy(update={
-        "authors": [a for a in tree.authors if q in a.name.casefold()],
-        "series": [s for s in tree.series if q in s.name.casefold()],
-        "franchises": [f for f in tree.franchises if q in f.name.casefold()],
-    })
+
+    def keep(books: list[BookUnit]) -> list[BookUnit]:
+        return [b for b in books if b.id in book_ids]
+
+    authors: list[AuthorNode] = []
+    for a in tree.authors:
+        series = [s for s in (SeriesNode(name=s.name, books=keep(s.books)) for s in a.series) if s.books]
+        standalone = keep(a.standalone)
+        if series or standalone:
+            authors.append(AuthorNode(name=a.name, series=series, standalone=standalone))
+    return LibraryTree(
+        needs_id=keep(tree.needs_id),
+        authors=authors,
+        series=[s for s in (SeriesNode(name=s.name, books=keep(s.books)) for s in tree.series) if s.books],
+        franchises=[f for f in (FranchiseNode(name=f.name, books=keep(f.books)) for f in tree.franchises) if f.books],
+        all_books=keep(tree.all_books),
+    )
 
 
 def _author_view(

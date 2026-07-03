@@ -669,12 +669,13 @@ class AppController:
         self._tree_cache = (key, tree)
         return tree
 
-    def navigator_view(self, filter_text: str = "") -> LibraryTree:
-        """The navigator tree narrowed to entities whose name matches `filter_text`. The query
-        seam: the UI depends on this rather than pulling all books and filtering in the view, so
-        the in-memory implementation can move to an indexed/SQL-backed store later without a UI
-        change. Reads the memoized `library_tree`, so filtering never triggers a rebuild."""
-        return filter_library_tree(self.library_tree(), filter_text)
+    def navigator_view(self, book_ids: set[str] | None = None) -> LibraryTree:
+        """The navigator tree narrowed to `book_ids` (the books currently visible in the list), or
+        the full tree when None. The query seam: the UI passes the shared filter's match set so the
+        navigator and the book list always show the same subset. Reads the memoized `library_tree`,
+        so narrowing never triggers a rebuild; the in-memory filter can move to a SQL/indexed query
+        later without a UI change."""
+        return filter_library_tree(self.library_tree(), book_ids)
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
