@@ -52,3 +52,13 @@ def render_franchises(controller: AppController) -> None:
             ui.button("Add", icon="add", on_click=_add).props("no-caps")
 
         _refresh()
+
+        builtin = controller.builtin_franchises()
+        if builtin:
+            ui.separator().classes("q-my-md")
+            ui.label("Built-in").classes("text-subtitle2")
+            ui.label("Always recognized, no need to declare. Override one by adding it above "
+                     "with your preferred spelling.").classes("colophon-muted text-caption")
+            with ui.row().classes("q-gutter-xs wrap"):
+                for name in builtin:
+                    ui.chip(name).props("outline")

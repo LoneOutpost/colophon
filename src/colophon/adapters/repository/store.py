@@ -406,10 +406,19 @@ class KnownFranchiseRepo:
         self.conn.commit()
 
     def all(self) -> dict[str, str]:
+        """The user-declared franchises only (`name_key -> display`)."""
         rows = self.conn.execute(
             "SELECT name_key, display FROM known_entities WHERE kind = 'franchise'"
         ).fetchall()
         return {r["name_key"]: r["display"] for r in rows}
+
+    def active(self) -> dict[str, str]:
+        """Every franchise the classifier should recognize: the built-in seeds (see
+        `franchise_seeds`) plus the user-declared ones, with a user declaration overriding a
+        seed's display on a shared key. This is what the scan reads; `all` stays 'what the user
+        declared' so the Manage UI lists only removable, user-owned entries."""
+        from colophon.core.franchise_seeds import default_franchises
+        return {**default_franchises(), **self.all()}
 
 
 @dataclass

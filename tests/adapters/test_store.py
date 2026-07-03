@@ -411,3 +411,26 @@ def test_known_franchise_add_list_remove(tmp_path: Path):
 
     repo.remove("Star Trek")   # remove by display name (normalized internally), as the UI does
     assert repo.all() == {"doctor who": "Doctor Who"}
+
+
+def test_known_franchise_active_merges_builtin_seeds(tmp_path: Path):
+    from colophon.core.franchise_seeds import default_franchises
+    from colophon.core.graph_resolve import _name_key
+
+    conn = connect(tmp_path / "colophon.db")
+    migrate(conn)
+    repo = KnownFranchiseRepo(conn)
+
+    # with nothing declared, active() is exactly the built-in seed set
+    assert repo.active() == default_franchises()
+    assert repo.all() == {}                                  # seeds are not "declared"
+
+    # a user declaration is added on top of the seeds
+    repo.add("My Little Franchise")
+    active = repo.active()
+    assert active[_name_key("Star Wars")] == "Star Wars"     # seed still present
+    assert active[_name_key("My Little Franchise")] == "My Little Franchise"
+
+    # a user declaration overrides a seed's display on a shared key
+    repo.add("STAR WARS")
+    assert repo.active()[_name_key("Star Wars")] == "STAR WARS"
