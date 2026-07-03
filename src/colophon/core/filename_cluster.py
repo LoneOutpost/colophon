@@ -95,9 +95,14 @@ def _series_and_seq(chunks: list[str]) -> tuple[str | None, float | None]:
     return None, None
 
 
-def _title_chunks(chunks: list[str]) -> list[str]:
-    """Chunks the title is built from: drop leading number-only chunks (track/sequence
-    indexes — never title text), keeping at least the last chunk."""
+def _title_chunks(chunks: list[str], stem: str = "") -> list[str]:
+    """Chunks the title is built from: drop a leading number-only chunk (a track/sequence index)
+    ONLY when the original stem reads as a strong sequence affix (spaced or bracketed); an unspaced
+    compound like '30-Day' keeps its number. Keeps at least the last chunk."""
+    from colophon.core.sequence_affix import parse_sequence_affix
+    affix = parse_sequence_affix(stem)
+    if affix is not None and affix.confidence == "weak":
+        return chunks
     i = 0
     while i < len(chunks) - 1 and not _text_sig(_tokens(chunks[i])):
         i += 1
@@ -106,9 +111,11 @@ def _title_chunks(chunks: list[str]) -> list[str]:
 
 def _multi_work(file: Path, chunks: list[str]) -> DetectedWork:
     """One file = one work. Title is the leading text chunk (number-only index chunks
-    dropped); series/seq from a later chunk."""
-    title_chunks = _title_chunks(chunks) if chunks else []
-    title = _spaced(title_chunks[0]) if title_chunks else _spaced(file.stem)
+    dropped); series/seq from a later chunk. When the first chunk is a bare number
+    (the affix was weak so we kept it), fall back to the raw stem as the display title."""
+    title_chunks = _title_chunks(chunks, file.stem) if chunks else []
+    first_has_text = title_chunks and _text_sig(_tokens(title_chunks[0]))
+    title = _spaced(title_chunks[0]) if first_has_text else _spaced(file.stem)
     series, seq = _series_and_seq(title_chunks[1:]) if len(title_chunks) > 1 else (None, None)
     return DetectedWork(label=title or _spaced(file.stem), series=series, sequence=seq, files=[file])
 
@@ -116,7 +123,7 @@ def _multi_work(file: Path, chunks: list[str]) -> DetectedWork:
 def _parts_work(files: list[Path], per_file: list[list[str]]) -> DetectedWork:
     """All files are one book's parts. Title is the leading text chunk with the varying
     part number stripped."""
-    first = _title_chunks(per_file[0]) if per_file[0] else []
+    first = _title_chunks(per_file[0], files[0].stem) if per_file[0] else []
     title = _strip_trailing_number(_spaced(first[0])) if first else _spaced(files[0].stem)
     return DetectedWork(label=title or _spaced(files[0].stem), series=None, sequence=None,
                         files=list(files))
