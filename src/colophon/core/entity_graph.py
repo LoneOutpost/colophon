@@ -81,6 +81,29 @@ class EntityGraph:
     books: list[BookUnit] = field(default_factory=list)
 
 
+def _link(
+    g: EntityGraph,
+    kind: str,
+    raw_name: str,
+    book: BookUnit,
+    book_key: str,
+    seen: set[EntityKey],
+    aliases: dict[tuple[str, str], str] | None,
+) -> None:
+    """Add one book->entity membership edge to `g`, shared by both builders: resolve `raw_name`
+    through `aliases`, dedupe by `(kind, _name_key(name))`, and record the node, its member book,
+    and the reverse edge. `seen` is the caller's per-book set (a name repeated on one book links
+    once); `book_key` is the key under which the reverse edge is stored."""
+    name = resolve_alias(aliases, kind, raw_name)
+    ek = (kind, _name_key(name))
+    if ek in seen:
+        return
+    seen.add(ek)
+    g.nodes.setdefault(ek, EntityNode(kind=kind, name=name, key=ek[1]))
+    g.members.setdefault(ek, []).append(book)
+    g.book_entities.setdefault(book_key, []).append(ek)
+
+
 def build_entity_graph(
     books: list[BookUnit],
     *,
@@ -94,25 +117,15 @@ def build_entity_graph(
     franchise_of = franchise_of or {}
     g = EntityGraph(books=list(books))
 
-    def link(kind: str, raw_name: str, book: BookUnit, seen: set[EntityKey]) -> None:
-        name = resolve_alias(aliases, kind, raw_name)
-        ek = (kind, _name_key(name))
-        if ek in seen:  # a name repeated on one book links once
-            return
-        seen.add(ek)
-        g.nodes.setdefault(ek, EntityNode(kind=kind, name=name, key=ek[1]))
-        g.members.setdefault(ek, []).append(book)
-        g.book_entities.setdefault(book.id, []).append(ek)
-
     for b in books:
         seen: set[EntityKey] = set()
         for a in b.authors:
-            link("author", a, b, seen)
+            _link(g, "author", a, b, b.id, seen, aliases)
         for s in b.series:
-            link("series", s.name, b, seen)
+            _link(g, "series", s.name, b, b.id, seen, aliases)
         raw_f = franchise_of.get(b.id)
         if raw_f:
-            link("franchise", raw_f, b, seen)
+            _link(g, "franchise", raw_f, b, b.id, seen, aliases)
 
     _canonicalize_displays(g, aliases)
     return g
@@ -154,15 +167,7 @@ def entity_graph_from_records(
         if book is None:
             continue  # graph book node with no BookUnit
         kind, raw_name = ent
-        name = resolve_alias(aliases, kind, raw_name)
-        ek = (kind, _name_key(name))
-        bseen = seen.setdefault(bid, set())
-        if ek in bseen:
-            continue
-        bseen.add(ek)
-        g.nodes.setdefault(ek, EntityNode(kind=kind, name=name, key=ek[1]))
-        g.members.setdefault(ek, []).append(book)
-        g.book_entities.setdefault(bid, []).append(ek)
+        _link(g, kind, raw_name, book, bid, seen.setdefault(bid, set()), aliases)
 
     # `g.books` carries the joined BookUnits so the navigator's view builders can read
     # per-book fields (the series-but-no-author pseudo-author reads `b.series`). This

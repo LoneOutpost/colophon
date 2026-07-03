@@ -70,7 +70,14 @@ def resolve(
         manual = [e for e in hard if e.kind in manual_kinds]
         pool = manual or hard
         winner = max(pool, key=lambda e: e.weight)
-        source = "manual" if winner.kind in manual_kinds else ("matched" if winner.kind in matched_kinds else "manual")
+        # manual > matched; a hard vote that is neither (a future hard axiom the caller did not
+        # register in matched_kinds) stamps neutral "" — never a forged user "manual" confirmation.
+        if winner.kind in manual_kinds:
+            source = "manual"
+        elif winner.kind in matched_kinds:
+            source = "matched"
+        else:
+            source = ""
         return Classification(
             kind=winner.kind, value=winner.value or _value_for(winner.kind, evidence, fallback_value),
             confidence=1.0, source=source, settled=True, evidence=list(evidence),
@@ -243,9 +250,10 @@ def ax_tag_author_match(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 
 
 def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """When the folder's tagged books agree on one author, that value IS the author — even if it
+    """When the folder's tagged books agree on one author, that value IS the author, even if it
     differs from the folder name (a lone tag is weak but still names the author; container weight
-    outvotes a stray tag at a bucket root). No vote when tag authors disagree."""
+    outvotes a stray tag at a bucket root). A >=75% supermajority counts as agreement, so one
+    mis-tagged or guest-author book does not block the vote; no vote below that."""
     from collections import Counter
 
     from colophon.core.graph_resolve import _name_key
