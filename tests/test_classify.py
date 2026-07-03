@@ -63,6 +63,38 @@ def test_no_signal_is_undetermined():
     assert signals == []
 
 
+def test_folder_last_first_matches_artist_is_author():
+    # "King, Stephen" folder vs "Stephen King" tag: the same author under the canonical entity key,
+    # which node_classify already uses. Plain casefold ("king, stephen") would miss it.
+    feats = [_feat("/lib/King, Stephen/Legion.mp3", artist="Stephen King")]
+    kind, _ = classify_folder_kind(
+        Path("/lib/King, Stephen"), Path("/lib"), feats,
+        template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+    )
+    assert kind is FolderKind.AUTHOR
+
+
+def test_folder_diacritic_matches_artist_is_author():
+    # Diacritic-folded entity key: "Bela Bartok" folder matches a "Béla Bartók" tag.
+    feats = [_feat("/lib/Bela Bartok/x.mp3", artist="Béla Bartók")]
+    kind, _ = classify_folder_kind(
+        Path("/lib/Bela Bartok"), Path("/lib"), feats,
+        template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+    )
+    assert kind is FolderKind.AUTHOR
+
+
+def test_reordered_title_does_not_match_album_stays_casefold():
+    # Album detection stays on a plain casefold key, NOT the person-name entity key: a reordered
+    # "Gathering, The" must not be canonicalized into matching the folder "The Gathering".
+    feats = [_feat("/lib/The Gathering/part1.mp3", album="Gathering, The")]
+    kind, _ = classify_folder_kind(
+        Path("/lib/The Gathering"), Path("/lib"), feats,
+        template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+    )
+    assert kind is FolderKind.UNDETERMINED
+
+
 def test_shared_album_groups_into_one_work():
     feats = [
         _feat("/a/d/01.mp3", album="The Way of Kings"),
