@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from colophon.core.graph import DirectoryNode, FileNode, Graph
+from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph
 from colophon.core.graph_resolve import _ancestor_paths, _name_key
 from colophon.core.models import BookUnit, _Base
 
@@ -151,6 +151,53 @@ def book_records(
 
     nodes.extend(entities.values())
     return nodes, edges
+
+
+def graph_from_records(
+    nodes: list[NodeRecord], edges: list[EdgeRecord],
+    books_by_id: dict[str, BookUnit], *, root: Path,
+) -> Graph:
+    """Rebuild the structural Graph (directories/files/books + containment) from persisted records,
+    WITHOUT a filesystem walk — the input `classify_graph`/`classify_nodes` consume. The inverse of
+    `graph_records`'s structural half: classification fields are left empty for a fresh re-derive,
+    and `FileNode.source_file` is not restored (classification never reads it). A book node whose
+    `book_id` has no BookUnit is skipped (defensive)."""
+    r = str(root)
+    g = Graph()
+    for n in nodes:
+        if n.root != r:
+            continue
+        if n.physical == "directory":
+            g.directories[n.id] = DirectoryNode(path=Path(str(n.attrs["path"])))
+        elif n.physical == "file":
+            g.files[n.id] = FileNode(
+                path=Path(str(n.attrs["path"])),
+                role=FileRole(str(n.attrs.get("role", FileRole.AUDIO.value))),
+            )
+        elif n.semantic == "book":
+            bid = n.attrs.get("book_id")
+            book = books_by_id.get(bid) if isinstance(bid, str) else None
+            if book is not None:
+                g.books[n.id] = BookNode(id=n.id, book=book, dir_id="")
+    for e in edges:
+        if e.root != r:
+            continue
+        if e.kind == "contains":
+            d = g.directories.get(e.src)
+            if d is None:
+                continue
+            if e.dst in g.directories:
+                d.child_dirs.append(e.dst)
+            elif e.dst in g.files:
+                d.child_files.append(e.dst)
+            elif e.dst in g.books:
+                d.books.append(e.dst)
+                g.books[e.dst].dir_id = e.src
+        elif e.kind == "owns":
+            bn = g.books.get(e.src)
+            if bn is not None and e.dst in g.files:
+                bn.owns.append(e.dst)
+    return g
 
 
 def graph_records(
