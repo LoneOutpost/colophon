@@ -15,11 +15,18 @@ from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
 
-_SEP = re.compile(r"[()\[\]_\-]+")             # top-level chunk separators
+# Top-level chunk separators: brackets, underscore, dash. Also a dot on a letter<->digit boundary
+# ("Series.01" -> "Series"|"01", "Vol.1" -> "Vol"|"1"), but NOT a dot between two digits (a decimal
+# like "1.5") or between two letters (initials like "J.R.R."), which stay whole.
+_SEP = re.compile(r"[()\[\]_\-]+|(?<=[A-Za-z])\.(?=\d)|(?<=\d)\.(?=[A-Za-z])")
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")    # camelCase boundary
 _LETTER_DIGIT = re.compile(r"(?<=[A-Za-z])(?=\d)")  # letter->digit ONLY ("Part1"->"Part 1"; "7th" intact)
 _NUM = re.compile(r"^\d+(?:\.\d+)?$")          # integer or decimal token
-_TRAIL_NUM = re.compile(r"\s+\d+(?:\.\d+)?\s*$")
+# A trailing sequence number within a chunk ("Wheel of Time 3"). Bounded to 1-3 integer digits + an
+# optional 2-place decimal, matching sequence_affix._NUM so a 4-digit year ("Dune 1984") is never
+# read as a sequence. (This chunk-local, space-separated form is why we can't just call
+# parse_sequence_affix, which needs a bracket or dash separator, not a bare space.)
+_TRAIL_NUM = re.compile(r"\s+\d{1,3}(?:\.\d{1,2})?\s*$")
 
 
 @dataclass(frozen=True)

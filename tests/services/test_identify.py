@@ -96,7 +96,9 @@ def test_normalize_cleans_directory_title(tmp_path):
     book.title = "1982 - The Gunslinger (DT1 - original edition)"
     book.provenance["title"] = Provenance.DIRECTORY.value
     normalize(book)
-    assert book.title == "The Gunslinger"
+    # Edition parenthetical is stripped; the leading year is intentionally KEPT — a stored title
+    # never risks the ambiguous year-vs-numeric-title guess (that strip is query-only).
+    assert book.title == "1982 - The Gunslinger"
     assert book.provenance["title"] == Provenance.DIRECTORY.value  # provenance unchanged
 
 
