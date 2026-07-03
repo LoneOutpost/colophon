@@ -287,6 +287,58 @@ def ax_series_ramp(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     return []
 
 
+def _child_name(node_path: Path, book: BookUnit) -> str:
+    """The name of the node directly under `node_path` on the way to `book`: the book's
+    sub-folder name, or its filename stem when the book sits directly in the folder (flat layout)."""
+    folder = book.source_folder
+    if folder == node_path:
+        return Path(book.source_files[0].path).stem if book.source_files else folder.name
+    try:
+        return folder.relative_to(node_path).parts[0]
+    except ValueError:
+        return folder.name
+
+
+def _series_tag_present(books: list[BookUnit]) -> bool:
+    """True when a book independently asserts a series (tag/datafile) — corroboration that its
+    numbered siblings really are a series."""
+    return any(b.series and b.provenance.get("series") in _SOFT_AUTHOR_PROV for b in books)
+
+
+def ax_numbered_siblings(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A folder whose child books carry sequence-number affixes ('02 - Yendi', '03 - Teckla', …)
+    is a series ramp — structural series evidence that exists BEFORE any series field does (unlike
+    ax_series_ramp, which needs the field). Additive: an attention trigger, a distinct-title ramp,
+    and optional tag corroboration; the resolve() sum decides against the author-grouping vote."""
+    from colophon.core.sequence_affix import parse_sequence_affix
+    books = ctx.books_by_folder.get(node.path, [])
+    if not books:
+        return []
+    parsed: dict[str, object] = {}          # one entry per direct child name (SequenceAffix)
+    for b in books:
+        name = _child_name(node.path, b)
+        aff = parse_sequence_affix(name)
+        if aff is not None:
+            parsed.setdefault(name, aff)
+    if not parsed:
+        return []
+    value = node.path.name
+    evidence = [Evidence("series", 1.0, f"{len(parsed)} child name(s) carry a sequence number",
+                         value=value)]
+    nums = {a.sequence for a in parsed.values()}
+    titles = {a.cleaned.casefold() for a in parsed.values()}
+    has_strong = any(a.confidence == "strong" for a in parsed.values())
+    corroborated = _series_tag_present(books)
+    if len(parsed) >= 2 and len(nums) >= 2 and len(titles) >= 2 and (has_strong or corroborated):
+        lo, hi = min(nums), max(nums)
+        evidence.append(Evidence("series", 2.0,
+                                 f"numbered title ramp (seq {lo:g}-{hi:g}, distinct titles)",
+                                 value=value))
+    if corroborated:
+        evidence.append(Evidence("series", 1.0, "child books carry a series tag", value=value))
+    return evidence
+
+
 def ax_matched_identity(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     """Books positively identified by a match source that agree on an author equal to the folder
     name settle the node as that author (hard)."""
@@ -316,7 +368,8 @@ _AXIOMS = (
     ax_manual_override, ax_matched_identity,          # hard
     ax_artist_consensus, ax_tag_author_match,         # author (name-bearing)
     ax_leaf_title,                                     # title (book-identity leaf)
-    ax_author_structure, ax_author_from_grouping, ax_known_franchise, ax_series_ramp,   # author/series/franchise (structural)
+    ax_author_structure, ax_author_from_grouping, ax_known_franchise,
+    ax_numbered_siblings, ax_series_ramp,                                                # author/series/franchise (structural)
     ax_container_shape, ax_bucket_word,               # container
 )
 
