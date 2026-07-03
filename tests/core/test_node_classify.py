@@ -376,3 +376,42 @@ def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
     _fill_series_ramp(g, [b], root=root)
 
     assert b.title == "30-Day Heart Tune-Up"     # weak title + weak position -> not cleaned
+
+
+def test_known_franchise_suppresses_structural_author_vote():
+    # a declared-franchise folder that spans many series must NOT be read as an author
+    from colophon.core.graph_classify import GROUPING
+    from colophon.core.node_classify import (
+        _Ctx,
+        ax_author_from_grouping,
+        ax_author_structure,
+        ax_known_franchise,
+        resolve,
+    )
+    g = Graph()
+    root = Path("/lib")
+    sw = _dir(g, "/lib/Star Wars")
+    books = [_book("/lib/Star Wars", series=s) for s in ("Thrawn", "Aftermath", "Old Republic")]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={}, direct_books={sw.path: books},
+               known_franchises={"star wars": "Star Wars"})
+
+    assert ax_author_structure(sw, ctx) == []          # the "spans N series" author vote is gated
+    sw.kind = GROUPING
+    assert ax_author_from_grouping(sw, ctx) == []       # the grouping-author vote is gated too
+
+    # with the structural author votes gone, the franchise match wins
+    ev = ax_author_structure(sw, ctx) + ax_author_from_grouping(sw, ctx) + ax_known_franchise(sw, ctx)
+    assert resolve(ev, fallback_value="Star Wars").kind == "franchise"
+
+
+def test_non_franchise_folder_still_votes_author():
+    # a real author folder (not a declared franchise) keeps its structural author vote
+    from colophon.core.node_classify import _Ctx, ax_author_structure
+    g = Graph()
+    root = Path("/lib")
+    d = _dir(g, "/lib/Stephen King")
+    books = [_book("/lib/Stephen King", series=s) for s in ("The Dark Tower", "Bill Hodges")]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={}, direct_books={d.path: books}, known_franchises={"star wars": "Star Wars"})
+    assert any(e.kind == "author" for e in ax_author_structure(d, ctx))
