@@ -3290,22 +3290,43 @@ def test_graph_neighborhood_resolves_book_label_and_confidence(tmp_path):
 def test_add_franchise_reclassifies_and_remove_reverts(tmp_path):
     ctx = _ctx(tmp_path)
     ingest = tmp_path / "ingest"
-    for t, a in [("Prime Directive", "Judith Reeves-Stevens"), ("Spock's World", "Diane Duane")]:
-        d = ingest / "Star Trek" / t
+    # a made-up franchise name (not a built-in seed) so it classifies as author until declared
+    for t, a in [("First Contact", "A Writer"), ("Second Contact", "B Writer")]:
+        d = ingest / "Cosmic Legends" / t
         d.mkdir(parents=True)
         (d / "01.mp3").write_bytes(b"")
     ctrl = AppController(ctx)
     ctrl.scan([ingest])
 
     from colophon.core.graph import DirectoryNode
-    st_id = DirectoryNode.id_for(ingest / "Star Trek")
+    cl_id = DirectoryNode.id_for(ingest / "Cosmic Legends")
 
-    assert ctrl.graph_for(ingest).directories[st_id].kind == "author"
+    assert ctrl.graph_for(ingest).directories[cl_id].kind == "author"
 
-    ctrl.add_franchise("Star Trek")
-    assert "Star Trek" in ctrl.list_franchises()
-    assert ctrl.graph_for(ingest).directories[st_id].kind == "franchise"   # cache invalidated
+    ctrl.add_franchise("Cosmic Legends")
+    assert "Cosmic Legends" in ctrl.list_franchises()
+    assert ctrl.graph_for(ingest).directories[cl_id].kind == "franchise"   # cache invalidated
 
-    ctrl.remove_franchise("Star Trek")
-    assert ctrl.graph_for(ingest).directories[st_id].kind == "author"      # reverted
+    ctrl.remove_franchise("Cosmic Legends")
+    assert ctrl.graph_for(ingest).directories[cl_id].kind == "author"      # reverted
+    ctx.close()
+
+
+def test_builtin_franchise_classifies_without_declaration(tmp_path):
+    # a folder named after a built-in franchise seed is a franchise tier with no user action
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    for t in ("Heir to the Empire", "Dark Force Rising"):
+        d = ingest / "Star Wars" / t
+        d.mkdir(parents=True)
+        (d / "01.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    from colophon.core.graph import DirectoryNode
+    sw_id = DirectoryNode.id_for(ingest / "Star Wars")
+
+    assert ctrl.list_franchises() == []                                    # nothing declared
+    assert "Star Wars" in ctrl.builtin_franchises()
+    assert ctrl.graph_for(ingest).directories[sw_id].kind == "franchise"   # seed recognized
     ctx.close()
