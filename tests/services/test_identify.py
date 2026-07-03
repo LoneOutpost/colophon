@@ -286,3 +286,19 @@ def test_normalize_leaves_tag_title_untouched():
     b.provenance["title"] = Provenance.TAG.value
     normalize(b)
     assert b.title == "02 - Yendi"                   # only directory/filename titles are cleaned
+
+
+def test_normalize_proper_cases_shouting_directory_author():
+    b = BookUnit.new(source_folder=Path("/lib/SANDRA BROWN"))
+    b.authors = ["SANDRA BROWN"]
+    b.provenance["authors"] = Provenance.DIRECTORY.value
+    normalize(b)
+    assert b.authors == ["Sandra Brown"]
+
+
+def test_normalize_leaves_tag_author_verbatim():
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    b.authors = ["BBC"]
+    b.provenance["authors"] = Provenance.TAG.value
+    normalize(b)
+    assert b.authors == ["BBC"]          # authoritative tag spelling kept

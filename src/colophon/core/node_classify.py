@@ -173,11 +173,22 @@ def _distinct_series(books: list[BookUnit]) -> dict[str, list[float | None]]:
     return by
 
 
+def _is_known_franchise(node: DirectoryNode, ctx: _Ctx) -> bool:
+    """True when the folder's name matches a declared/seeded franchise. A franchise and an author
+    are mutually exclusive for one folder, so a franchise match suppresses the structural author
+    guess (which otherwise reads a franchise's many series as strong authorship)."""
+    from colophon.core.graph_resolve import _name_key
+    return _name_key(node.path.name) in ctx.known_franchises
+
+
 def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     """A folder holding >= 2 of its OWN loose books reads as an author — UNLESS those books are all
-    one series whose name matches the folder (a genuine series folder, which ax_series_ramp votes).
-    Uses direct books (a folder-of-folders is a bucket, not a multi-series author); a single book is
-    a title, not an author. A node at the modal author depth gets a small tree-consistency nudge."""
+    one series whose name matches the folder (a genuine series folder, which ax_series_ramp votes),
+    or the folder is a known franchise (never an author). Uses direct books (a folder-of-folders is
+    a bucket, not a multi-series author); a single book is a title, not an author. A node at the
+    modal author depth gets a small tree-consistency nudge."""
+    if _is_known_franchise(node, ctx):
+        return []
     from colophon.core.graph_classify import _series_label
     from colophon.core.graph_resolve import _resembles
     books = ctx.direct_books.get(node.path, [])
@@ -208,9 +219,10 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
 
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
     """A GROUPING (classify_graph found its children are mostly title folders) is an author/series
-    folder — vote author; a genuine single-series grouping is pulled to series by ax_series_ramp."""
+    folder — vote author; a genuine single-series grouping is pulled to series by ax_series_ramp,
+    and a known franchise (never an author) is suppressed."""
     from colophon.core.graph_classify import GROUPING
-    if node.kind == GROUPING:
+    if node.kind == GROUPING and not _is_known_franchise(node, ctx):
         return [Evidence("author", 2.0, "a folder of title subfolders (author/series grouping)")]
     return []
 
@@ -483,6 +495,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     whose name is not an author. Never overwrite a book's own hard (tag/datafile/match/manual)
     author."""
     from colophon.core.models import Provenance
+    from colophon.core.normalize import proper_case_if_shouting
     non_author = {"franchise", "series", "container"}
     for book in books:
         prov = book.provenance.get("authors")
@@ -513,6 +526,10 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             provenance = Provenance.DIRECTORY.value
         else:
             continue
+        # proper-case a shouting inherited/layout name ('STEPHEN COONTS' -> 'Stephen Coonts'); a
+        # user's manual value is kept verbatim (authoritative spelling).
+        if provenance != Provenance.MANUAL.value:
+            name = proper_case_if_shouting(name)
         # only (re)stamp when we actually introduce the value, so a book's own more-specific weak
         # provenance (directory/filename) survives when it already agrees.
         if book.authors != [name]:
