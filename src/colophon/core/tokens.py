@@ -15,6 +15,8 @@ class Token:
     builds: bool         # may appear in an organize (build) pattern
     description: str      # human help, rendered in Settings
     hidden: bool = False  # still renders, but omitted from the Settings token reference
+    pattern: str = ".+?"  # regex fragment this token captures when parsing; numeric tokens
+    #                       constrain it so a digit inside neighbouring text isn't mis-captured
 
 
 # Display order in Settings. The build-only names below must exactly equal the keys
@@ -24,8 +26,8 @@ TOKENS: list[Token] = [
     Token("Title", "title", True, True, "Book title."),
     Token("Narrator", "narrator", True, True, "First narrator."),
     Token("Series", "series", True, True, "Series name."),
-    Token("SerNum", "sequence", True, True, "Series sequence number."),
-    Token("PubYear", "year", True, True, "Publication year."),
+    Token("SerNum", "sequence", True, True, "Series sequence number.", pattern=r"\d+(?:\.\d+)?"),
+    Token("PubYear", "year", True, True, "Publication year.", pattern=r"\d{4}"),
     Token("Skip", None, True, False, "Parse only: match and discard a run of text."),
     Token("SortAuthor", None, False, True, "Build only: author as 'Last, First'."),
     Token("SortTitle", None, False, True, "Build only: title with a leading article dropped."),
