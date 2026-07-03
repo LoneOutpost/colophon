@@ -487,6 +487,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     whose name is not an author. Never overwrite a book's own hard (tag/datafile/match/manual)
     author."""
     from colophon.core.models import Provenance
+    from colophon.core.normalize import proper_case_if_shouting
     non_author = {"franchise", "series", "container"}
     for book in books:
         prov = book.provenance.get("authors")
@@ -517,6 +518,10 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             provenance = Provenance.DIRECTORY.value
         else:
             continue
+        # proper-case a shouting inherited/layout name ('STEPHEN COONTS' -> 'Stephen Coonts'); a
+        # user's manual value is kept verbatim (authoritative spelling).
+        if provenance != Provenance.MANUAL.value:
+            name = proper_case_if_shouting(name)
         # only (re)stamp when we actually introduce the value, so a book's own more-specific weak
         # provenance (directory/filename) survives when it already agrees.
         if book.authors != [name]:

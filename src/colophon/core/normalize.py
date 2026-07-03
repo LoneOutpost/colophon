@@ -78,6 +78,18 @@ def normalize_name(value: str) -> str:
     return normalize_text(value, lowercase_small=False)
 
 
+def proper_case_if_shouting(name: str) -> str:
+    """Title-case an all-caps name for display ('SANDRA BROWN' -> 'Sandra Brown'). A name carrying
+    any lowercase letter is left untouched, so intentional casing ('bell hooks', 'will.i.am',
+    'MacDonald') survives. Deterministic and threshold-free: it only reshapes the unambiguous
+    shouting case. Callers gate this to weak (directory/filename) provenance — authoritative
+    tag/datafile/match spellings are kept verbatim."""
+    letters = [c for c in name if c.isalpha()]
+    if letters and all(c.isupper() for c in letters):
+        return normalize_name(name)
+    return name
+
+
 def normalize_description(value: str) -> str:
     """Clean common HTML/entity cruft from prose (not full HTML): line-break tags
     become newlines, other tags are stripped, entities are decoded, comma spacing

@@ -162,3 +162,24 @@ def test_normalize_key_folds_formatting_and_diacritics():
     assert k(k("Robert A. Heinlein")) == k("Robert A. Heinlein")
     # distinct names stay distinct
     assert k("Stephen King") != k("Brandon Sanderson")
+
+
+def test_proper_case_if_shouting_titlecases_all_caps():
+    from colophon.core.normalize import proper_case_if_shouting
+    assert proper_case_if_shouting("SANDRA BROWN") == "Sandra Brown"
+    assert proper_case_if_shouting("S M STIRLING") == "S M Stirling"
+
+
+def test_proper_case_if_shouting_leaves_mixed_case_untouched():
+    from colophon.core.normalize import proper_case_if_shouting
+    # intentional casing must survive — any lowercase letter means "leave it alone"
+    assert proper_case_if_shouting("bell hooks") == "bell hooks"
+    assert proper_case_if_shouting("will.i.am") == "will.i.am"
+    assert proper_case_if_shouting("Sandra Brown") == "Sandra Brown"
+    assert proper_case_if_shouting("MacDonald") == "MacDonald"
+
+
+def test_proper_case_if_shouting_ignores_non_alpha():
+    from colophon.core.normalize import proper_case_if_shouting
+    assert proper_case_if_shouting("") == ""
+    assert proper_case_if_shouting("1984") == "1984"
