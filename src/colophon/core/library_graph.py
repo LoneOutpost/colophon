@@ -16,6 +16,13 @@ from colophon.core.graph_records import EdgeRecord, NodeRecord
 class LibraryGraph:
     nodes: dict[str, NodeRecord] = field(default_factory=dict)
     edges: list[EdgeRecord] = field(default_factory=list)
+    _generation: int = field(default=0, init=False, repr=False)
+
+    @property
+    def generation(self) -> int:
+        """Monotonic write counter, bumped on every `replace_root` — the single in-memory mutator.
+        Lets a derived cache memoize against structural graph changes (resync/scan)."""
+        return self._generation
 
     @classmethod
     def from_records(
@@ -37,6 +44,7 @@ class LibraryGraph:
         for n in nodes:
             self.nodes[n.id] = n
         self.edges.extend(edges)
+        self._generation += 1
 
 
 @dataclass

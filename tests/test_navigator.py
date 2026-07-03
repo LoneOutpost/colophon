@@ -87,6 +87,68 @@ def test_library_tree_empty(tmp_path):
     ctx.close()
 
 
+def test_library_tree_is_memoized_between_reads(tmp_path):
+    ctx = _ctx(tmp_path)
+    _seed(ctx, tmp_path, [_book(tmp_path, "A", author="Author One")])
+    ctrl = AppController(ctx)
+    assert ctrl.library_tree() is ctrl.library_tree()  # same object: not rebuilt per read
+    ctx.close()
+
+
+def test_library_tree_memo_invalidates_on_book_write(tmp_path):
+    ctx = _ctx(tmp_path)
+    a = _book(tmp_path, "A", author="Author One")
+    _seed(ctx, tmp_path, [a])
+    ctrl = AppController(ctx)
+    first = ctrl.library_tree()
+    b = _book(tmp_path, "B", author="Author Two")
+    _seed(ctx, tmp_path, [a, b])  # upsert + replace_root -> books & graph generations bump
+    second = ctrl.library_tree()
+    assert second is not first
+    assert {n.name for n in second.authors} >= {"Author One", "Author Two"}
+    ctx.close()
+
+
+def test_library_tree_memo_invalidates_on_alias_change(tmp_path):
+    ctx = _ctx(tmp_path)
+    _seed(ctx, tmp_path, [
+        _book(tmp_path, "A", author="Anne Rice"),
+        _book(tmp_path, "B", author="A. Rice"),
+    ])
+    ctrl = AppController(ctx)
+    first = ctrl.library_tree()
+    assert {n.name for n in first.authors} == {"Anne Rice", "A. Rice"}
+    ctrl.set_entity_alias("author", "A. Rice", "Anne Rice")  # merge; resolved at read time
+    second = ctrl.library_tree()
+    assert second is not first
+    assert "A. Rice" not in {n.name for n in second.authors}  # memo saw the alias change
+    ctx.close()
+
+
+def test_known_authors_memoized_and_invalidated(tmp_path):
+    ctx = _ctx(tmp_path)
+    _seed(ctx, tmp_path, [_book(tmp_path, "A", author="Author One")])
+    ctrl = AppController(ctx)
+    assert ctrl.known_authors() is ctrl.known_authors()  # memoized
+    assert ctrl.known_authors() == ["Author One"]
+    ctx.books.upsert(_book(tmp_path, "B", author="Author Two"))
+    assert ctrl.known_authors() == ["Author One", "Author Two"]  # invalidated on write
+    ctx.close()
+
+
+def test_navigator_view_narrows_to_book_ids(tmp_path):
+    ctx = _ctx(tmp_path)
+    a = _book(tmp_path, "A", author="Brandon Sanderson")
+    b = _book(tmp_path, "B", author="Robin Hobb")
+    _seed(ctx, tmp_path, [a, b])
+    ctrl = AppController(ctx)
+    assert len(ctrl.navigator_view(None).authors) == 2        # None -> full tree
+    view = ctrl.navigator_view({a.id})                        # narrow to one book's entities
+    assert [n.name for n in view.authors] == ["Brandon Sanderson"]
+    assert {bk.id for bk in view.all_books} == {a.id}         # nav's book set matches the filter
+    ctx.close()
+
+
 def test_list_directory_separates_dirs_audio_and_other(tmp_path):
     root = tmp_path / "Author"
     (root / "Mistborn").mkdir(parents=True)

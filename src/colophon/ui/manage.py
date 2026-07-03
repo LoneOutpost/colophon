@@ -12,6 +12,7 @@ from nicegui import ui
 from colophon.controller import AppController
 from colophon.ui.chrome import page_body, page_header, page_toolbar
 from colophon.ui.dialogs import modal
+from colophon.ui.filter_input import filter_input
 
 logger = logging.getLogger(__name__)
 
@@ -175,9 +176,10 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
             "no-caps"
         ).classes("colophon-seg")
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-            ui.input(placeholder="Filter", value=str(state["filter"])).props(
-                'dense clearable outlined aria-label="Filter folders"'
-            ).classes("col").on_value_change(lambda e: _on_filter(e.value))
+            filter_input(
+                _on_filter, placeholder="Filter", value=str(state["filter"]),
+                aria_label="Filter entries",
+            ).classes("col")
             merge_btn = ui.button(
                 "Merge selected", icon="merge", on_click=_merge_dialog
             ).props("flat")

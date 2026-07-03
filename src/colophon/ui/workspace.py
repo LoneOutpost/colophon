@@ -45,6 +45,7 @@ from colophon.ui.dialogs import (
     scan_dialog,
     tag_dialog,
 )
+from colophon.ui.filter_input import filter_input
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
@@ -1333,7 +1334,15 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     def refresh_nav() -> None:
         nav_container.clear()
-        tree = controller.library_tree()
+        full = controller.library_tree()
+        terms = book_filter["text"].lower().split()
+        if terms or folder_filter["path"] is not None:
+            # Narrow the navigator to the same books the list shows (folder ∧ text), so the two
+            # panels never disagree. `visible` is the shared match set; None means no active filter.
+            visible = {b.id for b in full.all_books if _in_folder(b) and _matches_filter(b, terms)}
+            tree = controller.navigator_view(visible)
+        else:
+            tree = full
         nav_aliases = controller.ctx.aliases.all()  # fetched once for every node's kebab
         kind, key = scope["kind"], scope["key"]
         with nav_container:
@@ -1379,7 +1388,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         color="negative",
                         checkbox=_node_checkbox([b.id for b in needs_id]),
                     )
-                attention = [b for b in controller.books_needing_attention() if _in_folder(b)]
+                attention = [
+                    b for b in controller.books_needing_attention()
+                    if _in_folder(b) and _matches_filter(b, terms)
+                ]
                 if attention:
                     counts = {"error": 0, "warn": 0, "info": 0}
                     for b in attention:
@@ -1446,6 +1458,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             checkbox=_node_checkbox(aids),
                             menu=lambda n=author.name: _entity_menu("author", n, nav_aliases),
                         )
+                view_entities = {"series": tree.series, "franchise": tree.franchises}.get(
+                    str(view["group_by"]), tree.authors
+                )
+                if terms and view["group_by"] != "phase" and not view_entities:
+                    ui.label("No matches").classes("colophon-muted text-caption q-pa-sm")
 
     def _update_count() -> None:
         n = len(selected_ids)
@@ -1454,6 +1471,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _set_filter(value: str | None) -> None:
         book_filter["text"] = value or ""
         refresh_list()
+        refresh_nav()  # the filter is cross-panel: it narrows the navigator to the same books
         _persist_view()
 
     def _filter_to(label: str) -> None:
@@ -1463,6 +1481,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if search is not None:
             search.set_value(label)
         refresh_list()
+        refresh_nav()
         _persist_view()
 
     def _set_facet(name: str, value) -> None:
@@ -1535,21 +1554,13 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 "Open findings", value=view["facets"]["findings"],
                 on_change=lambda e: _set_facet("findings", e.value),
             ).props("dense")
-            search = ui.input(
+            search = filter_input(
+                _set_filter,
                 placeholder="Filter title, author, series, narrator, genre, tag, filename",
                 value=book_filter["text"],
-            ).props("dense clearable debounce=300").classes("w-full")
-            search.on_value_change(lambda e: _set_filter(e.value))
+                aria_label="Filter the library",
+            ).classes("w-full")
             refs["filter"] = search  # so the "/" shortcut can focus it
-
-            def _clear_filter() -> None:
-                search.set_value("")
-                _set_filter("")
-                search.run_method("blur")  # return keyboard control to the list
-
-            search.on("keydown.esc", _clear_filter)
-            with search.add_slot("prepend"):
-                ui.icon("search")
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                 ui.button("Select all", icon="done_all", on_click=_select_visible) \
                     .props("flat dense no-caps").tooltip("Select all books matching the filter")

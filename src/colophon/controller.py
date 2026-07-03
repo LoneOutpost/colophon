@@ -55,6 +55,7 @@ from colophon.core.navigator import (
     DirEntry,
     LibraryTree,
     build_library_tree,
+    filter_library_tree,
 )
 from colophon.core.node_classify import classify_nodes
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
@@ -212,6 +213,10 @@ class AppController:
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
         self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
+        # Derived-view memos, valid while their input generations (books/aliases/graph) hold. Keyed
+        # by those generations so any write rebuilds automatically — no manual invalidation to forget.
+        self._tree_cache: tuple[tuple[int, int, int], LibraryTree] | None = None
+        self._distinct_cache: dict[str, tuple[int, list[str]]] = {}  # kind -> (books_gen, values)
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -590,17 +595,25 @@ class AppController:
         """All persisted books (used by callers that need the full set)."""
         return self.ctx.books.list_all()
 
-    def _distinct(self, project: Callable[[BookUnit], Iterable[str]]) -> list[str]:
-        """Sorted distinct values projected from every book (editor autocomplete)."""
-        return sorted({v for b in self.ctx.books.list_all() for v in project(b)})
+    def _distinct(self, kind: str, project: Callable[[BookUnit], Iterable[str]]) -> list[str]:
+        """Sorted distinct values projected from every book (editor autocomplete), memoized per
+        `kind` against the book-store generation so repeated detail-pane opens don't rescan the
+        whole library. The cached list is read-only (callers must not mutate it)."""
+        gen = self.ctx.books.generation
+        cached = self._distinct_cache.get(kind)
+        if cached is not None and cached[0] == gen:
+            return cached[1]
+        values = sorted({v for b in self.ctx.books.list_all() for v in project(b)})
+        self._distinct_cache[kind] = (gen, values)
+        return values
 
     def known_authors(self) -> list[str]:
         """Distinct author names across the library, sorted (editor autocomplete)."""
-        return self._distinct(lambda b: b.authors)
+        return self._distinct("authors", lambda b: b.authors)
 
     def known_series(self) -> list[str]:
         """Distinct series names across the library, sorted (editor autocomplete)."""
-        return self._distinct(lambda b: (s.name for s in b.series))
+        return self._distinct("series", lambda b: (s.name for s in b.series))
 
     def genre_policy(self) -> GenrePolicy:
         """Build the active genre policy from config."""
@@ -612,7 +625,7 @@ class AppController:
 
     def known_genres(self) -> list[str]:
         """Distinct genre names across the library, sorted (editor autocomplete)."""
-        return self._distinct(lambda b: b.genres)
+        return self._distinct("genres", lambda b: b.genres)
 
     def catalog_entries(self, kind: str) -> list[CatalogEntry]:
         """Distinct values of `kind` across the whole library, with usage counts."""
@@ -633,7 +646,7 @@ class AppController:
 
     def known_tags(self) -> list[str]:
         """Distinct tag names across the library, sorted (editor autocomplete)."""
-        return self._distinct(lambda b: b.tags)
+        return self._distinct("tags", lambda b: b.tags)
 
     # --- workspace navigator ---
     def library_tree(self) -> LibraryTree:
@@ -641,11 +654,28 @@ class AppController:
         (`ctx.library_graph`). Conservative: `all_books`/`needs_id` come from `ctx.books`,
         so a book the graph hasn't placed still shows (in All, and under Needs
         identification) rather than vanishing."""
+        key = (
+            self.ctx.books.generation,
+            self.ctx.aliases.generation,
+            self.ctx.library_graph.generation,
+        )
+        if self._tree_cache is not None and self._tree_cache[0] == key:
+            return self._tree_cache[1]
         books = self._hydrate(self.ctx.books.list_all())
         books_by_id = {b.id: b for b in books}
         aliases = self.ctx.aliases.all()
         entity_graph = entity_graph_from_records(self.ctx.library_graph, books_by_id, aliases=aliases)
-        return build_library_tree(books, aliases=aliases, entity_graph=entity_graph)
+        tree = build_library_tree(books, aliases=aliases, entity_graph=entity_graph)
+        self._tree_cache = (key, tree)
+        return tree
+
+    def navigator_view(self, book_ids: set[str] | None = None) -> LibraryTree:
+        """The navigator tree narrowed to `book_ids` (the books currently visible in the list), or
+        the full tree when None. The query seam: the UI passes the shared filter's match set so the
+        navigator and the book list always show the same subset. Reads the memoized `library_tree`,
+        so narrowing never triggers a rebuild; the in-memory filter can move to a SQL/indexed query
+        later without a UI change."""
+        return filter_library_tree(self.library_tree(), book_ids)
 
     def list_directory(self, path: Path) -> DirectoryListing:
         """List a directory's immediate children: subdirs first, then files.
