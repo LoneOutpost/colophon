@@ -124,6 +124,12 @@ onto the node later.
 - `core/normalize.py::normalize_key` — the **one** canonical comparison key
   (case/spacing/punctuation/underscore/diacritics + guarded PascalCase). Distinct
   from `normalize_name`/`normalize_text` (display formatting).
+- `core/normalize.py::proper_case_if_shouting` — title-cases an ALL-CAPS name
+  (`SANDRA BROWN` → `Sandra Brown`); any lowercase letter means "leave verbatim"
+  (`bell hooks`, `MacDonald`). Applied **source-side** to weak (directory/filename)
+  author names in `IDENTIFY.normalize` and `_fill_down`; tag/datafile/match spellings
+  stay verbatim, `manual` is untouched. Casing never splits an entity (`normalize_key`
+  folds case for dedup).
 - `core/graph_resolve.py::_name_key` — thin delegate to `normalize_key` (the shared
   re-export ~8 modules import). Also `_resembles`/`_series_tokens` (fuzzy series
   match), `propagate_overrides`/`apply_confirmed_overrides`/`franchise_for`.
