@@ -25,7 +25,7 @@ from colophon.core.models import (
     FindingSeverity,
     FolderKind,
 )
-from colophon.core.normalize import normalize_text
+from colophon.core.normalize import normalize_key, normalize_text
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,10 @@ class ClassificationResult:
     detected_works: list[DetectedWork] = field(default_factory=list)
 
 
-def _norm(s: str | None) -> str:
+def _text_key(s: str | None) -> str:
+    """Generic casefold/whitespace key for comparing free text (titles, albums, stems). NOT an
+    entity key: for person-name equality (author/narrator) use `normalize_key`, which also folds
+    diacritics and 'Last, First' order so it agrees with node_classify."""
     return re.sub(r"\s+", " ", s).strip().casefold() if s else ""
 
 
@@ -67,24 +70,26 @@ def classify_folder_kind(
     """Decide author/title/undetermined via the cascade: (1) folder name vs
     embedded artist/album/title; (2) folder name vs template/dir-scheme parse;
     (3) folder name vs a file stem; (4) undetermined."""
-    name = _norm(folder.name)
+    name = _text_key(folder.name)              # for title/album/stem (free text)
+    name_key = normalize_key(folder.name)      # for author (canonical person-name key)
 
-    artists = {_norm(f.tags.artist) for f in features if f.tags.artist}
-    albums = {_norm(f.tags.album) for f in features if f.tags.album}
-    titles = {_norm(f.tags.title) for f in features if f.tags.title}
-    if name and name in artists:
+    artists = {normalize_key(f.tags.artist) for f in features if f.tags.artist}
+    albums = {_text_key(f.tags.album) for f in features if f.tags.album}
+    titles = {_text_key(f.tags.title) for f in features if f.tags.title}
+    if name_key and name_key in artists:
         return FolderKind.AUTHOR, [_signal("foldername_is_artist", 3, "folder name matches embedded artist")]
     if name and (name in albums or name in titles):
         return FolderKind.TITLE, [_signal("foldername_is_album", 3, "folder name matches embedded album/title")]
 
     inferred = infer_from_path(folder, root, scheme_patterns)
     fn_fields = parse_filename(template_pattern, features[0].path.name) or {}
-    if name and (_norm(inferred.get("author")) == name or _norm(fn_fields.get("author")) == name):
+    if name_key and (normalize_key(inferred.get("author") or "") == name_key
+                     or normalize_key(fn_fields.get("author") or "") == name_key):
         return FolderKind.AUTHOR, [_signal("foldername_is_parsed_author", 2, "folder name matches parsed author")]
-    if name and (_norm(inferred.get("title")) == name or _norm(fn_fields.get("title")) == name):
+    if name and (_text_key(inferred.get("title")) == name or _text_key(fn_fields.get("title")) == name):
         return FolderKind.TITLE, [_signal("foldername_is_parsed_title", 2, "folder name matches parsed title")]
 
-    if name and any(_norm(f.path.stem) == name for f in features):
+    if name and any(_text_key(f.path.stem) == name for f in features):
         return FolderKind.TITLE, [_signal("foldername_is_file_stem", 1, "folder name matches a file stem")]
 
     return FolderKind.UNDETERMINED, []
@@ -101,7 +106,7 @@ def _work_key(f: FileFeatures) -> str | None:
     if t.isbn:
         return f"isbn:{t.isbn.strip().lower()}"
     if t.album:
-        return f"album:{_norm(t.album)}"
+        return f"album:{_text_key(t.album)}"
     return None
 
 
@@ -212,7 +217,7 @@ def _duplicate_findings(
     if len(files) > 1 and len(exts) > 1:
         return [Finding(code=FindingCode.DUP_FORMAT, severity=FindingSeverity.INFO,
                         detail=f"same book in formats: {', '.join(sorted(exts))}")]
-    narrators = {_norm(f.tags.narrator) for f in features if f.tags.narrator}
+    narrators = {_text_key(f.tags.narrator) for f in features if f.tags.narrator}
     years = {f.tags.year for f in features if f.tags.year}
     if len(files) > 1 and (len(narrators) > 1 or len(years) > 1):
         return [Finding(code=FindingCode.DUP_EDITION, severity=FindingSeverity.WARN,
