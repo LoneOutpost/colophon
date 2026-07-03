@@ -253,6 +253,52 @@ def test_author_depth_from_scheme():
     assert _author_depth("$Title") is None              # scheme with no author level
 
 
+def _titled_book(folder, title):
+    b = _book(folder)
+    b.title = title
+    return b
+
+
+def test_numbered_siblings_ramp_votes_series():
+    from colophon.core.node_classify import _Ctx, ax_numbered_siblings
+    g = Graph()
+    root = Path("/lib")
+    vlad = _dir(g, "/lib/Steven Brust/Vlad Taltos")
+    kids = [_titled_book(f"/lib/Steven Brust/Vlad Taltos/{n}", n) for n in
+            ("01 - Jereg", "02 - Yendi", "03 - Teckla", "05 - Phoenix")]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={vlad.path: kids}, modal_author_depth=None,
+               book_like_children={})
+    ev = ax_numbered_siblings(vlad, ctx)
+    assert {e.kind for e in ev} == {"series"}
+    assert sum(e.weight for e in ev) >= 3.0            # trigger 1 + ramp 2, beats author-grouping 2.0
+    assert all(e.value == "Vlad Taltos" for e in ev)
+
+
+def test_single_numbered_book_is_trigger_only():
+    from colophon.core.node_classify import _Ctx, ax_numbered_siblings
+    g = Graph()
+    root = Path("/lib")
+    d = _dir(g, "/lib/Some Author/05 - Phoenix")
+    ctx = _Ctx(graph=g, root=root,
+               books_by_folder={d.path: [_titled_book("/lib/Some Author/05 - Phoenix", "05 - Phoenix")]},
+               modal_author_depth=None, book_like_children={})
+    ev = ax_numbered_siblings(d, ctx)
+    assert sum(e.weight for e in ev) == 1.0            # trigger only, no ramp -> author 2.0 still wins
+
+
+def test_same_title_parts_are_not_a_ramp():
+    from colophon.core.node_classify import _Ctx, ax_numbered_siblings
+    g = Graph()
+    root = Path("/lib")
+    d = _dir(g, "/lib/A/Tiassa")
+    kids = [_titled_book(f"/lib/A/Tiassa/{n} - Tiassa", f"{n} - Tiassa") for n in ("01", "02", "03")]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={d.path: kids},
+               modal_author_depth=None, book_like_children={})
+    ev = ax_numbered_siblings(d, ctx)
+    # distinct numbers but SAME cleaned title -> no ramp weight, trigger only
+    assert sum(e.weight for e in ev) == 1.0
+
+
 def test_depth_flexible_author_fallback(tmp_path):
     from colophon.core.graph_classify import classify_graph
     from colophon.core.node_classify import classify_nodes
@@ -279,3 +325,54 @@ def test_depth_flexible_author_fallback(tmp_path):
     assert all(b.authors == [] for b in trek)                      # franchise folder never authors its books
     assert all(b.authors == ["Diane Duane"] for b in tagged)       # tag author untouched
     assert all(b.provenance["authors"] == "tag" for b in tagged)
+
+
+def test_fill_series_ramp_stamps_sequence_and_cleans_title():
+    from colophon.core.graph import BookNode
+    from colophon.core.models import Provenance
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    _dir(g, "/lib/Steven Brust")
+    _dir(g, "/lib/Steven Brust/Vlad Taltos", kind="series", kind_value="Vlad Taltos")
+    # a book sub-folder whose title is dirty, and one whose title is already clean
+    yendi = _titled_book("/lib/Steven Brust/Vlad Taltos/02 - Yendi", "02 - Yendi")
+    jereg = _titled_book("/lib/Steven Brust/Vlad Taltos/01 - Jereg", "Jhereg")  # already clean from file
+    for b in (yendi, jereg):
+        b.provenance["title"] = Provenance.DIRECTORY.value
+    for i, b in enumerate((yendi, jereg)):
+        bd = _dir(g, str(b.source_folder))
+        bid = f"{bd.id}:{i}"
+        g.books[bid] = BookNode(id=bid, book=b, owns=[], dir_id=bd.id)
+
+    _fill_series_ramp(g, [yendi, jereg], root=root)
+
+    assert yendi.title == "Yendi"                                  # dirty title cleaned
+    assert yendi.series and yendi.series[0].name == "Vlad Taltos" and yendi.series[0].sequence == 2.0
+    assert jereg.title == "Jhereg"                                 # good title left intact
+    assert jereg.series and jereg.series[0].sequence == 1.0        # sequence still from folder name
+    assert yendi.provenance["series"] == Provenance.GRAPHING.value
+    assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title cleaned, provenance unchanged
+
+
+def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
+    # a series node whose child position is itself a weak (unspaced) compound — e.g. a manual/match
+    # series with no strong ramp — must NOT mangle a weak compound title like "30-Day Heart Tune-Up"
+    from colophon.core.graph import BookNode
+    from colophon.core.models import Provenance
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    _dir(g, "/lib/Health", kind="series", kind_value="Health")
+    b = _titled_book("/lib/Health/30-Day Heart Tune-Up", "30-Day Heart Tune-Up")
+    b.provenance["title"] = Provenance.DIRECTORY.value
+    bd = _dir(g, str(b.source_folder))
+    g.books["x:0"] = BookNode(id="x:0", book=b, owns=[], dir_id=bd.id)
+
+    _fill_series_ramp(g, [b], root=root)
+
+    assert b.title == "30-Day Heart Tune-Up"     # weak title + weak position -> not cleaned

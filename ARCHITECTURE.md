@@ -78,6 +78,10 @@ onto the node later.
   books"). Used both directly (fully-untagged folders) and by `group_works`.
 - `services/graph_build.py::_leaves_for` — *materializes* the grouping: a MULTI
   folder with >1 work becomes one `BookNode` per work.
+- `core/sequence_affix.py::parse_sequence_affix` — the one place that decides whether a name
+  carries a sequence-number affix ('02 - Yendi'), its clean title, and confidence (strong =
+  spaced/bracketed, weak = unspaced compound). Reused by the numbered-siblings axiom, IDENTIFY
+  title cleaning, and `filename_cluster` (one number-stripper, one whitespace guard).
 
 ### 4b. Categorize (`core/classify.py`)
 - `classify` → `ClassificationResult(content_kind, folder_kind, confidence,
@@ -112,6 +116,7 @@ onto the node later.
   `ax_tag_author_match` (author 1.5), `ax_container_shape` (container; scan-root
   prior 2.5), `ax_bucket_word` (container 2). `_fill_down` does the leaf→root author
   inheritance (with the scheme `author_depth` fallback, #188).
+  `ax_numbered_siblings` (series 1–4, additive: trigger + distinct-title ramp + tag corroboration)
 - `core/graph_records.py::_ancestor_franchise` — reads `node.kind == "franchise"` to
   emit franchise edges.
 
@@ -210,6 +215,9 @@ either to a shared key — that role belongs to `normalize_key` alone.
   (`_is_single_sequence`) that disagreed with `cluster` on the same input. It now
   delegates ambiguous album groups and unkeyed files to `cluster`, so there is one
   answer to "same book's parts vs distinct books".
+- Number-stripping **consolidated** onto `sequence_affix.parse_sequence_affix`: `filename_cluster`
+  no longer drops a leading number blindly (which mangled '30-Day Heart Tune-Up'); it shares the
+  strong/weak whitespace guard with IDENTIFY and the classifier.
 
 ---
 
