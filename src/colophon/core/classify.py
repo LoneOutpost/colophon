@@ -110,16 +110,12 @@ def _fully_untagged(features: list[FileFeatures]) -> bool:
     return all(_work_key(f) is None for f in features)
 
 
-def _is_single_sequence(files: list[FileFeatures]) -> bool:
-    """True when every file carries a distinct number in its stem — i.e. the
-    files look like numbered parts of one work, not separate books."""
-    nums: list[int] = []
-    for f in files:
-        m = re.search(r"\d+", f.path.stem)
-        if not m:
-            return False
-        nums.append(int(m.group()))
-    return len(set(nums)) == len(nums)
+def _cluster_works(files: list[FileFeatures]) -> tuple[list[DetectedWork], list[ConfidenceSignal]]:
+    """Delegate a set of files to the filename clusterer. `cluster` is the one place that decides
+    "same title, differ only by number = one book's parts" vs "distinct title text = separate
+    books"; grouping reuses it here rather than reimplementing that reasoning less capably."""
+    cr = cluster([f.path for f in files])
+    return cr.detected_works, cr.signals
 
 
 def _first(values) -> str | None:
@@ -143,8 +139,11 @@ def _to_work(group: list[FileFeatures]) -> DetectedWork:
 
 
 def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[ConfidenceSignal]]:
-    """Group files into distinct works: shared asin/isbn/album group together;
-    otherwise unkeyed files either form one numbered sequence or each stand alone."""
+    """Group files into distinct works. `asin`/`isbn` are per-book identifiers and always group
+    as one work. `album` is ambiguous — it may be a book title (files are that book's parts) or a
+    *series* name (files are distinct books) — so a multi-file album group is re-checked by the
+    clusterer, which splits it when the filenames carry distinct titles. Unkeyed files are handed
+    to the same clusterer."""
     signals: list[ConfidenceSignal] = []
     keyed: dict[str, list[FileFeatures]] = {}
     unkeyed: list[FileFeatures] = []
@@ -155,20 +154,26 @@ def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[
         else:
             keyed.setdefault(key, []).append(f)
 
-    works: list[list[FileFeatures]] = list(keyed.values())
+    works: list[DetectedWork] = []
+    for key, group in keyed.items():
+        if key.startswith("album:") and len(group) > 1:
+            sub, sub_signals = _cluster_works(group)
+            if len(sub) > 1:  # the album was a series name over several distinct-title books
+                works.extend(sub)
+                signals.extend(sub_signals)
+                continue
+        works.append(_to_work(group))
     if keyed:
         signals.append(_signal("tag_work_keys", 2 * len(keyed), f"{len(keyed)} work key(s) from tags"))
 
-    if unkeyed:
-        if len(unkeyed) > 1 and _is_single_sequence(unkeyed):
-            works.append(unkeyed)
-            signals.append(_signal("filename_sequence", 2, f"{len(unkeyed)} files form one numbered sequence"))
-        else:
-            works.extend([f] for f in unkeyed)
-            if len(unkeyed) > 1:
-                signals.append(_signal("unkeyed_singletons", 0, f"{len(unkeyed)} files lack a shared work key"))
+    if len(unkeyed) > 1:
+        sub, sub_signals = _cluster_works(unkeyed)
+        works.extend(sub)
+        signals.extend(sub_signals)
+    elif unkeyed:
+        works.append(_to_work(unkeyed))
 
-    return [_to_work(g) for g in works], signals
+    return works, signals
 
 
 def content_kind_for(works: list[DetectedWork], signals: list[ConfidenceSignal]) -> ContentKind:

@@ -52,7 +52,7 @@ def compile_template(template: str) -> Pattern[str]:
             if tok.field in seen:
                 raise ValueError(f"Token ${name} used more than once")
             seen.add(tok.field)
-            parts.append(rf"(?P<{tok.field}>.+?)")
+            parts.append(rf"(?P<{tok.field}>{tok.pattern})")
         last = match.end()
     trailing = protected[last:]
     if trailing:

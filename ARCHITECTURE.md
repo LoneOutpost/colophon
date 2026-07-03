@@ -69,12 +69,13 @@ onto the node later.
 ### 4a. Structure & grouping
 - `adapters/scan.py::group_book_units` — filesystem walk → per-folder audio file
   sets (which folders hold books).
-- `core/classify.py::group_works` (+ `_work_key`, `_is_single_sequence`, `_to_work`)
-  — within one folder, cluster files into `DetectedWork`s: shared asin/isbn/album
-  key groups; otherwise a distinct-numbered sequence forms one work, else each file
-  stands alone.
-- `core/filename_cluster.py::cluster` — filename-structure-only fallback when a
-  folder is fully untagged.
+- `core/classify.py::group_works` (+ `_work_key`, `_to_work`) — within one folder,
+  cluster files into `DetectedWork`s: shared asin/isbn key groups as one book;
+  `album` is treated as *ambiguous* (may be a series name) and a multi-file album
+  group plus any unkeyed files are handed to `filename_cluster.cluster` to split.
+- `core/filename_cluster.py::cluster` — the single filename-structure reasoner
+  ("same title differing by number = one book's parts; distinct titles = separate
+  books"). Used both directly (fully-untagged folders) and by `group_works`.
 - `services/graph_build.py::_leaves_for` — *materializes* the grouping: a MULTI
   folder with >1 work becomes one `BookNode` per work.
 - `core/sequence_affix.py::parse_sequence_affix` — the one place that decides whether a name
@@ -209,6 +210,11 @@ either to a shared key — that role belongs to `normalize_key` alone.
   engine subsumed them (their behavior + tests moved to `node_classify`).
 - Dedup vs display **split**: `normalize_key` ("same entity?") vs `_canonical_display`
   ("which spelling?") — two clearly-separated jobs, not one fuzzy one.
+- Filename-structure reasoning **consolidated** into `filename_cluster.cluster`
+  (#189): `group_works` used to carry its own weaker numbered-sequence detector
+  (`_is_single_sequence`) that disagreed with `cluster` on the same input. It now
+  delegates ambiguous album groups and unkeyed files to `cluster`, so there is one
+  answer to "same book's parts vs distinct books".
 - Number-stripping **consolidated** onto `sequence_affix.parse_sequence_affix`: `filename_cluster`
   no longer drops a leading number blindly (which mangled '30-Day Heart Tune-Up'); it shares the
   strong/weak whitespace guard with IDENTIFY and the classifier.
