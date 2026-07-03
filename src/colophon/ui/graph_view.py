@@ -116,7 +116,22 @@ def render_classic_tree(controller: AppController) -> None:
         ui.notify(f"Cleared the classification on {node.label}")
         await _build()
 
+    async def _quick_classify(node, kind: str) -> None:
+        """Right-click fast path: re-categorize `node` as `kind` at once, using the folder's own name
+        as the value (a container carries none). Recoverable via Clear."""
+        controller.set_node_classification(node.path, kind, node.label if kind != "container" else None)
+        ui.notify(f"Marked {node.label} as {kind}", type="positive")
+        await _build()
+
     def _classify_menu(node) -> None:
+        # Right-click anywhere on the row for fast re-categorization (value = the folder's own name);
+        # the kebab opens the dialog for the rarer case where the value should differ from the name.
+        with ui.context_menu():
+            for kind in ("author", "series", "franchise", "container"):
+                ui.menu_item(f"Mark as {kind}",
+                             lambda kind=kind, node=node: _quick_classify(node, kind))
+            ui.separator()
+            ui.menu_item("Clear classification", lambda node=node: _clear_classify(node))
         btn = ui.button(icon="sell").props(
             'flat dense round aria-label="Classify this folder"'
         ).classes("colophon-muted")
