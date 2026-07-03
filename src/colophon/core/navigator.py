@@ -74,6 +74,21 @@ def build_library_tree(
     )
 
 
+def filter_library_tree(tree: LibraryTree, filter_text: str) -> LibraryTree:
+    """A navigator view narrowed to entities whose display name contains `filter_text`
+    (case-insensitive substring). Blank text returns `tree` unchanged. `needs_id` and `all_books`
+    are preserved so the All and Needs-identification affordances still work; only the
+    author/series/franchise entity lists are narrowed. Pure; never mutates `tree`."""
+    q = filter_text.strip().casefold()
+    if not q:
+        return tree
+    return tree.model_copy(update={
+        "authors": [a for a in tree.authors if q in a.name.casefold()],
+        "series": [s for s in tree.series if q in s.name.casefold()],
+        "franchises": [f for f in tree.franchises if q in f.name.casefold()],
+    })
+
+
 def _author_view(
     g: EntityGraph, aliases: dict[tuple[str, str], str] | None
 ) -> list[AuthorNode]:

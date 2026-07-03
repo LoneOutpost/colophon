@@ -126,6 +126,14 @@ class BookUnitRepo:
     # Colophon owns its DB, so no external writer can stale it.
     _cache: dict[str, BookUnit] | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+    _generation: int = field(default=0, init=False, repr=False)
+
+    @property
+    def generation(self) -> int:
+        """Monotonic write counter, bumped on every upsert/delete/invalidate. A derived-data
+        cache (e.g. the controller's library tree or autocomplete lists) can memoize against it:
+        an unchanged generation means the book set is unchanged, so no rebuild is needed."""
+        return self._generation
 
     def upsert(self, book: BookUnit, commit: bool = True) -> None:
         # The denormalized columns (source_folder, state, confidence, created_at,
@@ -155,6 +163,7 @@ class BookUnitRepo:
         if commit:
             self.conn.commit()
             with self._lock:
+                self._generation += 1
                 if self._cache is not None:
                     # store a deep copy so later in-place edits to the caller's
                     # object can't reach the cache without their own write
@@ -176,6 +185,7 @@ class BookUnitRepo:
         if commit:
             self.conn.commit()
             with self._lock:
+                self._generation += 1
                 if self._cache is not None:
                     self._cache.pop(id, None)
         else:
@@ -184,6 +194,7 @@ class BookUnitRepo:
     def _invalidate(self) -> None:
         with self._lock:
             self._cache = None
+            self._generation += 1
 
     def list_all(self) -> list[BookUnit]:
         with self._lock:
@@ -357,6 +368,13 @@ class EntityAliasRepo:
     an already-normalized `name_key`."""
 
     conn: sqlite3.Connection
+    _generation: int = field(default=0, init=False, repr=False)
+
+    @property
+    def generation(self) -> int:
+        """Monotonic write counter, bumped on every set/clear. Aliases resolve at read time, so a
+        derived cache (the controller's library tree) has no other signal that a merge/rename ran."""
+        return self._generation
 
     def set(self, kind: str, name_key: str, canonical: str) -> None:
         self.conn.execute(
@@ -365,12 +383,14 @@ class EntityAliasRepo:
             (kind, name_key, canonical),
         )
         self.conn.commit()
+        self._generation += 1
 
     def clear(self, kind: str, name_key: str) -> None:
         self.conn.execute(
             "DELETE FROM entity_aliases WHERE kind = ? AND name_key = ?", (kind, name_key)
         )
         self.conn.commit()
+        self._generation += 1
 
     def all(self) -> dict[tuple[str, str], str]:
         rows = self.conn.execute(
