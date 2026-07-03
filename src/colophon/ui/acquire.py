@@ -13,6 +13,7 @@ from colophon.services.filetree import (
     default_selection,
 )
 from colophon.ui.chrome import page_body, page_header, page_toolbar
+from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +361,7 @@ def render_acquire(controller: AppController) -> None:
         if not any(e.status == "done" for e in controller.active_downloads()):
             return
         scan_prompt["shown"] = True
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
+        with modal() as dialog, ui.card().classes("w-96"):
             ui.label("Add the downloads folder to your scan paths?").classes("text-subtitle1")
             ui.label(
                 "New downloads will then be picked up the next time you scan your library."

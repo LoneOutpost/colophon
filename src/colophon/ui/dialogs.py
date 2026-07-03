@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 _DEPTH_TO_SCOPE = {"new_changed": ScanScope.UPDATE, "rebuild": ScanScope.REFRESH}
 
 
+def modal() -> ui.dialog:
+    """A persistent dialog: it will not dismiss on an outside click or the Escape key, so unsaved
+    edits are never lost to a stray click. The single place the app's dialog-dismissal policy lives;
+    build every dialog through this rather than calling `ui.dialog()` directly."""
+    return ui.dialog().props("persistent")
+
+
 def dialog_actions(
     dialog: ui.dialog,
     *,
@@ -166,7 +173,7 @@ def remap_dialog(
     show_detail: Callable[[str], None],
 ) -> None:
     """Move one field's value into another field (fixes mis-tagging)."""
-    with ui.dialog() as dialog, ui.card().classes("w-80"):
+    with modal() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
         ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
             "text-caption colophon-muted"
@@ -196,7 +203,7 @@ def bulk_remap_dialog(
     clear_selection: Callable[[], None],
 ) -> None:
     """Move one field's value into another across all selected books (fixes mis-tagging)."""
-    with ui.dialog() as dialog, ui.card().classes("w-80"):
+    with modal() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
         ui.label(
             f"Move a field's value into another across {len(books)} selected book(s)."
@@ -226,7 +233,7 @@ def rename_dialog(
     show_detail: Callable[[str], None],
 ) -> None:
     """Rename a single source file of the book."""
-    with ui.dialog() as dialog, ui.card():
+    with modal() as dialog, ui.card():
         ui.label("Rename file").classes("text-subtitle1")
         name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
 
@@ -249,7 +256,7 @@ def cover_dialog(
     show_detail: Callable[[str], None],
 ) -> None:
     """Set the book's cover from a URL, an upload, or a source search result."""
-    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+    with modal() as dialog, ui.card().classes("w-[28rem]"):
         ui.label("Change cover").classes("text-subtitle1")
 
         url_in = ui.input("Image URL").props("dense clearable").classes("w-full")
@@ -334,7 +341,7 @@ def chapter_edit_dialog(
             ui.notify(f"Bad time: {row['time'].value!r} (use H:MM:SS)", type="negative")
             return None
 
-    with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 640px"):
+    with modal() as dialog, ui.card().classes("w-full").style("max-width: 640px"):
         ui.label(f"Edit chapters ({len(chapters)})").classes("text-subtitle1")
         ui.label(
             "Titles and start times are written into the M4B when you encode."
@@ -414,7 +421,7 @@ def compare_dialog(
     }
     matches: list = []
 
-    with ui.dialog() as dialog, ui.card().classes("w-96"):
+    with modal() as dialog, ui.card().classes("w-96"):
         ui.label(f"Find matches for {book.title or '(untitled)'}").classes("text-subtitle1")
         body = ui.column().classes("w-full")
 
@@ -541,7 +548,7 @@ async def tag_dialog(
     """Preview and write metadata tags to the book's files."""
     save_pending()  # "Write" encompasses Save: persist editor edits first
     plan = controller.tag_plan(book)
-    with ui.dialog() as dialog, ui.card().classes("w-96"):
+    with modal() as dialog, ui.card().classes("w-96"):
         ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")
         for warning in plan.warnings:
             with ui.row().classes("items-center no-wrap"):
@@ -600,7 +607,7 @@ async def bulk_tag_dialog(
     apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
     plans = [(b, controller.tag_plan(b)) for b in books]
     total_files = sum(len(p.files) for _, p in plans)
-    with ui.dialog() as dialog, ui.card().classes("w-96"):
+    with modal() as dialog, ui.card().classes("w-96"):
         ui.label(f"Write tags to {len(books)} books ({total_files} files)").classes(
             "text-subtitle1"
         )
@@ -671,7 +678,7 @@ async def quick_match_dialog(
 ) -> None:
     """Bulk-identify selected books against sources and apply chosen matches."""
     sources = controller.available_sources()  # [(name, label), ...]
-    with ui.dialog() as dialog, ui.card().classes("w-[32rem]"):
+    with modal() as dialog, ui.card().classes("w-[32rem]"):
         title = ui.label(f"Quick Match {len(books)} books").classes("text-subtitle1")
         body = ui.column().classes("w-full")
         proposals: list = []
@@ -807,7 +814,7 @@ async def scan_dialog(
     """Scan the filesystem with per-run pattern overrides, scope, and phase controls,
     review the resulting changes, then apply them (merge new books/files, fill empties)."""
     cfg = controller.ctx.config
-    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+    with modal() as dialog, ui.card().classes("w-[28rem]"):
         body = ui.column().classes("w-full")
 
         def show_options() -> None:
@@ -931,7 +938,7 @@ async def identify_dialog(
         ui.notify("Nothing to identify")
         return
 
-    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+    with modal() as dialog, ui.card().classes("w-[28rem]"):
         ui.label(f"Identifying {len(candidates)} book(s)").classes("text-subtitle1")
         log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in candidates])
         state = {"cancelled": False}
@@ -1004,7 +1011,7 @@ async def process_dialog(
         ui.notify("Nothing selected or ready")
         return
 
-    with ui.dialog() as dialog, ui.card().classes("w-[28rem]"):
+    with modal() as dialog, ui.card().classes("w-[28rem]"):
         body = ui.column().classes("w-full")
 
         def _close() -> None:

@@ -15,6 +15,7 @@ from colophon.controller import AppController
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
 from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
 from colophon.ui.chrome import body_column, page_header, page_toolbar
+from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def render_classic_tree(controller: AppController) -> None:
     body = body_column("full")
 
     async def _open_classify_dialog(node, kind: str) -> None:
-        with ui.dialog() as dialog, ui.card():
+        with modal() as dialog, ui.card():
             ui.label(f"Classify {node.label} as {kind}")
             name = ui.input("Name", value=node.label)
             with ui.row():
@@ -128,7 +129,7 @@ def render_classic_tree(controller: AppController) -> None:
             ui.menu_item("Clear", lambda node=node: _clear_classify(node))
 
     async def _confirm_cohort(hint: str, count: int) -> None:
-        with ui.dialog() as dialog, ui.card():
+        with modal() as dialog, ui.card():
             ui.label(f"Confirm {count} groupings as {hint}?")
             ui.label("Each folder is marked as that author/series; this applies to the "
                      "books on the next scan.").classes("colophon-muted text-caption")
