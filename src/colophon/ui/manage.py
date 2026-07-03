@@ -11,6 +11,7 @@ from nicegui import ui
 
 from colophon.controller import AppController
 from colophon.ui.chrome import page_body, page_header, page_toolbar
+from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
     # --- dialogs ---
     def _edit_dialog(name: str) -> None:
         kind = state["kind"]
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
+        with modal() as dialog, ui.card().classes("w-96"):
             ui.label(f"Rename {kind}").classes("text-subtitle1")
             new_in = ui.input("New name", value=name).props("dense autofocus").classes("w-full")
             write_tags = _write_tags_checkbox()
@@ -108,7 +109,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
 
     def _delete_dialog(name: str, count: int) -> None:
         kind = state["kind"]
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
+        with modal() as dialog, ui.card().classes("w-96"):
             ui.label(f"Delete {kind}").classes("text-subtitle1")
             ui.label(f"Used by {count} books. Remove from all?").classes(
                 "text-caption colophon-muted"
@@ -137,7 +138,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
         if len(sources) < 2:
             ui.notify("Select at least two entries to merge", type="warning")
             return
-        with ui.dialog() as dialog, ui.card().classes("w-96"):
+        with modal() as dialog, ui.card().classes("w-96"):
             ui.label(f"Merge {len(sources)} {kind} entries").classes("text-subtitle1")
             ui.label("; ".join(sources)).classes("text-caption colophon-muted")
             target_in = ui.select(

@@ -37,6 +37,7 @@ from colophon.ui.dialogs import (
     compare_dialog,
     cover_dialog,
     identify_dialog,
+    modal,
     process_dialog,
     quick_match_dialog,
     remap_dialog,
@@ -297,7 +298,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         is_dirty = editor_state["is_dirty"]
         if is_dirty is None or not is_dirty() or editor_state["book_id"] == target_book_id:
             return False
-        with ui.dialog() as d, ui.card().classes("w-96"):
+        with modal() as d, ui.card().classes("w-96"):
             ui.label("Unsaved changes").classes("text-subtitle1")
             ui.label("This book has unsaved edits.").classes("text-caption colophon-muted")
             with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
@@ -549,7 +550,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     if (b.asin or "").strip():
                         await _fetch_chapters(b)
                         return
-                    with ui.dialog() as dlg, ui.card().classes("w-80"):
+                    with modal() as dlg, ui.card().classes("w-80"):
                         ui.label("Fetch chapters from Audible").classes("text-subtitle1")
                         asin_in = ui.input("ASIN").props("dense").classes("w-full")
                         with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
@@ -1111,7 +1112,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         initial_pattern = controller.ctx.config.filename_template or "$Author - $Title"
         chosen: dict[str, bool] = {}
 
-        with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
+        with modal() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
             ui.label("Parse from filename").classes("text-h6")
             ui.label(f"Applies to {len(books)} selected book(s).").classes(
                 "text-caption colophon-muted"
@@ -1287,7 +1288,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             _after_alias(None)
 
         def _rename() -> None:
-            with ui.dialog() as dlg, ui.card().classes("w-80"):
+            with modal() as dlg, ui.card().classes("w-80"):
                 ui.label("Rename entity").classes("text-subtitle1")
                 name_in = ui.input("Name", value=name).props("dense").classes("w-full")
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
@@ -1299,7 +1300,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             dlg.open()
 
         def _merge() -> None:
-            with ui.dialog() as dlg, ui.card().classes("w-80"):
+            with modal() as dlg, ui.card().classes("w-80"):
                 ui.label("Merge into").classes("text-subtitle1")
                 ui.label(f"Merge '{name}' into another entity.").classes(
                     "text-caption colophon-muted"
