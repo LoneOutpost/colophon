@@ -31,6 +31,16 @@ def test_clean_match_title_strips_year_prefix_and_edition_paren():
     assert clean_match_title("1982 - The Gunslinger (DT1 - original edition)") == "The Gunslinger"
 
 
+def test_clean_match_title_keeps_numeric_title_before_colon():
+    # A leading number before a colon is subtitle punctuation, not a year prefix, so it stays.
+    assert clean_match_title("2001: A Space Odyssey") == "2001: A Space Odyssey"
+
+
+def test_clean_match_title_strip_year_false_keeps_year_prefix():
+    # The stored-title path (strip_year=False) keeps a leading year but still cleans format cruft.
+    assert clean_match_title("1982 - The Gunslinger (Unabridged)", strip_year=False) == "1982 - The Gunslinger"
+
+
 def test_clean_match_title_keeps_series_paren():
     assert clean_match_title("The Gunslinger (The Dark Tower #1)") == "The Gunslinger (The Dark Tower #1)"
 

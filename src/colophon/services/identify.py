@@ -2,8 +2,10 @@
 
 Decomposed into named, single-purpose steps so each is testable in isolation and
 the IDENTIFY phase stays atomic: gather (read + vet) -> seed_series -> resolve
-(reconcile) -> normalize (seam) -> attribute (structural). `_run_local` calls
-`run_identify`.
+(reconcile) -> attribute (structural) -> normalize (seam). `attribute` runs before
+`normalize` so its "title still equals the folder name" guard sees the un-normalized
+title; `normalize` then also cleans any label `attribute` promoted (it is idempotent).
+`_run_local` calls `run_identify`.
 """
 
 from __future__ import annotations
@@ -116,15 +118,16 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
 
 
 def normalize(book: BookUnit) -> None:
-    """Clean a scan-derived title of query/display noise (year prefix, edition/format
-    parentheticals) and a strong sequence-number affix ('05 - Phoenix' -> 'Phoenix'). Only
-    directory/filename-sourced titles — tag, datafile, and manual titles are left as-is. A weak
-    (unspaced) affix like '30-Day Heart Tune-Up' is left for the corroborated series-ramp path.
-    Idempotent."""
+    """Clean a scan-derived title of display noise (edition/format parentheticals) and a strong
+    sequence-number affix ('05 - Phoenix' -> 'Phoenix'). Only directory/filename-sourced titles;
+    tag, datafile, and manual titles are left as-is. A leading year prefix is NOT stripped here
+    (unlike the match-query path): a leading 4-digit number is ambiguous with a numeric title, so
+    the persisted title keeps it rather than risk deleting real content. A weak (unspaced) affix
+    like '30-Day Heart Tune-Up' is left for the corroborated series-ramp path. Idempotent."""
     from colophon.core.sequence_affix import parse_sequence_affix
     if book.provenance.get("title") not in {Provenance.DIRECTORY.value, Provenance.FILENAME.value}:
         return
-    cleaned = clean_match_title(book.title)
+    cleaned = clean_match_title(book.title, strip_year=False)
     if cleaned and cleaned != book.title:
         book.title = cleaned  # provenance unchanged
     affix = parse_sequence_affix(book.title or "")
