@@ -117,19 +117,23 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
 
 def normalize(book: BookUnit) -> None:
     """Clean a scan-derived title of query/display noise (year prefix, edition/format
-    parentheticals) and a strong sequence-number affix ('05 - Phoenix' -> 'Phoenix'). Only
-    directory/filename-sourced titles — tag, datafile, and manual titles are left as-is. A weak
-    (unspaced) affix like '30-Day Heart Tune-Up' is left for the corroborated series-ramp path.
-    Idempotent."""
+    parentheticals) and a strong sequence-number affix ('05 - Phoenix' -> 'Phoenix'), and
+    proper-case a shouting author name ('SANDRA BROWN' -> 'Sandra Brown'). Only directory/filename-
+    sourced fields — tag, datafile, and manual values are kept verbatim (authoritative spellings). A
+    weak (unspaced) title affix like '30-Day Heart Tune-Up' is left for the corroborated series-ramp
+    path. Idempotent."""
+    from colophon.core.normalize import proper_case_if_shouting
     from colophon.core.sequence_affix import parse_sequence_affix
-    if book.provenance.get("title") not in {Provenance.DIRECTORY.value, Provenance.FILENAME.value}:
-        return
-    cleaned = clean_match_title(book.title)
-    if cleaned and cleaned != book.title:
-        book.title = cleaned  # provenance unchanged
-    affix = parse_sequence_affix(book.title or "")
-    if affix is not None and affix.confidence == "strong" and affix.cleaned != book.title:
-        book.title = affix.cleaned  # provenance unchanged
+    weak = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
+    if book.provenance.get("title") in weak:
+        cleaned = clean_match_title(book.title)
+        if cleaned and cleaned != book.title:
+            book.title = cleaned  # provenance unchanged
+        affix = parse_sequence_affix(book.title or "")
+        if affix is not None and affix.confidence == "strong" and affix.cleaned != book.title:
+            book.title = affix.cleaned  # provenance unchanged
+    if book.authors and book.provenance.get("authors") in weak:
+        book.authors = [proper_case_if_shouting(a) for a in book.authors]  # provenance unchanged
 
 
 def attribute(book: BookUnit, evidence: Evidence) -> None:

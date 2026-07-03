@@ -376,3 +376,18 @@ def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
     _fill_series_ramp(g, [b], root=root)
 
     assert b.title == "30-Day Heart Tune-Up"     # weak title + weak position -> not cleaned
+
+
+def test_fill_down_proper_cases_shouting_inherited_author():
+    # a book inheriting its author from an ALL-CAPS author node gets a proper-cased name (GRAPHING)
+    from colophon.core.graph import BookNode
+    from colophon.core.node_classify import _fill_down
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    author_node = _dir(g, "/lib/STEPHEN COONTS", kind="author", author="STEPHEN COONTS")
+    b = _book("/lib/STEPHEN COONTS/Flight of the Intruder")
+    bd = _dir(g, str(b.source_folder))
+    g.books["x:0"] = BookNode(id="x:0", book=b, owns=[], dir_id=bd.id)
+    _fill_down(g, [b], {author_node.id: False}, root=root, author_depth=None)
+    assert b.authors == ["Stephen Coonts"]
