@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from mutagen.id3 import ID3, TIT2
 
@@ -257,3 +258,29 @@ def test_run_identify_clears_orphaned_datafile_on_any_scan(tmp_path):
 
     assert book.description == ""
     assert "description" not in book.provenance
+
+
+def _dir_titled(title: str) -> BookUnit:
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    b.title = title
+    b.provenance["title"] = Provenance.DIRECTORY.value
+    return b
+
+
+def test_normalize_strips_strong_leading_sequence():
+    b = _dir_titled("05 - Phoenix")
+    normalize(b)
+    assert b.title == "Phoenix"
+
+
+def test_normalize_leaves_weak_compound_title():
+    b = _dir_titled("30-Day Heart Tune-Up")
+    normalize(b)
+    assert b.title == "30-Day Heart Tune-Up"        # weak affix: not stripped here
+
+
+def test_normalize_leaves_tag_title_untouched():
+    b = _dir_titled("02 - Yendi")
+    b.provenance["title"] = Provenance.TAG.value
+    normalize(b)
+    assert b.title == "02 - Yendi"                   # only directory/filename titles are cleaned
