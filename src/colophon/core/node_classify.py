@@ -459,8 +459,11 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             book.provenance["series"] = Provenance.GRAPHING.value
         taff = parse_sequence_affix(book.title or "")
         if (taff is not None and taff.cleaned != book.title
-                and book.provenance.get("title") in _WEAK):
-            book.title = taff.cleaned          # under a corroborated ramp, weak title affixes clean too
+                and book.provenance.get("title") in _WEAK
+                and (taff.confidence == "strong" or aff.confidence == "strong")):
+            # a strong title affix, or a strong ramp position (aff) corroborating a weak title one —
+            # so a manual/match series node with a weak compound title (e.g. '30-Day…') is left alone
+            book.title = taff.cleaned
 
 
 def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *,

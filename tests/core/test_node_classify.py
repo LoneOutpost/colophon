@@ -354,3 +354,25 @@ def test_fill_series_ramp_stamps_sequence_and_cleans_title():
     assert jereg.title == "Jhereg"                                 # good title left intact
     assert jereg.series and jereg.series[0].sequence == 1.0        # sequence still from folder name
     assert yendi.provenance["series"] == Provenance.GRAPHING.value
+    assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title cleaned, provenance unchanged
+
+
+def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
+    # a series node whose child position is itself a weak (unspaced) compound — e.g. a manual/match
+    # series with no strong ramp — must NOT mangle a weak compound title like "30-Day Heart Tune-Up"
+    from colophon.core.graph import BookNode
+    from colophon.core.models import Provenance
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    _dir(g, "/lib/Health", kind="series", kind_value="Health")
+    b = _titled_book("/lib/Health/30-Day Heart Tune-Up", "30-Day Heart Tune-Up")
+    b.provenance["title"] = Provenance.DIRECTORY.value
+    bd = _dir(g, str(b.source_folder))
+    g.books["x:0"] = BookNode(id="x:0", book=b, owns=[], dir_id=bd.id)
+
+    _fill_series_ramp(g, [b], root=root)
+
+    assert b.title == "30-Day Heart Tune-Up"     # weak title + weak position -> not cleaned
