@@ -91,11 +91,13 @@ def test_numbered_files_no_tags_are_one_sequence():
     assert content_kind_for(works, signals) is CK.SINGLE
 
 
-def test_untagged_unsequenced_files_are_unknown():
+def test_untagged_distinct_files_are_multi():
+    # distinct-title unkeyed files are handed to the clusterer, which reads them as two works
+    # (matching the fully-untagged classify() path — one grouper, one answer)
     feats = [_feat("/a/d/alpha.mp3"), _feat("/a/d/bravo.mp3")]
     works, signals = group_works(feats)
     assert len(works) == 2
-    assert content_kind_for(works, signals) is CK.UNKNOWN
+    assert content_kind_for(works, signals) is CK.MULTI
 
 
 def test_asin_beats_album_for_grouping():
@@ -193,3 +195,29 @@ def test_structure_unclear_not_added_when_other_finding_present():
     ]
     r = _classify("/lib/Legion", "/lib", feats)
     assert all(f.code is not FC.STRUCTURE_UNCLEAR for f in r.findings)
+
+
+def test_series_album_with_distinct_titles_splits_into_separate_books():
+    # stella Rimington regression: distinct novels share album="Liz Carlyle" (the SERIES name).
+    # The shared album key must NOT collapse different-title books into one work.
+    feats = [
+        _feat("/a/d/Close Call (Liz Carlyle 8).mp3", album="Liz Carlyle", artist="Stella Rimington"),
+        _feat("/a/d/Dead Line (Liz Carlyle 4).mp3", album="Liz Carlyle", artist="Stella Rimington"),
+        _feat("/a/d/Breaking Cover (Liz Carlyle 9).mp3", album="Liz Carlyle", artist="Stella Rimington"),
+    ]
+    works, signals = group_works(feats)
+    assert len(works) == 3
+    assert content_kind_for(works, signals) is CK.MULTI
+    # each split work carries its own filename title + the series/sequence the clusterer read
+    assert {w.label for w in works} == {"Close Call", "Dead Line", "Breaking Cover"}
+
+
+def test_title_album_with_numbered_parts_stays_one_book():
+    # when the album really is the book title, its numbered parts still merge into one work
+    feats = [
+        _feat("/a/d/The Winter Sea Part 1.mp3", album="The Winter Sea", artist="Susanna Kearsley"),
+        _feat("/a/d/The Winter Sea Part 2.mp3", album="The Winter Sea", artist="Susanna Kearsley"),
+    ]
+    works, signals = group_works(feats)
+    assert len(works) == 1
+    assert content_kind_for(works, signals) is CK.SINGLE
