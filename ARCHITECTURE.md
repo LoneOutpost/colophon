@@ -111,12 +111,19 @@ onto the node later.
 - `core/node_classify.py` — the engine: `Evidence` → axioms → `resolve` →
   `Classification`. Axioms (kind / weight): `ax_manual_override` (hard 100),
   `ax_matched_identity` (hard 10), `ax_leaf_title` (title 5), `ax_known_franchise`
-  (franchise 7), `ax_series_ramp` (series 3), `ax_artist_consensus` (author ≤3),
-  `ax_author_from_grouping` (author 2), `ax_author_structure` (author ~1–2),
+  (franchise 4), `ax_series_ramp` (series 3), `ax_artist_consensus` (author ≤3),
+  `ax_author_from_grouping` (author 2), `ax_author_structure`
+  (author **`1 + 0.5·(series count)` — UNBOUNDED**; a franchise-shaped folder spanning
+  many series makes a huge author vote, e.g. Star Wars 27 series → 14.5),
   `ax_tag_author_match` (author 1.5), `ax_container_shape` (container; scan-root
   prior 2.5), `ax_bucket_word` (container 2). `_fill_down` does the leaf→root author
   inheritance (with the scheme `author_depth` fallback, #188).
-  `ax_numbered_siblings` (series 1–4, additive: trigger + distinct-title ramp + tag corroboration)
+  `ax_numbered_siblings` (series 1–4, additive: trigger + distinct-title ramp + tag corroboration).
+  `resolve()` **sums weight per kind**; `_KIND_ORDER` breaks ties toward `author` over `franchise`.
+- **Franchise ⊥ author:** a known-franchise match (`_is_known_franchise`) **suppresses** the
+  structural author axioms (`ax_author_structure`, `ax_author_from_grouping`) — a folder is one or the
+  other, never both. Needed because the unbounded author-structure vote otherwise swamps the flat
+  franchise-seed 4.0 (#197). A hard match/manual still wins; a real tag-author consensus is untouched.
 - `core/graph_records.py::_ancestor_franchise` — reads `node.kind == "franchise"` to
   emit franchise edges.
 
