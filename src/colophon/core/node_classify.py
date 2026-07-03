@@ -423,6 +423,44 @@ def classify_nodes(
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
+    _fill_series_ramp(graph, books, root=root)
+
+
+def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
+    """The nearest ancestor (incl. `folder`) classified `series`, or None — walking to root."""
+    cur = folder
+    while True:
+        node = graph.directories.get(DirectoryNode.id_for(cur))
+        if node is not None and node.kind == "series":
+            return node
+        if cur == root or root not in cur.parents:
+            return None
+        cur = cur.parent
+
+
+def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
+    """For a book under a folder classified `series`, take its sequence from the child-name affix
+    (the reliable position number) and stamp series name + sequence when it has no stronger series;
+    separately clean the affix off the book's OWN title (so a good title isn't overwritten by a
+    misspelled folder). GRAPHING provenance; MATCH overrules. Never touch a tag/datafile/match/manual
+    series or title."""
+    from colophon.core.models import Provenance, SeriesRef
+    from colophon.core.sequence_affix import parse_sequence_affix
+    fillable = _WEAK | {Provenance.GRAPHING.value}
+    for book in books:
+        node = _nearest_series(graph, book.source_folder, root)
+        if node is None or not node.kind_value:
+            continue
+        aff = parse_sequence_affix(_child_name(node.path, book))
+        if aff is None:
+            continue
+        if not book.series or book.provenance.get("series") in fillable:
+            book.series = [SeriesRef(name=node.kind_value, sequence=aff.sequence)]
+            book.provenance["series"] = Provenance.GRAPHING.value
+        taff = parse_sequence_affix(book.title or "")
+        if (taff is not None and taff.cleaned != book.title
+                and book.provenance.get("title") in _WEAK):
+            book.title = taff.cleaned          # under a corroborated ramp, weak title affixes clean too
 
 
 def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *,

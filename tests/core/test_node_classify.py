@@ -325,3 +325,32 @@ def test_depth_flexible_author_fallback(tmp_path):
     assert all(b.authors == [] for b in trek)                      # franchise folder never authors its books
     assert all(b.authors == ["Diane Duane"] for b in tagged)       # tag author untouched
     assert all(b.provenance["authors"] == "tag" for b in tagged)
+
+
+def test_fill_series_ramp_stamps_sequence_and_cleans_title():
+    from colophon.core.graph import BookNode
+    from colophon.core.models import Provenance
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    _dir(g, "/lib/Steven Brust")
+    _dir(g, "/lib/Steven Brust/Vlad Taltos", kind="series", kind_value="Vlad Taltos")
+    # a book sub-folder whose title is dirty, and one whose title is already clean
+    yendi = _titled_book("/lib/Steven Brust/Vlad Taltos/02 - Yendi", "02 - Yendi")
+    jereg = _titled_book("/lib/Steven Brust/Vlad Taltos/01 - Jereg", "Jhereg")  # already clean from file
+    for b in (yendi, jereg):
+        b.provenance["title"] = Provenance.DIRECTORY.value
+    for i, b in enumerate((yendi, jereg)):
+        bd = _dir(g, str(b.source_folder))
+        bid = f"{bd.id}:{i}"
+        g.books[bid] = BookNode(id=bid, book=b, owns=[], dir_id=bd.id)
+
+    _fill_series_ramp(g, [yendi, jereg], root=root)
+
+    assert yendi.title == "Yendi"                                  # dirty title cleaned
+    assert yendi.series and yendi.series[0].name == "Vlad Taltos" and yendi.series[0].sequence == 2.0
+    assert jereg.title == "Jhereg"                                 # good title left intact
+    assert jereg.series and jereg.series[0].sequence == 1.0        # sequence still from folder name
+    assert yendi.provenance["series"] == Provenance.GRAPHING.value
