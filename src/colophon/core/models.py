@@ -218,6 +218,9 @@ class BookUnit(_Base):
     folder_kind: FolderKind = FolderKind.UNDETERMINED
     classification_confidence: float = 0.0
     classification_signals: list[ConfidenceSignal] = []
+    # Local-identification confidence (0-100) rolled up from the graph evidence: how sure we are we
+    # know this book locally (pre-match). Distinct from `confidence`, which is the post-match score.
+    identity_confidence: float = 0.0
     findings: list[Finding] = []
     detected_works: list[DetectedWork] = []
     acknowledged_findings: list[FindingCode] = []
