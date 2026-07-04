@@ -24,6 +24,7 @@ from colophon.core.filename_parser import compile_template
 from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
+from colophon.core.review import review_reasons
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.triage import FACET_DEFAULTS, apply_facets, needs_human, sort_books
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
@@ -156,6 +157,27 @@ def _primary_confidence(book: BookUnit, threshold: float) -> tuple[float, str, s
         return (book.confidence, _confidence_color(book.confidence),
                 _confidence_tooltip(book, threshold))
     return (book.identity_confidence, _confidence_color(book.identity_confidence), _IDENTITY_TOOLTIP)
+
+
+# States that are finished/verified — a review-reason tooltip on their badge would be noise.
+_DONE_BADGE_STATES = frozenset({BookState.READY, BookState.ORGANIZED, BookState.ENCODED})
+
+
+def _review_tooltip(book: BookUnit) -> str | None:
+    """A one-line 'why this needs review' for the state badge, or None when nothing is wrong."""
+    if book.state in _DONE_BADGE_STATES:
+        return None
+    reasons = review_reasons(book)
+    return " ".join(reasons) if reasons else None
+
+
+def _state_badge(book: BookUnit) -> None:
+    """Render the per-book state badge, with a review-reason tooltip when the book is uncertain."""
+    label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
+    badge = ui.badge(label).props(f"color={color} outline")
+    tip = _review_tooltip(book)
+    if tip:
+        badge.tooltip(tip)
 
 
 _CHIP_FIELDS = ("genre", "tag")
@@ -592,8 +614,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         _render_cover(book, width=112, height=168, icon="text-h2")
                         _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
                         ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
-                        _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
-                        ui.badge(_slabel).props(f"color={_scolor} outline")
+                        _state_badge(book)
                     # Main column: title, source path, tools, grouped fields.
                     with ui.column().classes("col q-gutter-none").style("min-width: 0"):
                         ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
@@ -984,10 +1005,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         )
                     _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
                     ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
-                    _slabel, _scolor = _STATE_BADGE.get(
-                        book.state, (book.state.value, "grey-6")
-                    )
-                    ui.badge(_slabel).props(f"color={_scolor} outline")
+                    _state_badge(book)
                     if book.missing:
                         ui.badge("Missing").props("color=warning outline").tooltip(
                             "This book's folder is gone from disk. Remove it or "
