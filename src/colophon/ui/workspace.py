@@ -215,19 +215,6 @@ def _render_cover(
             ui.icon("menu_book", color="grey-6").classes(icon)
 
 
-def _short_location(folder: Path | None) -> str:
-    """A compact display of a book's folder: the last two path segments joined by
-    ' / ' (for example 'Sanderson / The Way of Kings'), or the final segment alone,
-    or '' when there is no folder. The full path is shown in a tooltip by the
-    caller."""
-    if folder is None:
-        return ""
-    parts = [p for p in folder.parts if p not in ("/", "\\")]
-    if not parts:
-        return ""
-    return " / ".join(parts[-2:])
-
-
 def render_workspace(controller: AppController, initial_filter: str = "") -> None:
     apply_theme()
     # Make the content area fill exactly between the fixed header and footer so the
@@ -607,15 +594,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
                         _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
                         ui.badge(_slabel).props(f"color={_scolor} outline")
-                        if book.source_folder is not None:
-                            with ui.row().classes("items-center no-wrap q-gutter-xs").style("max-width:112px"):
-                                ui.icon("folder", size="14px").classes("colophon-muted")
-                                ui.label(_short_location(book.source_folder)).classes(
-                                    "text-caption colophon-muted ellipsis"
-                                ).tooltip(str(book.source_folder))
-                    # Main column: title, tools, grouped fields.
-                    with ui.column().classes("col q-gutter-none"):
+                    # Main column: title, source path, tools, grouped fields.
+                    with ui.column().classes("col q-gutter-none").style("min-width: 0"):
                         ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
+                        if book.source_folder is not None:
+                            with ui.row().classes("items-center no-wrap w-full q-gutter-xs q-mb-xs"):
+                                ui.icon("folder", size="14px").classes("colophon-muted")
+                                ui.label(str(book.source_folder)).classes(
+                                    "text-caption colophon-muted ellipsis col"
+                                ).style("min-width: 0; direction: rtl; text-align: left; "
+                                        "unicode-bidi: plaintext").tooltip(str(book.source_folder))
                         if book.confidence_signals:
                             with ui.row().classes("items-center w-full q-gutter-xs q-mb-xs"):
                                 for sig in book.confidence_signals:
