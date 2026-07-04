@@ -28,7 +28,12 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import classify_graph
-from colophon.core.graph_records import book_node_id, book_records
+from colophon.core.graph_records import (
+    book_node_id,
+    book_records,
+    graph_from_records,
+    skeleton_records,
+)
 from colophon.core.graph_resolve import (
     _name_key,
     apply_confirmed_overrides,
@@ -217,6 +222,7 @@ class AppController:
         # by those generations so any write rebuilds automatically — no manual invalidation to forget.
         self._tree_cache: tuple[tuple[int, int, int], LibraryTree] | None = None
         self._distinct_cache: dict[str, tuple[int, list[str]]] = {}  # kind -> (books_gen, values)
+        self._classic_graph_cache: tuple[tuple[str, int], Graph] | None = None  # (root, graph_gen)
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -364,8 +370,21 @@ class AppController:
                 if fname:
                     franchise_of[b.id] = fname
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
-            nodes = skeleton_nodes + book_nodes
-            edges = skeleton_edges + book_edges
+            # Re-derive the directory classification in memory (no disk walk) so the maintained graph
+            # carries current classification: rebuild the structural graph from the preserved skeleton
+            # + fresh book records, reclassify, then re-serialize the skeleton with the new kinds. The
+            # classify runs on book COPIES so its fill_down never mutates the stored books.
+            recon = graph_from_records(
+                skeleton_nodes + book_nodes, skeleton_edges + book_edges,
+                {b.id: b.model_copy(deep=True) for b in root_books}, root=root,
+            )
+            classify_graph(recon, root=root)
+            classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
+                           overrides=overrides, known_franchises=self.ctx.franchises.active(),
+                           directory_scheme=self.ctx.config.directory_scheme)
+            sk_nodes, sk_edges = skeleton_records(recon, root=root)
+            nodes = sk_nodes + book_nodes
+            edges = sk_edges + book_edges
             # Store first: if the persist raises (e.g. a write conflict), leave the
             # in-memory graph unchanged so the two never diverge.
             self.ctx.graph.replace_subgraph(root, nodes, edges)
@@ -1385,6 +1404,23 @@ class AppController:
                        known_franchises=self.ctx.franchises.active(),
                        directory_scheme=self.ctx.config.directory_scheme)
         self._graph_cache[(str(root), fresh)] = graph
+        return graph
+
+    def classic_tree_graph(self, root: Path) -> Graph:
+        """The classification tree as a view of the maintained `library_graph`: reconstructed with
+        its persisted classification (restore mode) — no disk walk, no reclassify — and memoized by
+        the graph generation, so opening the page and re-rendering after an edit are both instant.
+        Use `graph_for` / the Rebuild toggle to reconcile the graph with the filesystem."""
+        key = (str(root), self.ctx.library_graph.generation)
+        if self._classic_graph_cache is not None and self._classic_graph_cache[0] == key:
+            return self._classic_graph_cache[1]
+        r = str(root)
+        lib = self.ctx.library_graph
+        nodes = [n for n in lib.nodes.values() if n.root == r]
+        edges = [e for e in lib.edges if e.root == r]
+        books_by_id = {b.id: b for b in self.ctx.books.list_all()}
+        graph = graph_from_records(nodes, edges, books_by_id, root=root, restore_classification=True)
+        self._classic_graph_cache = (key, graph)
         return graph
 
     def set_node_classification(self, path: Path, kind: str, value: str | None = None) -> None:

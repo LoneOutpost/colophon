@@ -74,6 +74,8 @@ def skeleton_records(
     edges: list[EdgeRecord] = []
     for d in graph.directories.values():
         attrs: dict[str, object] = {"path": str(d.path), "name": d.path.name, "kind": d.kind}
+        if d.kind_value:
+            attrs["kind_value"] = d.kind_value
         if d.kind_source:
             attrs["kind_source"] = d.kind_source
         if d.kind_confidence:
@@ -153,22 +155,43 @@ def book_records(
     return nodes, edges
 
 
+def _restore_classification(d: DirectoryNode, attrs: dict[str, object]) -> None:
+    """Copy the persisted classification (kind + value + confidence + source + evidence) from a
+    directory record's attrs back onto its DirectoryNode — the read path, where the tree renders the
+    stored classification instead of re-deriving it."""
+    d.kind = str(attrs.get("kind", "unknown"))
+    kv = attrs.get("kind_value")
+    d.kind_value = kv if isinstance(kv, str) else None
+    d.author = d.kind_value if d.kind == "author" else None
+    d.kind_source = str(attrs.get("kind_source", ""))
+    conf = attrs.get("kind_confidence")
+    d.kind_confidence = float(conf) if isinstance(conf, int | float) else 0.0
+    ev = attrs.get("kind_evidence")
+    d.kind_evidence = [str(x) for x in ev] if isinstance(ev, list) else []
+
+
 def graph_from_records(
     nodes: list[NodeRecord], edges: list[EdgeRecord],
-    books_by_id: dict[str, BookUnit], *, root: Path,
+    books_by_id: dict[str, BookUnit], *, root: Path, restore_classification: bool = False,
 ) -> Graph:
     """Rebuild the structural Graph (directories/files/books + containment) from persisted records,
     WITHOUT a filesystem walk — the input `classify_graph`/`classify_nodes` consume. The inverse of
-    `graph_records`'s structural half: classification fields are left empty for a fresh re-derive,
-    and `FileNode.source_file` is not restored (classification never reads it). A book node whose
-    `book_id` has no BookUnit is skipped (defensive)."""
+    `graph_records`'s structural half. `FileNode.source_file` is not restored (classification never
+    reads it); a book node whose `book_id` has no BookUnit is skipped (defensive).
+
+    `restore_classification=False` (the re-derive path) leaves each directory's classification empty
+    for a fresh classify pass; `True` (the read path) restores the persisted kind/value/confidence/
+    source/evidence so the tree can render without reclassifying."""
     r = str(root)
     g = Graph()
     for n in nodes:
         if n.root != r:
             continue
         if n.physical == "directory":
-            g.directories[n.id] = DirectoryNode(path=Path(str(n.attrs["path"])))
+            d = DirectoryNode(path=Path(str(n.attrs["path"])))
+            if restore_classification:
+                _restore_classification(d, n.attrs)
+            g.directories[n.id] = d
         elif n.physical == "file":
             g.files[n.id] = FileNode(
                 path=Path(str(n.attrs["path"])),
