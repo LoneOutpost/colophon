@@ -5,11 +5,12 @@ confidence, and provenance, with a per-node classify menu and bulk cohort confir
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from urllib.parse import quote
 
-from nicegui import ui
+from nicegui import app, ui
 
 from colophon.controller import AppController
 from colophon.core.graph import DirectoryNode
@@ -80,7 +81,21 @@ def render_classic_tree(controller: AppController) -> None:
         )
         return
 
+    _ROOT_KEY = "graph_root"
+
+    def _tab_storage():
+        """app.storage.tab, or None when the client isn't connected. Remembering the root is
+        best-effort — a transient no-connection must never raise and 500 the page."""
+        try:
+            return app.storage.tab
+        except RuntimeError:
+            return None
+
     state = {"root": str(roots[0])}
+    _store = _tab_storage()
+    _remembered = _store.get(_ROOT_KEY) if _store is not None else None
+    if _remembered in {str(r) for r in roots}:  # restore the last-selected root across page navigation
+        state["root"] = _remembered
 
     with page_toolbar():
         with ui.row().classes("items-center q-gutter-sm w-full no-wrap"):
@@ -110,19 +125,19 @@ def render_classic_tree(controller: AppController) -> None:
         if result is not None:
             controller.set_node_classification(node.path, kind, result or None)
             ui.notify(f"Marked {node.label} as {kind}", type="positive")
-            _refresh()
+            await _render_maintained()
 
     async def _clear_classify(node) -> None:
         controller.clear_node_classification(node.path)
         ui.notify(f"Cleared the classification on {node.label}")
-        _refresh()
+        await _render_maintained()
 
     async def _quick_classify(node, kind: str) -> None:
         """Right-click fast path: re-categorize `node` as `kind` at once, using the folder's own name
         as the value (a container carries none). Recoverable via Clear."""
         controller.set_node_classification(node.path, kind, node.label if kind != "container" else None)
         ui.notify(f"Marked {node.label} as {kind}", type="positive")
-        _refresh()
+        await _render_maintained()
 
     def _classify_menu(node) -> None:
         # Right-click anywhere on the row for fast re-categorization (value = the folder's own name);
@@ -161,7 +176,7 @@ def render_classic_tree(controller: AppController) -> None:
         if await dialog:
             n = controller.confirm_hint_cohort(Path(state["root"]), hint)
             ui.notify(f"Confirmed {n} folders as {hint}", type="positive")
-            _refresh()
+            await _render_maintained()
 
     def _render_worklist(graph, s) -> None:
         worklist.clear()
@@ -229,23 +244,36 @@ def render_classic_tree(controller: AppController) -> None:
             return
         _show(graph)
 
-    def _refresh() -> None:
-        """Render the classic tree from the maintained graph (no disk walk, memoized by generation).
-        Used after a classification edit, which resync has already applied to the graph."""
-        _show(controller.classic_tree_graph(Path(state["root"])))
+    def _loading(msg: str = "Loading…") -> None:
+        worklist.clear()
+        body.clear()
+        with body, ui.row().classes("items-center q-gutter-sm q-pa-md"):
+            ui.spinner(size="lg")
+            ui.label(msg).classes("text-caption colophon-muted").props("role=status aria-live=polite")
+
+    async def _render_maintained() -> None:
+        """Show a loading state, then render the tree from the re-classified maintained graph (an
+        in-memory reclassify that can take a moment on a large root). Falls back to a disk build when
+        the root has no maintained graph yet."""
+        _loading()
+        await asyncio.sleep(0.05)  # let the spinner paint before the synchronous reclassify
+        graph = controller.classic_tree_graph(Path(state["root"]))
+        if graph.directories:
+            _show(graph)
+        else:
+            await _build()  # nothing maintained for this root yet; build from disk
 
     async def _load() -> None:
         if fresh_switch.value:
             await _build()  # "From scratch": reconcile the graph with the filesystem
-            return
-        graph = controller.classic_tree_graph(Path(state["root"]))
-        if graph.directories:
-            _show(graph)    # a view of the maintained graph — instant, no disk walk
         else:
-            await _build()  # nothing maintained for this root yet; build from disk
+            await _render_maintained()
 
     async def _on_root(value: str) -> None:
         state["root"] = value
+        store = _tab_storage()
+        if store is not None:
+            store[_ROOT_KEY] = value  # remember the selected root across page navigation
         await _load()
 
     root_select.on_value_change(lambda e: _on_root(e.value))
