@@ -12,6 +12,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from colophon.controller import AppController
+from colophon.core.graph import DirectoryNode
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
 from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
 from colophon.ui.chrome import body_column, page_header, page_toolbar
@@ -132,6 +133,12 @@ def render_classic_tree(controller: AppController) -> None:
                              lambda kind=kind, node=node: _quick_classify(node, kind))
             ui.separator()
             ui.menu_item("Clear classification", lambda node=node: _clear_classify(node))
+            ui.separator()
+            ui.menu_item(
+                "Show in grid",
+                lambda node=node: ui.navigate.to(
+                    _mode_url("explorer", DirectoryNode.id_for(node.path))),
+            )
         btn = ui.button(icon="sell").props(
             'flat dense round aria-label="Classify this folder"'
         ).classes("colophon-muted")
@@ -274,6 +281,15 @@ def _graph_url(focal_id: str, hidden: frozenset[str], *, depth: int = 1) -> str:
     return url
 
 
+def _mode_url(mode: str, focal: str | None) -> str:
+    """A /graph URL for `mode` (grid=explorer / tree=classic) that carries the focal node across the
+    flip, so switching Tree<->Grid keeps you on the same node."""
+    url = f"/graph?mode={mode}"
+    if focal:
+        url += f"&focal={quote(focal)}"
+    return url
+
+
 def _node_click_target(args: dict, hidden: frozenset[str], *, depth: int = 1) -> str | None:
     """The explorer URL to navigate to for an ECharts `componentClick`, or None to ignore it. Only
     graph *node* clicks navigate; edge and background clicks are ignored. We read `args` defensively
@@ -308,14 +324,19 @@ def _explorer_legend(focal_id: str, hidden: frozenset[str], depth: int = 1) -> N
                     label.style("text-decoration: line-through")
 
 
-def _explorer_panel(view) -> None:
+def _explorer_panel(view, focal_id: str | None) -> None:
     """Render one focal node's inspect read-model (a NodeInspection) into the current container."""
     if not view or not view.kind:
         ui.label("Search for an author, series, or book, then click a result to explore it.").classes(
             "text-caption colophon-muted"
         )
         return
-    ui.label(view.label).classes("text-subtitle1")
+    with ui.row().classes("items-center justify-between no-wrap w-full"):
+        ui.label(view.label).classes("text-subtitle1")
+        if focal_id:
+            ui.button("Show in tree", icon="account_tree",
+                      on_click=lambda: ui.navigate.to(_mode_url("classic", focal_id))).props(
+                "flat dense no-caps").classes("colophon-muted")
     cap = view.kind.upper()
     if view.confidence is not None:
         cap += f" · {view.confidence:.0%}"
@@ -386,7 +407,7 @@ def render_explorer(controller: AppController, focal_id: str | None,
                     "text-caption colophon-muted q-pa-md"
                 )
         with ui.column().classes("col-4 gap-1"):
-            _explorer_panel(controller.graph_inspect(focal_id) if focal_id else None)
+            _explorer_panel(controller.graph_inspect(focal_id) if focal_id else None, focal_id)
 
     def _run_search() -> None:
         results.clear()
@@ -411,8 +432,8 @@ def render_graph(
     with page_header(controller, "graph", icon="account_tree"):
         pass
     ui.toggle(
-        {"explorer": "Explorer", "classic": "Classic tree"}, value=mode,
-        on_change=lambda e: ui.navigate.to(f"/graph?mode={e.value}"),
+        {"explorer": "Grid", "classic": "Tree"}, value=mode,
+        on_change=lambda e: ui.navigate.to(_mode_url(e.value, focal)),
     ).props("dense no-caps").classes("q-ma-sm")
     if mode == "classic":
         render_classic_tree(controller)
