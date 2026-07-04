@@ -109,19 +109,19 @@ def render_classic_tree(controller: AppController) -> None:
         if result is not None:
             controller.set_node_classification(node.path, kind, result or None)
             ui.notify(f"Marked {node.label} as {kind}", type="positive")
-            await _build()
+            _refresh()
 
     async def _clear_classify(node) -> None:
         controller.clear_node_classification(node.path)
         ui.notify(f"Cleared the classification on {node.label}")
-        await _build()
+        _refresh()
 
     async def _quick_classify(node, kind: str) -> None:
         """Right-click fast path: re-categorize `node` as `kind` at once, using the folder's own name
         as the value (a container carries none). Recoverable via Clear."""
         controller.set_node_classification(node.path, kind, node.label if kind != "container" else None)
         ui.notify(f"Marked {node.label} as {kind}", type="positive")
-        await _build()
+        _refresh()
 
     def _classify_menu(node) -> None:
         # Right-click anywhere on the row for fast re-categorization (value = the folder's own name);
@@ -154,7 +154,7 @@ def render_classic_tree(controller: AppController) -> None:
         if await dialog:
             n = controller.confirm_hint_cohort(Path(state["root"]), hint)
             ui.notify(f"Confirmed {n} folders as {hint}", type="positive")
-            await _build()
+            _refresh()
 
     def _render_worklist(graph, s) -> None:
         worklist.clear()
@@ -222,12 +222,20 @@ def render_classic_tree(controller: AppController) -> None:
             return
         _show(graph)
 
+    def _refresh() -> None:
+        """Render the classic tree from the maintained graph (no disk walk, memoized by generation).
+        Used after a classification edit, which resync has already applied to the graph."""
+        _show(controller.classic_tree_graph(Path(state["root"])))
+
     async def _load() -> None:
-        cached = controller.cached_graph(Path(state["root"]), fresh=fresh_switch.value)
-        if cached is not None:
-            _show(cached)
+        if fresh_switch.value:
+            await _build()  # "From scratch": reconcile the graph with the filesystem
+            return
+        graph = controller.classic_tree_graph(Path(state["root"]))
+        if graph.directories:
+            _show(graph)    # a view of the maintained graph — instant, no disk walk
         else:
-            await _build()
+            await _build()  # nothing maintained for this root yet; build from disk
 
     async def _on_root(value: str) -> None:
         state["root"] = value

@@ -222,6 +222,7 @@ class AppController:
         # by those generations so any write rebuilds automatically — no manual invalidation to forget.
         self._tree_cache: tuple[tuple[int, int, int], LibraryTree] | None = None
         self._distinct_cache: dict[str, tuple[int, list[str]]] = {}  # kind -> (books_gen, values)
+        self._classic_graph_cache: tuple[tuple[str, int], Graph] | None = None  # (root, graph_gen)
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -1403,6 +1404,23 @@ class AppController:
                        known_franchises=self.ctx.franchises.active(),
                        directory_scheme=self.ctx.config.directory_scheme)
         self._graph_cache[(str(root), fresh)] = graph
+        return graph
+
+    def classic_tree_graph(self, root: Path) -> Graph:
+        """The classification tree as a view of the maintained `library_graph`: reconstructed with
+        its persisted classification (restore mode) — no disk walk, no reclassify — and memoized by
+        the graph generation, so opening the page and re-rendering after an edit are both instant.
+        Use `graph_for` / the Rebuild toggle to reconcile the graph with the filesystem."""
+        key = (str(root), self.ctx.library_graph.generation)
+        if self._classic_graph_cache is not None and self._classic_graph_cache[0] == key:
+            return self._classic_graph_cache[1]
+        r = str(root)
+        lib = self.ctx.library_graph
+        nodes = [n for n in lib.nodes.values() if n.root == r]
+        edges = [e for e in lib.edges if e.root == r]
+        books_by_id = {b.id: b for b in self.ctx.books.list_all()}
+        graph = graph_from_records(nodes, edges, books_by_id, root=root, restore_classification=True)
+        self._classic_graph_cache = (key, graph)
         return graph
 
     def set_node_classification(self, path: Path, kind: str, value: str | None = None) -> None:
