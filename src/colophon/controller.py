@@ -28,7 +28,12 @@ from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import classify_graph
-from colophon.core.graph_records import book_node_id, book_records
+from colophon.core.graph_records import (
+    book_node_id,
+    book_records,
+    graph_from_records,
+    skeleton_records,
+)
 from colophon.core.graph_resolve import (
     _name_key,
     apply_confirmed_overrides,
@@ -364,8 +369,21 @@ class AppController:
                 if fname:
                     franchise_of[b.id] = fname
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
-            nodes = skeleton_nodes + book_nodes
-            edges = skeleton_edges + book_edges
+            # Re-derive the directory classification in memory (no disk walk) so the maintained graph
+            # carries current classification: rebuild the structural graph from the preserved skeleton
+            # + fresh book records, reclassify, then re-serialize the skeleton with the new kinds. The
+            # classify runs on book COPIES so its fill_down never mutates the stored books.
+            recon = graph_from_records(
+                skeleton_nodes + book_nodes, skeleton_edges + book_edges,
+                {b.id: b.model_copy(deep=True) for b in root_books}, root=root,
+            )
+            classify_graph(recon, root=root)
+            classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
+                           overrides=overrides, known_franchises=self.ctx.franchises.active(),
+                           directory_scheme=self.ctx.config.directory_scheme)
+            sk_nodes, sk_edges = skeleton_records(recon, root=root)
+            nodes = sk_nodes + book_nodes
+            edges = sk_edges + book_edges
             # Store first: if the persist raises (e.g. a write conflict), leave the
             # in-memory graph unchanged so the two never diverge.
             self.ctx.graph.replace_subgraph(root, nodes, edges)
