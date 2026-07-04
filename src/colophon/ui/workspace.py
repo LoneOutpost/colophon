@@ -955,7 +955,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         # Every book is always individually selectable. The leading checkbox
         # toggles selection; clicking the title section opens the detail view.
         # Rows are keyboard-navigable; the focused row is tinted.
-        item = ui.item()
+        item = ui.item().classes("book-row")
         row_elements[book.id] = item
         if book.id == focus["id"]:
             item.classes("book-row-focused")

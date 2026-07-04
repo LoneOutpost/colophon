@@ -128,6 +128,11 @@ body.body--dark { color: #ece4d8; }
   background: var(--colophon-sel);
   box-shadow: inset 0 0 0 1px var(--colophon-ring);
 }
+/* Let the title ellipsize instead of forcing the row wide: a flex child won't shrink
+   below its content unless min-width is 0, and without this the right-pinned
+   confidence/state badges get pushed off the (often narrow) list pane. */
+.book-row .q-item__section--main,
+.book-row .colophon-book-title { min-width: 0; }
 /* Calmer scrollbars. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, .4); border-radius: 8px; }
