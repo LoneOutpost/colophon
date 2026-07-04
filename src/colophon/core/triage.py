@@ -18,11 +18,22 @@ def needs_human(book: BookUnit) -> bool:
     return book.state not in _DONE_STATES
 
 
+def effective_confidence(book: BookUnit) -> float:
+    """The confidence to rank and bucket a book by: its post-match verification score once matched,
+    else its pre-match local-identification confidence. `confidence` is only ever nonzero after a
+    source match or a manual confirmation, so it takes precedence when present; before that the graph
+    tells us how well we know the book locally."""
+    return book.confidence if book.confidence > 0 else book.identity_confidence
+
+
 def confidence_bucket(book: BookUnit) -> str:
-    """'low' (<40), 'mid' (40-74), or 'high' (>=75) — matching the confidence badge colors."""
-    if book.confidence >= _CONF_HIGH:
+    """'low' (<40), 'mid' (40-74), or 'high' (>=75) — matching the confidence badge colors.
+    Buckets on the effective confidence, so a locally-identified but unmatched book reads by how
+    well the graph knows it, not as a flat 0."""
+    conf = effective_confidence(book)
+    if conf >= _CONF_HIGH:
         return "high"
-    if book.confidence >= _CONF_LOW:
+    if conf >= _CONF_LOW:
         return "mid"
     return "low"
 
@@ -90,9 +101,9 @@ def sort_books(books: list[BookUnit], key: str) -> list[BookUnit]:
     """Order a book list. 'conf_asc' (worst first) / 'conf_desc' / 'title'; any other key
     (e.g. 'none') leaves the order unchanged. Confidence ties break by title."""
     if key == "conf_asc":
-        return sorted(books, key=lambda b: (b.confidence, (b.title or "").casefold()))
+        return sorted(books, key=lambda b: (effective_confidence(b), (b.title or "").casefold()))
     if key == "conf_desc":
-        return sorted(books, key=lambda b: (-b.confidence, (b.title or "").casefold()))
+        return sorted(books, key=lambda b: (-effective_confidence(b), (b.title or "").casefold()))
     if key == "title":
         return sorted(books, key=lambda b: (b.title or "").casefold())
     return list(books)
