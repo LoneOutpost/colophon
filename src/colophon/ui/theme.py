@@ -133,6 +133,10 @@ body.body--dark { color: #ece4d8; }
    confidence/state badges get pushed off the (often narrow) list pane. */
 .book-row .q-item__section--main,
 .book-row .colophon-book-title { min-width: 0; }
+/* Pin the Books list's scroll content to its container width. Quasar's scroll content is absolutely
+   positioned and sizes to its widest child, so without this the rows expand to their natural width
+   and push the right-pinned confidence/state badges out past the (scrollable) pane edge. */
+.colophon-book-scroll .q-scrollarea__content { width: 100%; }
 /* Calmer scrollbars. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, .4); border-radius: 8px; }

@@ -260,12 +260,25 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     ui.run_javascript(
         "(function(){"
         "if(window.__colophonResizerReady)return;window.__colophonResizerReady=true;"
-        "var MIN={nav:200,mid:320},MAX={nav:520,mid:960};"
-        "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'};"
+        "var MIN={nav:200,mid:340},MAX={nav:460,mid:600},DET_MIN=460,GAP=18;"
+        "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'},DEF={nav:260,mid:460};"
         "var KEY={nav:'colophon.navW',mid:'colophon.midW'};"
         "function setW(key,px){document.documentElement.style.setProperty(VAR[key],px+'px');}"
+        "function getW(k){var v=parseInt(getComputedStyle(document.documentElement)"
+        ".getPropertyValue(VAR[k]),10);return isNaN(v)?DEF[k]:v;}"
+        # Clamp both panes to their range, then to a window budget so the detail pane never
+        # drops below DET_MIN (shrink the middle first, then the nav). Runs on load + resize,
+        # so an over-wide persisted width is reined in on a smaller screen instead of squashing.
+        "function fit(){var W=window.innerWidth;"
+        "var nav=Math.max(MIN.nav,Math.min(MAX.nav,getW('nav')));"
+        "var mid=Math.max(MIN.mid,Math.min(MAX.mid,getW('mid')));"
+        "var over=(nav+mid+GAP+DET_MIN)-W;"
+        "if(over>0){var m=Math.max(MIN.mid,mid-over);over-=(mid-m);mid=m;}"
+        "if(over>0){nav=Math.max(MIN.nav,nav-over);}"
+        "setW('nav',nav);setW('mid',mid);}"
         "['nav','mid'].forEach(function(k){"
         "var v=localStorage.getItem(KEY[k]);if(v)setW(k,parseInt(v,10));});"
+        "fit();window.addEventListener('resize',fit);"
         "var drag=null;"
         "document.addEventListener('pointerdown',function(e){"
         "var h=e.target.closest&&e.target.closest('.colophon-resizer');if(!h)return;"
@@ -276,14 +289,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "document.addEventListener('pointermove',function(e){"
         "if(!drag)return;var w=drag.startW+(e.clientX-drag.startX);"
         "w=Math.round(Math.max(MIN[drag.key],Math.min(MAX[drag.key],w)));"
-        "setW(drag.key,w);drag.last=w;});"
+        "setW(drag.key,w);fit();drag.last=getW(drag.key);});"
         "document.addEventListener('pointerup',function(){"
         "if(!drag)return;if(drag.last)localStorage.setItem(KEY[drag.key],drag.last);"
         "drag=null;document.body.style.userSelect='';});"
         "window.colophonResetColumns=function(){"
         "['nav','mid'].forEach(function(k){"
         "localStorage.removeItem(KEY[k]);"
-        "document.documentElement.style.removeProperty(VAR[k]);});};"
+        "document.documentElement.style.removeProperty(VAR[k]);});fit();};"
         "})();"
     )
     dark = setup_dark_mode()
@@ -1854,7 +1867,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 middle_count = ui.label("").classes("text-caption colophon-muted")
             middle_toolbar = ui.column().classes("w-full gap-1 q-mt-xs")
             ui.separator().classes("q-mt-xs")
-            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col")
+            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col colophon-book-scroll")
             with list_scroll:
                 list_container = ui.column().classes("w-full gap-0")
         ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
