@@ -108,6 +108,7 @@ _SEVERITY_BADGE: dict[FindingSeverity, tuple[str, str]] = {
 # Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
 _STATUS_BADGES = [
     ("detected", "Detected", "grey-6"),
+    ("identified", "Identified", "grey-7"),
     ("needs_review", "Needs review", "warning"),
     ("ready", "Ready", "positive"),
     ("organized", "Organized", "info"),
@@ -138,6 +139,23 @@ def _confidence_tooltip(book: BookUnit, threshold: float) -> str:
         f"Match confidence 0-100: how strongly the metadata agrees with the sources. "
         f"At or above {threshold:.0f} a book is auto-marked Ready."
     )
+
+
+_IDENTITY_TOOLTIP = (
+    "Identification confidence 0-100: how sure we are we've correctly identified this book from "
+    "your library's structure and file tags, before matching an online source."
+)
+
+
+def _primary_confidence(book: BookUnit, threshold: float) -> tuple[float, str, str]:
+    """The confidence to feature for a book: once a source match (or manual confirm) exists, the
+    match-verification score; otherwise the pre-match local-identification confidence. `confidence`
+    is only ever nonzero post-match, so its presence is what distinguishes the two. Returns
+    (value, badge color, tooltip)."""
+    if book.confidence > 0:
+        return (book.confidence, _confidence_color(book.confidence),
+                _confidence_tooltip(book, threshold))
+    return (book.identity_confidence, _confidence_color(book.identity_confidence), _IDENTITY_TOOLTIP)
 
 
 _CHIP_FIELDS = ("genre", "tag")
@@ -572,9 +590,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     # Left aside: cover, status, location.
                     with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
                         _render_cover(book, width=112, height=168, icon="text-h2")
-                        ui.badge(f"{book.confidence:.0f}").props(
-                            f"color={_confidence_color(book.confidence)}"
-                        ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
+                        _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
+                        ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
                         _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
                         ui.badge(_slabel).props(f"color={_scolor} outline")
                         if book.source_folder is not None:
@@ -964,9 +981,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         ui.label(_fmt_duration(total)).classes(
                             "text-caption colophon-muted colophon-mono"
                         )
-                    ui.badge(f"{book.confidence:.0f}").props(
-                        f"color={_confidence_color(book.confidence)}"
-                    ).tooltip(_confidence_tooltip(book, controller.review_threshold()))
+                    _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
+                    ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
                     _slabel, _scolor = _STATE_BADGE.get(
                         book.state, (book.state.value, "grey-6")
                     )
@@ -1524,8 +1540,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             )
             with ui.row().classes("items-center w-full q-gutter-xs"):
                 ui.select(
-                    {"detected": "Detected", "needs_review": "Needs review",
-                     "ready": "Ready", "failed": "Failed"},
+                    {"detected": "Detected", "identified": "Identified",
+                     "needs_review": "Needs review", "ready": "Ready", "failed": "Failed"},
                     multiple=True, label="State", value=view["facets"]["state"],
                     on_change=lambda e: _set_facet("state", e.value),
                 ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")

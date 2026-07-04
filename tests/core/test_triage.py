@@ -12,6 +12,7 @@ from colophon.core.triage import (
     FACET_DEFAULTS,
     apply_facets,
     confidence_bucket,
+    effective_confidence,
     has_open_findings,
     has_weak_identity,
     missing_fields,
@@ -41,6 +42,28 @@ def test_confidence_bucket():
     assert confidence_bucket(_book(confidence=74.9)) == "mid"
     assert confidence_bucket(_book(confidence=75.0)) == "high"
     assert confidence_bucket(_book(confidence=100.0)) == "high"
+
+
+def test_effective_confidence_prefers_match_then_identity():
+    # a matched book ranks by its match score
+    assert effective_confidence(_book(confidence=82.0, identity_confidence=40.0)) == 82.0
+    # unmatched (confidence 0): fall back to local-identification confidence
+    assert effective_confidence(_book(confidence=0.0, identity_confidence=90.0)) == 90.0
+    # neither: 0
+    assert effective_confidence(_book()) == 0.0
+
+
+def test_confidence_bucket_uses_identity_pre_match():
+    # unmatched but locally well-identified reads 'high', not a flat 'low'
+    assert confidence_bucket(_book(confidence=0.0, identity_confidence=90.0)) == "high"
+    assert confidence_bucket(_book(confidence=0.0, identity_confidence=30.0)) == "low"
+
+
+def test_sort_worst_first_ranks_by_effective_confidence():
+    strong = _book(title="A", confidence=0.0, identity_confidence=90.0)
+    weak = _book(title="B", confidence=0.0, identity_confidence=20.0)
+    assert sort_books([strong, weak], "conf_asc") == [weak, strong]
+    assert sort_books([weak, strong], "conf_desc") == [strong, weak]
 
 
 def test_has_weak_identity():

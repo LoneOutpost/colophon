@@ -444,6 +444,7 @@ def classify_nodes(
         evidenced[node.id] = c.value_evidenced
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
     _fill_series_ramp(graph, books, root=root)
+    _fill_identity_confidence(graph, books, root=root)
 
 
 def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
@@ -484,6 +485,58 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             # a strong title affix, or a strong ramp position (aff) corroborating a weak title one —
             # so a manual/match series node with a weak compound title (e.g. '30-Day…') is left alone
             book.title = taff.cleaned
+
+
+_STRONG_ID_PROV = frozenset({"manual", "match"})   # authoritative: a user or a source named it
+_TAG_ID_PROV = frozenset({"tag", "datafile"})       # the file itself says so
+
+
+def _nearest_author(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
+    """The nearest ancestor (incl. `folder`) classified `author`, or None — walking to root."""
+    cur = folder
+    while True:
+        node = graph.directories.get(DirectoryNode.id_for(cur))
+        if node is not None and node.kind == "author":
+            return node
+        if cur == root or root not in cur.parents:
+            return None
+        cur = cur.parent
+
+
+def _field_confidence(prov: str | None, node_conf: float) -> float:
+    """Confidence in one identity field (0-1) given how it was sourced. A user/match value is
+    authoritative; the file's own tags are strong; everything else (graph inference, folder, filename)
+    leans on the confidence of the graph node that backs it."""
+    if prov in _STRONG_ID_PROV:
+        return 1.0
+    if prov in _TAG_ID_PROV:
+        return 0.9
+    return node_conf
+
+
+def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
+    """A book's local-identification confidence (0-100): how sure we are, from the graph evidence and
+    the book's own provenance, that we've correctly identified it — pre-match, distinct from the
+    post-match `confidence`. The author axis dominates; a corroborating series adds a little; a
+    missing title discounts. Graph/folder-sourced fields inherit the confidence of the classifying
+    node, so a book under a 0.9 author folder reads ~0.9 even with zero source matches."""
+    if not (book.authors or book.series):
+        return 0.0
+    a_node = _nearest_author(graph, book.source_folder, root)
+    a = (_field_confidence(book.provenance.get("authors"), a_node.kind_confidence if a_node else 0.0)
+         if book.authors else 0.0)
+    s_node = _nearest_series(graph, book.source_folder, root)
+    s = (_field_confidence(book.provenance.get("series"), s_node.kind_confidence if s_node else 0.0)
+         if book.series else 0.0)
+    corroboration = 0.1 if (a > 0 and s > 0) else 0.0
+    title_factor = 1.0 if book.title else 0.7
+    return round(min(1.0, max(a, s) + corroboration) * title_factor * 100)
+
+
+def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
+    """Stamp each book's local-identification confidence from the now-classified graph."""
+    for book in books:
+        book.identity_confidence = book_identity_confidence(book, graph, root)
 
 
 def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *,

@@ -14,6 +14,7 @@ from nicegui import ui
 
 from colophon.core.models import BookUnit, Phase, PhaseState
 from colophon.core.phases import state_of
+from colophon.core.provenance import provenance_label, provenance_tooltip
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,28 @@ def phase_rows(book: BookUnit) -> list[PhaseRow]:
     return rows
 
 
+def _render_identification(book: BookUnit) -> None:
+    """The live local-identification evidence: what we think each identity field is, and where that
+    value came from (its provenance tier). This is what the identity confidence is rolled up from."""
+    rows: list[tuple[str, str, str | None]] = [
+        ("Title", book.title or "—", book.provenance.get("title")),
+        ("Author", ", ".join(book.authors) or "—", book.provenance.get("authors")),
+        ("Series", "; ".join(s.name for s in book.series) or "—", book.provenance.get("series")),
+    ]
+    ui.label("Identification").classes("colophon-seccap")
+    with ui.column().classes("w-full q-gutter-xs"):
+        for field, value, prov in rows:
+            with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                ui.label(field).classes("colophon-muted text-caption").style("width: 3.5rem")
+                ui.label(value).classes("col ellipsis")
+                plabel = provenance_label(prov)
+                if plabel:
+                    badge = ui.badge(plabel).props("color=grey-7 outline")
+                    ptip = provenance_tooltip(prov)
+                    if ptip:
+                        badge.tooltip(ptip)
+
+
 def render(controller, book: BookUnit) -> None:
     """Read-only State tab for one book: derived state + confidence header, the phase
     timeline (with reserved, disabled per-phase re-run buttons), the confidence-signal
@@ -87,10 +110,22 @@ def render(controller, book: BookUnit) -> None:
         with ui.row().classes("items-center q-gutter-sm"):
             label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
             ui.badge(label).props(f"color={color} outline")
-            ui.badge(f"{book.confidence:.0f}").props(f"color={_confidence_color(book.confidence)}")
+            # The two confidences are distinct and both shown here, labelled: identity is the
+            # pre-match local-identification rollup from the graph; match is the post-match score.
+            ui.badge(f"Identity {book.identity_confidence:.0f}").props(
+                f"color={_confidence_color(book.identity_confidence)}"
+            ).tooltip(
+                "Local-identification confidence: how sure we are we've identified this book "
+                "from your library's structure and file tags, before matching an online source."
+            )
+            ui.badge(f"Match {book.confidence:.0f}").props(
+                f"color={_confidence_color(book.confidence)}"
+            ).tooltip("Match confidence: how strongly a matched source agrees. 0 until matched.")
             ui.label(f"/ threshold {controller.review_threshold():.0f}").classes(
                 "colophon-muted text-caption"
             )
+
+        _render_identification(book)
 
         ui.label("Pipeline").classes("colophon-seccap")
         with ui.column().classes("w-full q-gutter-none"):
@@ -125,7 +160,7 @@ def render(controller, book: BookUnit) -> None:
         else:
             ui.label("No confidence signals yet.").classes("colophon-muted text-caption")
 
-        ui.label("Classification").classes("colophon-seccap")
+        ui.label("Structure").classes("colophon-seccap")
         with ui.column().classes("w-full q-gutter-xs"):
             ui.label(
                 f"Folder: {book.folder_kind.value} · Content: {book.content_kind.value} "

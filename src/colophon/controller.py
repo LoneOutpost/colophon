@@ -62,7 +62,7 @@ from colophon.core.navigator import (
     build_library_tree,
     filter_library_tree,
 )
-from colophon.core.node_classify import classify_nodes
+from colophon.core.node_classify import book_identity_confidence, classify_nodes
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
 from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
@@ -335,21 +335,26 @@ class AppController:
         """Re-derive the graph for every scan root the given books belong to."""
         self._resync_roots({self._scan_root_for_path(b.source_folder) for b in books})
 
-    def _resync_roots(self, roots: set[Path]) -> None:
+    def _resync_roots(self, roots: set[Path]) -> int:
         """Keep each root's filesystem skeleton (unchanged by an edit) and re-derive its
         book/entity records from current books + overrides, then write through to the
         in-memory graph and the store. A root with no books and no skeleton is skipped
         (nothing to derive or keep); a book-only root is seeded from books (no skeleton
         until a scan).
 
+        Each stored book is re-stamped with its local-identification confidence (rolled up
+        from the just-reclassified graph) and its BookState re-derived; only books whose
+        confidence or state actually changed are written back. Returns that changed count.
+
         Contract: callers must PERSIST the mutation (upsert/delete/override) BEFORE calling
         this — re-derivation reads `ctx.books.list_all()`/`ctx.overrides.all()`, not the
         passed objects."""
         if not roots:
-            return
+            return 0
         books = self.ctx.books.list_all()
         overrides = self.ctx.overrides.all()
         lib = self.ctx.library_graph
+        changed: list[BookUnit] = []
         for root in roots:
             r = str(root)
             skeleton_nodes = [
@@ -389,6 +394,28 @@ class AppController:
             # in-memory graph unchanged so the two never diverge.
             self.ctx.graph.replace_subgraph(root, nodes, edges)
             lib.replace_root(r, nodes, edges)
+            # Stamp local-identification confidence + re-derive state onto the STORED books
+            # from the freshly-reclassified graph. Read each stored book's own identity against
+            # `recon`'s node confidences (the classify above ran on copies, so the stored books
+            # keep their fields; only these two derived caches move). Collect the movers to write.
+            for book in root_books:
+                old_ic, old_state = book.identity_confidence, book.state
+                book.identity_confidence = book_identity_confidence(book, recon, root)
+                resync_state(book, ready_threshold=self.ctx.config.review_threshold)
+                if book.identity_confidence != old_ic or book.state is not old_state:
+                    changed.append(book)
+        for i, book in enumerate(changed):
+            self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
+        return len(changed)
+
+    def recompute_all_identity(self) -> int:
+        """One-time backfill: re-derive every scan root's classification and stamp
+        identity_confidence + BookState onto the stored books, writing back only the movers.
+        Returns the number of books updated. Idempotent — a harmonized library writes nothing."""
+        roots = {
+            self._scan_root_for_path(b.source_folder) for b in self.ctx.books.list_all()
+        }
+        return self._resync_roots(roots)
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its

@@ -70,6 +70,15 @@ def main() -> None:
             logger.info(f"graph: rebuilt {healed} root(s) from existing books (self-heal)")
     except Exception:
         logger.exception("graph self-heal failed; starting with the graph as loaded")
+    # Backfill local-identification confidence + re-derive state across the catalog so the
+    # library opens harmonized with the current graph classifier. Idempotent and non-fatal:
+    # a already-harmonized library writes nothing, and a failure must never block startup.
+    try:
+        updated = controller.recompute_all_identity()
+        if updated:
+            logger.info(f"identity: backfilled {updated} book(s) from the graph classification")
+    except Exception:
+        logger.exception("identity backfill failed; starting with stored confidence/state as loaded")
     create_app(controller)
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:

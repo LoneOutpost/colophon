@@ -45,8 +45,10 @@ def test_scan_ingest_persists_book_units(tmp_path: Path):
 
     assert len(units) == 1
     book = units[0]
-    # Local phases run during scan; confidence=0 → NEEDS_REVIEW (IDENTIFY FRESH, low confidence)
-    assert book.state == BookState.NEEDS_REVIEW
+    # Local phases run during scan. The file tag names the author, so the book is locally
+    # identified (IDENTIFIED) even before any source match — a strong pre-match signal.
+    assert book.state == BookState.IDENTIFIED
+    assert book.identity_confidence >= 60
     assert state_of(book, Phase.SEARCH) is PhaseState.FRESH
     assert state_of(book, Phase.CATEGORIZE) is PhaseState.FRESH
     assert state_of(book, Phase.IDENTIFY) is PhaseState.FRESH
