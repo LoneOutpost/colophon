@@ -60,6 +60,39 @@ def test_identified_ready_vs_needs_review():
     assert derive_state(low) is BookState.NEEDS_REVIEW
 
 
+def test_locally_identified_is_its_own_state():
+    # graph-confident local identity but not source-matched -> IDENTIFIED (not NEEDS_REVIEW)
+    identified = _book(confidence=20.0, authors=["Some Author"], identity_confidence=90.0)
+    mark(identified, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(identified) is BookState.IDENTIFIED
+
+    # graph unsure -> NEEDS_REVIEW
+    unsure = _book(confidence=20.0, authors=["Some Author"], identity_confidence=40.0)
+    mark(unsure, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(unsure) is BookState.NEEDS_REVIEW
+
+
+def test_source_verification_beats_local_identity():
+    # a source match past the ready threshold -> READY even though also locally identified
+    b = _book(confidence=90.0, authors=["A"], identity_confidence=90.0)
+    mark(b, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(b) is BookState.READY
+
+
+def test_high_identity_confidence_without_identity_is_needs_review():
+    # identity_confidence high but no author/series -> NEEDS_REVIEW (has_identity gates it)
+    b = _book(confidence=20.0, identity_confidence=90.0)
+    mark(b, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(b) is BookState.NEEDS_REVIEW
+
+
+def test_identity_threshold_is_overridable():
+    b = _book(confidence=20.0, authors=["A"], identity_confidence=50.0)
+    mark(b, Phase.IDENTIFY, PhaseState.FRESH)
+    assert derive_state(b) is BookState.NEEDS_REVIEW                     # default 60
+    assert derive_state(b, identity_threshold=45.0) is BookState.IDENTIFIED
+
+
 def test_ready_threshold_is_overridable():
     b = _book(confidence=60.0, authors=["A"])
     mark(b, Phase.IDENTIFY, PhaseState.FRESH)

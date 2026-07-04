@@ -59,10 +59,17 @@ def invalidate_from(book: BookUnit, phase: Phase) -> list[Phase]:
 
 
 DEFAULT_READY_THRESHOLD = 75.0   # 0-100 scale; matches config.review_threshold default
+DEFAULT_IDENTITY_THRESHOLD = 60.0  # 0-100; local-identification confidence to read as IDENTIFIED
 
 
-def derive_state(book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRESHOLD) -> BookState:
-    """The legacy BookState computed from the phase map (+ the two non-phase signals)."""
+def derive_state(
+    book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRESHOLD,
+    identity_threshold: float = DEFAULT_IDENTITY_THRESHOLD,
+) -> BookState:
+    """The BookState from the phase map (+ non-phase signals). Two distinct confidences gate the
+    identified/review distinction: `confidence` is the post-match verification score;
+    `identity_confidence` is the pre-match local-identification confidence from the graph. A book the
+    graph knows locally reads IDENTIFIED (not NEEDS_REVIEW) even before any source match."""
     if book.skipped:
         return BookState.SKIPPED
     if any(state_of(book, p) is PhaseState.FAILED for p in Phase):
@@ -77,14 +84,20 @@ def derive_state(book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRES
             or state_of(book, Phase.MATCH) is PhaseState.FRESH):
         has_identity = bool(book.authors) or bool(book.series)
         if book.manually_confirmed or (book.confidence >= ready_threshold and has_identity):
-            return BookState.READY
-        return BookState.NEEDS_REVIEW
+            return BookState.READY          # source-verified or user-confirmed
+        if has_identity and book.identity_confidence >= identity_threshold:
+            return BookState.IDENTIFIED     # locally confident, awaiting a source match
+        return BookState.NEEDS_REVIEW       # the graph genuinely isn't sure
     return BookState.DETECTED
 
 
-def resync_state(book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRESHOLD) -> None:
+def resync_state(
+    book: BookUnit, *, ready_threshold: float = DEFAULT_READY_THRESHOLD,
+    identity_threshold: float = DEFAULT_IDENTITY_THRESHOLD,
+) -> None:
     """Recompute and store the denormalized BookState cache. Call after any phase mutation."""
-    book.state = derive_state(book, ready_threshold=ready_threshold)
+    book.state = derive_state(
+        book, ready_threshold=ready_threshold, identity_threshold=identity_threshold)
 
 
 # Highest phase each legacy state implies is "done through".
