@@ -209,12 +209,40 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 
 
 def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
-    """A single-book leaf (classify_graph's TITLE) is that book's title folder — a strong structural
-    vote that keeps it from being pulled up to author/series by a lone tag on its one book."""
-    from colophon.core.graph_classify import TITLE
-    if node.kind == TITLE:
+    """Decide a single-book leaf's folder name by elimination against the one book's own fields —
+    the title is already known from the filename. If the folder name resembles that title, the folder
+    IS the book's title folder (the common Root/.../Title layout). Otherwise the folder is not the
+    title: if the book carries a series the folder resembles, it is a series folder; failing that, and
+    when the name is neither a known franchise nor a bucket/numeric label, the only thing the folder
+    name can be is the author — the very common Root/Author/OneBook.mp3 layout, where a lone book would
+    otherwise be misread as its own title. A disorganized leftover keeps just its filename title and
+    makes no author claim (its own bucket/franchise axioms vote instead).
+
+    The author vote is deliberately weaker than a tagged-author consensus, so an embedded tag still
+    wins the node's author VALUE when folder name and tag disagree."""
+    from colophon.core.graph_classify import TITLE, _series_label
+    from colophon.core.graph_resolve import _resembles
+    if node.kind != TITLE:
+        return []
+    books = ctx.direct_books.get(node.path, [])
+    book = books[0] if books else None
+    name = node.path.name
+    # Without a known title the elimination has no anchor, so keep the conservative default: a
+    # single-book leaf is that book's title folder. (Real file-backed books always parse a title.)
+    if book is None or not book.title:
         return [Evidence("title", 5.0, "single-book leaf (a title folder)")]
-    return []
+    if _resembles(name, book.title):
+        return [Evidence("title", 5.0, "single-book leaf; folder name matches the title")]
+    label = _series_label(book)
+    if label is not None and _resembles(name, label[1]):
+        return [Evidence("series", 4.0, f"single-book leaf; folder matches series '{label[1]}'",
+                         value=label[1])]
+    low = name.strip().casefold()
+    if _is_known_franchise(node, ctx) or low in _BUCKET_WORDS or low.replace(" ", "").isdigit():
+        return []  # a franchise / bucket / numeric leaf is not an author; its own axioms decide
+    return [Evidence("author", 2.5,
+                     "single-book leaf; folder is neither the title nor a known series (so, author)",
+                     value=name)]
 
 
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
