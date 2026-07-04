@@ -47,6 +47,24 @@ def test_project_reconstructs_folder_and_files_from_nodes(tmp_path):
     assert [sf.path.name for sf in b.source_files] == ["01.mp3"]
 
 
+def test_same_title_duplicates_split_into_separate_books(tmp_path):
+    from colophon.services.graph_build import project
+    # Two files that are the same title (one with a parenthetical subtitle) with no chapter numbers
+    # are separate editions, not one multi-file "chapters" book: each becomes its own book unit.
+    author = tmp_path / "ingest" / "Susan Freinkel"
+    author.mkdir(parents=True)
+    (author / "Plastic.mp3").write_bytes(b"")
+    (author / "Plastic (A Toxic Love Story).mp3").write_bytes(b"")
+
+    books = project(build_graph(_repo(tmp_path), tmp_path / "ingest", template="$Author - $Title"))
+
+    assert len(books) == 2
+    assert all(len(b.source_files) == 1 for b in books)
+    assert {sf.path.name for b in books for sf in b.source_files} == {
+        "Plastic.mp3", "Plastic (A Toxic Love Story).mp3",
+    }
+
+
 def _by_id(books):
     return {b.id: b for b in books}
 

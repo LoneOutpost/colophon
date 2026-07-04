@@ -48,11 +48,13 @@ def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUni
 
 
 def _leaves_for(book: BookUnit) -> list[tuple[BookUnit, list[Path]]]:
-    """The logical books a container yields, with the file paths each owns. A MULTI
-    folder with more than one detected work fans out into one leaf per work; anything
-    else is the single container book owning all its source files (Phase 1 behavior)."""
+    """The logical books a container yields, with the file paths each owns. More than one
+    detected work fans out into one leaf per work — multiple works are multiple books, even
+    when the folder's content-kind confidence stayed UNKNOWN (e.g. two same-title files that
+    are separate editions, not chapters). A single work owns all the folder's files (a genuine
+    multi-file book keeps its chapters together)."""
     works = book.detected_works
-    if book.content_kind is ContentKind.MULTI and len(works) > 1:
+    if len(works) > 1:
         return [
             (_leaf_book(book, w, leaf_id_for(book.source_folder, w.files)), list(w.files))
             for w in works
