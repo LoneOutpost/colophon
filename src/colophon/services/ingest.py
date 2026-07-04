@@ -521,6 +521,11 @@ def plan_scan_graph(
     if node_overrides:
         propagate_overrides(graph, plan.units, root=root)
         _phase("propagate_overrides")
+    # classify_nodes just stamped each unit's local-identification confidence; the state derived
+    # back in _adopt_and_identify predates it, so re-derive now that identity_confidence is known
+    # (else a locally-confident book would persist as NEEDS_REVIEW instead of IDENTIFIED).
+    for unit in plan.units:
+        resync_state(unit)
     plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
     _phase(f"graph_records ({len(plan.graph_nodes)} nodes, {len(plan.graph_edges)} edges)")
     return plan
