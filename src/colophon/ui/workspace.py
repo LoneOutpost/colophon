@@ -1823,19 +1823,19 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "})();"
     )
 
-    def _do_scan() -> None:
-        scan_dialog(
+    async def _do_scan() -> None:
+        await scan_dialog(
             controller, refresh_all=_refresh_all,
             folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
             selected_ids=set(selected_ids),
         )
 
-    def _do_match() -> None:
-        match_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids))
+    async def _do_match() -> None:
+        await match_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids))
 
-    def _do_persist() -> None:
-        persist_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),
-                       clear_selection=selected_ids.clear)
+    async def _do_persist() -> None:
+        await persist_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),
+                             clear_selection=selected_ids.clear)
 
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
