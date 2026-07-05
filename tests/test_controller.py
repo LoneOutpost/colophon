@@ -3398,3 +3398,28 @@ def test_reprobe_flags_empty_audio(tmp_path):
     ctrl.reprobe_durations()
     flagged = ctrl.ctx.books.list_all()[0]
     assert any(f.code is FindingCode.EMPTY_AUDIO for f in flagged.findings)
+
+
+def test_books_for_scope_and_pipeline_counts(tmp_path):
+    from colophon.core.models import BookState, BookUnit
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    def mk(name, state):
+        b = BookUnit.new(source_folder=tmp_path / name)
+        b.state = state
+        ctx.books.upsert(b)
+        return b
+
+    ready = mk("a", BookState.READY)
+    ident = mk("b", BookState.IDENTIFIED)
+    review = mk("c", BookState.NEEDS_REVIEW)
+
+    counts = ctrl.pipeline_counts()
+    assert counts["ready"] == 1
+    assert counts["identified"] == 1
+
+    assert {x.id for x in ctrl.books_for_scope("ready")} == {ready.id}
+    assert {x.id for x in ctrl.books_for_scope("all")} == {ready.id, ident.id, review.id}
+    assert {x.id for x in ctrl.books_for_scope("selected", {ident.id})} == {ident.id}
+    assert ctrl.books_for_scope("selected", set()) == []

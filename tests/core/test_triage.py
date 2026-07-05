@@ -135,3 +135,14 @@ def test_sort_books():
     assert sort_books([a, b], "conf_desc") == [b, a]
     assert sort_books([a, b], "title") == [b, a]
     assert sort_books([a, b], "none") == [a, b]   # unknown/none key -> unchanged order
+
+
+def test_is_ready_to_persist():
+    from colophon.core.triage import is_ready_to_persist
+    assert is_ready_to_persist(_book(state=BookState.READY))
+    assert is_ready_to_persist(_book(state=BookState.ORGANIZED))
+    assert is_ready_to_persist(_book(state=BookState.ENCODED))
+    assert is_ready_to_persist(_book(state=BookState.IDENTIFIED, manually_confirmed=True))
+    assert not is_ready_to_persist(_book(state=BookState.IDENTIFIED))
+    assert not is_ready_to_persist(_book(state=BookState.NEEDS_REVIEW))
+    assert not is_ready_to_persist(_book(state=BookState.DETECTED))

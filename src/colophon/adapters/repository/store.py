@@ -210,6 +210,14 @@ class BookUnitRepo:
         ).fetchall()
         return [BookUnit.model_validate_json(r["data"]) for r in rows]
 
+    def count_by_state(self) -> dict[str, int]:
+        """Per-state row counts from the denormalized `state` column — no JSON parsing, so it's
+        cheap enough to poll for the header pipeline counts."""
+        rows = self.conn.execute(
+            "SELECT state, COUNT(*) AS n FROM book_units GROUP BY state"
+        ).fetchall()
+        return {r["state"]: r["n"] for r in rows}
+
     def ids_in_folder(self, folder: Path) -> set[str]:
         """Ids of every persisted book whose source_folder equals `folder`."""
         rows = self.conn.execute(

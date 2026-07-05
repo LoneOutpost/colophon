@@ -38,9 +38,9 @@ from colophon.ui.dialogs import (
     chapter_edit_dialog,
     compare_dialog,
     cover_dialog,
-    identify_dialog,
+    match_dialog,
     modal,
-    process_dialog,
+    persist_dialog,
     quick_match_dialog,
     remap_dialog,
     rename_dialog,
@@ -1684,10 +1684,15 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ).props("flat dense").tooltip("Deselect every book, including any outside the current view")
             ui.button("Undo", icon="undo", on_click=_undo).props("flat dense")
 
+    # Set when the header pipeline stepper is built (below); called on every global refresh so the
+    # per-stage counts stay current after a scan / match / persist.
+    _stepper_refresh: dict[str, object] = {"fn": lambda: None}
+
     def _refresh_all() -> None:
         refresh_nav()
         _render_middle()
         refresh_status()
+        _stepper_refresh["fn"]()
         # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
         if len(selected_ids) >= 2:
             show_bulk()
@@ -1818,37 +1823,60 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "})();"
     )
 
+    def _do_scan() -> None:
+        scan_dialog(
+            controller, refresh_all=_refresh_all,
+            folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
+            selected_ids=set(selected_ids),
+        )
+
+    def _do_match() -> None:
+        match_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids))
+
+    def _do_persist() -> None:
+        persist_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),
+                       clear_selection=selected_ids.clear)
+
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         app_tabs(controller, "library")
         ui.space()
-        scan_btn = ui.button("Scan", icon="search").props("flat").tooltip(
-            "Find audiobooks in your scan paths and preview changes before applying."
-        )
-        identify_btn = ui.button("Identify", icon="travel_explore").props("flat").tooltip(
-            "Look up metadata from your sources and preview matches before applying."
-        )
-        process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated").tooltip(
-            "Encode selected/ready books to M4B and/or move them into your library. Choose options first."
-        )
+
+        # The pipeline stepper: Scan -> Match -> Persist. Each stage is an action; the connectors
+        # read as the guided path. Match/Persist show a live readiness count.
+        _stage_badges: dict[str, object] = {}
+
+        def _stage(label, icon, key, on_click, *, primary=False) -> None:
+            btn = ui.button(on_click=on_click).props(
+                "no-caps " + ("unelevated" if primary else "flat")
+            ).classes("colophon-stage")
+            with btn, ui.row().classes("items-center no-wrap q-gutter-xs"):
+                ui.icon(icon)
+                ui.label(label)
+                if key:
+                    _stage_badges[key] = ui.badge("").props("color=grey-7 rounded")
+
+        _stage("Scan", "radar", None, _do_scan)
+        ui.icon("chevron_right").classes("colophon-muted")
+        _stage("Match", "join_inner", "identified", _do_match)
+        ui.icon("chevron_right").classes("colophon-muted")
+        _stage("Persist", "save", "ready", _do_persist, primary=True)
+
+        def _refresh_stepper() -> None:
+            counts = controller.pipeline_counts()
+            for key, badge in _stage_badges.items():
+                badge.set_text(str(counts.get(key, 0)))
+
+        _refresh_stepper()
+        _stepper_refresh["fn"] = _refresh_stepper
+
         jobs_indicator(controller)
         dark_mode_button(dark)
         ui.button(
             icon="view_column",
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
-
-    scan_btn.on_click(
-        lambda: scan_dialog(
-            controller,
-            refresh_all=_refresh_all,
-            folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
-            selected_ids=set(selected_ids),
-        )
-    )  # manages its own preview dialog + refresh
-    identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all))  # streams its own preview dialog + refresh
-    process_btn.on_click(lambda: process_dialog(controller, _selected_books() or controller.ready_books(), refresh_all=_refresh_all, clear_selection=selected_ids.clear))  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)

@@ -123,6 +123,9 @@ body.body--dark { color: #ece4d8; }
 /* Active-jobs indicator: the popover menu gets a comfortable minimum so progress bars
    and detail lines aren't cramped. */
 .colophon-jobs-menu { min-width: 16rem; }
+/* Pipeline stepper stages in the header: even padding, count badge sits inline with the label. */
+.colophon-stage { padding-inline: 10px; }
+.colophon-stage .q-badge { font-weight: 600; }
 /* Row states: full warm tint for selection/hover, an inset ring for keyboard
    focus. No left-edge accent bar. */
 .book-row-selected { background: var(--colophon-sel); }

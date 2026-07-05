@@ -24,8 +24,10 @@ from colophon.core.models import BookUnit
 from colophon.core.pathscheme import sample_target
 from colophon.core.phases import LOCAL
 from colophon.core.sources import SourceResult
+from colophon.core.triage import has_weak_identity, is_ready_to_persist
 from colophon.services.ingest import ScanOptions, ScanScope
 from colophon.ui.batch_log import BatchItem, BatchLog
+from colophon.ui.scope import scope_selector
 
 logger = logging.getLogger(__name__)
 
@@ -928,109 +930,155 @@ async def scan_dialog(
         show_options()
 
 
-async def identify_dialog(
-    controller: AppController, *, refresh_all: Callable[[], None]
+async def match_dialog(
+    controller: AppController, *, refresh_all: Callable[[], None], selected_ids: set[str],
 ) -> None:
-    """Preview source matches for unidentified books with a live per-book log, then apply
-    (fill empties, route review) or retry the books that found no match."""
-    candidates = controller.identify_candidates()
-    if not candidates:
-        ui.notify("Nothing to identify")
-        return
-
-    with modal() as dialog, ui.card().classes("w-[28rem]"):
-        ui.label(f"Identifying {len(candidates)} book(s)").classes("text-subtitle1")
-        log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in candidates])
-        state = {"cancelled": False}
-
-        def _cancel() -> None:
-            state["cancelled"] = True
-            dialog.close()
-
-        def _progress(book_id: str, kind: str) -> None:
-            log.update(book_id, "match found" if kind == "ok" else "no match", kind=kind)
-
-        def _summary(plan) -> str:
-            no_match = sum(1 for p in plan.proposals if p.best is None)
-            parts = [f"{plan.to_apply} auto-matched", f"{plan.to_review} review"]
-            if no_match:
-                parts.append(f"{no_match} no match")
-            if plan.skipped:
-                parts.append(f"{plan.skipped} skipped")
-            return "  ·  ".join(parts)
-
-        async def _apply(plan) -> None:
-            dialog.close()
-            summary = await asyncio.to_thread(controller.apply_identify, plan)
-            refresh_all()
-            actions = (
-                [{
-                    "label": "Undo", "color": "white",
-                    "handler": lambda b=summary.batch_id: (controller.undo(b), refresh_all()),
-                }]
-                if summary.batch_id else None
-            )
-            ui.notify(
-                f"Identified {summary.auto_matched} book(s); "
-                f"{summary.routed_to_review} need review",
-                actions=actions,
-            )
-
-        async def _retry(plan, ids: list[str]) -> None:
-            new_plan = await controller.retry_identify(plan, ids, progress=_progress)
-            _finish(new_plan)
-
-        def _finish(plan) -> None:
-            log.finish(
-                _summary(plan),
-                on_close=dialog.close,
-                on_retry=lambda ids, p=plan: _retry(p, ids),
-                extra=[("Apply", "done_all", lambda p=plan: _apply(p))],
-            )
-
-        dialog.open()
-        log.cancel_action(_cancel)
-        plan = await controller.identify_preview(progress=_progress)
-        if state["cancelled"]:
-            return
-        _finish(plan)
-
-
-async def process_dialog(
-    controller: AppController,
-    books: list[BookUnit],
-    *,
-    refresh_all: Callable[[], None],
-    clear_selection: Callable[[], None],
-) -> None:
-    """Encode selected/ready books to M4B and organize them into the library."""
-    from colophon.controller import CancelToken, EncodeJobOptions
-    from colophon.core.models import BookState
-
-    if not books:
-        ui.notify("Nothing selected or ready")
-        return
-
+    """Match books against the metadata sources. First choose the scope (Selected / Ready / All)
+    — warning when the set carries weakly-identified books whose match query is only a guess —
+    then preview per-book matches and apply (fill empties, route review) or retry the misses."""
     with modal() as dialog, ui.card().classes("w-[28rem]"):
         body = ui.column().classes("w-full")
 
+        def show_scope() -> None:
+            body.clear()
+            with body:
+                ui.label("Match against sources").classes("text-subtitle1")
+                ui.label("Look up metadata and preview matches before applying.").classes(
+                    "text-caption colophon-muted"
+                )
+                scope = scope_selector(controller, selected_ids)
+                warn = ui.label("").classes("text-caption text-warning q-mt-xs")
+
+                def _refresh_warn() -> None:
+                    books = controller.books_for_scope(scope.value, selected_ids)
+                    weak = sum(1 for b in books if has_weak_identity(b))
+                    warn.set_text(
+                        f"⚠ {weak} of {len(books)} have only a weakly-inferred identity — matches "
+                        f"may be unreliable." if weak else ""
+                    )
+
+                scope.on_value_change(lambda _e: _refresh_warn())
+                _refresh_warn()
+
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Cancel", on_click=dialog.close).props("flat")
+                    ui.button(
+                        "Match", icon="join_inner", on_click=lambda: _start(scope.value)
+                    ).props("unelevated")
+
+        async def _start(scope_value: str) -> None:
+            books = controller.books_for_scope(scope_value, selected_ids)
+            if not books:
+                ui.notify("No books in that scope")
+                return
+            await run_match(books)
+
+        async def run_match(books: list[BookUnit]) -> None:
+            body.clear()
+            with body:
+                ui.label(f"Matching {len(books)} book(s)").classes("text-subtitle1")
+                log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in books])
+            state = {"cancelled": False}
+
+            def _cancel() -> None:
+                state["cancelled"] = True
+                dialog.close()
+
+            def _progress(book_id: str, kind: str) -> None:
+                log.update(book_id, "match found" if kind == "ok" else "no match", kind=kind)
+
+            def _summary(plan) -> str:
+                no_match = sum(1 for p in plan.proposals if p.best is None)
+                parts = [f"{plan.to_apply} auto-matched", f"{plan.to_review} review"]
+                if no_match:
+                    parts.append(f"{no_match} no match")
+                if plan.skipped:
+                    parts.append(f"{plan.skipped} skipped")
+                return "  ·  ".join(parts)
+
+            async def _apply(plan) -> None:
+                dialog.close()
+                summary = await asyncio.to_thread(controller.apply_identify, plan)
+                refresh_all()
+                actions = (
+                    [{
+                        "label": "Undo", "color": "white",
+                        "handler": lambda b=summary.batch_id: (controller.undo(b), refresh_all()),
+                    }]
+                    if summary.batch_id else None
+                )
+                ui.notify(
+                    f"Matched {summary.auto_matched} book(s); "
+                    f"{summary.routed_to_review} need review",
+                    actions=actions,
+                )
+
+            async def _retry(plan, ids: list[str]) -> None:
+                new_plan = await controller.retry_identify(plan, ids, progress=_progress)
+                _finish(new_plan)
+
+            def _finish(plan) -> None:
+                log.finish(
+                    _summary(plan),
+                    on_close=dialog.close,
+                    on_retry=lambda ids, p=plan: _retry(p, ids),
+                    extra=[("Apply", "done_all", lambda p=plan: _apply(p))],
+                )
+
+            log.cancel_action(_cancel)
+            plan = await controller.identify_preview(books, progress=_progress)
+            if state["cancelled"]:
+                return
+            _finish(plan)
+
+        dialog.open()
+        show_scope()
+
+
+async def persist_dialog(
+    controller: AppController,
+    *,
+    refresh_all: Callable[[], None],
+    selected_ids: set[str],
+    clear_selection: Callable[[], None],
+) -> None:
+    """Write curated metadata out. Choose a scope (Selected / Ready / All) and one or more of
+    Tag / Organize / Encode; warn when the scope includes books that aren't Ready/confirmed, and
+    when Encode is chosen (it can be slow per book). Runs the chosen operations in the background."""
+    from colophon.controller import CancelToken, EncodeJobOptions
+
+    with modal() as dialog, ui.card().classes("w-[30rem]"):
+        cfg = controller.ctx.config
+        body = ui.column().classes("w-full")
+
         def _close() -> None:
-            # Refresh the underlying views only on close — refresh_all rebuilds the
-            # list panel, so refreshing while the dialog is open could disturb it.
             dialog.close()
             refresh_all()
 
+        def _patterns(folder_pat, file_pat) -> AudiobookPatterns:
+            return AudiobookPatterns(
+                folder=folder_pat.value or cfg.organize_folder_pattern,
+                single_file=file_pat.value or cfg.organize_file_pattern,
+            )
+
         def show_options() -> None:
             body.clear()
-            cfg = controller.ctx.config
-            n_encode = sum(1 for b in books if b.source_files)
-            n_organize = sum(1 for b in books if b.state == BookState.ENCODED and b.output_path)
             with body:
-                ui.label(f"Encode + organize {len(books)} book(s)").classes("text-subtitle1")
-                enc = ui.checkbox("Encode to M4B", value=True).props("dense")
-                org = ui.checkbox("Organize into library", value=True).props("dense")
-                dele = ui.checkbox("Delete source files after (verified)", value=False).props("dense")
-                conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props("dense").classes("w-32")
+                ui.label("Persist changes").classes("text-subtitle1")
+                ui.label(
+                    "Write your curated metadata out to the files and library."
+                ).classes("text-caption colophon-muted")
+                scope = scope_selector(controller, selected_ids)
+
+                ui.label("Operations").classes("colophon-seccap q-mt-sm")
+                tag = ui.checkbox("Tag — write metadata into the files").props("dense")
+                org = ui.checkbox("Organize — move into the library").props("dense")
+                enc = ui.checkbox("Encode — re-encode to M4B").props("dense")
+                ui.label(
+                    "Encoding re-encodes each book and can take a long time per book — minutes to "
+                    "hours depending on length."
+                ).classes("text-caption text-warning").bind_visibility_from(enc, "value")
+
                 folder_pat = ui.input("Folder pattern", value=cfg.organize_folder_pattern).props(
                     "outlined dense"
                 ).classes("w-full")
@@ -1038,6 +1086,8 @@ async def process_dialog(
                     "outlined dense"
                 ).classes("w-full")
                 preview = ui.label("").classes("text-caption colophon-muted")
+                for el in (folder_pat, file_pat, preview):
+                    el.bind_visibility_from(org, "value")
 
                 def _preview() -> None:
                     preview.set_text("Structure: " + sample_target(folder_pat.value, file_pat.value))
@@ -1045,86 +1095,104 @@ async def process_dialog(
                 folder_pat.on_value_change(lambda _e: _preview())
                 file_pat.on_value_change(lambda _e: _preview())
                 _preview()
-
-                def _pick_pair(op) -> None:
-                    folder_pat.set_value(op.folder)
-                    file_pat.set_value(op.file)
-                    _preview()
-
                 attach_history_menu(
                     folder_pat, cfg.recent_organize_patterns,
-                    lambda op: f"{op.folder} · {op.file}", _pick_pair,
+                    lambda op: f"{op.folder} · {op.file}",
+                    lambda op: (folder_pat.set_value(op.folder), file_pat.set_value(op.file),
+                                _preview()),
                     tooltip="Recent folder + file patterns",
                 )
-                dry = ui.checkbox("Dry run (show destinations, change nothing)", value=False)
-                ui.label(f"{n_encode} to encode · {n_organize} ready to organize").classes(
-                    "text-caption colophon-muted"
-                )
+                conc = ui.number("Concurrency", value=2, min=1, max=8, format="%d").props(
+                    "dense"
+                ).classes("w-32")
+                conc.bind_visibility_from(enc, "value")
+                dele = ui.checkbox("Delete source files after (verified)").props("dense")
+                dele.bind_visibility_from(enc, "value")
 
-                def _patterns() -> AudiobookPatterns:
-                    return AudiobookPatterns(
-                        folder=folder_pat.value or cfg.organize_folder_pattern,
-                        single_file=file_pat.value or cfg.organize_file_pattern,
+                warn = ui.label("").classes("text-caption text-warning q-mt-xs")
+
+                def _refresh_warn() -> None:
+                    books = controller.books_for_scope(scope.value, selected_ids)
+                    notready = sum(1 for b in books if not is_ready_to_persist(b))
+                    warn.set_text(
+                        f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed — persisting "
+                        f"may write unverified metadata." if notready else ""
                     )
 
-                def _show_dry() -> None:
-                    body.clear()
-                    targets = controller.organize_targets(books, patterns=_patterns())
-                    by_id = {b.id: b for b in books}
-                    with body:
-                        ui.label("Dry run — destinations").classes("text-subtitle1")
-                        with ui.scroll_area().classes("w-full").style("max-height: 50vh"), \
-                                ui.list().props("dense").classes("w-full"):
-                            for bid, target in targets:
-                                b = by_id[bid]
-                                with ui.item(), ui.item_section():
-                                    ui.item_label(str(b.output_path or b.source_folder))
-                                    ui.item_label("-> " + str(target)).props("caption").classes(
-                                        "colophon-muted"
-                                    )
-                        with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                            ui.button("Back", on_click=show_options).props("flat")
-                            ui.button("Close", on_click=dialog.close).props("flat")
+                scope.on_value_change(lambda _e: _refresh_warn())
+                _refresh_warn()
 
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
                     async def _run() -> None:
-                        if dry.value:
-                            _show_dry()
-                            return
-                        if not enc.value and not org.value:
-                            ui.notify("Select Encode and/or Organize")
+                        if not (tag.value or org.value or enc.value):
+                            ui.notify("Choose at least one operation")
                             return
                         if dele.value and not enc.value:
                             ui.notify("Delete sources requires Encode")
                             return
-                        options = EncodeJobOptions(
+                        books = controller.books_for_scope(scope.value, selected_ids)
+                        if not books:
+                            ui.notify("No books in that scope")
+                            return
+                        opts = EncodeJobOptions(
                             encode=bool(enc.value), organize=bool(org.value),
                             delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
-                            patterns=_patterns(),
+                            patterns=_patterns(folder_pat, file_pat),
                         )
-                        if options.organize and options.patterns is not None:
+                        if opts.organize:
                             controller.record_organize_pattern(
-                                options.patterns.folder, options.patterns.single_file
+                                opts.patterns.folder, opts.patterns.single_file
                             )
-                        await show_progress(options)
+                        notready = sum(1 for b in books if not is_ready_to_persist(b))
+                        if notready:
+                            _confirm(books, bool(tag.value), opts, notready)
+                        else:
+                            await run_persist(books, bool(tag.value), opts)
 
-                    ui.button("Run", icon="play_arrow", on_click=_run).props("unelevated")
+                    ui.button("Persist", icon="save", on_click=_run).props("unelevated")
 
-        async def show_progress(options) -> None:
+        def _confirm(books, do_tag, opts, notready) -> None:
+            body.clear()
+            with body:
+                with ui.row().classes("items-center q-gutter-sm"):
+                    ui.icon("warning", color="warning", size="24px")
+                    ui.label("Some books aren't ready").classes("text-subtitle1")
+                ui.label(
+                    f"{notready} of {len(books)} books aren't marked Ready or confirmed. Persisting "
+                    f"now may tag, move, or encode books with unverified metadata."
+                ).classes("text-body2 colophon-muted")
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Back", on_click=show_options).props("flat")
+                    ui.button(
+                        "Persist anyway", icon="save",
+                        on_click=lambda: run_persist(books, do_tag, opts),
+                    ).props("unelevated color=warning")
+
+        async def run_persist(books, do_tag, opts) -> None:
             body.clear()
             token = CancelToken()
             _KIND = {"done": "ok", "failed": "fail", "cancelled": "skip"}
             with body:
-                ui.label(f"Processing {len(books)} book(s)").classes("text-subtitle1")
+                ui.label(f"Persisting {len(books)} book(s)").classes("text-subtitle1")
                 log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in books])
             log.cancel_action(token.cancel)
 
-            def _progress(book_id: str, status: str) -> None:
-                log.update(book_id, status, kind=_KIND.get(status, "running"))
-
-            await controller.run_encode_job(books, options, progress=_progress, cancel=token)
+            if do_tag:
+                await controller.write_tags_books(
+                    books,
+                    progress=lambda done, book, res: log.update(
+                        book.id, "tagged" if getattr(res, "ok", True) else "tag failed",
+                        kind="ok" if getattr(res, "ok", True) else "fail",
+                    ),
+                )
+            if opts.encode or opts.organize:
+                await controller.run_encode_job(
+                    books, opts,
+                    progress=lambda bid, status: log.update(bid, status, kind=_KIND.get(status, "running")),
+                    cancel=token,
+                )
             clear_selection()
             await controller.trigger_abs_scan()  # best-effort library rescan
 
@@ -1134,13 +1202,7 @@ async def process_dialog(
                 note += f", {c['fail']} failed"
             if c.get("skip"):
                 note += f", {c['skip']} cancelled"
-
-            async def _retry_failed(ids: list[str]) -> None:
-                nonlocal books
-                books = [b for b in books if b.id in set(ids)]
-                await show_progress(options)
-
-            log.finish(note, on_close=_close, on_retry=lambda ids: _retry_failed(ids))
+            log.finish(note, on_close=_close)
 
         dialog.open()
         show_options()

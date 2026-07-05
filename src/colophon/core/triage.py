@@ -18,6 +18,16 @@ def needs_human(book: BookUnit) -> bool:
     return book.state not in _DONE_STATES
 
 
+# States that are safe to persist (tag/organize/encode) without a warning: source-verified/ready or
+# already past it. A manual confirmation counts even below the ready threshold.
+_PERSIST_READY = {BookState.READY, BookState.ORGANIZED, BookState.ENCODED}
+
+
+def is_ready_to_persist(book: BookUnit) -> bool:
+    """True when a book is Ready/confirmed enough to tag/organize/encode without a warning."""
+    return book.manually_confirmed or book.state in _PERSIST_READY
+
+
 def effective_confidence(book: BookUnit) -> float:
     """The confidence to rank and bucket a book by: its post-match verification score once matched,
     else its pre-match local-identification confidence. `confidence` is only ever nonzero after a
