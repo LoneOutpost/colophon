@@ -78,7 +78,11 @@ def test_first_file_drives_metadata_with_numeric_sort(tmp_path: Path):
     assert book.source_files[0].path.name == "2.mp3"
 
 
-def test_non_matching_filename_falls_back_to_dir_and_tags(tmp_path: Path):
+def test_lone_book_at_author_depth_makes_folder_the_author(tmp_path: Path):
+    # A single file in a folder directly at the author depth, whose filename carries a real title
+    # distinct from the folder: the folder names the author and the filename is the title (the common
+    # Author/OneBook.mp3 layout). Contrast test_..._grouping_hint, where a bare "01" track number
+    # supplies no title, so the folder name stays the title.
     ingest = tmp_path / "ingest"
     dune = ingest / "Dune"
     dune.mkdir(parents=True)
@@ -89,7 +93,8 @@ def test_non_matching_filename_falls_back_to_dir_and_tags(tmp_path: Path):
 
     assert len(units) == 1
     book = units[0]
-    assert book.title == "Dune"
+    assert book.authors == ["Dune"]
+    assert book.title == "weird name no delimiters"
 
 
 def test_scan_ingest_is_idempotent(tmp_path: Path):

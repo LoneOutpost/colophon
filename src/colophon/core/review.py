@@ -22,6 +22,7 @@ _WEAK_PROV = frozenset({"directory", "filename", "graphing"})
 # loose in an author folder) is the normal audiobook layout under the graph model, not a problem,
 # so it is intentionally absent.
 _FINDING_MSG: dict[FindingCode, str] = {
+    FindingCode.EMPTY_AUDIO: "The audio file has no readable content — corrupt or an incomplete download.",
     FindingCode.MULTI_IN_AUTHOR: "Several distinct books share this folder.",
     FindingCode.MULTI_IN_UNDETERMINED: "Several distinct books share this folder.",
     FindingCode.MIXED_WORKS: "This folder mixes different books.",

@@ -208,18 +208,44 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     return out
 
 
-def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
-    """Decide a single-book leaf's folder name by elimination against the one book's own fields —
-    the title is already known from the filename. If the folder name resembles that title, the folder
-    IS the book's title folder (the common Root/.../Title layout). Otherwise the folder is not the
-    title: if the book carries a series the folder resembles, it is a series folder; failing that, and
-    when the name is neither a known franchise nor a bucket/numeric label, the only thing the folder
-    name can be is the author — the very common Root/Author/OneBook.mp3 layout, where a lone book would
-    otherwise be misread as its own title. A disorganized leftover keeps just its filename title and
-    makes no author claim (its own bucket/franchise axioms vote instead).
+# Title provenances that only echo the folder name back (directory inference / graph fill), so they
+# are NOT evidence the folder is a title. A title read from the file itself (tag/datafile/filename/
+# manual/match) is real evidence.
+_CIRCULAR_TITLE_PROV = frozenset({"directory", "graphing"})
 
-    The author vote is deliberately weaker than a tagged-author consensus, so an embedded tag still
-    wins the node's author VALUE when folder name and tag disagree."""
+# Phrases that mark a title as a memoir/autobiography. High-precision on purpose: a memoir is often
+# titled after its subject, so an author-named folder whose book title contains one of these AND
+# embeds the author's name is the author's folder, not a title folder.
+_MEMOIR_MARKERS = ("memoir", "autobiography", "my story", "the story of", "my life")
+
+
+def _is_memoir_titled(title: str) -> bool:
+    low = title.casefold()
+    return any(m in low for m in _MEMOIR_MARKERS)
+
+
+def _name_is_proper_subset(name: str, title: str) -> bool:
+    """True when every token of `name` appears in `title` AND `title` has more — i.e. the folder
+    (author) name is embedded in a strictly longer title, not equal to it."""
+    from colophon.core.graph_resolve import _series_tokens
+    a, b = _series_tokens(name), _series_tokens(title)
+    return bool(a) and a < b
+
+
+def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
+    """Decide a single-book leaf's folder by elimination against the one book's own fields. If the
+    folder name resembles the book's real (file-sourced) title, the folder IS the title folder
+    (Root/.../Title layout). Else if it resembles the book's series, it is a series folder. Else,
+    unless the name is a known franchise or a bucket/numeric label, the folder can only be the author
+    — the very common Root/Author/OneBook.mp3 layout, where a lone book would otherwise be misread as
+    its own title.
+
+    Crucially, a title that is only the folder name echoed back by directory inference is NOT title
+    evidence (that reasoning is circular): a folder whose book has no file-supplied title, series, or
+    franchise falls through to author, and `_repair_leaf_titles` then re-derives the book's title from
+    the filename. The author vote is deliberately weaker than a tagged-author consensus, so an
+    embedded tag still wins the node's author VALUE when folder name and tag disagree."""
+    from colophon.core.filename_cluster import _text_sig, _tokens
     from colophon.core.graph_classify import TITLE, _series_label
     from colophon.core.graph_resolve import _resembles
     if node.kind != TITLE:
@@ -227,11 +253,27 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     books = ctx.direct_books.get(node.path, [])
     book = books[0] if books else None
     name = node.path.name
-    # Without a known title the elimination has no anchor, so keep the conservative default: a
-    # single-book leaf is that book's title folder. (Real file-backed books always parse a title.)
-    if book is None or not book.title:
+    if book is None:
         return [Evidence("title", 5.0, "single-book leaf (a title folder)")]
-    if _resembles(name, book.title):
+    # The title the FILE supplies: a file-sourced title (tag/datafile/filename), else the filename's
+    # own cluster label. A directory/graphing title is only the folder-name echo — not the file's.
+    real_title = (book.title if book.title
+                  and book.provenance.get("title") not in _CIRCULAR_TITLE_PROV else None)
+    file_label = book.detected_works[0].label if book.detected_works else None
+    label_has_text = bool(file_label) and bool(_text_sig(_tokens(file_label)))  # real words, not "01"
+    file_title = real_title or (file_label if label_has_text else None)
+    has_real_author = bool(book.authors) and book.provenance.get("authors") not in _CIRCULAR_TITLE_PROV
+    at_author_depth = ctx.author_depth is not None and _depth(node.path, ctx.root) == ctx.author_depth
+    if file_title and _resembles(name, file_title):
+        # A memoir/autobiography is often titled after its subject, so an author-named folder whose
+        # book title embeds the author's name ('Sam Walton' -> 'Sam Walton, made in America, my
+        # story') reads like a title match but is really the author's folder. Only flip when the
+        # folder is a strict fragment of a memoir-marked title, at the author depth, with no author of
+        # its own — additive, never fires on a non-memoir and never demotes a real title.
+        if (at_author_depth and not has_real_author
+                and _is_memoir_titled(file_title) and _name_is_proper_subset(name, file_title)):
+            return [Evidence("author", 3.0,
+                             "memoir/autobiography title contains the author's name", value=name)]
         return [Evidence("title", 5.0, "single-book leaf; folder name matches the title")]
     label = _series_label(book)
     if label is not None and _resembles(name, label[1]):
@@ -240,9 +282,17 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     low = name.strip().casefold()
     if _is_known_franchise(node, ctx) or low in _BUCKET_WORDS or low.replace(" ", "").isdigit():
         return []  # a franchise / bucket / numeric leaf is not an author; its own axioms decide
-    return [Evidence("author", 2.5,
-                     "single-book leaf; folder is neither the title nor a known series (so, author)",
-                     value=name)]
+    # The folder is the AUTHOR only for a lone book sitting directly in an author slot: the book has
+    # no real author of its own (a tag/datafile/match author means the folder is the title, not the
+    # author); the folder sits exactly at the library's author depth (a leaf nested BELOW the author
+    # level is inside an author's own subtree, so it is a title); and the FILE supplies a real title
+    # distinct from the folder (a bare track number like "01" identifies no title, so the folder name
+    # stays the title). Otherwise it is a title folder; `_repair_leaf_titles` re-derives the book's
+    # real title from the filename.
+    if not has_real_author and at_author_depth and file_title is not None:
+        return [Evidence("author", 2.5,
+                         "lone book at the author depth; folder names the author", value=name)]
+    return [Evidence("title", 5.0, "single-book leaf (a title folder)")]
 
 
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
@@ -471,8 +521,28 @@ def classify_nodes(
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
+    _repair_leaf_titles(graph, books)
     _fill_series_ramp(graph, books, root=root)
     _fill_identity_confidence(graph, books, root=root)
+
+
+def _repair_leaf_titles(graph: Graph, books: list[BookUnit]) -> None:
+    """A single book whose folder turned out to be the author still carries the folder name as its
+    title: IDENTIFY defaulted the title to the folder when the filename supplied none, and that echo
+    is what let the folder look like a title before ax_leaf_title eliminated it. Re-derive the book's
+    title from its filename so the author folder's book gets its real title, not the author's name."""
+    from colophon.core.filename_cluster import _spaced
+    from colophon.core.models import Provenance
+    for book in books:
+        if book.provenance.get("title") != Provenance.DIRECTORY.value or not book.source_files:
+            continue
+        node = graph.directories.get(DirectoryNode.id_for(book.source_folder))
+        if node is None or node.kind != "author":
+            continue
+        stem_title = _spaced(book.source_files[0].path.stem.replace("_", " "))
+        if stem_title and stem_title.casefold() != book.source_folder.name.casefold():
+            book.title = stem_title
+            book.provenance["title"] = Provenance.FILENAME.value
 
 
 def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:

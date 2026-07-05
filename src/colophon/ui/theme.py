@@ -120,6 +120,9 @@ body.body--dark { color: #ece4d8; }
 .q-field--outlined .q-field__control { border-radius: 8px; }
 .q-field--outlined .q-field__control:before { border-color: var(--colophon-border); }
 .q-item { border-radius: 8px; }
+/* Active-jobs indicator: the popover menu gets a comfortable minimum so progress bars
+   and detail lines aren't cramped. */
+.colophon-jobs-menu { min-width: 16rem; }
 /* Row states: full warm tint for selection/hover, an inset ring for keyboard
    focus. No left-edge accent bar. */
 .book-row-selected { background: var(--colophon-sel); }

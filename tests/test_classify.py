@@ -265,3 +265,42 @@ def test_title_album_with_numbered_parts_stays_one_book():
     works, signals = group_works(feats)
     assert len(works) == 1
     assert content_kind_for(works, signals) is CK.SINGLE
+
+
+def test_empty_audio_file_is_flagged(tmp_path):
+    # A nonempty file with zero readable duration (corrupt / incomplete download) is flagged ERROR.
+    folder = tmp_path / "Some Author" / "Some Book"
+    folder.mkdir(parents=True)
+    p = folder / "01.mp3"
+    p.write_bytes(b"\x00" * (128 * 1024))  # 128KB, no audio
+    feat = FileFeatures(path=p, ext="mp3", duration_seconds=0.0, tags=EmbeddedTags())
+
+    r = _classify(folder, tmp_path, [feat])
+
+    empty = [f for f in r.findings if f.code is FC.EMPTY_AUDIO]
+    assert empty and empty[0].severity is FindingSeverity.ERROR
+
+
+def test_tiny_zero_duration_file_not_flagged(tmp_path):
+    # A sub-64KB stray with no duration is ignored — not a real audiobook file.
+    folder = tmp_path / "x"
+    folder.mkdir()
+    p = folder / "blip.mp3"
+    p.write_bytes(b"\x00" * 1024)
+    feat = FileFeatures(path=p, ext="mp3", duration_seconds=0.0, tags=EmbeddedTags())
+
+    r = _classify(folder, tmp_path, [feat])
+
+    assert not any(f.code is FC.EMPTY_AUDIO for f in r.findings)
+
+
+def test_real_duration_file_not_flagged(tmp_path):
+    folder = tmp_path / "a" / "b"
+    folder.mkdir(parents=True)
+    p = folder / "01.mp3"
+    p.write_bytes(b"\x00" * (128 * 1024))
+    feat = FileFeatures(path=p, ext="mp3", duration_seconds=3600.0, tags=EmbeddedTags())
+
+    r = _classify(folder, tmp_path, [feat])
+
+    assert not any(f.code is FC.EMPTY_AUDIO for f in r.findings)

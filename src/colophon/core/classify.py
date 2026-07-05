@@ -203,6 +203,33 @@ def _actionable_finding(
     return None
 
 
+_EMPTY_AUDIO_MIN_SIZE = 64 * 1024  # ignore sub-64KB stray files; a real audiobook is megabytes
+
+
+def empty_audio_finding(sized_durations: list[tuple[int, float]]) -> Finding | None:
+    """The EMPTY_AUDIO finding for a book, from its files' (size, duration) pairs — or None. A file
+    with real size but zero readable duration is corrupt or an incomplete download (neither mutagen
+    nor ffprobe found audio in it); flag it so it doesn't masquerade as a normal 0:00 entry. A size
+    floor ignores stray sub-64KB artifacts. Shared by scan (CATEGORIZE) and the re-probe pass."""
+    bad = sum(1 for size, dur in sized_durations if dur <= 0 and size > _EMPTY_AUDIO_MIN_SIZE)
+    if not bad:
+        return None
+    detail = (f"{bad} files have no readable audio (corrupt or an incomplete download)" if bad > 1
+              else "the audio file has no readable content (corrupt or an incomplete download)")
+    return Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail=detail)
+
+
+def _empty_audio_finding(features: list[FileFeatures]) -> Finding | None:
+    return empty_audio_finding([(_file_size(f.path), f.duration_seconds) for f in features])
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def _duplicate_findings(
     folder_kind: FolderKind, works: list[DetectedWork], features: list[FileFeatures]
 ) -> list[Finding]:
@@ -258,6 +285,9 @@ def classify(
     )
 
     findings: list[Finding] = []
+    empty = _empty_audio_finding(features)
+    if empty is not None:
+        findings.append(empty)
     actionable = _actionable_finding(content_kind, folder_kind, works)
     if actionable is not None:
         findings.append(actionable)

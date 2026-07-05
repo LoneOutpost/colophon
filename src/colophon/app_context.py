@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from platformdirs import user_data_path
@@ -27,6 +27,7 @@ from colophon.adapters.sources.audnexus import AudnexusSource
 from colophon.adapters.sources.googlebooks import GoogleBooksSource
 from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
+from colophon.core.jobs import JobRegistry
 from colophon.core.library_graph import LibraryGraph
 from colophon.core.sources import MetadataSource, arrange_sources
 
@@ -62,6 +63,7 @@ class AppContext:
     patterns: AudiobookPatterns
     abs_client: AbsClient | None
     config_path: Path
+    jobs: JobRegistry = field(default_factory=JobRegistry)
 
     @classmethod
     def create(cls, config: Config, *, config_path: Path | None = None) -> AppContext:

@@ -40,6 +40,7 @@ from colophon.core.graph_resolve import (
     franchise_for,
 )
 from colophon.core.graph_view import grouping_cohort
+from colophon.core.jobs import Job
 from colophon.core.models import (
     SUPPRESSED_FINDINGS,
     BookState,
@@ -297,18 +298,21 @@ class AppController:
         progress: Callable[[int, int, str], None] | None = None,
     ) -> ScanPlan:
         """Run scan_preview off the event loop, marshaling per-folder progress back onto
-        it so a live UI indicator updates safely from the worker thread."""
+        it so a live UI indicator updates safely from the worker thread. Registers a shared
+        job so the scan shows in every session's app-bar jobs indicator."""
         loop = asyncio.get_running_loop()
 
-        def safe(done: int, total: int, label: str) -> None:
-            if progress is not None:
-                loop.call_soon_threadsafe(progress, done, total, label)
+        with self.ctx.jobs.track("Scan") as job:
+            def safe(done: int, total: int, label: str) -> None:
+                job.progress(done, total, label)
+                if progress is not None:
+                    loop.call_soon_threadsafe(progress, done, total, label)
 
-        return await asyncio.to_thread(
-            self.scan_preview, roots,
-            template=template, directory_scheme=directory_scheme,
-            options=options, progress=safe,
-        )
+            return await asyncio.to_thread(
+                self.scan_preview, roots,
+                template=template, directory_scheme=directory_scheme,
+                options=options, progress=safe,
+            )
 
     def apply_scan(self, plan: ScanPlan) -> int:
         """Persist a previously-computed scan plan; returns the number written."""
@@ -417,6 +421,52 @@ class AppController:
             self._scan_root_for_path(b.source_folder) for b in self.ctx.books.list_all()
         }
         return self._resync_roots(roots)
+
+    def reprobe_durations(self, *, only_missing: bool = True) -> int:
+        """Re-read source-file durations from disk and reconcile the EMPTY_AUDIO finding, persisting
+        any book that changed. With `only_missing` (default) limits to books that currently have a
+        file with a nonzero size but zero duration — a file that read as 0 (before the ffprobe
+        fallback existed, or a since-completed download). A file that recovers gets its real duration
+        and loses the flag; a file still reading 0 with real size gains an EMPTY_AUDIO finding
+        (corrupt / incomplete). Clears the audio cache so an unchanged file is genuinely re-read.
+        Returns the number of books updated."""
+        from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+        from colophon.core.classify import empty_audio_finding
+
+        def wants(book: BookUnit) -> bool:
+            return any(sf.duration_seconds <= 0 < sf.size for sf in book.source_files)
+
+        clear_audio_metadata_cache()
+        targets = [b for b in self.ctx.books.list_all() if not only_missing or wants(b)]
+        changed: list[BookUnit] = []
+        with self.ctx.jobs.track("Re-probe durations") as job:
+            for n, book in enumerate(targets, start=1):
+                job.progress(n, len(targets), book.title or book.source_folder.name)
+                new_files = list(book.source_files)
+                moved = False
+                for i, sf in enumerate(book.source_files):
+                    if sf.duration_seconds > 0 or not sf.path.exists():
+                        continue
+                    fresh = read_audio_metadata(sf.path)[0]
+                    if fresh.duration_seconds != sf.duration_seconds:
+                        new_files[i] = fresh
+                        moved = True
+                # Reconcile the EMPTY_AUDIO finding against the (possibly refreshed) files.
+                finding = empty_audio_finding([(sf.size, sf.duration_seconds) for sf in new_files])
+                others = [f for f in book.findings if f.code is not FindingCode.EMPTY_AUDIO]
+                new_findings = others + ([finding] if finding is not None else [])
+                if moved or new_findings != book.findings:
+                    book.source_files = new_files
+                    book.findings = new_findings
+                    book.touch()
+                    changed.append(book)
+            for i, book in enumerate(changed):
+                self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
+        return len(changed)
+
+    def active_jobs(self) -> list[Job]:
+        """Snapshot of running background jobs, for the app-bar indicator (shared across sessions)."""
+        return self.ctx.jobs.active()
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its
@@ -1809,28 +1859,36 @@ class AppController:
         is set is reported 'cancelled'; in-flight books finish. `progress(book_id,
         status)` is called as each book moves through its steps."""
         sem = asyncio.Semaphore(max(1, options.concurrency))
+        _terminal = {"encoded", "organized", "failed", "cancelled", "skipped"}
 
-        def _emit(book_id: str, status: str) -> None:
-            if progress is not None:
-                progress(book_id, status)
+        with self.ctx.jobs.track("Encode + organize" if options.encode else "Organize") as job:
+            counted = {"n": 0}
+            job.progress(0, len(books), "")
 
-        async def _one(book: BookUnit) -> BookProcessResult:
-            if cancel is not None and cancel.cancelled:
-                _emit(book.id, "cancelled")
-                return BookProcessResult(book_id=book.id, status="cancelled")
-            async with sem:
+            def _emit(book_id: str, status: str) -> None:
+                if status in _terminal:
+                    counted["n"] += 1
+                    job.progress(counted["n"], len(books), status)
+                if progress is not None:
+                    progress(book_id, status)
+
+            async def _one(book: BookUnit) -> BookProcessResult:
                 if cancel is not None and cancel.cancelled:
                     _emit(book.id, "cancelled")
                     return BookProcessResult(book_id=book.id, status="cancelled")
-                _emit(book.id, "encoding" if options.encode else "organizing")
-                if options.encode:
-                    await self.ensure_cover_cached(book)
-                result = await asyncio.to_thread(self._process_book, book, options)
-                _emit(book.id, result.status)
-                return result
+                async with sem:
+                    if cancel is not None and cancel.cancelled:
+                        _emit(book.id, "cancelled")
+                        return BookProcessResult(book_id=book.id, status="cancelled")
+                    _emit(book.id, "encoding" if options.encode else "organizing")
+                    if options.encode:
+                        await self.ensure_cover_cached(book)
+                    result = await asyncio.to_thread(self._process_book, book, options)
+                    _emit(book.id, result.status)
+                    return result
 
-        results = await asyncio.gather(*(_one(b) for b in books))
-        return EncodeJobResult(results=list(results))
+            results = await asyncio.gather(*(_one(b) for b in books))
+            return EncodeJobResult(results=list(results))
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
         """Encode + organize a single book (delegates to the unified worker, which
