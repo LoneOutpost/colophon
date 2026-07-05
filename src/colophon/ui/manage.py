@@ -4,13 +4,14 @@ batches."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import quote
 
 from nicegui import ui
 
 from colophon.controller import AppController
-from colophon.ui.chrome import page_body, page_header, page_toolbar
+from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
 from colophon.ui.dialogs import modal
 from colophon.ui.filter_input import filter_input
 
@@ -30,6 +31,37 @@ _KIND_LABELS = {
 def _valid_kind(kind: str | None) -> str:
     """A safe manage vocabulary kind, defaulting to 'author' for anything unrecognized."""
     return kind if kind in _KIND_LABELS else "author"
+
+
+def _render_utilities(controller: AppController) -> None:
+    """Library-wide maintenance actions (the Utilities tab). One-off repairs run on demand — kept
+    apart from the vocabulary editing so an action button never sits next to a form's Save."""
+    with page_body("read"), page_section(
+        "Durations",
+        "Re-read length from disk for books that scanned as 0:00 — for example after a download "
+        "that was incomplete at scan time has finished. Files with no readable audio are flagged.",
+    ):
+        reprobe_btn = ui.button("Re-probe durations", icon="graphic_eq").props("unelevated")
+
+        async def _reprobe() -> None:
+            reprobe_btn.props("loading")
+            try:
+                n = await asyncio.to_thread(controller.reprobe_durations)
+            except Exception:
+                logger.exception("re-probe durations failed")
+                ui.notify("Re-probe failed (see logs)", type="negative")
+                return
+            finally:
+                reprobe_btn.props(remove="loading")
+            ui.notify(
+                f"Re-probed durations: updated {n} book(s)" if n
+                else "All readable files already have a duration"
+            )
+
+        reprobe_btn.on_click(_reprobe)
+        ui.label("Runs in the background — watch the app-bar jobs indicator for progress.").classes(
+            "text-caption colophon-muted"
+        )
 
 
 def render_manage(controller: AppController, initial_kind: str | None = None,
@@ -170,25 +202,31 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
                 ui.button("Merge", icon="merge", on_click=_confirm).props("unelevated")
         dialog.open()
 
-    # --- page body ---
-    with page_toolbar():
-        ui.toggle(_KIND_LABELS, value=state["kind"], on_change=lambda e: _on_kind(e.value)).props(
-            "no-caps"
-        ).classes("colophon-seg")
-        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-            filter_input(
-                _on_filter, placeholder="Filter", value=str(state["filter"]),
-                aria_label="Filter entries",
-            ).classes("col")
-            merge_btn = ui.button(
-                "Merge selected", icon="merge", on_click=_merge_dialog
-            ).props("flat")
-            undo_btn = ui.button("Undo", icon="undo", on_click=_do_undo).props("flat")
-            ui.button("Franchises", icon="hub",
-                      on_click=lambda: ui.navigate.to("/franchises")).props("flat no-caps")
-
-    with page_body("read"):
-        list_box = ui.column().classes("w-full gap-0")
+    # --- page body: Catalog (vocabulary) and Utilities (maintenance) as tabs ---
+    with ui.tabs().props("no-caps inline-label align=left") as top_tabs:
+        ui.tab("catalog", label="Catalog", icon="category")
+        ui.tab("utilities", label="Utilities", icon="build")
+    with ui.tab_panels(top_tabs, value="catalog").classes("w-full").props("keep-alive"):
+        with ui.tab_panel("catalog").classes("q-pa-none"):
+            with page_toolbar():
+                ui.toggle(
+                    _KIND_LABELS, value=state["kind"], on_change=lambda e: _on_kind(e.value)
+                ).props("no-caps").classes("colophon-seg")
+                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                    filter_input(
+                        _on_filter, placeholder="Filter", value=str(state["filter"]),
+                        aria_label="Filter entries",
+                    ).classes("col")
+                    merge_btn = ui.button(
+                        "Merge selected", icon="merge", on_click=_merge_dialog
+                    ).props("flat")
+                    undo_btn = ui.button("Undo", icon="undo", on_click=_do_undo).props("flat")
+                    ui.button("Franchises", icon="hub",
+                              on_click=lambda: ui.navigate.to("/franchises")).props("flat no-caps")
+            with page_body("read"):
+                list_box = ui.column().classes("w-full gap-0")
+        with ui.tab_panel("utilities").classes("q-pa-none"):
+            _render_utilities(controller)
 
     def _sync_buttons() -> None:
         merge_btn.set_enabled(len(_selected()) >= 2)
