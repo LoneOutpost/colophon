@@ -181,17 +181,65 @@ def test_directory_provenance_author_uses_structure_not_the_book_tag(tmp_path):
     assert node.kind == "author" and node.author == "Some Folder"  # value is the fallback folder name
 
 
-def test_single_book_leaf_stays_a_title_not_author(tmp_path):
-    # A single-book leaf is that book's title folder, even when its one book's tag author would
-    # otherwise name it — the engine keeps it a title rather than promoting it to author.
+def test_single_book_leaf_without_a_title_stays_a_title(tmp_path):
+    # Degenerate: a single-book leaf whose one book has no parsed title. With no title to eliminate
+    # against, the engine keeps the conservative default (a title folder) rather than guessing author.
     root = tmp_path / "lib"
     folder = root / "Stephen King"
-    book = _book(folder, ["Stephen King"], Provenance.TAG.value)
+    book = _book(folder, ["Stephen King"], Provenance.TAG.value)  # note: no title set
     graph = _graph_with_dirs(folder)
 
     _resolve(graph, [book], root)
 
     assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"
+
+
+def test_single_book_leaf_folder_named_like_author_becomes_author(tmp_path):
+    # Root/Author/OneBook.mp3 (the folder IS the author): the book's title comes from the filename
+    # and does not resemble the folder name, so by elimination the folder can only be the author.
+    from colophon.core.node_classify import book_identity_confidence
+    root = tmp_path / "lib"
+    folder = root / "Sean Flynn"
+    book = _book(folder, ["Sean Flynn"], Provenance.DIRECTORY.value)
+    book.title = "3000 Degrees"
+    graph = _graph_with_dirs(folder)
+
+    _resolve(graph, [book], root)
+
+    node = graph.directories[DirectoryNode.id_for(folder)]
+    assert node.kind == "author" and node.author == "Sean Flynn"
+    # the payoff: the book now reads as locally identified, not a flat zero
+    assert book_identity_confidence(book, graph, root) >= 60
+
+
+def test_single_book_leaf_folder_named_like_title_stays_title(tmp_path):
+    # Root/Title.mp3: the folder name resembles the book's own title, so it is a title folder and is
+    # NOT invented into an author — even with a tagged author present.
+    root = tmp_path / "lib"
+    folder = root / "Dune"
+    book = _book(folder, ["Frank Herbert"], Provenance.TAG.value)
+    book.title = "Dune"
+    graph = _graph_with_dirs(folder)
+
+    _resolve(graph, [book], root)
+
+    assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"
+
+
+def test_single_book_leaf_folder_named_like_series_becomes_series(tmp_path):
+    # Root/Series/OneBook.mp3: the folder resembles the book's series (not its title), so it is a
+    # series folder.
+    root = tmp_path / "lib"
+    folder = root / "Mistborn"
+    book = _book(folder, ["Brandon Sanderson"], Provenance.TAG.value)
+    book.title = "The Final Empire"
+    book.series = [SeriesRef(name="Mistborn", sequence=1)]
+    book.provenance["series"] = Provenance.TAG.value
+    graph = _graph_with_dirs(folder)
+
+    _resolve(graph, [book], root)
+
+    assert graph.directories[DirectoryNode.id_for(folder)].kind == "series"
 
 
 def test_propagate_manual_author_fills_empty_not_tag(tmp_path):

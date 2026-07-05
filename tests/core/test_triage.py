@@ -85,12 +85,15 @@ def test_missing_fields():
 
 
 def test_has_open_findings():
-    f = Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN, detail="x")
+    f = Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR, detail="x")
     assert has_open_findings(_book(findings=[f]))
     assert not has_open_findings(
-        _book(findings=[f], acknowledged_findings=[FindingCode.LOOSE_IN_AUTHOR])
+        _book(findings=[f], acknowledged_findings=[FindingCode.MIXED_WORKS])
     )
     assert not has_open_findings(_book())
+    # LOOSE_IN_AUTHOR is retired from the user-facing surface -> not an open finding
+    loose = Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN, detail="x")
+    assert not has_open_findings(_book(findings=[loose]))
 
 
 def test_facet_defaults_are_no_constraint():
@@ -119,7 +122,7 @@ def test_apply_facets_missing_and_findings():
                       asin="A", narrators=["N"], publish_year=2020)
     assert apply_facets([no_cover, has_cover], {**FACET_DEFAULTS, "missing": ["cover"]}) == [no_cover]
 
-    f = Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN, detail="x")
+    f = Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR, detail="x")
     flagged = _book(findings=[f])
     clean = _book()
     assert apply_facets([flagged, clean], {**FACET_DEFAULTS, "findings": True}) == [flagged]

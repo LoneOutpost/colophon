@@ -185,10 +185,10 @@ def cluster(files: list[Path]) -> ClusterResult:
         signals.append(_signal("distinct_titles", 2, "files have different title text"))
         works = [_multi_work(files[i], per_file[i]) for i in range(n)]
         kind = ContentKind.MULTI
-    elif same_count or has_match_num:
-        # Ragged files can hide a distinguishing title in trailing chunks we did
-        # not compare; if any trailing chunk carries non-numeric text, stay UNKNOWN
-        # rather than wrongly merging separate books into one.
+    elif has_match_num:
+        # The multichapter hallmark: files share their text and differ only by a part number.
+        # Ragged files can hide a distinguishing title in trailing chunks we did not compare;
+        # if any trailing chunk carries non-numeric text, stay UNKNOWN rather than merging.
         trailing_text = not same_count and any(
             any(_text_sig(_tokens(c)) for c in per_file[f][min_len:]) for f in range(n)
         )
@@ -199,9 +199,20 @@ def cluster(files: list[Path]) -> ClusterResult:
             signals.append(_signal("parts_differ_by_number", 2, "files differ only by numbers"))
             works = [_parts_work(files, per_file)]
             kind = ContentKind.SINGLE
+    elif same_count:
+        # Identical stems (the files differ only by extension): one book's format/duplicate
+        # variants, kept as a single work — a title-folder DUP_FORMAT is flagged downstream.
+        signals.append(_signal("identical_stems", 1, "files share an identical name (format/duplicate)"))
+        works = [_parts_work(files, per_file)]
+        kind = ContentKind.SINGLE
     else:
+        # A shared leading title but a distinguishing trailing chunk and NO part number -> not
+        # chapters. Separate editions/versions of the book, one work (book) per file; downstream
+        # fans them out into distinct titles.
+        signals.append(_signal("no_part_numbers", 0,
+                               "files share a title but carry no chapter numbers (separate editions)"))
         works = [_multi_work(files[i], per_file[i]) for i in range(n)]
-        kind = ContentKind.UNKNOWN
+        kind = ContentKind.MULTI
 
     confidence = float(max(sum(s.points for s in signals), 0))
     return ClusterResult(kind, confidence, signals, works)

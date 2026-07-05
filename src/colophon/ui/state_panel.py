@@ -12,9 +12,10 @@ from typing import NamedTuple
 
 from nicegui import ui
 
-from colophon.core.models import BookUnit, Phase, PhaseState
+from colophon.core.models import BookState, BookUnit, Phase, PhaseState
 from colophon.core.phases import state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
+from colophon.core.review import review_reasons
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,22 @@ def phase_rows(book: BookUnit) -> list[PhaseRow]:
     return rows
 
 
+def _render_review_reasons(book: BookUnit) -> None:
+    """Why this book reads uncertain — the book-level analogue of a node's kind_evidence. Shown only
+    when there are reasons and the book isn't already source-verified/done."""
+    if book.state in (BookState.READY, BookState.ORGANIZED, BookState.ENCODED):
+        return
+    reasons = review_reasons(book)
+    if not reasons:
+        return
+    ui.label("Needs review because").classes("colophon-seccap")
+    with ui.column().classes("w-full q-gutter-xs"):
+        for reason in reasons:
+            with ui.row().classes("items-start no-wrap q-gutter-xs"):
+                ui.icon("error_outline", size="16px", color="warning").classes("q-mt-xs")
+                ui.label(reason).classes("col text-caption")
+
+
 def _render_identification(book: BookUnit) -> None:
     """The live local-identification evidence: what we think each identity field is, and where that
     value came from (its provenance tier). This is what the identity confidence is rolled up from."""
@@ -125,6 +142,7 @@ def render(controller, book: BookUnit) -> None:
                 "colophon-muted text-caption"
             )
 
+        _render_review_reasons(book)
         _render_identification(book)
 
         ui.label("Pipeline").classes("colophon-seccap")

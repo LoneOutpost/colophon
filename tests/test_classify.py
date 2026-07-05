@@ -192,13 +192,25 @@ def test_clean_single_title_has_no_findings():
     assert r.findings == []
 
 
-def test_unknown_content_emits_structure_unclear():
-    # Fully-untagged files where the clusterer cannot determine structure:
-    # "foo.mp3" and "foo - Subtitle.mp3" share the leading chunk but have ragged
-    # trailing text with no number-only variation → cluster() returns UNKNOWN.
+def test_same_title_no_numbers_split_as_separate_editions():
+    # "foo.mp3" and "foo - bar.mp3" share the leading title but differ by a non-numeric trailing
+    # chunk and carry no chapter numbers -> not one multi-chapter book; two separate editions.
     feats = [
         _feat("/lib/Brandon Sanderson/foo.mp3"),
         _feat("/lib/Brandon Sanderson/foo - bar.mp3"),
+    ]
+    r = _classify("/lib/Brandon Sanderson", "/lib", feats)
+    assert r.content_kind is ContentKind.MULTI
+    assert len(r.detected_works) == 2
+    assert not any(f.code is FC.STRUCTURE_UNCLEAR for f in r.findings)
+
+
+def test_unknown_content_emits_structure_unclear():
+    # Numbers vary but a trailing chunk hides distinguishing text the clusterer could not compare
+    # ("01 - Foo" vs "02") -> genuinely UNKNOWN structure, surfaced for review.
+    feats = [
+        _feat("/lib/Brandon Sanderson/01 - Foo.mp3"),
+        _feat("/lib/Brandon Sanderson/02.mp3"),
     ]
     r = _classify("/lib/Brandon Sanderson", "/lib", feats)
     assert r.content_kind is ContentKind.UNKNOWN

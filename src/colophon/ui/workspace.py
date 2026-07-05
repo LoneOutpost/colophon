@@ -24,6 +24,7 @@ from colophon.core.filename_parser import compile_template
 from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
+from colophon.core.review import review_reasons
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.triage import FACET_DEFAULTS, apply_facets, needs_human, sort_books
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
@@ -158,6 +159,27 @@ def _primary_confidence(book: BookUnit, threshold: float) -> tuple[float, str, s
     return (book.identity_confidence, _confidence_color(book.identity_confidence), _IDENTITY_TOOLTIP)
 
 
+# States that are finished/verified — a review-reason tooltip on their badge would be noise.
+_DONE_BADGE_STATES = frozenset({BookState.READY, BookState.ORGANIZED, BookState.ENCODED})
+
+
+def _review_tooltip(book: BookUnit) -> str | None:
+    """A one-line 'why this needs review' for the state badge, or None when nothing is wrong."""
+    if book.state in _DONE_BADGE_STATES:
+        return None
+    reasons = review_reasons(book)
+    return " ".join(reasons) if reasons else None
+
+
+def _state_badge(book: BookUnit) -> None:
+    """Render the per-book state badge, with a review-reason tooltip when the book is uncertain."""
+    label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
+    badge = ui.badge(label).props(f"color={color} outline")
+    tip = _review_tooltip(book)
+    if tip:
+        badge.tooltip(tip)
+
+
 _CHIP_FIELDS = ("genre", "tag")
 
 
@@ -215,19 +237,6 @@ def _render_cover(
             ui.icon("menu_book", color="grey-6").classes(icon)
 
 
-def _short_location(folder: Path | None) -> str:
-    """A compact display of a book's folder: the last two path segments joined by
-    ' / ' (for example 'Sanderson / The Way of Kings'), or the final segment alone,
-    or '' when there is no folder. The full path is shown in a tooltip by the
-    caller."""
-    if folder is None:
-        return ""
-    parts = [p for p in folder.parts if p not in ("/", "\\")]
-    if not parts:
-        return ""
-    return " / ".join(parts[-2:])
-
-
 def render_workspace(controller: AppController, initial_filter: str = "") -> None:
     apply_theme()
     # Make the content area fill exactly between the fixed header and footer so the
@@ -260,12 +269,25 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     ui.run_javascript(
         "(function(){"
         "if(window.__colophonResizerReady)return;window.__colophonResizerReady=true;"
-        "var MIN={nav:200,mid:320},MAX={nav:520,mid:960};"
-        "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'};"
+        "var MIN={nav:200,mid:340},MAX={nav:460,mid:600},DET_MIN=460,GAP=18;"
+        "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'},DEF={nav:260,mid:460};"
         "var KEY={nav:'colophon.navW',mid:'colophon.midW'};"
         "function setW(key,px){document.documentElement.style.setProperty(VAR[key],px+'px');}"
+        "function getW(k){var v=parseInt(getComputedStyle(document.documentElement)"
+        ".getPropertyValue(VAR[k]),10);return isNaN(v)?DEF[k]:v;}"
+        # Clamp both panes to their range, then to a window budget so the detail pane never
+        # drops below DET_MIN (shrink the middle first, then the nav). Runs on load + resize,
+        # so an over-wide persisted width is reined in on a smaller screen instead of squashing.
+        "function fit(){var W=window.innerWidth;"
+        "var nav=Math.max(MIN.nav,Math.min(MAX.nav,getW('nav')));"
+        "var mid=Math.max(MIN.mid,Math.min(MAX.mid,getW('mid')));"
+        "var over=(nav+mid+GAP+DET_MIN)-W;"
+        "if(over>0){var m=Math.max(MIN.mid,mid-over);over-=(mid-m);mid=m;}"
+        "if(over>0){nav=Math.max(MIN.nav,nav-over);}"
+        "setW('nav',nav);setW('mid',mid);}"
         "['nav','mid'].forEach(function(k){"
         "var v=localStorage.getItem(KEY[k]);if(v)setW(k,parseInt(v,10));});"
+        "fit();window.addEventListener('resize',fit);"
         "var drag=null;"
         "document.addEventListener('pointerdown',function(e){"
         "var h=e.target.closest&&e.target.closest('.colophon-resizer');if(!h)return;"
@@ -276,14 +298,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "document.addEventListener('pointermove',function(e){"
         "if(!drag)return;var w=drag.startW+(e.clientX-drag.startX);"
         "w=Math.round(Math.max(MIN[drag.key],Math.min(MAX[drag.key],w)));"
-        "setW(drag.key,w);drag.last=w;});"
+        "setW(drag.key,w);fit();drag.last=getW(drag.key);});"
         "document.addEventListener('pointerup',function(){"
         "if(!drag)return;if(drag.last)localStorage.setItem(KEY[drag.key],drag.last);"
         "drag=null;document.body.style.userSelect='';});"
         "window.colophonResetColumns=function(){"
         "['nav','mid'].forEach(function(k){"
         "localStorage.removeItem(KEY[k]);"
-        "document.documentElement.style.removeProperty(VAR[k]);});};"
+        "document.documentElement.style.removeProperty(VAR[k]);});fit();};"
         "})();"
     )
     dark = setup_dark_mode()
@@ -592,17 +614,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         _render_cover(book, width=112, height=168, icon="text-h2")
                         _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
                         ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
-                        _slabel, _scolor = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
-                        ui.badge(_slabel).props(f"color={_scolor} outline")
-                        if book.source_folder is not None:
-                            with ui.row().classes("items-center no-wrap q-gutter-xs").style("max-width:112px"):
-                                ui.icon("folder", size="14px").classes("colophon-muted")
-                                ui.label(_short_location(book.source_folder)).classes(
-                                    "text-caption colophon-muted ellipsis"
-                                ).tooltip(str(book.source_folder))
-                    # Main column: title, tools, grouped fields.
-                    with ui.column().classes("col q-gutter-none"):
+                        _state_badge(book)
+                    # Main column: title, source path, tools, grouped fields.
+                    with ui.column().classes("col q-gutter-none").style("min-width: 0"):
                         ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
+                        if book.source_folder is not None:
+                            with ui.row().classes("items-center no-wrap w-full q-gutter-xs q-mb-xs"):
+                                ui.icon("folder", size="14px").classes("colophon-muted")
+                                ui.label(str(book.source_folder)).classes(
+                                    "text-caption colophon-muted ellipsis col"
+                                ).style("min-width: 0; direction: rtl; text-align: left; "
+                                        "unicode-bidi: plaintext").tooltip(str(book.source_folder))
                         if book.confidence_signals:
                             with ui.row().classes("items-center w-full q-gutter-xs q-mb-xs"):
                                 for sig in book.confidence_signals:
@@ -983,10 +1005,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         )
                     _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
                     ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
-                    _slabel, _scolor = _STATE_BADGE.get(
-                        book.state, (book.state.value, "grey-6")
-                    )
-                    ui.badge(_slabel).props(f"color={_scolor} outline")
+                    _state_badge(book)
                     if book.missing:
                         ui.badge("Missing").props("color=warning outline").tooltip(
                             "This book's folder is gone from disk. Remove it or "
@@ -1854,7 +1873,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 middle_count = ui.label("").classes("text-caption colophon-muted")
             middle_toolbar = ui.column().classes("w-full gap-1 q-mt-xs")
             ui.separator().classes("q-mt-xs")
-            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col")
+            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col colophon-book-scroll")
             with list_scroll:
                 list_container = ui.column().classes("w-full gap-0")
         ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")

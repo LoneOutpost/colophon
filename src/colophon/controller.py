@@ -41,6 +41,7 @@ from colophon.core.graph_resolve import (
 )
 from colophon.core.graph_view import grouping_cohort
 from colophon.core.models import (
+    SUPPRESSED_FINDINGS,
     BookState,
     BookUnit,
     ConfidenceSignal,
@@ -1046,8 +1047,12 @@ class AppController:
     }
 
     def _active_findings(self, book: BookUnit) -> list[Finding]:
-        """Findings not dismissed via acknowledge."""
-        return [f for f in book.findings if f.code not in book.acknowledged_findings]
+        """Findings not dismissed via acknowledge, excluding the ones retired from the user-facing
+        surface (e.g. LOOSE_IN_AUTHOR — the normal loose-file-in-author layout)."""
+        return [
+            f for f in book.findings
+            if f.code not in book.acknowledged_findings and f.code not in SUPPRESSED_FINDINGS
+        ]
 
     def books_needing_attention(self) -> list[BookUnit]:
         """All books carrying at least one un-acknowledged finding, most severe first."""
