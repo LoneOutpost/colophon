@@ -30,6 +30,7 @@ from colophon.core.triage import FACET_DEFAULTS, apply_facets, needs_human, sort
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
+from colophon.ui.chrome import jobs_indicator
 from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
@@ -1831,6 +1832,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated").tooltip(
             "Encode selected/ready books to M4B and/or move them into your library. Choose options first."
         )
+        jobs_indicator(controller)
         dark_mode_button(dark)
         ui.button(
             icon="view_column",

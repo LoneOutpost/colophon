@@ -33,7 +33,48 @@ def page_header(
         app_tabs(controller, active)
         ui.space()
         yield
+        jobs_indicator(controller)
         dark_mode_button(dark)
+
+
+def jobs_indicator(controller: AppController) -> None:
+    """A cross-session indicator of running background jobs (scan, re-probe, encode, downloads).
+    Reads the shared server-side registry, so every open browser shows the same live set. A compact
+    spinner + count chip in the app bar, click for a popover with each job's progress; hidden when
+    idle. A short poll keeps it live without a websocket push. The button and menu are persistent —
+    only the inner list re-renders — so an open popover stays open while its progress updates."""
+    btn = ui.button().props("flat dense round").classes("colophon-jobs-chip")
+    with btn:
+        ui.spinner(size="sm", color="primary")
+        badge = ui.badge("").props("floating color=primary rounded")
+        with ui.menu().props("anchor='bottom right' self='top right'").classes("colophon-jobs-menu"):
+            ui.item_label("Active jobs").props("header").classes("text-weight-medium")
+
+            @ui.refreshable
+            def job_list() -> None:
+                for j in controller.active_jobs():
+                    with ui.item(), ui.item_section():
+                        ui.item_label(j.label)
+                        frac = j.fraction
+                        if frac is not None:
+                            ui.linear_progress(value=frac, size="6px").props(
+                                "instant-feedback rounded color=primary"
+                            ).classes("q-mt-xs")
+                            tail = f" · {j.detail}" if j.detail else ""
+                            ui.item_label(f"{j.done} / {j.total}{tail}").props("caption")
+                        elif j.detail:
+                            ui.item_label(j.detail).props("caption")
+
+            job_list()
+
+    def tick() -> None:
+        jobs = controller.active_jobs()
+        btn.set_visibility(bool(jobs))
+        badge.set_text(str(len(jobs)))
+        job_list.refresh()
+
+    ui.timer(1.5, tick)
+    tick()
 
 
 @contextmanager
