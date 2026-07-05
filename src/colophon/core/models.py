@@ -86,6 +86,13 @@ RESTRUCTURE_FINDINGS = frozenset({
     FindingCode.MIXED_WORKS,
 })
 
+# Findings retired from the user-facing surface (not "Needs attention", not a review reason).
+# LOOSE_IN_AUTHOR — a single book sitting loose in an author folder — is the normal audiobook
+# layout under the graph model, not a problem to fix. It is still generated and kept in
+# RESTRUCTURE_FINDINGS because IDENTIFY reads it to name a foster container's author from its
+# folder; it is simply not shown as something the user must act on.
+SUPPRESSED_FINDINGS = frozenset({FindingCode.LOOSE_IN_AUTHOR})
+
 
 class Finding(_Base):
     """One structural finding about a book unit (recomputed each scan)."""
