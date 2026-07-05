@@ -39,6 +39,20 @@ def read_audio_metadata(path: Path) -> tuple[SourceFile, EmbeddedTags]:
     return _read_audio_metadata(str(path), st.st_mtime_ns, st.st_size, path)
 
 
+_HEADER_PEEK = 256 * 1024  # a real mp3's ID3 tag + first frames sit well within this
+
+
+def _has_data(path: Path) -> bool:
+    """True if the file's leading bytes contain any non-zero data. A zero-filled placeholder (an
+    incomplete download) has none — and ffprobe couldn't find audio there anyway — so this cheap
+    read avoids an expensive multi-MB ffprobe probe on a file that has nothing to recover."""
+    try:
+        with open(path, "rb") as fh:
+            return any(fh.read(_HEADER_PEEK))
+    except OSError:
+        return False
+
+
 @lru_cache(maxsize=AUDIO_META_CACHE_SIZE)
 def _read_audio_metadata(
     path_str: str, mtime_ns: int, size: int, path: Path
@@ -58,17 +72,21 @@ def _read_audio_metadata(
         # tag-container open so they aren't lost. Real library files always carry a stream,
         # so this fallback never fires on the hot path — the single load above stands.
         tags = read_embedded_tags(path)
-    # mutagen returns 0 for files it can't sync to (e.g. an mp3 with a broken/absent VBR header) even
-    # when the file has real audio. Fall back to ffprobe, which decodes the container/stream directly.
-    # Only on the failure path (a nonempty file mutagen read as 0s), so the hot path is unaffected.
+    # mutagen returns 0 for files it can't sync to (a broken/absent VBR header) even when the file
+    # has real audio. Only then do we consider ffprobe, which decodes the stream directly. But
+    # ffprobe reads several MB hunting for a frame, which is wasted on a zero-filled placeholder (an
+    # incomplete download) — the common cause of a 0-length nonempty file. So gate it on a cheap
+    # header peek: no data in the header means no audio to find, skip straight to 0.
     if duration <= 0.0 and size > 0:
-        try:
-            duration = probe_duration_seconds(path)
-            logger.info(f"duration: recovered {duration:.0f}s for {path} via ffprobe (mutagen read 0)")
-        except (FFmpegError, OSError):
-            # FFmpegError = ffprobe ran but found no duration (an empty/corrupt file); OSError =
-            # ffprobe isn't installed. Either way we couldn't recover — leave duration 0.
-            logger.warning(f"duration: no readable audio in {path} (mutagen and ffprobe both failed)")
+        if not _has_data(path):
+            logger.warning(f"duration: {path} is empty/zero-filled (incomplete download); no audio")
+        else:
+            try:
+                duration = probe_duration_seconds(path)
+                logger.info(f"duration: recovered {duration:.0f}s for {path} via ffprobe (mutagen 0)")
+            except (FFmpegError, OSError):
+                # ffprobe found no duration (corrupt) or isn't installed — leave duration 0.
+                logger.warning(f"duration: no readable audio in {path} (mutagen and ffprobe failed)")
     sf = SourceFile(
         path=path,
         size=size,
