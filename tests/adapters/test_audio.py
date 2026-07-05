@@ -107,3 +107,38 @@ def test_empty_file_reads_zero_duration_without_crashing(tmp_path):
     sf, _ = read_audio_metadata(p)
     assert sf.size == 8192
     assert sf.duration_seconds == 0.0
+
+
+def test_ffprobe_skipped_for_zero_filled_file(tmp_path, monkeypatch):
+    # A zero-filled placeholder (mutagen reads 0) must NOT trigger an ffprobe probe — there's no
+    # audio to recover, and probing reads several wasted MB. The gate short-circuits to 0.
+    from colophon.adapters import audio as audio_mod
+    from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+    p = tmp_path / "placeholder.mp3"
+    p.write_bytes(b"\x00" * (256 * 1024))
+    clear_audio_metadata_cache()
+    called = {"n": 0}
+    def _boom(_path):
+        called["n"] += 1
+        raise AssertionError("ffprobe should not run on a zero-filled file")
+    monkeypatch.setattr(audio_mod, "probe_duration_seconds", _boom)
+
+    sf, _ = read_audio_metadata(p)
+    assert sf.duration_seconds == 0.0
+    assert called["n"] == 0  # ffprobe was gated out
+
+
+def test_ffprobe_still_runs_for_a_file_with_data(tmp_path, monkeypatch):
+    # A file with real bytes that mutagen can't sync still gets the ffprobe fallback.
+    from colophon.adapters import audio as audio_mod
+    from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+    p = tmp_path / "headerless.mp3"
+    p.write_bytes(b"\x00" * 1024 + b"\xff\xfb" + b"data" * 1000)  # has non-zero data in the header
+    clear_audio_metadata_cache()
+    monkeypatch.setattr(audio_mod, "MutagenFile", lambda *a, **k: None)  # force mutagen failure
+    monkeypatch.setattr(audio_mod, "probe_duration_seconds", lambda _p: 123.0)
+
+    sf, _ = read_audio_metadata(p)
+    assert sf.duration_seconds == 123.0  # ffprobe ran and recovered it

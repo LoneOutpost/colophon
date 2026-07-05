@@ -132,6 +132,7 @@ logger = logging.getLogger(__name__)
 
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 _MATCH_CONCURRENCY = 8  # max books scanned concurrently during Identify/Quick Match
+_REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progress survives a restart
 
 
 class CoverSetResult(_Base):
@@ -438,7 +439,16 @@ class AppController:
 
         clear_audio_metadata_cache()
         targets = [b for b in self.ctx.books.list_all() if not only_missing or wants(b)]
-        changed: list[BookUnit] = []
+        changed = 0
+        pending: list[BookUnit] = []
+
+        def flush() -> None:
+            # Commit the accumulated batch (commit on the last upsert flushes the group). Batched so
+            # a long run persists incrementally — a restart mid-run keeps what's done, not nothing.
+            for i, b in enumerate(pending):
+                self.ctx.books.upsert(b, commit=(i == len(pending) - 1))
+            pending.clear()
+
         with self.ctx.jobs.track("Re-probe durations") as job:
             for n, book in enumerate(targets, start=1):
                 job.progress(n, len(targets), book.title or book.source_folder.name)
@@ -459,10 +469,12 @@ class AppController:
                     book.source_files = new_files
                     book.findings = new_findings
                     book.touch()
-                    changed.append(book)
-            for i, book in enumerate(changed):
-                self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
-        return len(changed)
+                    pending.append(book)
+                    changed += 1
+                if len(pending) >= _REPROBE_COMMIT_BATCH:
+                    flush()
+            flush()
+        return changed
 
     def active_jobs(self) -> list[Job]:
         """Snapshot of running background jobs, for the app-bar indicator (shared across sessions)."""
