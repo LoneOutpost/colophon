@@ -76,6 +76,7 @@ class FindingCode(StrEnum):
     DUP_FORMAT = "dup_format"
     DUP_EDITION = "dup_edition"
     STRUCTURE_UNCLEAR = "structure_unclear"
+    EMPTY_AUDIO = "empty_audio"  # a file with real size but no readable audio (corrupt/incomplete)
 
 
 # Findings whose remedy is fostering the folder into one subfolder per work.

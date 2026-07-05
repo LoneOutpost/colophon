@@ -3381,3 +3381,20 @@ def test_reprobe_is_idempotent_when_nothing_missing(tmp_path, make_audio):
     ctrl = AppController(ctx)
     ctrl.scan([tmp_path / "ingest"])
     assert ctrl.reprobe_durations() == 0  # every file already has a duration
+
+
+def test_reprobe_flags_empty_audio(tmp_path):
+    from colophon.core.models import FindingCode
+    ctx = _ctx(tmp_path)
+    # a nonempty file with no audio (zero-filled placeholder), scanned as 0 duration
+    folder = tmp_path / "ingest" / "Some Author" / "Some Book"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"\x00" * (128 * 1024))
+    ctrl = AppController(ctx)
+    ctrl.scan([tmp_path / "ingest"])
+    book = ctrl.ctx.books.list_all()[0]
+    assert book.source_files[0].duration_seconds == 0.0
+
+    ctrl.reprobe_durations()
+    flagged = ctrl.ctx.books.list_all()[0]
+    assert any(f.code is FindingCode.EMPTY_AUDIO for f in flagged.findings)

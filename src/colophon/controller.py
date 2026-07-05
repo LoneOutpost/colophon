@@ -419,12 +419,15 @@ class AppController:
         return self._resync_roots(roots)
 
     def reprobe_durations(self, *, only_missing: bool = True) -> int:
-        """Re-read source-file durations from disk and persist any that changed. With `only_missing`
-        (default) limits to books that currently have a file with a nonzero size but zero duration —
-        a file that should carry audio but read as 0 (before the ffprobe fallback existed, or a
-        since-completed download). Clears the audio cache first so an unchanged file is genuinely
-        re-probed. Returns the number of books updated; idempotent when nothing recovers."""
+        """Re-read source-file durations from disk and reconcile the EMPTY_AUDIO finding, persisting
+        any book that changed. With `only_missing` (default) limits to books that currently have a
+        file with a nonzero size but zero duration — a file that read as 0 (before the ffprobe
+        fallback existed, or a since-completed download). A file that recovers gets its real duration
+        and loses the flag; a file still reading 0 with real size gains an EMPTY_AUDIO finding
+        (corrupt / incomplete). Clears the audio cache so an unchanged file is genuinely re-read.
+        Returns the number of books updated."""
         from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+        from colophon.core.classify import empty_audio_finding
 
         def wants(book: BookUnit) -> bool:
             return any(sf.duration_seconds <= 0 < sf.size for sf in book.source_files)
@@ -443,8 +446,14 @@ class AppController:
                 if fresh.duration_seconds != sf.duration_seconds:
                     new_files[i] = fresh
                     moved = True
-            if moved:
+            # Reconcile the EMPTY_AUDIO finding against the (possibly refreshed) files.
+            finding = empty_audio_finding([(sf.size, sf.duration_seconds) for sf in new_files])
+            others = [f for f in book.findings if f.code is not FindingCode.EMPTY_AUDIO]
+            new_findings = others + ([finding] if finding is not None else [])
+            findings_moved = new_findings != book.findings
+            if moved or findings_moved:
                 book.source_files = new_files
+                book.findings = new_findings
                 book.touch()
                 changed.append(book)
         for i, book in enumerate(changed):

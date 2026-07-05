@@ -67,6 +67,15 @@ def test_structural_finding_surfaces_but_loose_in_author_does_not():
     assert review_reasons(loose) == []  # the normal loose-file layout is not a review reason
 
 
+def test_empty_audio_finding_is_a_review_reason():
+    b = _book(title="X", authors=["A"], identity_confidence=90.0,
+              findings=[Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR,
+                                detail="")])
+    b.provenance["authors"] = Provenance.TAG.value
+    reasons = review_reasons(b)
+    assert any("no readable content" in r for r in reasons)
+
+
 def test_acknowledged_finding_is_skipped():
     b = _book(title="X", authors=["A"], identity_confidence=90.0,
               findings=[Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR, detail="")],
