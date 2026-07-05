@@ -418,6 +418,39 @@ class AppController:
         }
         return self._resync_roots(roots)
 
+    def reprobe_durations(self, *, only_missing: bool = True) -> int:
+        """Re-read source-file durations from disk and persist any that changed. With `only_missing`
+        (default) limits to books that currently have a file with a nonzero size but zero duration —
+        a file that should carry audio but read as 0 (before the ffprobe fallback existed, or a
+        since-completed download). Clears the audio cache first so an unchanged file is genuinely
+        re-probed. Returns the number of books updated; idempotent when nothing recovers."""
+        from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+        def wants(book: BookUnit) -> bool:
+            return any(sf.duration_seconds <= 0 < sf.size for sf in book.source_files)
+
+        clear_audio_metadata_cache()
+        changed: list[BookUnit] = []
+        for book in self.ctx.books.list_all():
+            if only_missing and not wants(book):
+                continue
+            new_files = list(book.source_files)
+            moved = False
+            for i, sf in enumerate(book.source_files):
+                if sf.duration_seconds > 0 or not sf.path.exists():
+                    continue
+                fresh = read_audio_metadata(sf.path)[0]
+                if fresh.duration_seconds != sf.duration_seconds:
+                    new_files[i] = fresh
+                    moved = True
+            if moved:
+                book.source_files = new_files
+                book.touch()
+                changed.append(book)
+        for i, book in enumerate(changed):
+            self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
+        return len(changed)
+
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its
         scan root's entity records from the existing books (no scan, no filesystem walk,

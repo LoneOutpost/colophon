@@ -3354,3 +3354,30 @@ def test_numbered_series_folder_classifies_series_and_cleans_titles(tmp_path):
     assert books["Yendi"].series[0].sequence == 2.0
     assert books["Yendi"].authors != ["Vlad Taltos"]                    # the series name is no longer the author
     ctx.close()
+
+
+def test_reprobe_recovers_zero_duration(tmp_path, make_audio):
+    ctx = _ctx(tmp_path)
+    make_audio("ingest/Dune/01.mp3", seconds=1)  # a real 1s audio file
+    ingest = tmp_path / "ingest"
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = ctrl.ctx.books.list_all()[0]
+    assert book.source_files[0].duration_seconds > 0.5  # scanned with a real duration
+
+    # Simulate a pre-fallback scan that stored 0 duration for a real (nonzero-size) file.
+    broken = book.model_copy(deep=True)
+    broken.source_files[0].duration_seconds = 0.0
+    ctrl.ctx.books.upsert(broken)
+    assert ctrl.ctx.books.list_all()[0].source_files[0].duration_seconds == 0.0
+
+    assert ctrl.reprobe_durations() == 1
+    assert ctrl.ctx.books.list_all()[0].source_files[0].duration_seconds > 0.5
+
+
+def test_reprobe_is_idempotent_when_nothing_missing(tmp_path, make_audio):
+    ctx = _ctx(tmp_path)
+    make_audio("ingest/Dune/01.mp3", seconds=1)
+    ctrl = AppController(ctx)
+    ctrl.scan([tmp_path / "ingest"])
+    assert ctrl.reprobe_durations() == 0  # every file already has a duration

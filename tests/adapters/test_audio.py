@@ -78,3 +78,32 @@ def test_probe_audio_file_delegates_to_reader(make_audio):
     path = make_audio("01.mp3", seconds=1)
     sf = probe_audio_file(path)
     assert sf.path == path and sf.ext == "mp3" and sf.size > 0 and sf.duration_seconds > 0.5
+
+
+def test_ffprobe_fallback_recovers_duration_when_mutagen_reads_zero(make_audio, monkeypatch):
+    # A header-less-but-real file: mutagen can't sync to a frame (returns None), so duration falls
+    # back to ffprobe, which decodes the stream directly.
+    from colophon.adapters import audio as audio_mod
+    from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+    path = make_audio("real.mp3", seconds=1)
+    clear_audio_metadata_cache()
+    monkeypatch.setattr(audio_mod, "MutagenFile", lambda *a, **k: None)  # simulate mutagen failure
+
+    sf, _ = read_audio_metadata(path)
+    assert sf.size > 0
+    assert sf.duration_seconds > 0.5  # recovered via the ffprobe fallback
+
+
+def test_empty_file_reads_zero_duration_without_crashing(tmp_path):
+    # A nonempty file with no audio (zero-filled placeholder): mutagen and ffprobe both fail; the
+    # reader returns a real size with 0 duration rather than raising.
+    from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+    p = tmp_path / "placeholder.mp3"
+    p.write_bytes(b"\x00" * 8192)
+    clear_audio_metadata_cache()
+
+    sf, _ = read_audio_metadata(p)
+    assert sf.size == 8192
+    assert sf.duration_seconds == 0.0

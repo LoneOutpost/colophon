@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 
 from mutagen import File as MutagenFile
 from mutagen import MutagenError
 
+from colophon.adapters.ffmpeg import FFmpegError, probe_duration_seconds
 from colophon.adapters.tags import read_embedded_tags, tags_from_loaded
 from colophon.core.models import EmbeddedTags, SourceFile
+
+logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".m4b", ".mp4", ".aac", ".ogg", ".flac"}
 
@@ -54,6 +58,17 @@ def _read_audio_metadata(
         # tag-container open so they aren't lost. Real library files always carry a stream,
         # so this fallback never fires on the hot path — the single load above stands.
         tags = read_embedded_tags(path)
+    # mutagen returns 0 for files it can't sync to (e.g. an mp3 with a broken/absent VBR header) even
+    # when the file has real audio. Fall back to ffprobe, which decodes the container/stream directly.
+    # Only on the failure path (a nonempty file mutagen read as 0s), so the hot path is unaffected.
+    if duration <= 0.0 and size > 0:
+        try:
+            duration = probe_duration_seconds(path)
+            logger.info(f"duration: recovered {duration:.0f}s for {path} via ffprobe (mutagen read 0)")
+        except (FFmpegError, OSError):
+            # FFmpegError = ffprobe ran but found no duration (an empty/corrupt file); OSError =
+            # ffprobe isn't installed. Either way we couldn't recover — leave duration 0.
+            logger.warning(f"duration: no readable audio in {path} (mutagen and ffprobe both failed)")
     sf = SourceFile(
         path=path,
         size=size,

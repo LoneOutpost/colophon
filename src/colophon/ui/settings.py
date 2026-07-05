@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -400,3 +401,30 @@ def render_settings(controller: AppController) -> None:
 
         with ui.row().classes("w-full justify-end q-mt-sm"):
             ui.button("Save changes", icon="save", on_click=do_save).props("unelevated")
+
+        with page_section(
+            "Maintenance",
+            "One-off library repairs, run on demand.",
+        ):
+            reprobe_btn = ui.button("Re-probe durations", icon="graphic_eq").props("flat")
+
+            async def _reprobe() -> None:
+                reprobe_btn.props("loading")
+                try:
+                    n = await asyncio.to_thread(controller.reprobe_durations)
+                except Exception:
+                    logger.exception("re-probe durations failed")
+                    ui.notify("Re-probe failed (see logs)", type="negative")
+                    return
+                finally:
+                    reprobe_btn.props(remove="loading")
+                ui.notify(
+                    f"Re-probed durations: updated {n} book(s)" if n
+                    else "All readable files already have a duration"
+                )
+
+            reprobe_btn.on_click(_reprobe)
+            ui.label(
+                "Re-read length from disk for books that scanned as 0:00 — for example after a "
+                "download that was incomplete at scan time has finished."
+            ).classes("text-caption colophon-muted")
