@@ -899,7 +899,7 @@ async def scan_dialog(
                             return
                         show_results(plan)
 
-                    ui.button("Scan", icon="search", on_click=_run_scan).props("unelevated")
+                    ui.button("Scan", icon="radar", on_click=_run_scan).props("unelevated")
 
         def show_results(plan) -> None:
             body.clear()

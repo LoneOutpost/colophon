@@ -639,8 +639,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             with ui.element("div").classes("colophon-toolgroup col"):
                                 ui.label("Fetch from sources").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
-                                    ui.button("Matches", icon="search", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
-                                    ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
+                                    ui.button("Matches", icon="travel_explore", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
+                                    ui.button("Chapters", icon="toc", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
                                     ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
                             with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Confidence").classes("colophon-seccap")
@@ -667,7 +667,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Clean up").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
-                                    ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
+                                    ui.button("Normalize", icon="text_format", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
                                     ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
                             if book.missing:
                                 with ui.element("div").classes("colophon-toolgroup"):
@@ -908,11 +908,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     )
                     _clear_selection()
 
-                ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
+                ui.button("Normalize", icon="text_format", on_click=_normalize).props("outline")
 
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Quick Match", icon="auto_awesome", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
+                ui.button("Quick Match", icon="bolt", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
                 ui.button("Remap", icon="swap_horiz", on_click=lambda: bulk_remap_dialog(controller, books, clear_selection=_clear_selection)).props("outline").tooltip("Move one field's value to another across the selection")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
@@ -1175,7 +1175,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             fields_row = ui.row().classes("items-center w-full q-gutter-sm q-mt-sm")
             preview_box = ui.column().classes("w-full q-mt-sm")
-            apply_btn = ui.button("Apply to selection", icon="auto_fix_high")
+            apply_btn = ui.button("Apply to selection", icon="done_all")
 
             def _render_fields(present: list[str]) -> None:
                 fields_row.clear()
@@ -1603,7 +1603,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.button("Deselect visible", icon="remove_done", on_click=_deselect_visible) \
                     .props("flat dense no-caps").tooltip("Deselect only the books matching the current filter")
                 ui.space()
-                ui.button("Parse", icon="auto_fix_high", on_click=_parse_dialog) \
+                ui.button("Parse", icon="data_object", on_click=_parse_dialog) \
                     .props("flat dense no-caps").tooltip(
                         "Parse fields from the selected books' filenames"
                     )

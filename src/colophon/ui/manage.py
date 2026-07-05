@@ -41,7 +41,7 @@ def _render_utilities(controller: AppController) -> None:
         "Re-read length from disk for books that scanned as 0:00 — for example after a download "
         "that was incomplete at scan time has finished. Files with no readable audio are flagged.",
     ):
-        reprobe_btn = ui.button("Re-probe durations", icon="graphic_eq").props("unelevated")
+        reprobe_btn = ui.button("Re-probe durations", icon="timer").props("unelevated")
 
         async def _reprobe() -> None:
             reprobe_btn.props("loading")
