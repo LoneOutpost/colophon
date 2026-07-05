@@ -213,6 +213,24 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 # manual/match) is real evidence.
 _CIRCULAR_TITLE_PROV = frozenset({"directory", "graphing"})
 
+# Phrases that mark a title as a memoir/autobiography. High-precision on purpose: a memoir is often
+# titled after its subject, so an author-named folder whose book title contains one of these AND
+# embeds the author's name is the author's folder, not a title folder.
+_MEMOIR_MARKERS = ("memoir", "autobiography", "my story", "the story of", "my life")
+
+
+def _is_memoir_titled(title: str) -> bool:
+    low = title.casefold()
+    return any(m in low for m in _MEMOIR_MARKERS)
+
+
+def _name_is_proper_subset(name: str, title: str) -> bool:
+    """True when every token of `name` appears in `title` AND `title` has more — i.e. the folder
+    (author) name is embedded in a strictly longer title, not equal to it."""
+    from colophon.core.graph_resolve import _series_tokens
+    a, b = _series_tokens(name), _series_tokens(title)
+    return bool(a) and a < b
+
 
 def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
     """Decide a single-book leaf's folder by elimination against the one book's own fields. If the
@@ -244,7 +262,18 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     file_label = book.detected_works[0].label if book.detected_works else None
     label_has_text = bool(file_label) and bool(_text_sig(_tokens(file_label)))  # real words, not "01"
     file_title = real_title or (file_label if label_has_text else None)
+    has_real_author = bool(book.authors) and book.provenance.get("authors") not in _CIRCULAR_TITLE_PROV
+    at_author_depth = ctx.author_depth is not None and _depth(node.path, ctx.root) == ctx.author_depth
     if file_title and _resembles(name, file_title):
+        # A memoir/autobiography is often titled after its subject, so an author-named folder whose
+        # book title embeds the author's name ('Sam Walton' -> 'Sam Walton, made in America, my
+        # story') reads like a title match but is really the author's folder. Only flip when the
+        # folder is a strict fragment of a memoir-marked title, at the author depth, with no author of
+        # its own — additive, never fires on a non-memoir and never demotes a real title.
+        if (at_author_depth and not has_real_author
+                and _is_memoir_titled(file_title) and _name_is_proper_subset(name, file_title)):
+            return [Evidence("author", 3.0,
+                             "memoir/autobiography title contains the author's name", value=name)]
         return [Evidence("title", 5.0, "single-book leaf; folder name matches the title")]
     label = _series_label(book)
     if label is not None and _resembles(name, label[1]):
@@ -260,8 +289,6 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     # distinct from the folder (a bare track number like "01" identifies no title, so the folder name
     # stays the title). Otherwise it is a title folder; `_repair_leaf_titles` re-derives the book's
     # real title from the filename.
-    has_real_author = bool(book.authors) and book.provenance.get("authors") not in _CIRCULAR_TITLE_PROV
-    at_author_depth = ctx.author_depth is not None and _depth(node.path, ctx.root) == ctx.author_depth
     if not has_real_author and at_author_depth and file_title is not None:
         return [Evidence("author", 2.5,
                          "lone book at the author depth; folder names the author", value=name)]

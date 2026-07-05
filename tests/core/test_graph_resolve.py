@@ -226,6 +226,37 @@ def test_single_book_leaf_folder_named_like_title_stays_title(tmp_path):
     assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"
 
 
+def test_memoir_title_embedding_author_name_becomes_author(tmp_path):
+    # A memoir/autobiography is often titled after its subject, so an author folder whose book title
+    # embeds the author's name reads like a title match but is the author's folder.
+    root = tmp_path / "lib"
+    folder = root / "Sam Walton"
+    book = _book(folder, [])
+    book.title = "Sam Walton, made in America, my story"
+    book.provenance["title"] = Provenance.FILENAME.value
+    graph = _graph_with_dirs(folder)
+
+    _resolve(graph, [book], root)
+
+    node = graph.directories[DirectoryNode.id_for(folder)]
+    assert node.kind == "author" and node.author == "Sam Walton"
+
+
+def test_name_subset_without_memoir_marker_stays_title(tmp_path):
+    # The memoir flip is gated on a marker: a plain name-subset title (folder is a fragment of the
+    # title, no memoir marker) must NOT be flipped to author — e.g. 'Dune' under 'Dune Messiah'.
+    root = tmp_path / "lib"
+    folder = root / "Dune"
+    book = _book(folder, [])
+    book.title = "Dune Messiah"
+    book.provenance["title"] = Provenance.FILENAME.value
+    graph = _graph_with_dirs(folder)
+
+    _resolve(graph, [book], root)
+
+    assert graph.directories[DirectoryNode.id_for(folder)].kind == "title"
+
+
 def test_single_book_leaf_folder_named_like_series_becomes_series(tmp_path):
     # Root/Series/OneBook.mp3: the folder resembles the book's series (not its title), so it is a
     # series folder.
