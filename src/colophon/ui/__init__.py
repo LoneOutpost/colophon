@@ -69,6 +69,6 @@ def create_app(controller: AppController) -> None:
         render_settings(controller)
 
     @ui.page("/acquire")
-    def acquire() -> None:
+    def acquire(book: str = "") -> None:  # the URL query-param name is "book"
         preload_theme_background()
-        render_acquire(controller)
+        render_acquire(controller, book_id=book)

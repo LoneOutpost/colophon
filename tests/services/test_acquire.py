@@ -30,10 +30,10 @@ class FakeRd:
         return self._links[link]
 
 
-async def test_list_candidates_only_ready_and_classifies_audio():
+async def test_list_candidates_ready_classifies_audio_inprogress_shown():
     torrents = [
         RdTorrent(id="a", filename="Mistborn", status="downloaded"),
-        RdTorrent(id="b", filename="pending", status="downloading"),
+        RdTorrent(id="b", filename="pending", status="downloading", progress=42.0),
     ]
     infos = {
         "a": RdTorrentInfo(id="a", filename="Mistborn", status="downloaded", files=[
@@ -42,12 +42,15 @@ async def test_list_candidates_only_ready_and_classifies_audio():
         ]),
     }
     cands = await list_candidates(FakeRd(torrents=torrents, infos=infos))
-    assert len(cands) == 1
-    c = cands[0]
-    assert c.torrent.id == "a"
-    assert [f.path for f in c.audio_files] == ["/Mistborn/01.mp3"]
-    assert c.total_files == 2
-    assert c.is_audiobook is True
+    by_id = {c.torrent.id: c for c in cands}
+    # ready one: full file info + audio classification
+    assert by_id["a"].is_ready is True
+    assert [f.path for f in by_id["a"].audio_files] == ["/Mistborn/01.mp3"]
+    assert by_id["a"].total_files == 2 and by_id["a"].is_audiobook is True
+    # in-progress one: shown, no files, carries status/progress
+    assert by_id["b"].is_ready is False
+    assert by_id["b"].total_files == 0
+    assert by_id["b"].torrent.progress == 42.0
 
 
 async def test_list_candidates_isolates_info_failure():
@@ -57,7 +60,10 @@ async def test_list_candidates_isolates_info_failure():
 
     torrents = [RdTorrent(id="a", filename="X", status="downloaded")]
     cands = await list_candidates(Boom(torrents=torrents))
-    assert cands == []  # failure isolated, not raised
+    # Failure isolated (not raised): the torrent is surfaced as not-ready (no file list),
+    # not silently dropped.
+    assert len(cands) == 1
+    assert cands[0].is_ready is False and cands[0].total_files == 0
 
 
 async def test_download_torrent_keeps_audio_and_cover_skips_other(tmp_path, monkeypatch):
@@ -158,37 +164,50 @@ async def test_download_torrent_reuses_pinned_folder_for_resume(tmp_path, monkey
     assert (pinned / "01.mp3").exists()
 
 
-def test_structured_dests_strips_shared_root_keeps_discs(tmp_path):
+def test_structured_dests_names_container_after_torrent_top(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Expanse 1"
-    dests = structured_dests(["Expanse 1/Disc 1/01.mp3", "Expanse 1/Disc 2/02.mp3"], folder)
-    assert dests == [folder / "Disc 1" / "01.mp3", folder / "Disc 2" / "02.mp3"]
+    container, dests = structured_dests(
+        ["Mistborn/Disc 1/01.mp3", "Mistborn/Disc 2/01.mp3"], tmp_path, "torrent-name")
+    assert container == tmp_path / "Mistborn"  # the torrent's own top folder, not torrent-name
+    assert dests == [container / "Disc 1" / "01.mp3", container / "Disc 2" / "01.mp3"]
 
 
-def test_structured_dests_flat_when_no_shared_dir(tmp_path):
+def test_structured_dests_wraps_bare_files_in_torrent_name(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Bk"
-    assert structured_dests(["01.mp3", "02.mp3"], folder) == [folder / "01.mp3", folder / "02.mp3"]
+    container, dests = structured_dests(["01.mp3", "02.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "01.mp3", container / "02.mp3"]
 
 
-def test_structured_dests_distinct_top_dirs_no_collision(tmp_path):
+def test_structured_dests_distinct_top_dirs_wrap_and_keep_tree(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Bundle"
-    dests = structured_dests(["A/01.mp3", "B/01.mp3"], folder)
-    assert dests == [folder / "A" / "01.mp3", folder / "B" / "01.mp3"]
+    # No shared top -> wrap in torrent name, keep each file's full path (no collision).
+    container, dests = structured_dests(["A/01.mp3", "B/01.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "A" / "01.mp3", container / "B" / "01.mp3"]
 
 
-def test_structured_dests_subset_keeps_subbook_folder(tmp_path):
+def test_structured_dests_subset_keeps_full_tree(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Bundle"
-    dests = structured_dests(["Bundle/Book A/01.mp3", "Bundle/Book A/02.mp3"], folder)
-    assert dests == [folder / "Book A" / "01.mp3", folder / "Book A" / "02.mp3"]
+    container, dests = structured_dests(
+        ["Bundle/Book A/01.mp3", "Bundle/Book A/02.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "Book A" / "01.mp3", container / "Book A" / "02.mp3"]
 
 
-def test_structured_dests_sanitizes_and_strips_leading_slash(tmp_path):
+def test_structured_dests_honors_pinned_container(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "X"
-    assert structured_dests(["/X/a:b.mp3"], folder) == [folder / "a_b.mp3"]
+    pinned = tmp_path / "already"
+    container, dests = structured_dests(["Mistborn/Disc 1/01.mp3"], tmp_path, "n", pinned=pinned)
+    assert container == pinned
+    assert dests == [pinned / "Disc 1" / "01.mp3"]
+
+
+def test_structured_dests_sanitizes_components(tmp_path):
+    from colophon.services.acquire import structured_dests
+    container, dests = structured_dests(["/X/a:b.mp3", "/X/c?d.mp3"], tmp_path, "n")
+    assert container == tmp_path / "X"
+    assert dests == [container / "a_b.mp3", container / "c_d.mp3"]
 
 
 def test_plan_pairs_maps_links_to_selected_paths():

@@ -1257,6 +1257,82 @@ async def test_rd_download_threads_file_ids(tmp_path, monkeypatch):
     ctx.close()
 
 
+async def test_rd_download_uses_given_dest_dir_and_tracks_file_counts(tmp_path, monkeypatch):
+    from colophon.adapters.realdebrid import RdTorrentInfo
+    from colophon.services.acquire import AcquiredFile, AcquireResult
+
+    ctx = _ctx(tmp_path)
+    ctx.config.real_debrid_token = "t"
+    ctx.config.real_debrid_download_dir = tmp_path / "default"
+    ctrl = AppController(ctx)
+
+    class FakeClient:
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id=tid, filename="Bk", status="downloaded", links=["L1", "L2"])
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
+    captured = {}
+
+    async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
+                            progress=None, byte_progress=None, cancel=None):
+        captured["dest_root"] = dest_root
+        used = folder or (dest_root / "Bk")
+        used.mkdir(parents=True, exist_ok=True)
+        if progress is not None:
+            progress(1, 2, "01.mp3")
+            progress(2, 2, "02.mp3")   # drives the queue-count fields on the entry
+        (used / "01.mp3").write_bytes(b"")
+        return AcquireResult(folder=used, files=[AcquiredFile("01.mp3", used / "01.mp3", True)])
+
+    monkeypatch.setattr("colophon.controller.download_torrent", fake_download)
+
+    custom = tmp_path / "chosen"
+    await ctrl.rd_download("tid", name="Bk", dest_dir=custom)
+    assert captured["dest_root"] == custom               # override honored, not the default dir
+    entry = ctrl.active_downloads()[0]
+    assert entry.files_total == 2 and entry.files_done == 2
+    ctx.close()
+
+
+def test_cancel_download_discards_partials_and_entry(tmp_path):
+    from colophon.controller import DownloadEntry
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    folder = tmp_path / "dl"
+    folder.mkdir()
+    (folder / "01.mp3.part").write_bytes(b"x")   # a retained partial
+    ctrl._downloads["T"] = DownloadEntry(key="T", name="Bk", status="paused")
+    ctrl._download_folders["T"] = folder
+
+    ctrl.cancel_download("T")
+    assert "T" not in ctrl._downloads              # entry dropped
+    assert not (folder / "01.mp3.part").exists()   # partial deleted
+    assert not folder.exists()                     # emptied container removed
+    ctx.close()
+
+
+def test_cancel_download_keeps_other_files_in_a_shared_folder(tmp_path):
+    from colophon.controller import DownloadEntry
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book_folder = tmp_path / "book"
+    book_folder.mkdir()
+    (book_folder / "keep.m4b").write_bytes(b"good")   # a pre-existing file (book-folder fix)
+    (book_folder / "01.mp3.part").write_bytes(b"x")   # our partial
+    ctrl._downloads["T"] = DownloadEntry(key="T", name="Bk", status="active")
+    ctrl._download_folders["T"] = book_folder
+
+    ctrl.cancel_download("T")
+    assert not (book_folder / "01.mp3.part").exists()  # partial gone
+    assert (book_folder / "keep.m4b").exists()         # other files untouched
+    assert book_folder.exists()                        # non-empty folder kept
+    ctx.close()
+
+
 async def test_resume_download_reapplies_file_ids(tmp_path, monkeypatch):
     from colophon.adapters.realdebrid import RdTorrentInfo
     from colophon.services.acquire import AcquiredFile, AcquireResult

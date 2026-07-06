@@ -42,14 +42,10 @@ def test_bundle_multiple_audio_folders():
     assert is_single_audiobook(tree) is False
 
 
-def test_default_selection_single_picks_audio_bundle_empty():
-    single = build_file_tree([
+def test_default_selection_is_empty():
+    # No preselection: the user picks what to download.
+    tree = build_file_tree([
         RdTorrentFile(id=1, path="/Book/01.mp3", selected=True),
         RdTorrentFile(id=2, path="/Book/cover.jpg", selected=True),
     ])
-    assert default_selection(single) == {1}  # audio only
-    bundle = build_file_tree([
-        RdTorrentFile(id=1, path="/A/01.mp3", selected=True),
-        RdTorrentFile(id=2, path="/B/01.mp3", selected=True),
-    ])
-    assert default_selection(bundle) == set()
+    assert default_selection(tree) == set()
