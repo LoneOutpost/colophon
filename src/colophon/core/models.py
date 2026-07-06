@@ -94,6 +94,11 @@ RESTRUCTURE_FINDINGS = frozenset({
 # folder; it is simply not shown as something the user must act on.
 SUPPRESSED_FINDINGS = frozenset({FindingCode.LOOSE_IN_AUTHOR})
 
+# Findings that BLOCK persisted actions (tag/organize/encode): the fault is outside the app's
+# control, so no in-app edit can fix it and attempting to persist would error. Structural findings
+# like MIXED_WORKS are deliberately absent — those are fixable in-app by splitting the folder.
+BLOCKING_FINDINGS = frozenset({FindingCode.EMPTY_AUDIO})
+
 
 class Finding(_Base):
     """One structural finding about a book unit (recomputed each scan)."""

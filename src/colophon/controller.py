@@ -77,6 +77,7 @@ from colophon.core.quickmatch import (
     QuickMatchSummary,
 )
 from colophon.core.sources import MetadataSource, SourceQuery, SourceResult, arrange_sources
+from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
 from colophon.services.acquire import (
@@ -1156,6 +1157,13 @@ class AppController:
         batch_id = new_batch_id()
         results: list[TagCommitResult] = []
         for book in books:
+            # Backstop: never write tags into a book with a blocking error (missing/corrupt files) —
+            # the write would fail. Report it as a no-op so counts stay truthful.
+            if has_blocking_error(book):
+                results.append(TagCommitResult(book_id=book.id))
+                if progress is not None:
+                    progress(len(results), book, results[-1])
+                continue
             await ensure_cached_cover(book, dest_dir=book.source_folder)
             self.ctx.books.upsert(book)
             result = await asyncio.to_thread(
@@ -1840,6 +1848,10 @@ class AppController:
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->
         organize (move) -> tag once at the resting path -> optional source delete."""
+        # Backstop: a book with a blocking error (missing/corrupt files) can't be persisted — no
+        # in-app edit fixes it and attempting would error. Skip it even if a stale UI let it through.
+        if has_blocking_error(book):
+            return BookProcessResult(book_id=book.id, status="skipped", detail="blocking error")
         if options.encode:
             target = self._encode_target(book)
             if target.exists() and target != book.output_path:

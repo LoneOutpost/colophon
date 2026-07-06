@@ -3,7 +3,7 @@ findings). UI-agnostic so the Library page's facet filters are unit-testable wit
 
 from __future__ import annotations
 
-from colophon.core.models import SUPPRESSED_FINDINGS, BookState, BookUnit
+from colophon.core.models import BLOCKING_FINDINGS, SUPPRESSED_FINDINGS, BookState, BookUnit
 
 # States that do NOT need a human: finished work, or a deliberate skip.
 _DONE_STATES = {BookState.READY, BookState.ORGANIZED, BookState.ENCODED, BookState.SKIPPED}
@@ -80,8 +80,28 @@ def has_open_findings(book: BookUnit) -> bool:
     )
 
 
+def has_blocking_error(book: BookUnit) -> bool:
+    """True when a fault outside the app's control makes persisting (tag/organize/encode) impossible:
+    the book's folder is gone, or a file is corrupt/unreadable. These are not acknowledgeable — no
+    in-app edit fixes them — so blocked books are skipped by every persist path."""
+    return book.missing or any(f.code in BLOCKING_FINDINGS for f in book.findings)
+
+
+def blocking_reason(book: BookUnit) -> str | None:
+    """A human-readable reason a book is blocked, or None when it isn't — for the error indicator's
+    tooltip. Missing files take precedence over a corrupt-audio finding."""
+    if book.missing:
+        return "The book's files are missing from disk — restore the folder and rescan."
+    for f in book.findings:
+        if f.code in BLOCKING_FINDINGS:
+            return f.detail
+    return None
+
+
 # The "no constraint" facet selection. Copy with dict(FACET_DEFAULTS) before mutating.
-FACET_DEFAULTS = {"state": [], "confidence": [], "trust": None, "missing": [], "findings": False}
+FACET_DEFAULTS = {
+    "state": [], "confidence": [], "trust": None, "missing": [], "findings": False, "errors": False,
+}
 
 
 def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
@@ -92,6 +112,7 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
     trust = facets.get("trust")
     missing = set(facets.get("missing") or ())
     findings = bool(facets.get("findings"))
+    errors = bool(facets.get("errors"))
 
     out: list[BookUnit] = []
     for b in books:
@@ -106,6 +127,8 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
         if missing and not (missing & missing_fields(b)):
             continue
         if findings and not has_open_findings(b):
+            continue
+        if errors and not has_blocking_error(b):
             continue
         out.append(b)
     return out

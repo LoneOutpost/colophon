@@ -66,6 +66,12 @@ class TagCommitResult(_Base):
     written: int = 0
     failed: int = 0
 
+    @property
+    def ok(self) -> bool:
+        """True when no file write failed. A book with nothing written and nothing failed
+        (e.g. skipped) counts as ok — there was no error."""
+        return self.failed == 0
+
 
 def _load_cover(book: BookUnit) -> tuple[bytes, str] | None:
     if book.cover_path is None or not book.cover_path.exists():

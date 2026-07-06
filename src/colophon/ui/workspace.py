@@ -27,7 +27,14 @@ from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.perf import span
 from colophon.core.review import review_reasons
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
-from colophon.core.triage import FACET_DEFAULTS, apply_facets, needs_human, sort_books
+from colophon.core.triage import (
+    FACET_DEFAULTS,
+    apply_facets,
+    blocking_reason,
+    has_blocking_error,
+    needs_human,
+    sort_books,
+)
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
@@ -49,6 +56,7 @@ from colophon.ui.dialogs import (
     tag_dialog,
 )
 from colophon.ui.filter_input import filter_input
+from colophon.ui.graph_view import grid_url_for_book
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
@@ -634,7 +642,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         _state_badge(book)
                     # Main column: title, source path, tools, grouped fields.
                     with ui.column().classes("col q-gutter-none").style("min-width: 0"):
-                        ui.label(book.title or "(untitled)").classes("colophon-book-title text-h6")
+                        with ui.row().classes("items-center no-wrap w-full q-gutter-xs"):
+                            ui.label(book.title or "(untitled)").classes(
+                                "colophon-book-title text-h6 col ellipsis"
+                            )
+                            ui.button(
+                                icon="grid_view",
+                                on_click=lambda b=book: ui.navigate.to(grid_url_for_book(b.id)),
+                            ).props('flat dense round aria-label="Show in the graph grid"').tooltip(
+                                "Show this book in the graph grid"
+                            )
                         if book.source_folder is not None:
                             with ui.row().classes("items-center no-wrap w-full q-gutter-xs q-mb-xs"):
                                 ui.icon("folder", size="14px").classes("colophon-muted")
@@ -649,6 +666,15 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
                                         f"color={color} outline"
                                     ).tooltip(sig.detail)
+
+                        # Attention sits up top, right under the confidence read-out, so the score,
+                        # the signals behind it, and the problems that need a human read as one story.
+                        if controller._active_findings(book):
+                            with ui.element("div").classes("colophon-attention w-full q-mb-sm"):
+                                with ui.row().classes("items-center q-gutter-xs q-mb-xs"):
+                                    ui.icon("warning_amber", size="18px").classes("text-warning")
+                                    ui.label("Attention").classes("text-subtitle2")
+                                render_attention_pane(book)
 
                         # --- metadata tool groups ---
                         with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
@@ -725,14 +751,22 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 for _inp in inputs.values():
                     _inp.on_value_change(lambda _e=None: _set_dirty(True))
 
+                blocked = has_blocking_error(book)
+                block_tip = blocking_reason(book) if blocked else None
                 with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
                     ui.button("Save", icon="save", on_click=_save).props("unelevated")
-                    ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
+                    write_btn = ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
+                    write_btn.set_enabled(not blocked)
+                    if block_tip:
+                        write_btn.tooltip(f"Can't persist — {block_tip}")
                     ui.space()
-                    ui.button(
+                    ready_btn = ui.button(
                         "Mark ready", icon="check",
                         on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
                     ).props("flat")
+                    ready_btn.set_enabled(not blocked)
+                    if block_tip:
+                        ready_btn.tooltip(f"Can't mark ready — {block_tip}")
 
                 editor_state.update(
                     book_id=book_id, is_dirty=_is_dirty,
@@ -741,11 +775,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 )
                 _set_dirty(False)
                 _persist_view()
-
-                if controller._active_findings(book):
-                    ui.separator().classes("q-my-sm")
-                    ui.label("Attention").classes("text-subtitle2")
-                    render_attention_pane(book)
 
                 if book.source_files:
                     ui.separator().classes("q-my-sm")
@@ -1023,11 +1052,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
                     ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
                     _state_badge(book)
-                    if book.missing:
-                        ui.badge("Missing").props("color=warning outline").tooltip(
-                            "This book's folder is gone from disk. Remove it or "
-                            "restore the folder and rescan."
-                        )
+                    if has_blocking_error(book):
+                        # A hard error: files missing or corrupt/unreadable. Persisted actions are
+                        # blocked, so flag it red with the specific cause in the tooltip.
+                        ui.badge("Missing" if book.missing else "Error").props(
+                            "color=negative"
+                        ).tooltip(blocking_reason(book) or "Blocking problem")
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
                 line2 = f"{author} · {series}" if series else author
@@ -1617,6 +1647,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             ).props("dense no-caps").tooltip(
                 "Triage: books needing attention, worst-confidence first. Browse: the whole scope."
             )
+            ui.label(
+                "Books that still need a human — anything not Ready or Skipped, worst confidence first."
+                if view["mode"] == "triage"
+                else "Every book in the current scope, sorted by title."
+            ).classes("text-caption colophon-muted")
             with ui.row().classes("items-center w-full q-gutter-xs"):
                 ui.select(
                     {"detected": "Detected", "identified": "Identified",
@@ -1645,10 +1680,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     label="Sort", value=view["sort"],
                     on_change=lambda e: _set_sort(e.value),
                 ).props("dense outlined options-dense").style("min-width: 8.5rem; max-width: 11rem")
-            ui.checkbox(
-                "Open findings", value=view["facets"]["findings"],
-                on_change=lambda e: _set_facet("findings", e.value),
-            ).props("dense")
+            with ui.row().classes("items-center q-gutter-md"):
+                ui.checkbox(
+                    "Open findings", value=view["facets"]["findings"],
+                    on_change=lambda e: _set_facet("findings", e.value),
+                ).props("dense")
+                ui.checkbox(
+                    "Blocking errors", value=view["facets"]["errors"],
+                    on_change=lambda e: _set_facet("errors", e.value),
+                ).props("dense").tooltip(
+                    "Only books with a fault that blocks persisting — missing or corrupt files."
+                )
             search = filter_input(
                 _set_filter,
                 placeholder="Filter title, author, series, narrator, genre, tag, filename",
