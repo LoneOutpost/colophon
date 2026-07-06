@@ -1292,12 +1292,24 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             if menu is not None:
                 with ui.item_section().props("side"):
                     # Kebab opens its own menu; click.stop keeps the row's
-                    # on_click (scope navigation) from also firing.
+                    # on_click (scope navigation) from also firing. The menu's
+                    # contents are built lazily on first open, not up front:
+                    # with thousands of author/series rows, eagerly constructing
+                    # every (almost never opened) menu dominated nav render time.
                     with ui.button(icon="more_vert").props(
                         "flat dense round size=sm"
                     ).on("click.stop", lambda: None):
-                        with ui.menu():
-                            menu()
+                        node_menu = ui.menu()
+                        built = {"done": False}
+
+                        def _populate(_=None, m=node_menu, build=menu, built=built) -> None:
+                            if built["done"]:
+                                return
+                            built["done"] = True
+                            with m:
+                                build()
+
+                        node_menu.on("before-show", _populate)
 
     def _entity_menu(kind: str, name: str, aliases: dict[tuple[str, str], str]) -> None:
         """Populate the kebab menu for an author/series/franchise nav node:
