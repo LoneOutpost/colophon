@@ -84,6 +84,7 @@ from colophon.services.acquire import (
     AcquireCandidate,
     AcquireResult,
     add_torrent,
+    add_torrent_file,
     download_torrent,
     list_candidates,
     sanitize_name,
@@ -866,6 +867,14 @@ class AppController:
         client = self.rd_client()
         try:
             return await add_torrent(client, magnet, audio_only=audio_only)
+        finally:
+            await client.aclose()
+
+    async def rd_add_torrent_file(self, content: bytes, *, audio_only: bool = False) -> str:
+        """Upload a .torrent file to Real-Debrid and select its files. Returns the torrent id."""
+        client = self.rd_client()
+        try:
+            return await add_torrent_file(client, content, audio_only=audio_only)
         finally:
             await client.aclose()
 

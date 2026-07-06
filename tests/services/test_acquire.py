@@ -288,6 +288,47 @@ async def test_add_torrent_audio_only_selects_audio_ids():
     assert selected["ids"] == "1,3"  # audio files only
 
 
+async def test_add_torrent_file_uploads_and_selects_all_by_default():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import add_torrent_file
+
+    calls = {}
+
+    class FakeRd:
+        async def add_torrent_file(self, content):
+            calls["content"] = content
+            return "TID"
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id="TID", files=[RdTorrentFile(id=1, path="book.mp3")])
+        async def select_files(self, tid, file_ids):
+            calls["ids"] = file_ids
+
+    assert await add_torrent_file(FakeRd(), b"d8:announce...") == "TID"
+    assert calls["content"] == b"d8:announce..."  # raw bytes forwarded
+    assert calls["ids"] == "all"
+
+
+async def test_add_torrent_file_audio_only_selects_audio_ids():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import add_torrent_file
+
+    calls = {}
+
+    class FakeRd:
+        async def add_torrent_file(self, content):
+            return "TID"
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id="TID", files=[
+                RdTorrentFile(id=1, path="book.mp3"), RdTorrentFile(id=2, path="cover.jpg"),
+                RdTorrentFile(id=3, path="part2.m4b"),
+            ])
+        async def select_files(self, tid, file_ids):
+            calls["ids"] = file_ids
+
+    await add_torrent_file(FakeRd(), b"data", audio_only=True)
+    assert calls["ids"] == "1,3"
+
+
 async def test_add_torrent_audio_only_falls_back_to_all_when_no_audio():
     from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
     from colophon.services.acquire import add_torrent

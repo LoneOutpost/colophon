@@ -88,6 +88,24 @@ def render_acquire(controller: AppController) -> None:
                 "so you can pick any of them and keep the folder structure."
             )
             add_btn = ui.button("Add", icon="add")
+
+        async def _on_torrent_upload(e) -> None:
+            if not (e.file.name or "").lower().endswith(".torrent"):
+                ui.notify("Please choose a .torrent file", type="warning")
+                return
+            try:
+                data = await e.file.read()
+                await controller.rd_add_torrent_file(data, audio_only=bool(audio_only.value))
+            except Exception as ex:  # surface add failure to the operator (BLE001 intentional)
+                logger.warning(f"RD add .torrent failed: {ex}")
+                ui.notify("Could not add .torrent (see logs)", type="negative")
+                return
+            ui.notify("Added. It will appear here once Real-Debrid finishes preparing it.")
+
+        ui.upload(on_upload=_on_torrent_upload, auto_upload=True).props(
+            'accept=".torrent" flat dense label="or upload a .torrent file"'
+        ).classes("w-full")
+
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             load_btn = ui.button("Load torrents", icon="refresh")
             ui.switch("Show all (not just audiobooks)", on_change=lambda e: _set_show_all(e.value))
