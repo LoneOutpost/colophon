@@ -204,6 +204,14 @@ def book_haystack(book: BookUnit) -> str:
     ).lower()
 
 
+def _opening_mode(initial_filter: str) -> str:
+    """The Books mode the Library opens in. Defaults to Triage (worst-confidence,
+    needs-a-human first). But an explicit ?filter= jump — Manage/Stats "Show in Library" —
+    means "show me these books"; open in Browse so a match already past triage
+    (Ready/Organized/Encoded/Skipped) isn't hidden by the needs-a-human filter."""
+    return "browse" if initial_filter else "triage"
+
+
 def _editor_text(widget) -> str:
     """Read an editor widget's value as a '; '-joined string. Chip selects hold a
     list of values; text inputs hold a plain string."""
@@ -414,10 +422,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         book_filter["text"] = _restored.filter_text
     selected_ids.update(_restored.selected_ids)
 
-    # Triage view-state is ephemeral — always default to Triage on open (not persisted).
-    view["mode"] = "triage"
+    # Triage view-state is ephemeral — default to Triage on open (not persisted). A jump
+    # carrying an explicit ?filter= opens in Browse instead, so books already past triage
+    # aren't hidden from the very filter that navigated to them.
+    view["mode"] = _opening_mode(initial_filter)
     view["facets"] = dict(FACET_DEFAULTS)
-    view["sort"] = "conf_asc"
+    view["sort"] = "conf_asc" if view["mode"] == "triage" else "title"
 
     def _selected_books() -> list:
         return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
