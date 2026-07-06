@@ -43,6 +43,8 @@ def _graph():
 def test_display_kind():
     assert display_kind(_n("x", semantic="author")) == "author"
     assert display_kind(_n("x", semantic="book", book_id="b")) == "book"
+    # An identified title folder gets its own bucket, not the generic 'folder'.
+    assert display_kind(_n("x", semantic="title")) == "title"
     assert display_kind(_n("x", physical="file", name="f.mp3")) == "file"
     assert display_kind(_n("x", physical="directory", name="d")) == "folder"
 
@@ -78,12 +80,12 @@ def test_search_ranks_semantic_before_directories():
 def test_kind_constants_are_consistent():
     from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
 
-    assert KINDS == ("author", "series", "franchise", "book", "folder", "file")
+    assert KINDS == ("author", "series", "franchise", "book", "title", "folder", "file")
     assert set(KIND_COLOR) == set(KINDS)
     assert set(KIND_ICON) == set(KINDS)
     assert KIND_ICON == {
         "author": "person", "series": "layers", "franchise": "collections_bookmark",
-        "book": "menu_book", "folder": "folder", "file": "description",
+        "book": "menu_book", "title": "folder_special", "folder": "folder", "file": "description",
     }
 
 
@@ -95,6 +97,8 @@ def test_kind_symbols_are_echart_paths():
 
 
 def test_to_echart_structure():
+    from colophon.core.graph_explore import KINDS
+
     g = _graph()
     sub = neighborhood(g, "A", hops=1)
     opts = to_echart(g, sub, "A",
@@ -104,7 +108,7 @@ def test_to_echart_structure():
     assert series["type"] == "graph"
     assert len(series["data"]) == len(sub.node_ids)
     assert len(series["links"]) == len(sub.edges)
-    assert len(series["categories"]) == 6
+    assert len(series["categories"]) == len(KINDS)
     focal = next(d for d in series["data"] if d["id"] == "A")
     other = next(d for d in series["data"] if d["id"] == "b1")
     assert focal["symbolSize"] > other["symbolSize"]
