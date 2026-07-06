@@ -83,6 +83,10 @@ def render_acquire(controller: AppController) -> None:
             magnet_input = (
                 ui.input(placeholder="Paste a magnet link").props('dense clearable aria-label="Magnet link"').classes("col")
             )
+            audio_only = ui.switch("Audio only").props("dense").tooltip(
+                "On: Real-Debrid prepares only the audio files. Off: it prepares every file "
+                "so you can pick any of them and keep the folder structure."
+            )
             add_btn = ui.button("Add", icon="add")
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             load_btn = ui.button("Load torrents", icon="refresh")
@@ -109,7 +113,7 @@ def render_acquire(controller: AppController) -> None:
             return
         add_btn.props("loading=true")
         try:
-            await controller.rd_add_magnet(magnet)
+            await controller.rd_add_magnet(magnet, audio_only=bool(audio_only.value))
         except Exception as e:  # surface add failure to the operator (BLE001 intentional)
             logger.warning(f"RD add magnet failed: {e}")
             ui.notify("Could not add magnet (see logs)", type="negative")

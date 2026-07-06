@@ -84,6 +84,30 @@ async def test_download_torrent_keeps_audio_and_cover_skips_other(tmp_path, monk
     assert result.any_ok is True
 
 
+async def test_download_torrent_preserves_structure_no_collision(tmp_path, monkeypatch):
+    torrent = RdTorrentInfo(
+        id="a", filename="Expanse", status="downloaded", links=["L1", "L2"],
+        files=[
+            RdTorrentFile(id=1, path="/Expanse/Disc 1/01.mp3", selected=True),
+            RdTorrentFile(id=2, path="/Expanse/Disc 2/01.mp3", selected=True),
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/d1"),
+        "L2": RdUnrestrictedLink(filename="01.mp3", download="http://dl/d2"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    assert (result.folder / "Disc 1" / "01.mp3").exists()
+    assert (result.folder / "Disc 2" / "01.mp3").exists()  # no clobber despite same basename
+    assert sum(1 for f in result.files if f.ok) == 2
+
+
 async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch):
     torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1", "L2"])
     links = {
@@ -134,6 +158,84 @@ async def test_download_torrent_reuses_pinned_folder_for_resume(tmp_path, monkey
     assert (pinned / "01.mp3").exists()
 
 
+def test_structured_dests_strips_shared_root_keeps_discs(tmp_path):
+    from colophon.services.acquire import structured_dests
+    folder = tmp_path / "Expanse 1"
+    dests = structured_dests(["Expanse 1/Disc 1/01.mp3", "Expanse 1/Disc 2/02.mp3"], folder)
+    assert dests == [folder / "Disc 1" / "01.mp3", folder / "Disc 2" / "02.mp3"]
+
+
+def test_structured_dests_flat_when_no_shared_dir(tmp_path):
+    from colophon.services.acquire import structured_dests
+    folder = tmp_path / "Bk"
+    assert structured_dests(["01.mp3", "02.mp3"], folder) == [folder / "01.mp3", folder / "02.mp3"]
+
+
+def test_structured_dests_distinct_top_dirs_no_collision(tmp_path):
+    from colophon.services.acquire import structured_dests
+    folder = tmp_path / "Bundle"
+    dests = structured_dests(["A/01.mp3", "B/01.mp3"], folder)
+    assert dests == [folder / "A" / "01.mp3", folder / "B" / "01.mp3"]
+
+
+def test_structured_dests_subset_keeps_subbook_folder(tmp_path):
+    from colophon.services.acquire import structured_dests
+    folder = tmp_path / "Bundle"
+    dests = structured_dests(["Bundle/Book A/01.mp3", "Bundle/Book A/02.mp3"], folder)
+    assert dests == [folder / "Book A" / "01.mp3", folder / "Book A" / "02.mp3"]
+
+
+def test_structured_dests_sanitizes_and_strips_leading_slash(tmp_path):
+    from colophon.services.acquire import structured_dests
+    folder = tmp_path / "X"
+    assert structured_dests(["/X/a:b.mp3"], folder) == [folder / "a_b.mp3"]
+
+
+def test_plan_pairs_maps_links_to_selected_paths():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import plan_pairs
+    t = RdTorrentInfo(id="a", links=["L1", "L2"], files=[
+        RdTorrentFile(id=1, path="/A/01.mp3", selected=True),
+        RdTorrentFile(id=2, path="/A/02.mp3", selected=True),
+    ])
+    pairs, keep = plan_pairs(t, None)
+    assert pairs == [("/A/01.mp3", "L1"), ("/A/02.mp3", "L2")]
+    assert keep is None
+
+
+def test_plan_pairs_subset_keeps_only_chosen():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import plan_pairs
+    t = RdTorrentInfo(id="a", links=["L1", "L2", "L3"], files=[
+        RdTorrentFile(id=1, path="/A/01.mp3", selected=True),
+        RdTorrentFile(id=2, path="/B/01.mp3", selected=True),
+        RdTorrentFile(id=3, path="/C/01.mp3", selected=True),
+    ])
+    pairs, keep = plan_pairs(t, {2})
+    assert pairs == [("/B/01.mp3", "L2")]
+    assert keep is None
+
+
+def test_plan_pairs_falls_back_on_count_mismatch():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import plan_pairs
+    t = RdTorrentInfo(id="a", links=["L1"], files=[
+        RdTorrentFile(id=1, path="/A/keep.mp3", selected=True),
+        RdTorrentFile(id=2, path="/A/skip.mp3", selected=True),
+    ])
+    pairs, keep = plan_pairs(t, {1})
+    assert pairs is None
+    assert keep == {"keep.mp3"}
+
+
+def test_plan_pairs_no_files_is_flat_fallback():
+    from colophon.adapters.realdebrid import RdTorrent
+    from colophon.services.acquire import plan_pairs
+    t = RdTorrent(id="a", links=["L1", "L2"])  # no files list
+    pairs, keep = plan_pairs(t, None)
+    assert pairs is None and keep is None
+
+
 def test_sanitize_name_strips_separators():
     assert sanitize_name("a/b:c?.mp3") == "a_b_c_.mp3"
     assert sanitize_name("   ...   ") == "download"
@@ -145,7 +247,7 @@ def test_sanitize_name_clamps_length_and_keeps_extension():
     assert out.endswith(".mp3")
 
 
-async def test_add_torrent_selects_audio_files_only():
+async def test_add_torrent_selects_all_by_default():
     from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
     from colophon.services.acquire import add_torrent
 
@@ -156,18 +258,37 @@ async def test_add_torrent_selects_audio_files_only():
             return "TID"
         async def torrent_info(self, tid):
             return RdTorrentInfo(id="TID", files=[
-                RdTorrentFile(id=1, path="book.mp3"),
-                RdTorrentFile(id=2, path="cover.jpg"),
-                RdTorrentFile(id=3, path="part2.m4b"),
+                RdTorrentFile(id=1, path="book.mp3"), RdTorrentFile(id=2, path="cover.jpg"),
             ])
         async def select_files(self, tid, file_ids):
             selected["ids"] = file_ids
 
     assert await add_torrent(FakeRd(), "magnet:?x") == "TID"
-    assert selected["ids"] == "1,3"  # only the audio files
+    assert selected["ids"] == "all"  # prepare everything so the picker sees all files
 
 
-async def test_add_torrent_falls_back_to_all_when_no_audio():
+async def test_add_torrent_audio_only_selects_audio_ids():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import add_torrent
+
+    selected = {}
+
+    class FakeRd:
+        async def add_magnet(self, magnet):
+            return "TID"
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id="TID", files=[
+                RdTorrentFile(id=1, path="book.mp3"), RdTorrentFile(id=2, path="cover.jpg"),
+                RdTorrentFile(id=3, path="part2.m4b"),
+            ])
+        async def select_files(self, tid, file_ids):
+            selected["ids"] = file_ids
+
+    await add_torrent(FakeRd(), "magnet:?x", audio_only=True)
+    assert selected["ids"] == "1,3"  # audio files only
+
+
+async def test_add_torrent_audio_only_falls_back_to_all_when_no_audio():
     from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
     from colophon.services.acquire import add_torrent
 
@@ -181,7 +302,7 @@ async def test_add_torrent_falls_back_to_all_when_no_audio():
         async def select_files(self, tid, file_ids):
             selected["ids"] = file_ids
 
-    await add_torrent(FakeRd(), "magnet:?x")
+    await add_torrent(FakeRd(), "magnet:?x", audio_only=True)
     assert selected["ids"] == "all"
 
 
