@@ -70,8 +70,5 @@ def is_single_audiobook(tree: list[FolderNode]) -> bool:
 
 
 def default_selection(tree: list[FolderNode]) -> set[int]:
-    """Smart default: a single audiobook pre-checks its audio file ids; a bundle
-    pre-checks nothing (you pick the one book you want)."""
-    if is_single_audiobook(tree):
-        return {f.id for n in tree for f in n.files if f.is_audio}
+    """No preselection: the user picks what to download."""
     return set()
