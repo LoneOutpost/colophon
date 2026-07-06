@@ -197,6 +197,8 @@ class DownloadEntry(_Base):
     status: str = "active"  # active / paused / done / failed
     detail: str = ""
     file_ids: list[int] | None = None  # chosen file subset (None = default audio+cover)
+    files_total: int = 0               # files in this download (for the queue count)
+    files_done: int = 0                # files completed so far
 
 
 class EncodeJobOptions(_Base):
@@ -917,22 +919,44 @@ class AppController:
             self._download_cancels.pop(key, None)
             self._download_folders.pop(key, None)
 
-    def cancel_download(self, key: str) -> None:
-        """Signal a cancel for the in-flight download `key` (no-op if unknown)."""
+    def pause_download(self, key: str) -> None:
+        """Stop an in-flight download but keep its .part files for a later resume."""
         token = self._download_cancels.get(key)
         if token is not None:
             token.cancel()
+
+    def cancel_download(self, key: str) -> None:
+        """Abort a download and discard it: signal any in-flight token, delete the retained
+        partial (.part) files, remove an emptied container, and drop the entry. Deleting only
+        the partials (not the whole folder unless it is now empty) keeps a book-folder fix's
+        other files intact."""
+        token = self._download_cancels.get(key)
+        if token is not None:
+            token.cancel()
+        folder = self._download_folders.get(key)
+        if folder is not None and folder.exists():
+            for part in folder.rglob("*.part"):
+                part.unlink(missing_ok=True)
+            try:
+                folder.rmdir()  # only removes it if now empty
+            except OSError:
+                pass
+        self._downloads.pop(key, None)
+        self._download_cancels.pop(key, None)
+        self._download_folders.pop(key, None)
 
     async def _run_download(
         self, torrent_id: str, name: str,
         *, file_ids: list[int] | None = None,
         progress: Callable[[int, int, str], None] | None = None,
+        dest_dir: Path | None = None,
     ) -> tuple[AcquireResult, list[str]]:
         """Download one torrent and ingest its folder, tracking progress/status in
-        the registry. A cancel leaves the entry 'paused' (its .part files retained
+        the registry. A pause leaves the entry 'paused' (its .part files retained
         for resume); otherwise it ends 'done' or 'failed'. `file_ids` restricts the
         download to a chosen file subset (stored on the entry so a resume re-applies
-        it); None keeps the default audio+cover set."""
+        it); None keeps the default audio+cover set. `dest_dir` overrides the download
+        location (default: the configured downloads dir)."""
         entry = DownloadEntry(key=torrent_id, name=name, status="active", file_ids=file_ids)
         self._downloads[torrent_id] = entry
         token = CancelToken()
@@ -941,14 +965,19 @@ class AppController:
         def _byte_progress(done: int, total: int) -> None:
             entry.detail = f"{done * 100 // total}%" if total else f"{done} bytes"
 
+        def _prog(idx: int, total: int, fname: str) -> None:
+            entry.files_done, entry.files_total = idx, total
+            if progress is not None:
+                progress(idx, total, fname)
+
         client = self.rd_client()
         try:
             info = await client.torrent_info(torrent_id)
             result = await download_torrent(
-                client, info, self._rd_download_dir(),
+                client, info, dest_dir or self._rd_download_dir(),
                 folder=self._download_folders.get(torrent_id),
                 file_ids=set(file_ids) if file_ids is not None else None,
-                progress=progress, byte_progress=_byte_progress, cancel=token,
+                progress=_prog, byte_progress=_byte_progress, cancel=token,
             )
         finally:
             await client.aclose()
@@ -971,14 +1000,17 @@ class AppController:
         self, torrent_id: str, *, name: str | None = None,
         file_ids: list[int] | None = None,
         progress: Callable[[int, int, str], None] | None = None,
+        dest_dir: Path | None = None,
     ) -> tuple[AcquireResult, list[str]]:
         """Download a torrent (optionally only `file_ids`), then ingest the folder,
         tracked in the registry. Returns the download result and the ids of any newly
         registered books. `name` is the display label for the Downloads section
         (defaults to the torrent id); `file_ids=None` keeps the default audio+cover
-        set; `progress(idx, total, filename)` is the existing per-file callback."""
+        set; `progress(idx, total, filename)` is the existing per-file callback;
+        `dest_dir` overrides the download location."""
         return await self._run_download(
-            torrent_id, name or torrent_id, file_ids=file_ids, progress=progress
+            torrent_id, name or torrent_id, file_ids=file_ids, progress=progress,
+            dest_dir=dest_dir,
         )
 
     async def resume_download(self, key: str) -> tuple[AcquireResult, list[str]]:

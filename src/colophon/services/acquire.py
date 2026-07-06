@@ -29,6 +29,7 @@ class AcquireCandidate:
     torrent: RdTorrent
     audio_files: list[RdTorrentFile]
     total_files: int
+    is_ready: bool = True  # False for a torrent still preparing on RD (no file list yet)
 
     @property
     def is_audiobook(self) -> bool:
@@ -109,27 +110,30 @@ def _unique_dir(root: Path, name: str) -> Path:
 
 
 async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list[AcquireCandidate]:
-    """Ready RD torrents, each classified by whether it contains audio files.
-
-    One torrent's info failing is isolated (logged, omitted), never aborting the
-    whole listing."""
+    """All RD torrents. Ready ones ('downloaded') carry their file list + audio classification
+    and are pickable; in-progress ones are returned with their status/progress and no file list
+    (not yet pickable). One torrent's info failing is isolated (logged), never aborting the list."""
     torrents = await client.list_torrents(limit)
-    ready = [t for t in torrents if t.status == _READY_STATUS]
+    ready_ids = [t.id for t in torrents if t.status == _READY_STATUS]
 
-    async def _info(t: RdTorrent):
+    async def _info(tid: str):
         try:
-            return await client.torrent_info(t.id)
+            return await client.torrent_info(tid)
         except Exception:  # one torrent failing must not abort the listing (BLE001 intentional)
-            logger.warning(f"torrent_info failed for {t.id}", exc_info=True)
+            logger.warning(f"torrent_info failed for {tid}", exc_info=True)
             return None
 
-    infos = await asyncio.gather(*(_info(t) for t in ready))
+    infos = dict(zip(ready_ids, await asyncio.gather(*(_info(tid) for tid in ready_ids)), strict=True))
     candidates: list[AcquireCandidate] = []
-    for info in infos:
-        if info is None:
-            continue
-        audio = [f for f in info.files if is_audio_file(Path(f.path))]
-        candidates.append(AcquireCandidate(torrent=info, audio_files=audio, total_files=len(info.files)))
+    for t in torrents:
+        info = infos.get(t.id)
+        if info is not None:
+            audio = [f for f in info.files if is_audio_file(Path(f.path))]
+            candidates.append(AcquireCandidate(
+                torrent=info, audio_files=audio, total_files=len(info.files), is_ready=True))
+        else:
+            candidates.append(AcquireCandidate(
+                torrent=t, audio_files=[], total_files=0, is_ready=False))
     return candidates
 
 

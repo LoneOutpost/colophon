@@ -30,10 +30,10 @@ class FakeRd:
         return self._links[link]
 
 
-async def test_list_candidates_only_ready_and_classifies_audio():
+async def test_list_candidates_ready_classifies_audio_inprogress_shown():
     torrents = [
         RdTorrent(id="a", filename="Mistborn", status="downloaded"),
-        RdTorrent(id="b", filename="pending", status="downloading"),
+        RdTorrent(id="b", filename="pending", status="downloading", progress=42.0),
     ]
     infos = {
         "a": RdTorrentInfo(id="a", filename="Mistborn", status="downloaded", files=[
@@ -42,12 +42,15 @@ async def test_list_candidates_only_ready_and_classifies_audio():
         ]),
     }
     cands = await list_candidates(FakeRd(torrents=torrents, infos=infos))
-    assert len(cands) == 1
-    c = cands[0]
-    assert c.torrent.id == "a"
-    assert [f.path for f in c.audio_files] == ["/Mistborn/01.mp3"]
-    assert c.total_files == 2
-    assert c.is_audiobook is True
+    by_id = {c.torrent.id: c for c in cands}
+    # ready one: full file info + audio classification
+    assert by_id["a"].is_ready is True
+    assert [f.path for f in by_id["a"].audio_files] == ["/Mistborn/01.mp3"]
+    assert by_id["a"].total_files == 2 and by_id["a"].is_audiobook is True
+    # in-progress one: shown, no files, carries status/progress
+    assert by_id["b"].is_ready is False
+    assert by_id["b"].total_files == 0
+    assert by_id["b"].torrent.progress == 42.0
 
 
 async def test_list_candidates_isolates_info_failure():
@@ -57,7 +60,10 @@ async def test_list_candidates_isolates_info_failure():
 
     torrents = [RdTorrent(id="a", filename="X", status="downloaded")]
     cands = await list_candidates(Boom(torrents=torrents))
-    assert cands == []  # failure isolated, not raised
+    # Failure isolated (not raised): the torrent is surfaced as not-ready (no file list),
+    # not silently dropped.
+    assert len(cands) == 1
+    assert cands[0].is_ready is False and cands[0].total_files == 0
 
 
 async def test_download_torrent_keeps_audio_and_cover_skips_other(tmp_path, monkeypatch):
