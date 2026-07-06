@@ -676,6 +676,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     ui.icon("warning_amber", size="18px").classes("text-warning")
                                     ui.label("Attention").classes("text-subtitle2")
                                 render_attention_pane(book)
+                                ui.button(
+                                    "Full details in At a Glance", icon="insights",
+                                    on_click=lambda: _tabs.set_value("state"),
+                                ).props("flat dense no-caps").classes("q-mt-xs")
 
                         # --- metadata tool groups ---
                         with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
