@@ -950,6 +950,51 @@ async def test_write_tags_books_reports_progress_per_book(tmp_path):
     ctx.close()
 
 
+def test_write_tags_books_skips_blocking_error(tmp_path):
+    """A book with a blocking error (corrupt/unreadable audio) is never written — the backstop
+    skips it so a stale UI can't trigger a failing write."""
+    from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
+    from colophon.core.models import (
+        EmbeddedTags,
+        Finding,
+        FindingCode,
+        FindingSeverity,
+        SourceFile,
+    )
+
+    ctx = _ctx(tmp_path)
+    f = tmp_path / "ingest" / "01.mp3"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"")
+    write_embedded_tags(f, EmbeddedTags(title="Old"))
+    book = BookUnit.new(source_folder=f.parent)
+    book.title = "New Title"
+    book.source_files = [SourceFile(path=f, size=1, duration_seconds=0.0, ext="mp3")]
+    book.findings = [
+        Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")
+    ]
+    ctx.books.upsert(book)
+
+    (result,) = asyncio.run(AppController(ctx).write_tags_books([book]))
+    assert result.written == 0  # skipped, not written
+    assert read_embedded_tags(f).title == "Old"  # the file was left untouched
+    ctx.close()
+
+
+def test_process_book_skips_blocking_error(tmp_path):
+    """The encode/organize worker refuses a book whose files are gone — status 'skipped'."""
+    from colophon.controller import EncodeJobOptions
+
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.missing = True
+    ctx.books.upsert(book)
+    result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=True, organize=True))
+    assert result.status == "skipped"
+    assert "blocking" in (result.detail or "")
+    ctx.close()
+
+
 def test_process_one_embeds_tags_into_the_m4b(tmp_path, make_audio):
     from colophon.adapters.tags import read_embedded_tags
     from colophon.core.models import SourceFile

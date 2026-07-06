@@ -98,7 +98,7 @@ def test_has_open_findings():
 
 def test_facet_defaults_are_no_constraint():
     assert FACET_DEFAULTS == {"state": [], "confidence": [], "trust": None,
-                              "missing": [], "findings": False}
+                              "missing": [], "findings": False, "errors": False}
     books = [_book(confidence=10.0), _book(confidence=90.0)]
     assert apply_facets(books, dict(FACET_DEFAULTS)) == books  # nothing filtered
 
@@ -126,6 +126,40 @@ def test_apply_facets_missing_and_findings():
     flagged = _book(findings=[f])
     clean = _book()
     assert apply_facets([flagged, clean], {**FACET_DEFAULTS, "findings": True}) == [flagged]
+
+
+def test_has_blocking_error():
+    from colophon.core.triage import has_blocking_error
+    empty = Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")
+    mixed = Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR, detail="x")
+    assert has_blocking_error(_book(findings=[empty]))   # corrupt/unreadable audio
+    assert has_blocking_error(_book(missing=True))        # folder gone from disk
+    # A structural ERROR that IS fixable in-app (split the folder) is not blocking.
+    assert not has_blocking_error(_book(findings=[mixed]))
+    assert not has_blocking_error(_book())
+    # Blocking findings are not acknowledgeable — acknowledging must not clear the block.
+    assert has_blocking_error(
+        _book(findings=[empty], acknowledged_findings=[FindingCode.EMPTY_AUDIO])
+    )
+
+
+def test_blocking_reason():
+    from colophon.core.triage import blocking_reason
+    empty = Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")
+    assert blocking_reason(_book()) is None
+    assert "missing" in blocking_reason(_book(missing=True)).lower()
+    assert blocking_reason(_book(findings=[empty])) == "corrupt"
+    # Missing takes precedence over a corrupt-audio finding.
+    assert "missing" in blocking_reason(_book(missing=True, findings=[empty])).lower()
+
+
+def test_apply_facets_errors_only():
+    from colophon.core.triage import has_blocking_error
+    empty = Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")
+    blocked = _book(findings=[empty])
+    clean = _book()
+    assert has_blocking_error(blocked) and not has_blocking_error(clean)
+    assert apply_facets([blocked, clean], {**FACET_DEFAULTS, "errors": True}) == [blocked]
 
 
 def test_sort_books():
