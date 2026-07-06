@@ -158,37 +158,50 @@ async def test_download_torrent_reuses_pinned_folder_for_resume(tmp_path, monkey
     assert (pinned / "01.mp3").exists()
 
 
-def test_structured_dests_strips_shared_root_keeps_discs(tmp_path):
+def test_structured_dests_names_container_after_torrent_top(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Expanse 1"
-    dests = structured_dests(["Expanse 1/Disc 1/01.mp3", "Expanse 1/Disc 2/02.mp3"], folder)
-    assert dests == [folder / "Disc 1" / "01.mp3", folder / "Disc 2" / "02.mp3"]
+    container, dests = structured_dests(
+        ["Mistborn/Disc 1/01.mp3", "Mistborn/Disc 2/01.mp3"], tmp_path, "torrent-name")
+    assert container == tmp_path / "Mistborn"  # the torrent's own top folder, not torrent-name
+    assert dests == [container / "Disc 1" / "01.mp3", container / "Disc 2" / "01.mp3"]
 
 
-def test_structured_dests_flat_when_no_shared_dir(tmp_path):
+def test_structured_dests_wraps_bare_files_in_torrent_name(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Bk"
-    assert structured_dests(["01.mp3", "02.mp3"], folder) == [folder / "01.mp3", folder / "02.mp3"]
+    container, dests = structured_dests(["01.mp3", "02.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "01.mp3", container / "02.mp3"]
 
 
-def test_structured_dests_distinct_top_dirs_no_collision(tmp_path):
+def test_structured_dests_distinct_top_dirs_wrap_and_keep_tree(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Bundle"
-    dests = structured_dests(["A/01.mp3", "B/01.mp3"], folder)
-    assert dests == [folder / "A" / "01.mp3", folder / "B" / "01.mp3"]
+    # No shared top -> wrap in torrent name, keep each file's full path (no collision).
+    container, dests = structured_dests(["A/01.mp3", "B/01.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "A" / "01.mp3", container / "B" / "01.mp3"]
 
 
-def test_structured_dests_subset_keeps_subbook_folder(tmp_path):
+def test_structured_dests_subset_keeps_full_tree(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "Bundle"
-    dests = structured_dests(["Bundle/Book A/01.mp3", "Bundle/Book A/02.mp3"], folder)
-    assert dests == [folder / "Book A" / "01.mp3", folder / "Book A" / "02.mp3"]
+    container, dests = structured_dests(
+        ["Bundle/Book A/01.mp3", "Bundle/Book A/02.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "Book A" / "01.mp3", container / "Book A" / "02.mp3"]
 
 
-def test_structured_dests_sanitizes_and_strips_leading_slash(tmp_path):
+def test_structured_dests_honors_pinned_container(tmp_path):
     from colophon.services.acquire import structured_dests
-    folder = tmp_path / "X"
-    assert structured_dests(["/X/a:b.mp3"], folder) == [folder / "a_b.mp3"]
+    pinned = tmp_path / "already"
+    container, dests = structured_dests(["Mistborn/Disc 1/01.mp3"], tmp_path, "n", pinned=pinned)
+    assert container == pinned
+    assert dests == [pinned / "Disc 1" / "01.mp3"]
+
+
+def test_structured_dests_sanitizes_components(tmp_path):
+    from colophon.services.acquire import structured_dests
+    container, dests = structured_dests(["/X/a:b.mp3", "/X/c?d.mp3"], tmp_path, "n")
+    assert container == tmp_path / "X"
+    assert dests == [container / "a_b.mp3", container / "c_d.mp3"]
 
 
 def test_plan_pairs_maps_links_to_selected_paths():

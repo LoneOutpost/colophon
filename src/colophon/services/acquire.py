@@ -72,20 +72,29 @@ def sanitize_name(name: str) -> str:
     return cleaned
 
 
-def structured_dests(paths: list[str], folder: Path) -> list[Path]:
-    """Destination for each torrent-relative path under `folder`, preserving structure.
-    Strips a first component shared by every path when at least one file is nested
-    below it (it duplicates the torrent-named `folder`); keeps everything below. Each
-    component is sanitized. `paths` and the result are 1:1 and order-preserving."""
+def structured_dests(
+    paths: list[str], dest_dir: Path, torrent_name: str, *, pinned: Path | None = None
+) -> tuple[Path, list[Path]]:
+    """Return (container, dests): reproduce each torrent-relative path faithfully under a
+    container in `dest_dir`. When every path shares a top-level folder (the torrent's own
+    root), that folder IS the container and files keep their full path below it. Bare files
+    or mixed tops wrap in a `torrent_name` container. `pinned` reuses an existing container
+    (resume). Result is 1:1 and order-preserving with `paths`; each component is sanitized."""
     comps = [list(PurePosixPath(p.strip("/")).parts) for p in paths]
-    firsts = {c[0] for c in comps if c}
-    nested = any(len(c) > 1 for c in comps)
-    strip = len(firsts) == 1 and nested
-    dests: list[Path] = []
-    for c in comps:
-        rel = c[1:] if (strip and len(c) > 1) else c
-        dests.append(folder.joinpath(*[sanitize_name(part) for part in rel]) if rel else folder)
-    return dests
+    tops = {c[0] for c in comps if len(c) > 1}
+    shared = next(iter(tops)) if len(tops) == 1 and all(len(c) > 1 for c in comps) else None
+    if pinned is not None:
+        container = pinned
+    elif shared is not None:
+        container = _unique_dir(dest_dir, shared)
+    else:
+        container = _unique_dir(dest_dir, torrent_name)
+    rels = [c[1:] if shared is not None else c for c in comps]
+    dests = [
+        container.joinpath(*[sanitize_name(p) for p in rel]) if rel else container
+        for rel in rels
+    ]
+    return container, dests
 
 
 def _unique_dir(root: Path, name: str) -> Path:
@@ -206,10 +215,15 @@ async def download_torrent(
     fresh deduped subfolder is allocated. `progress(done, total, filename)` reports
     per-file granularity (file index of total links), not per-byte; that is the
     granularity the acquire UI surfaces."""
-    folder = folder or _unique_dir(dest_root, torrent.filename)
-    folder.mkdir(parents=True, exist_ok=True)
-    result = AcquireResult(folder=folder)
     pairs, keep_names = plan_pairs(torrent, file_ids)
+    if pairs is not None:
+        container, dests = structured_dests(
+            [p for p, _ in pairs], dest_root, torrent.filename, pinned=folder)
+    else:
+        container = folder or _unique_dir(dest_root, torrent.filename)
+        dests = None
+    container.mkdir(parents=True, exist_ok=True)
+    result = AcquireResult(folder=container)
 
     async def _fetch(url: str, dest: Path, display: str) -> bool:
         """Stream one file; record the outcome. Returns False to stop the batch (cancel)."""
@@ -224,9 +238,8 @@ async def download_torrent(
             result.files.append(AcquiredFile(filename=display, path=None, ok=False, error=str(e)))
         return True
 
-    if pairs is not None:
+    if dests is not None:
         # Structured: the destination comes from the torrent path, not unrestrict's filename.
-        dests = structured_dests([p for p, _ in pairs], folder)
         total = len(pairs)
         for idx, ((path, link), dest) in enumerate(zip(pairs, dests, strict=True), start=1):
             try:
@@ -258,14 +271,14 @@ async def download_torrent(
                 continue
             if progress is not None:
                 progress(idx, total, unr.filename)
-            dest = folder / sanitize_name(unr.filename)
+            dest = container / sanitize_name(unr.filename)
             if not await _fetch(unr.download, dest, unr.filename):
                 break
     if not result.any_ok:
         # Nothing landed; drop the staging dir if it is empty (leave it if .part
         # remnants remain, so a retry/cleanup can still find them).
         try:
-            folder.rmdir()
+            container.rmdir()
         except OSError:
             pass
     return result
