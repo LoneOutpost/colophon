@@ -11,11 +11,14 @@ from urllib.parse import quote
 from nicegui import ui
 
 from colophon.controller import AppController
+from colophon.core.perf import span
 from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
 from colophon.ui.dialogs import modal
 from colophon.ui.filter_input import filter_input
 
 logger = logging.getLogger(__name__)
+
+_PAGE = 100  # vocabulary rows rendered per chunk; the rest fill in via "Show more"
 
 _KIND_LABELS = {
     "author": "Authors",
@@ -240,6 +243,37 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
         _sync_buttons()
 
     def refresh() -> None:
+        with span("manage list render"):
+            _refresh()
+
+    def _entry_row(entry) -> None:
+        with ui.item():
+            with ui.item_section().props("avatar"):
+                ui.checkbox(
+                    value=entry.name in _selected(),
+                    on_change=lambda e, n=entry.name: _toggle_select(n, e.value),
+                ).props("dense")
+            with ui.item_section():
+                ui.item_label(entry.name)
+            with ui.item_section().props("side"):
+                with ui.row().classes("items-center no-wrap q-gutter-xs"):
+                    ui.badge(str(entry.count)).props("outline").classes("colophon-chip")
+                    ui.button(
+                        icon="arrow_outward",
+                        on_click=lambda n=entry.name: ui.navigate.to(f"/?filter={quote(n)}"),
+                    ).props('flat dense round aria-label="Show in Library"').tooltip("Show books in the Library")
+                    ui.button(
+                        icon="edit",
+                        on_click=lambda n=entry.name: _edit_dialog(n),
+                    ).props('flat dense round aria-label="Rename"').tooltip("Rename")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda n=entry.name, c=entry.count: _delete_dialog(n, c),
+                    ).props('flat dense round color=negative aria-label="Remove from all books"').tooltip(
+                        "Remove from all books"
+                    )
+
+    def _refresh() -> None:
         kind = state["kind"]
         needle = str(state["filter"]).strip().lower()
         entries = controller.catalog_entries(kind)  # type: ignore[arg-type]
@@ -251,38 +285,31 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
                 ui.label("No entries match" if needle else "No entries").classes(
                     "colophon-muted q-pa-md"
                 )
-            else:
-                with ui.list().props("separator dense").classes("w-full"):
-                    for entry in entries:
-                        with ui.item():
-                            with ui.item_section().props("avatar"):
-                                ui.checkbox(
-                                    value=entry.name in _selected(),
-                                    on_change=lambda e, n=entry.name: _toggle_select(n, e.value),
-                                ).props("dense")
-                            with ui.item_section():
-                                ui.item_label(entry.name)
-                            with ui.item_section().props("side"):
-                                with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                                    ui.badge(str(entry.count)).props("outline").classes("colophon-chip")
-                                    ui.button(
-                                        icon="arrow_outward",
-                                        on_click=lambda n=entry.name: ui.navigate.to(
-                                            f"/?filter={quote(n)}"
-                                        ),
-                                    ).props('flat dense round aria-label="Show in Library"').tooltip("Show books in the Library")
-                                    ui.button(
-                                        icon="edit",
-                                        on_click=lambda n=entry.name: _edit_dialog(n),
-                                    ).props('flat dense round aria-label="Rename"').tooltip("Rename")
-                                    ui.button(
-                                        icon="delete",
-                                        on_click=lambda n=entry.name, c=entry.count: _delete_dialog(
-                                            n, c
-                                        ),
-                                    ).props('flat dense round color=negative aria-label="Remove from all books"').tooltip(
-                                        "Remove from all books"
-                                    )
+                _sync_buttons()
+                return
+            # Authors alone can run to thousands of rows; building them all was the whole
+            # cost of a manage render (the data behind them is a few ms). Render a chunk and
+            # let "Show more" pull the rest, so the initial paint stays flat.
+            lst = ui.list().props("separator dense").classes("w-full")
+            more_row = ui.row().classes("w-full justify-center q-my-sm")
+            rendered = {"n": 0}
+
+            def _render_more() -> None:
+                end = min(rendered["n"] + _PAGE, len(entries))
+                with lst:
+                    for entry in entries[rendered["n"]:end]:
+                        _entry_row(entry)
+                rendered["n"] = end
+                more_row.clear()
+                remaining = len(entries) - end
+                if remaining:
+                    with more_row:
+                        ui.button(
+                            f"Show more ({remaining} left)", icon="expand_more",
+                            on_click=_render_more,
+                        ).props("flat no-caps")
+
+            _render_more()
         _sync_buttons()
 
     refresh()

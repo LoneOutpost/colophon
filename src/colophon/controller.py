@@ -67,6 +67,7 @@ from colophon.core.navigator import (
 from colophon.core.node_classify import book_identity_confidence, classify_nodes
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.pathscheme import build_target_path
+from colophon.core.perf import timed
 from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.quickmatch import (
@@ -586,6 +587,7 @@ class AppController:
             self.invalidate(book, phase)
 
     # --- dashboard ---
+    @timed("dashboard_stats")
     def dashboard_stats(self) -> dict[str, int]:
         books = self._hydrate(self.ctx.books.list_all())
         stats = {"total": len(books)}
@@ -736,6 +738,7 @@ class AppController:
         """Distinct genre names across the library, sorted (editor autocomplete)."""
         return self._distinct("genres", lambda b: b.genres)
 
+    @timed("catalog_entries")
     def catalog_entries(self, kind: str) -> list[CatalogEntry]:
         """Distinct values of `kind` across the whole library, with usage counts."""
         return list_entries(self.ctx.books.list_all(), kind)
@@ -758,6 +761,7 @@ class AppController:
         return self._distinct("tags", lambda b: b.tags)
 
     # --- workspace navigator ---
+    @timed("library_tree")
     def library_tree(self) -> LibraryTree:
         """Group all books into the entity-model tree, read from the maintained graph
         (`ctx.library_graph`). Conservative: `all_books`/`needs_id` come from `ctx.books`,
@@ -1804,6 +1808,7 @@ class AppController:
         by_state = self.ctx.books.count_by_state()
         return {"ready": by_state.get(BookState.READY.value, 0), "total": sum(by_state.values())}
 
+    @timed("books_for_scope")
     def books_for_scope(self, scope: str, selected_ids: set[str] | None = None) -> list[BookUnit]:
         """Resolve a Match/Persist scope to a concrete book list (hydrated). 'selected' = the given
         ids; 'ready' = books in the Ready state; anything else ('all') = the whole library. The ready

@@ -8,6 +8,7 @@ from fastapi import Response
 from nicegui import app, ui
 
 from colophon.controller import AppController
+from colophon.core.perf import span
 from colophon.ui.acquire import render_acquire
 from colophon.ui.franchises import render_franchises
 from colophon.ui.graph_view import render_graph
@@ -36,12 +37,14 @@ def create_app(controller: AppController) -> None:
         # so this page (the most navigated to) doesn't flash light on every visit.
         preload_theme_background()
         await ui.context.client.connected()
-        render_workspace(controller, initial_filter=filter)
+        with span("render / workspace"):
+            render_workspace(controller, initial_filter=filter)
 
     @ui.page("/manage")
     def manage(kind: str | None = None, filter: str = "") -> None:  # the URL query-param name is "filter"
         preload_theme_background()
-        render_manage(controller, initial_kind=kind, initial_filter=filter)
+        with span("render /manage"):
+            render_manage(controller, initial_kind=kind, initial_filter=filter)
 
     @ui.page("/stats")
     def stats() -> None:
