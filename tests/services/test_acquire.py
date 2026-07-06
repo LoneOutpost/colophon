@@ -114,6 +114,66 @@ async def test_download_torrent_preserves_structure_no_collision(tmp_path, monke
     assert sum(1 for f in result.files if f.ok) == 2
 
 
+async def test_download_preserves_structure_when_links_fewer_than_selected(tmp_path, monkeypatch):
+    # RD's real quirk: it returns FEWER links than selected files (e.g. 1638 vs 4440), so the
+    # index map can't be trusted. Structure must still be recovered by matching each link's
+    # unrestricted filename to a selected file's path — not flattened.
+    torrent = RdTorrentInfo(
+        id="a", filename="Collection", status="downloaded", links=["L1", "L2"],
+        files=[
+            RdTorrentFile(id=1, path="/Collection/Blake Crouch/Lightless.mp3", selected=True),
+            RdTorrentFile(id=2, path="/Collection/Blake Crouch/Supernova.mp3", selected=True),
+            RdTorrentFile(id=3, path="/Collection/Other/Third.mp3", selected=True),  # no link
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="Lightless.mp3", download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="Supernova.mp3", download="http://dl/2"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    assert (result.folder / "Blake Crouch" / "Lightless.mp3").exists()   # subfolder preserved
+    assert (result.folder / "Blake Crouch" / "Supernova.mp3").exists()
+    assert not (result.folder / "Lightless.mp3").exists()               # not flattened
+    assert sum(1 for f in result.files if f.ok) == 2
+
+
+async def test_download_mismatch_subset_preserves_structure(tmp_path, monkeypatch):
+    # Same quirk, but the user picked a subset (file_ids): only the picked files download, and
+    # they keep their structure.
+    torrent = RdTorrentInfo(
+        id="a", filename="Coll", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/Coll/A/one.mp3", selected=True),
+            RdTorrentFile(id=2, path="/Coll/B/two.mp3", selected=True),
+            RdTorrentFile(id=3, path="/Coll/C/three.mp3", selected=True),
+            RdTorrentFile(id=4, path="/Coll/D/four.mp3", selected=True),  # selected but no link
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="one.mp3", download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="two.mp3", download="http://dl/2"),
+        "L3": RdUnrestrictedLink(filename="three.mp3", download="http://dl/3"),
+    }
+    got = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+        got.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={2})
+    assert got == ["http://dl/2"]                                  # only the picked file
+    assert (result.folder / "B" / "two.mp3").exists()             # structure preserved
+    assert not (result.folder / "A" / "one.mp3").exists()
+
+
 async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch):
     torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1", "L2"])
     links = {
