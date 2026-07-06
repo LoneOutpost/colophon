@@ -836,7 +836,34 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 with ui.tab_panel("details").classes("q-pa-none"):
                     _details_body()
                 with ui.tab_panel("state").classes("q-pa-none"):
-                    state_panel.render(controller, book)
+                    async def _organize(b=book) -> None:
+                        await persist_dialog(
+                            controller, refresh_all=_refresh_all,
+                            selected_ids={b.id}, clear_selection=_clear_selection,
+                        )
+
+                    def _reprobe(b=book) -> None:
+                        if controller.reprobe_book(b):
+                            ui.notify("Re-probed — the file now reads")
+                        else:
+                            ui.notify(
+                                "Still no readable audio — replace the file first", type="warning"
+                            )
+                        refresh_list()
+                        show_detail(b.id)
+
+                    _attn = state_panel.AttentionActions(
+                        acquire=lambda: ui.navigate.to("/acquire"),
+                        reprobe=_reprobe,
+                        organize=_organize,
+                        files=lambda: _tabs.set_value("details"),
+                        matches=lambda b=book: compare_dialog(
+                            controller, b, show_detail=show_detail, refresh_list=refresh_list),
+                        acknowledge=lambda code, b=book: (
+                            controller.acknowledge_finding(b, code), refresh_list(),
+                            show_detail(b.id)),
+                    )
+                    state_panel.render(controller, book, actions=_attn)
 
     def _clear_selection() -> None:
         """Clear the ENTIRE selection across every view and collapse the bulk

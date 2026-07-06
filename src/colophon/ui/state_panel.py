@@ -7,17 +7,33 @@ pipeline phases, identification scoring, classification signals, and findings.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
 
 from nicegui import ui
 
-from colophon.core.models import BookState, BookUnit, Phase, PhaseState
+from colophon.core.guidance import FixAction, finding_guidance, review_guidance
+from colophon.core.models import BookState, BookUnit, FindingCode, Phase, PhaseState
 from colophon.core.phases import state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.review import review_reasons
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AttentionActions:
+    """Behaviors the At-a-Glance Attention section triggers, supplied by the workspace
+    (which owns the dialogs, tab control, selection, and navigation)."""
+
+    acquire: Callable[[], None]
+    reprobe: Callable[[], None]
+    organize: Callable[[], None]
+    files: Callable[[], None]
+    matches: Callable[[], None]
+    acknowledge: Callable[[FindingCode], None]
 
 _PHASE_LABELS: dict[Phase, str] = {
     Phase.SEARCH: "Search",
@@ -115,15 +131,38 @@ def _render_identification(book: BookUnit) -> None:
                         badge.tooltip(ptip)
 
 
-def render(controller, book: BookUnit) -> None:
-    """Read-only State tab for one book: derived state + confidence header, the phase
+_ACTION_META: dict[FixAction, tuple[str, str]] = {
+    FixAction.ACQUIRE: ("Go to Acquire", "cloud_download"),
+    FixAction.REPROBE: ("Re-probe", "timer"),
+    FixAction.ORGANIZE: ("Open Persist", "save"),
+    FixAction.FILES: ("Files", "folder"),
+    FixAction.MATCHES: ("Find matches", "travel_explore"),
+    FixAction.ACKNOWLEDGE: ("Acknowledge", "check"),
+}
+
+
+def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
+    """Read-only At-a-Glance tab for one book: derived state + confidence header, the phase
     timeline (with reserved, disabled per-phase re-run buttons), the confidence-signal
-    breakdown, classification signals, and active findings."""
+    breakdown, classification signals, and the Attention section (findings + a suggested
+    next action each)."""
     from colophon.ui.workspace import _STATE_BADGE, _confidence_color  # local: avoid import cycle
 
-    logger.debug(f"rendering State tab for book {book.id}")
+    logger.debug(f"rendering At a Glance tab for book {book.id}")
 
-    with ui.column().classes("w-full q-gutter-sm q-pa-sm"):
+    def _action_button(action: FixAction, code: FindingCode | None = None) -> None:
+        text, icon = _ACTION_META[action]
+        handlers: dict[FixAction, Callable[[], None]] = {
+            FixAction.ACQUIRE: actions.acquire,
+            FixAction.REPROBE: actions.reprobe,
+            FixAction.ORGANIZE: actions.organize,
+            FixAction.FILES: actions.files,
+            FixAction.MATCHES: actions.matches,
+            FixAction.ACKNOWLEDGE: (lambda c=code: actions.acknowledge(c)) if code else (lambda: None),
+        }
+        ui.button(text, icon=icon, on_click=handlers[action]).props("flat dense no-caps")
+
+    with ui.column().classes("w-full q-gutter-xs q-pa-sm"):
         with ui.row().classes("items-center q-gutter-sm"):
             label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
             ui.badge(label).props(f"color={color} outline")
@@ -143,6 +182,13 @@ def render(controller, book: BookUnit) -> None:
             )
 
         _render_review_reasons(book)
+        if review_reasons(book) and book.state not in (
+            BookState.READY, BookState.ORGANIZED, BookState.ENCODED
+        ):
+            with ui.row().classes("q-pl-lg q-gutter-xs"):
+                ui.label(review_guidance().suggestion).classes("colophon-muted text-caption")
+            with ui.row().classes("q-pl-lg q-gutter-xs q-mb-sm"):
+                _action_button(FixAction.MATCHES)
         _render_identification(book)
 
         ui.label("Pipeline").classes("colophon-seccap")
@@ -196,11 +242,17 @@ def render(controller, book: BookUnit) -> None:
 
         findings = controller._active_findings(book)
         if findings:
-            ui.label("Findings").classes("colophon-seccap")
+            ui.label("Attention").classes("colophon-seccap")
             for f in findings:
                 fc = {"error": "negative", "warn": "warning", "info": "info"}.get(
                     f.severity.value, "grey-6"
                 )
-                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                    ui.icon("flag", color=fc, size="16px")
-                    ui.label(f.detail).classes("col text-caption")
+                g = finding_guidance(f.code)
+                with ui.column().classes("w-full q-gutter-none q-mb-sm"):
+                    with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                        ui.icon("flag", color=fc, size="16px")
+                        ui.label(f.detail).classes("col text-caption")
+                    ui.label(g.suggestion).classes("colophon-muted text-caption q-pl-lg")
+                    with ui.row().classes("q-pl-lg q-gutter-xs"):
+                        for action in g.actions:
+                            _action_button(action, f.code)
