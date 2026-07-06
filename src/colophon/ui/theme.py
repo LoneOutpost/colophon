@@ -151,6 +151,8 @@ body.body--dark { color: #ece4d8; }
 .colophon-seccap { font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
   color: var(--colophon-accent); font-weight: 700; margin: 10px 0 4px; }
 .colophon-toolgroup { border: 1px solid var(--colophon-line); border-radius: 8px; padding: 6px 8px; }
+.colophon-attention { border: 1px solid var(--colophon-line); border-left: 3px solid #b45309;
+  border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
 .colophon-actionbar { position: sticky; bottom: 0; margin-top: 8px; padding: 8px 0;
   background: var(--colophon-surface); border-top: 1px solid var(--colophon-line); }
 .body--dark .colophon-actionbar { background: #262019; }

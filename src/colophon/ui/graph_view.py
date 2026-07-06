@@ -15,6 +15,7 @@ from nicegui import app, ui
 from colophon.controller import AppController
 from colophon.core.graph import DirectoryNode
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
+from colophon.core.graph_records import book_node_id
 from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
 from colophon.ui.chrome import body_column, page_header, page_toolbar
 from colophon.ui.dialogs import modal
@@ -307,6 +308,12 @@ def _graph_url(focal_id: str, hidden: frozenset[str], *, depth: int = 1) -> str:
     if hidden:
         url += f"&hide={','.join(sorted(hidden))}"
     return url
+
+
+def grid_url_for_book(book_id: str) -> str:
+    """The /graph Grid-explorer URL focused on a book's node — for the detail pane's
+    'Show in grid' jump. Keeps the explorer URL format in one place."""
+    return _mode_url("explorer", book_node_id(book_id))
 
 
 def _mode_url(mode: str, focal: str | None) -> str:

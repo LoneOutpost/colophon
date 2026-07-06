@@ -24,7 +24,7 @@ from colophon.core.models import BookUnit
 from colophon.core.pathscheme import sample_target
 from colophon.core.phases import LOCAL
 from colophon.core.sources import SourceResult
-from colophon.core.triage import has_weak_identity, is_ready_to_persist
+from colophon.core.triage import has_blocking_error, has_weak_identity, is_ready_to_persist
 from colophon.services.ingest import ScanOptions, ScanScope
 from colophon.ui.batch_log import BatchItem, BatchLog
 from colophon.ui.scope import scope_selector
@@ -625,7 +625,9 @@ async def bulk_tag_dialog(
                             )
                             ui.item_label(note).props("caption")
                         with ui.item_section().props("side"):
-                            statuses[b.id] = ui.item_label("queued").props("caption")
+                            statuses[b.id] = ui.item_label(
+                                "blocking error — will skip" if has_blocking_error(b) else "queued"
+                            ).props("caption")
         actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
         with actions:
             progress_label = ui.label().classes(
@@ -636,21 +638,25 @@ async def bulk_tag_dialog(
 
         async def _commit() -> None:
             def _on_progress(done: int, book, result) -> None:
-                statuses[book.id].set_text(
-                    f"written ({result.written})" if not result.failed
-                    else f"failed: {result.failed} file(s)"
-                )
+                if has_blocking_error(book):
+                    statuses[book.id].set_text("skipped — blocking error")
+                else:
+                    statuses[book.id].set_text(
+                        f"written ({result.written})" if not result.failed
+                        else f"failed: {result.failed} file(s)"
+                    )
                 progress_label.set_text(f"{done} / {len(books)} books")
 
             with busy(commit_btn):
                 results = await controller.write_tags_books(books, progress=_on_progress)
             wrote = sum(r.written for r in results)
             failed = sum(r.failed for r in results)
+            skipped = sum(1 for b in books if has_blocking_error(b))
             actions.clear()
             with actions:
                 note = f"Wrote {wrote} file(s) across {len(books)} books" + (
                     f", {failed} failed" if failed else ""
-                )
+                ) + (f", {skipped} skipped (blocking errors)" if skipped else "")
                 ui.label(note).classes("text-caption q-mr-auto self-center")
                 ui.button(
                     "Undo",
@@ -1109,14 +1115,21 @@ async def persist_dialog(
                 dele = ui.checkbox("Delete source files after (verified)").props("dense")
                 dele.bind_visibility_from(enc, "value")
 
+                block_warn = ui.label("").classes("text-caption text-negative q-mt-xs")
                 warn = ui.label("").classes("text-caption text-warning q-mt-xs")
 
                 def _refresh_warn() -> None:
                     books = controller.books_for_scope(scope.value, selected_ids)
-                    notready = sum(1 for b in books if not is_ready_to_persist(b))
+                    persistable = [b for b in books if not has_blocking_error(b)]
+                    blocked = len(books) - len(persistable)
+                    notready = sum(1 for b in persistable if not is_ready_to_persist(b))
+                    block_warn.set_text(
+                        f"⛔ {blocked} of {len(books)} have a blocking error (missing or corrupt "
+                        f"files) and will be skipped." if blocked else ""
+                    )
                     warn.set_text(
-                        f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed — persisting "
-                        f"may write unverified metadata." if notready else ""
+                        f"⚠ {notready} of {len(persistable)} aren't marked Ready/confirmed — "
+                        f"persisting may write unverified metadata." if notready else ""
                     )
 
                 scope.on_value_change(lambda _e: _refresh_warn())
@@ -1136,6 +1149,21 @@ async def persist_dialog(
                         if not books:
                             ui.notify("No books in that scope")
                             return
+                        # Blocking errors (missing/corrupt files) can't be persisted — drop them
+                        # here so we never attempt a write that would error.
+                        blocked = [b for b in books if has_blocking_error(b)]
+                        books = [b for b in books if not has_blocking_error(b)]
+                        if not books:
+                            ui.notify(
+                                "Every selected book has a blocking error (missing or corrupt "
+                                "files) — nothing to persist", type="negative",
+                            )
+                            return
+                        if blocked:
+                            ui.notify(
+                                f"Skipping {len(blocked)} book(s) with a blocking error",
+                                type="warning",
+                            )
                         opts = EncodeJobOptions(
                             encode=bool(enc.value), organize=bool(org.value),
                             delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
