@@ -24,7 +24,6 @@ class Job:
     done: int = 0
     total: int | None = None
     detail: str = ""
-    status: str = "running"  # running | done | failed
 
     @property
     def fraction(self) -> float | None:
@@ -45,12 +44,10 @@ class JobRegistry:
         self._lock = threading.Lock()
 
     def active(self) -> list[Job]:
-        """A snapshot of running jobs, oldest first. Copies so callers can read without the lock."""
+        """A snapshot of running jobs, oldest first — the registry only holds running jobs (a job is
+        removed when its block exits). Copies each so callers can read without the lock."""
         with self._lock:
-            return sorted(
-                (Job(**vars(j)) for j in self._jobs.values() if j.status == "running"),
-                key=lambda j: j.started_at,
-            )
+            return sorted((Job(**vars(j)) for j in self._jobs.values()), key=lambda j: j.started_at)
 
     def _start(self, label: str) -> Job:
         with self._lock:

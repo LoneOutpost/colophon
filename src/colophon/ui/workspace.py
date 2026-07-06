@@ -38,9 +38,9 @@ from colophon.ui.dialogs import (
     chapter_edit_dialog,
     compare_dialog,
     cover_dialog,
-    identify_dialog,
+    match_dialog,
     modal,
-    process_dialog,
+    persist_dialog,
     quick_match_dialog,
     remap_dialog,
     rename_dialog,
@@ -639,8 +639,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             with ui.element("div").classes("colophon-toolgroup col"):
                                 ui.label("Fetch from sources").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
-                                    ui.button("Matches", icon="search", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
-                                    ui.button("Chapters", icon="menu_book", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
+                                    ui.button("Matches", icon="travel_explore", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
+                                    ui.button("Chapters", icon="toc", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
                                     ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
                             with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Confidence").classes("colophon-seccap")
@@ -667,7 +667,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Clean up").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
-                                    ui.button("Normalize", icon="auto_fix_high", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
+                                    ui.button("Normalize", icon="text_format", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
                                     ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
                             if book.missing:
                                 with ui.element("div").classes("colophon-toolgroup"):
@@ -908,11 +908,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     )
                     _clear_selection()
 
-                ui.button("Normalize", icon="auto_fix_high", on_click=_normalize).props("outline")
+                ui.button("Normalize", icon="text_format", on_click=_normalize).props("outline")
 
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Quick Match", icon="auto_awesome", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
+                ui.button("Quick Match", icon="bolt", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
                 ui.button("Remap", icon="swap_horiz", on_click=lambda: bulk_remap_dialog(controller, books, clear_selection=_clear_selection)).props("outline").tooltip("Move one field's value to another across the selection")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
@@ -1175,7 +1175,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             fields_row = ui.row().classes("items-center w-full q-gutter-sm q-mt-sm")
             preview_box = ui.column().classes("w-full q-mt-sm")
-            apply_btn = ui.button("Apply to selection", icon="auto_fix_high")
+            apply_btn = ui.button("Apply to selection", icon="done_all")
 
             def _render_fields(present: list[str]) -> None:
                 fields_row.clear()
@@ -1603,7 +1603,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.button("Deselect visible", icon="remove_done", on_click=_deselect_visible) \
                     .props("flat dense no-caps").tooltip("Deselect only the books matching the current filter")
                 ui.space()
-                ui.button("Parse", icon="auto_fix_high", on_click=_parse_dialog) \
+                ui.button("Parse", icon="data_object", on_click=_parse_dialog) \
                     .props("flat dense no-caps").tooltip(
                         "Parse fields from the selected books' filenames"
                     )
@@ -1684,10 +1684,15 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ).props("flat dense").tooltip("Deselect every book, including any outside the current view")
             ui.button("Undo", icon="undo", on_click=_undo).props("flat dense")
 
+    # Set when the header pipeline stepper is built (below); called on every global refresh so the
+    # per-stage counts stay current after a scan / match / persist.
+    _stepper_refresh: dict[str, object] = {"fn": lambda: None}
+
     def _refresh_all() -> None:
         refresh_nav()
         _render_middle()
         refresh_status()
+        _stepper_refresh["fn"]()
         # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
         if len(selected_ids) >= 2:
             show_bulk()
@@ -1818,37 +1823,60 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "})();"
     )
 
+    async def _do_scan() -> None:
+        await scan_dialog(
+            controller, refresh_all=_refresh_all,
+            folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
+            selected_ids=set(selected_ids),
+        )
+
+    async def _do_match() -> None:
+        await match_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids))
+
+    async def _do_persist() -> None:
+        await persist_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),
+                             clear_selection=selected_ids.clear)
+
     with ui.header(elevated=True).classes("items-center q-px-md"):
         ui.icon("auto_stories", color="primary").classes("text-h5")
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         app_tabs(controller, "library")
         ui.space()
-        scan_btn = ui.button("Scan", icon="search").props("flat").tooltip(
-            "Find audiobooks in your scan paths and preview changes before applying."
-        )
-        identify_btn = ui.button("Identify", icon="travel_explore").props("flat").tooltip(
-            "Look up metadata from your sources and preview matches before applying."
-        )
-        process_btn = ui.button("Encode + organize", icon="play_arrow").props("unelevated").tooltip(
-            "Encode selected/ready books to M4B and/or move them into your library. Choose options first."
-        )
+
+        # The pipeline stepper: Scan -> Match -> Persist. Each stage is an action; the connectors
+        # read as the guided path. Match/Persist show a live readiness count.
+        _stage_badges: dict[str, object] = {}
+
+        def _stage(label, icon, key, on_click, *, primary=False) -> None:
+            btn = ui.button(on_click=on_click).props(
+                "no-caps " + ("unelevated" if primary else "flat")
+            ).classes("colophon-stage")
+            with btn, ui.row().classes("items-center no-wrap q-gutter-xs"):
+                ui.icon(icon)
+                ui.label(label)
+                if key:
+                    _stage_badges[key] = ui.badge("").props("color=grey-7 rounded")
+
+        _stage("Scan", "radar", None, _do_scan)
+        ui.icon("chevron_right").classes("colophon-muted")
+        _stage("Match", "join_inner", "identified", _do_match)
+        ui.icon("chevron_right").classes("colophon-muted")
+        _stage("Persist", "save", "ready", _do_persist, primary=True)
+
+        def _refresh_stepper() -> None:
+            counts = controller.pipeline_counts()
+            for key, badge in _stage_badges.items():
+                badge.set_text(str(counts.get(key, 0)))
+
+        _refresh_stepper()
+        _stepper_refresh["fn"] = _refresh_stepper
+
         jobs_indicator(controller)
         dark_mode_button(dark)
         ui.button(
             icon="view_column",
             on_click=lambda: ui.run_javascript("window.colophonResetColumns && colophonResetColumns()"),
         ).props("flat round").tooltip("Reset column widths")
-
-    scan_btn.on_click(
-        lambda: scan_dialog(
-            controller,
-            refresh_all=_refresh_all,
-            folder=Path(folder_filter["path"]) if folder_filter["path"] else None,
-            selected_ids=set(selected_ids),
-        )
-    )  # manages its own preview dialog + refresh
-    identify_btn.on_click(lambda: identify_dialog(controller, refresh_all=_refresh_all))  # streams its own preview dialog + refresh
-    process_btn.on_click(lambda: process_dialog(controller, _selected_books() or controller.ready_books(), refresh_all=_refresh_all, clear_selection=selected_ids.clear))  # manages its own progress dialog + refresh
 
     # The navigator is an in-content card rather than ui.left_drawer: the drawer
     # syncs its open state with a JavaScript round-trip on connect (1.0s timeout)

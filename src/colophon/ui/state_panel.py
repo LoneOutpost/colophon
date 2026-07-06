@@ -31,13 +31,13 @@ _PHASE_LABELS: dict[Phase, str] = {
 
 # Static, non-status icons reused by the nav phase mode and the timeline.
 _PHASE_ICONS: dict[Phase, str] = {
-    Phase.SEARCH: "search",
+    Phase.SEARCH: "radar",
     Phase.CATEGORIZE: "category",
     Phase.IDENTIFY: "fingerprint",
-    Phase.MATCH: "compare_arrows",
+    Phase.MATCH: "join_inner",
     Phase.TAG: "sell",
-    Phase.ORGANIZE: "folder_open",
-    Phase.ENCODE: "graphic_eq",
+    Phase.ORGANIZE: "drive_file_move",
+    Phase.ENCODE: "equalizer",
 }
 
 _PHASE_STATE_COLOR: dict[PhaseState, str] = {

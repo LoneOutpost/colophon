@@ -41,7 +41,7 @@ def _render_utilities(controller: AppController) -> None:
         "Re-read length from disk for books that scanned as 0:00 — for example after a download "
         "that was incomplete at scan time has finished. Files with no readable audio are flagged.",
     ):
-        reprobe_btn = ui.button("Re-probe durations", icon="graphic_eq").props("unelevated")
+        reprobe_btn = ui.button("Re-probe durations", icon="timer").props("unelevated")
 
         async def _reprobe() -> None:
             reprobe_btn.props("loading")
@@ -108,7 +108,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
             return
         ui.notify(f"Writing tags to {len(books)} book(s)...")
         results = await controller.write_tags_books(books)
-        ok = sum(1 for r in results if getattr(r, "ok", True))
+        ok = sum(1 for r in results if r.ok)
         ui.notify(f"Updated tags on {ok} of {len(books)} book(s)")
 
     def _write_tags_checkbox():
