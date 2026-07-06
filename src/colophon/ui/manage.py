@@ -11,6 +11,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from colophon.controller import AppController
+from colophon.core.perf import span
 from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
 from colophon.ui.dialogs import modal
 from colophon.ui.filter_input import filter_input
@@ -240,6 +241,10 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
         _sync_buttons()
 
     def refresh() -> None:
+        with span("manage list render"):
+            _refresh()
+
+    def _refresh() -> None:
         kind = state["kind"]
         needle = str(state["filter"]).strip().lower()
         entries = controller.catalog_entries(kind)  # type: ignore[arg-type]

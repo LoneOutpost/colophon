@@ -24,6 +24,7 @@ from colophon.core.filename_parser import compile_template
 from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
+from colophon.core.perf import span
 from colophon.core.review import review_reasons
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.triage import FACET_DEFAULTS, apply_facets, needs_human, sort_books
@@ -1063,6 +1064,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             _render_more()
 
     def refresh_list() -> None:
+        with span("list render"):
+            _refresh_list()
+
+    def _refresh_list() -> None:
         list_container.clear()
         row_elements.clear()
         books = _visible_books()
@@ -1689,13 +1694,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     _stepper_refresh: dict[str, object] = {"fn": lambda: None}
 
     def _refresh_all() -> None:
-        refresh_nav()
-        _render_middle()
-        refresh_status()
-        _stepper_refresh["fn"]()
-        # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
-        if len(selected_ids) >= 2:
-            show_bulk()
+        with span("refresh_all"):
+            with span("nav render"):
+                refresh_nav()
+            with span("middle render"):
+                _render_middle()
+            with span("status render"):
+                refresh_status()
+            _stepper_refresh["fn"]()
+            # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
+            if len(selected_ids) >= 2:
+                show_bulk()
 
     # --- async actions ---
     def _ui_safe(fn) -> None:
