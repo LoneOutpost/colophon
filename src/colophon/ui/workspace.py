@@ -88,7 +88,7 @@ def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
 
 
 # Short state label + Quasar color for the per-row state badge.
-_PAGE = 100  # book rows rendered per chunk (windowed list)
+_PAGE = 50  # book rows rendered per chunk; ~a viewport, the rest fill in on scroll
 _NAV_PAGE = 80  # navigator entity rows (author/series/franchise) rendered per chunk
 
 _STATE_BADGE: dict[BookState, tuple[str, str]] = {
