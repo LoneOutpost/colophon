@@ -3423,3 +3423,11 @@ def test_books_for_scope_and_pipeline_counts(tmp_path):
     assert {x.id for x in ctrl.books_for_scope("all")} == {ready.id, ident.id, review.id}
     assert {x.id for x in ctrl.books_for_scope("selected", {ident.id})} == {ident.id}
     assert ctrl.books_for_scope("selected", set()) == []
+    # A selected id that no longer exists is silently skipped, not hydrated as None.
+    assert {x.id for x in ctrl.books_for_scope("selected", {ident.id, "gone"})} == {ident.id}
+
+    # scope_counts feeds the selector's Ready/All labels from the stored state column, so they
+    # agree with pipeline_counts and with the set books_for_scope("ready") actually resolves.
+    scope = ctrl.scope_counts()
+    assert scope["ready"] == counts["ready"]
+    assert scope["total"] == len(ctrl.books_for_scope("all"))

@@ -12,8 +12,8 @@ from colophon.controller import AppController
 def scope_selector(controller: AppController, selected_ids: set[str]) -> ui.toggle:
     """Render the Selected / Ready / All toggle with counts and return it (read `.value`).
     Defaults to Selected when there's a selection, else Ready."""
-    stats = controller.dashboard_stats()
-    n_sel, n_ready, n_all = len(selected_ids), stats.get("ready", 0), stats.get("total", 0)
+    counts = controller.scope_counts()
+    n_sel, n_ready, n_all = len(selected_ids), counts["ready"], counts["total"]
     options = {
         "selected": f"Selected · {n_sel}",
         "ready": f"Ready · {n_ready}",
