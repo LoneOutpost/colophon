@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from nicegui import app, ui
 
@@ -857,7 +858,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         show_detail(b.id)
 
                     _attn = state_panel.AttentionActions(
-                        acquire=lambda: ui.navigate.to("/acquire"),
+                        acquire=lambda b=book: ui.navigate.to(f"/acquire?book={quote(b.id)}"),
                         reprobe=_reprobe,
                         organize=_organize,
                         files=lambda: _tabs.set_value("details"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from nicegui import background_tasks, ui
 
@@ -53,9 +54,12 @@ def _folder_caption(node: FolderNode, picks: set[int]) -> str:
     return f"{name}    ·    {state} · {_fmt_size(node.total_bytes)}"
 
 
-def render_acquire(controller: AppController) -> None:
+def render_acquire(controller: AppController, book_id: str = "") -> None:
     with page_header(controller, "acquire", icon="cloud_download", label="Acquire"):
         pass
+
+    # Optional book context (from ?book=), so a fix can download into that book's folder.
+    book = controller.get_book(book_id) if book_id else None
 
     if not controller.rd_configured():
         with ui.card().classes("q-ma-md"):
@@ -78,33 +82,49 @@ def render_acquire(controller: AppController) -> None:
     candidates: list = []
     scan_prompt = {"shown": False}
 
+    async def _on_torrent_upload(e) -> None:
+        if not (e.file.name or "").lower().endswith(".torrent"):
+            ui.notify("Please choose a .torrent file", type="warning")
+            return
+        try:
+            data = await e.file.read()
+            await controller.rd_add_torrent_file(data, audio_only=bool(audio_only.value))
+        except Exception as ex:  # surface add failure to the operator (BLE001 intentional)
+            logger.warning(f"RD add .torrent failed: {ex}")
+            ui.notify("Could not add .torrent (see logs)", type="negative")
+            return
+        ui.notify("Added. It will appear here once Real-Debrid finishes preparing it.")
+
     with page_toolbar():
+        # One row to add a source: paste a magnet, or browse/drop a .torrent.
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             magnet_input = (
                 ui.input(placeholder="Paste a magnet link").props('dense clearable aria-label="Magnet link"').classes("col")
             )
+            ui.upload(on_upload=_on_torrent_upload, auto_upload=True).props(
+                'accept=".torrent" flat dense label=".torrent"'
+            ).style("max-width: 14rem")
             audio_only = ui.switch("Audio only").props("dense").tooltip(
                 "On: Real-Debrid prepares only the audio files. Off: it prepares every file "
                 "so you can pick any of them and keep the folder structure."
             )
             add_btn = ui.button("Add", icon="add")
 
-        async def _on_torrent_upload(e) -> None:
-            if not (e.file.name or "").lower().endswith(".torrent"):
-                ui.notify("Please choose a .torrent file", type="warning")
-                return
-            try:
-                data = await e.file.read()
-                await controller.rd_add_torrent_file(data, audio_only=bool(audio_only.value))
-            except Exception as ex:  # surface add failure to the operator (BLE001 intentional)
-                logger.warning(f"RD add .torrent failed: {ex}")
-                ui.notify("Could not add .torrent (see logs)", type="negative")
-                return
-            ui.notify("Added. It will appear here once Real-Debrid finishes preparing it.")
-
-        ui.upload(on_upload=_on_torrent_upload, auto_upload=True).props(
-            'accept=".torrent" flat dense label="or upload a .torrent file"'
-        ).classes("w-full")
+        # Where downloads land: the saved default, editable per-download; a book fix can target
+        # the book's own folder.
+        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+            loc_input = (
+                ui.input("Download to", value=str(controller._rd_download_dir()))
+                .props("dense").classes("col")
+            )
+            ui.button(
+                "Default", on_click=lambda: loc_input.set_value(str(controller._rd_download_dir())),
+            ).props("flat dense no-caps").tooltip("Reset to the default from Settings")
+            if book is not None and book.source_folder is not None:
+                ui.button(
+                    "This book's folder", icon="folder",
+                    on_click=lambda: loc_input.set_value(str(book.source_folder)),
+                ).props("flat dense no-caps")
 
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             load_btn = ui.button("Load torrents", icon="refresh")
@@ -116,7 +136,7 @@ def render_acquire(controller: AppController) -> None:
     with page_body("full"):
         list_box = ui.column().classes("w-full gap-0")
         with ui.row().classes("items-center w-full"):
-            ui.label("Downloads").classes("text-subtitle1 text-weight-medium")
+            downloads_title = ui.label("Downloads").classes("text-subtitle1 text-weight-medium")
             ui.space()
             ui.button("Clear finished", icon="clear_all", on_click=lambda: _clear_finished()).props(
                 "flat dense"
@@ -149,7 +169,9 @@ def render_acquire(controller: AppController) -> None:
     def _visible() -> list:
         if show_all["value"]:
             return candidates
-        return [c for c in candidates if c.is_audiobook]
+        # In-progress torrents always show (so you see what you just added); the audiobook
+        # filter only narrows the ready ones.
+        return [c for c in candidates if c.is_audiobook or not c.is_ready]
 
     # selection helpers -------------------------------------------------------
     def _all_ids(tid: str) -> set[int]:
@@ -238,6 +260,17 @@ def render_acquire(controller: AppController) -> None:
 
     def _render_candidate(cand) -> None:
         tid = cand.torrent.id
+        if not cand.is_ready:
+            # Still preparing on Real-Debrid: show status/progress, not yet pickable.
+            with ui.item().props("dense"):
+                with ui.item_section().props("avatar"):
+                    ui.icon("cloud_sync").classes("colophon-muted")
+                with ui.item_section():
+                    ui.item_label(cand.torrent.filename or "(unnamed)")
+                    ui.item_label(
+                        f"{cand.torrent.status} · {cand.torrent.progress:.0f}%"
+                    ).props("caption").classes("colophon-muted")
+            return
         tree = trees[tid]
         picks = _picks(tid)
         all_ids = _all_ids(tid)
@@ -290,7 +323,7 @@ def render_acquire(controller: AppController) -> None:
             else:
                 for cand in visible:
                     tid = cand.torrent.id
-                    if tid not in trees:
+                    if cand.is_ready and tid not in trees:
                         trees[tid] = build_file_tree(cand.torrent.files)
                         file_picks[tid] = default_selection(trees[tid])
                     _render_candidate(cand)
@@ -315,9 +348,21 @@ def render_acquire(controller: AppController) -> None:
         _render_list()
 
     # --- downloads (registry-driven, polled) ---
+    def _pause(key: str) -> None:
+        controller.pause_download(key)
+        _render_downloads()
+
+    def _cancel(key: str) -> None:
+        controller.cancel_download(key)
+        _render_downloads()
+
     def _render_downloads() -> None:
         downloads_box.clear()
         entries = controller.active_downloads()
+        queued = sum(max(0, e.files_total - e.files_done) for e in entries if e.status == "active")
+        downloads_title.set_text(
+            f"Downloads — {queued} file(s) downloading" if queued else "Downloads"
+        )
         with downloads_box:
             if not entries:
                 ui.label("No downloads yet").classes("colophon-muted q-pa-md")
@@ -333,25 +378,32 @@ def render_acquire(controller: AppController) -> None:
                             detail = f"{entry.status} · {entry.detail}" if entry.detail else entry.status
                             ui.item_label(detail).props("caption").classes("colophon-muted")
                         if entry.status in ("active", "paused"):
-                            with ui.item_section().props("side"):
+                            with ui.item_section().props("side"), \
+                                    ui.row().classes("no-wrap q-gutter-xs"):
                                 if entry.status == "active":
                                     ui.button(
-                                        icon="close",
-                                        on_click=lambda _e, k=entry.key: controller.cancel_download(k),
-                                    ).props('flat dense round aria-label="Cancel download"').tooltip("Cancel")
+                                        icon="pause",
+                                        on_click=lambda _e, k=entry.key: _pause(k),
+                                    ).props('flat dense round aria-label="Pause download"').tooltip("Pause")
                                 else:
                                     ui.button(
                                         icon="play_arrow",
                                         on_click=lambda _e, k=entry.key: _resume(k),
                                     ).props('flat dense round aria-label="Resume download"').tooltip("Resume")
+                                ui.button(
+                                    icon="close",
+                                    on_click=lambda _e, k=entry.key: _cancel(k),
+                                ).props('flat dense round color=negative aria-label="Cancel download"').tooltip(
+                                    "Cancel and discard"
+                                )
 
     def _clear_finished() -> None:
         controller.clear_finished_downloads()
         _render_downloads()
 
-    async def _run_one(tid: str, name: str, file_ids: list[int]) -> None:
+    async def _run_one(tid: str, name: str, file_ids: list[int], dest_dir: Path) -> None:
         try:
-            await controller.rd_download(tid, name=name, file_ids=file_ids)
+            await controller.rd_download(tid, name=name, file_ids=file_ids, dest_dir=dest_dir)
         except Exception as e:  # isolate one torrent's failure (BLE001 intentional)
             logger.warning(f"RD download failed for {tid}: {e}")
 
@@ -369,9 +421,10 @@ def render_acquire(controller: AppController) -> None:
         targets = [tid for tid, picks in file_picks.items() if picks]
         if not targets:
             return
+        dest_dir = Path(loc_input.value.strip()) if loc_input.value.strip() else controller._rd_download_dir()
         for tid in targets:
             name = next((c.torrent.filename for c in candidates if c.torrent.id == tid), tid)
-            background_tasks.create(_run_one(tid, name, sorted(file_picks[tid])))
+            background_tasks.create(_run_one(tid, name, sorted(file_picks[tid]), dest_dir))
         download_btn.set_enabled(False)
         _render_downloads()
         ui.notify("Downloading. Progress appears under Downloads below.")
