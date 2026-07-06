@@ -135,26 +135,33 @@ async def add_torrent(client: RealDebridSource, magnet: str) -> str:
     return torrent_id
 
 
-def _plan_links(torrent: RdTorrent, file_ids: set[int] | None) -> tuple[list[str], set[str] | None]:
-    """Choose which links to fetch for a per-file download.
+def plan_pairs(
+    torrent: RdTorrent, file_ids: set[int] | None
+) -> tuple[list[tuple[str, str]] | None, set[str] | None]:
+    """Pair each RD download link with its selected file's torrent path.
 
-    Returns (links, keep_basenames). `file_ids=None` -> all links, keep_basenames None
-    (caller applies the audio+cover `_keep_file` filter). Otherwise map the chosen file
-    ids to links by their index among the RD-selected files; if the link/selected-file
-    counts disagree, fall back to fetching all links and keeping only those whose
-    basename matches a chosen file (keep_basenames set)."""
-    if file_ids is None:
-        return list(torrent.links), None
-    files = list(getattr(torrent, "files", []))
-    selected = [f for f in files if f.selected]
-    if len(selected) == len(torrent.links):
-        return [torrent.links[i] for i, f in enumerate(selected) if f.id in file_ids], None
+    Returns (pairs, keep_basenames):
+    - pairs is a list of (path, link) when RD's `links[i]` <-> `selected[i]` contract
+      holds (equal counts, a non-empty file list). `file_ids` filters to chosen ids.
+    - pairs is None when there is no usable file list or the counts disagree — the
+      caller falls back to the flat link list. keep_basenames is then None (keep the
+      audio+cover default when file_ids is None) or the chosen files' basenames."""
+    selected = [f for f in getattr(torrent, "files", []) if f.selected]
+    links = list(torrent.links)
+    if selected and len(selected) == len(links):
+        pairs = [
+            (f.path, links[i])
+            for i, f in enumerate(selected)
+            if file_ids is None or f.id in file_ids
+        ]
+        return pairs, None
     logger.warning(
-        f"download_torrent: links/selected-files count mismatch "
-        f"({len(torrent.links)} vs {len(selected)}); falling back to filename match"
+        f"plan_pairs: links/selected mismatch ({len(links)} vs {len(selected)}); flat fallback"
     )
-    keep = {Path(f.path).name for f in files if f.id in file_ids}
-    return list(torrent.links), keep
+    if file_ids is None:
+        return None, None
+    keep = {Path(f.path).name for f in selected if f.id in file_ids}
+    return None, keep
 
 
 async def download_torrent(
@@ -179,34 +186,58 @@ async def download_torrent(
     folder = folder or _unique_dir(dest_root, torrent.filename)
     folder.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=folder)
-    links, keep_names = _plan_links(torrent, file_ids)
-    total = len(links)
-    for idx, link in enumerate(links, start=1):
+    pairs, keep_names = plan_pairs(torrent, file_ids)
+
+    async def _fetch(url: str, dest: Path, display: str) -> bool:
+        """Stream one file; record the outcome. Returns False to stop the batch (cancel)."""
         try:
-            unr = await client.unrestrict_link(link)
-        except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
-            logger.warning(f"unrestrict failed: {e}")
-            result.files.append(AcquiredFile(filename=link, path=None, ok=False, error=str(e)))
-            continue
-        if keep_names is not None:
-            if Path(unr.filename).name not in keep_names:
-                continue
-        elif file_ids is None and not _keep_file(unr.filename):
-            continue
-        if progress is not None:
-            progress(idx, total, unr.filename)
-        dest = folder / sanitize_name(unr.filename)
-        try:
-            await stream_download(unr.download, dest, progress=byte_progress, cancel=cancel)
-            result.files.append(AcquiredFile(filename=unr.filename, path=dest, ok=True))
+            await stream_download(url, dest, progress=byte_progress, cancel=cancel)
+            result.files.append(AcquiredFile(filename=display, path=dest, ok=True))
         except DownloadCancelled:
-            result.files.append(
-                AcquiredFile(filename=unr.filename, path=None, ok=False, error="cancelled")
-            )
-            break  # stop the batch on cancel; the .part is retained for resume
+            result.files.append(AcquiredFile(filename=display, path=None, ok=False, error="cancelled"))
+            return False  # stop the batch on cancel; the .part is retained for resume
         except Exception as e:  # isolate a single failed download (BLE001 intentional)
-            logger.warning(f"download failed for {unr.filename}: {e}")
-            result.files.append(AcquiredFile(filename=unr.filename, path=None, ok=False, error=str(e)))
+            logger.warning(f"download failed for {display}: {e}")
+            result.files.append(AcquiredFile(filename=display, path=None, ok=False, error=str(e)))
+        return True
+
+    if pairs is not None:
+        # Structured: the destination comes from the torrent path, not unrestrict's filename.
+        dests = structured_dests([p for p, _ in pairs], folder)
+        total = len(pairs)
+        for idx, ((path, link), dest) in enumerate(zip(pairs, dests, strict=True), start=1):
+            try:
+                unr = await client.unrestrict_link(link)
+            except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
+                logger.warning(f"unrestrict failed: {e}")
+                result.files.append(AcquiredFile(filename=path, path=None, ok=False, error=str(e)))
+                continue
+            if progress is not None:
+                progress(idx, total, PurePosixPath(path).name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not await _fetch(unr.download, dest, PurePosixPath(path).name):
+                break
+    else:
+        # Flat fallback (no file list or count mismatch): keep by basename / audio+cover.
+        links = list(torrent.links)
+        total = len(links)
+        for idx, link in enumerate(links, start=1):
+            try:
+                unr = await client.unrestrict_link(link)
+            except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
+                logger.warning(f"unrestrict failed: {e}")
+                result.files.append(AcquiredFile(filename=link, path=None, ok=False, error=str(e)))
+                continue
+            if keep_names is not None:
+                if Path(unr.filename).name not in keep_names:
+                    continue
+            elif not _keep_file(unr.filename):
+                continue
+            if progress is not None:
+                progress(idx, total, unr.filename)
+            dest = folder / sanitize_name(unr.filename)
+            if not await _fetch(unr.download, dest, unr.filename):
+                break
     if not result.any_ok:
         # Nothing landed; drop the staging dir if it is empty (leave it if .part
         # remnants remain, so a retry/cleanup can still find them).
