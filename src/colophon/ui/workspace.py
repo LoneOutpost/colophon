@@ -32,6 +32,7 @@ from colophon.core.triage import (
     apply_facets,
     blocking_reason,
     has_blocking_error,
+    has_open_findings,
     needs_human,
     sort_books,
 )
@@ -675,6 +676,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     ui.icon("warning_amber", size="18px").classes("text-warning")
                                     ui.label("Attention").classes("text-subtitle2")
                                 render_attention_pane(book)
+                                ui.button(
+                                    "Full details in At a Glance", icon="insights",
+                                    on_click=lambda: _tabs.set_value("state"),
+                                ).props("flat dense no-caps").classes("q-mt-xs")
 
                         # --- metadata tool groups ---
                         with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
@@ -830,12 +835,39 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             with ui.tabs().props("dense no-caps").classes("w-full") as _tabs:
                 ui.tab("details", label="Details", icon="edit")
-                ui.tab("state", label="State", icon="insights")
+                ui.tab("state", label="At a Glance", icon="insights")
             with ui.tab_panels(_tabs, value="details").classes("w-full"):
                 with ui.tab_panel("details").classes("q-pa-none"):
                     _details_body()
                 with ui.tab_panel("state").classes("q-pa-none"):
-                    state_panel.render(controller, book)
+                    async def _organize(b=book) -> None:
+                        await persist_dialog(
+                            controller, refresh_all=_refresh_all,
+                            selected_ids={b.id}, clear_selection=_clear_selection,
+                        )
+
+                    def _reprobe(b=book) -> None:
+                        if controller.reprobe_book(b):
+                            ui.notify("Re-probed — the file now reads")
+                        else:
+                            ui.notify(
+                                "Still no readable audio — replace the file first", type="warning"
+                            )
+                        refresh_list()
+                        show_detail(b.id)
+
+                    _attn = state_panel.AttentionActions(
+                        acquire=lambda: ui.navigate.to("/acquire"),
+                        reprobe=_reprobe,
+                        organize=_organize,
+                        files=lambda: _tabs.set_value("details"),
+                        matches=lambda b=book: compare_dialog(
+                            controller, b, show_detail=show_detail, refresh_list=refresh_list),
+                        acknowledge=lambda code, b=book: (
+                            controller.acknowledge_finding(b, code), refresh_list(),
+                            show_detail(b.id)),
+                    )
+                    state_panel.render(controller, book, actions=_attn)
 
     def _clear_selection() -> None:
         """Clear the ENTIRE selection across every view and collapse the bulk
@@ -1058,6 +1090,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         ui.badge("Missing" if book.missing else "Error").props(
                             "color=negative"
                         ).tooltip(blocking_reason(book) or "Blocking problem")
+                    if has_open_findings(book):
+                        ui.icon("warning_amber", size="18px").classes("text-warning").tooltip(
+                            "Needs attention — see At a Glance"
+                        )
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
                 line2 = f"{author} · {series}" if series else author
@@ -1682,7 +1718,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ).props("dense outlined options-dense").style("min-width: 8.5rem; max-width: 11rem")
             with ui.row().classes("items-center q-gutter-md"):
                 ui.checkbox(
-                    "Open findings", value=view["facets"]["findings"],
+                    "Attention", value=view["facets"]["findings"],
                     on_change=lambda e: _set_facet("findings", e.value),
                 ).props("dense").tooltip(
                     "Only books with an unresolved structural finding — duplicates, mixed works, "
