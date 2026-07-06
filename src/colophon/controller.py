@@ -861,11 +861,11 @@ class AppController:
         finally:
             await client.aclose()
 
-    async def rd_add_magnet(self, magnet: str) -> str:
+    async def rd_add_magnet(self, magnet: str, *, audio_only: bool = False) -> str:
         """Add a magnet to Real-Debrid and select its files. Returns the torrent id."""
         client = self.rd_client()
         try:
-            return await add_torrent(client, magnet)
+            return await add_torrent(client, magnet, audio_only=audio_only)
         finally:
             await client.aclose()
 
