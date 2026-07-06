@@ -15,7 +15,7 @@ from colophon.core.models import EmbeddedTags, SourceFile
 
 logger = logging.getLogger(__name__)
 
-AUDIO_EXTENSIONS = {".mp3", ".m4a", ".m4b", ".mp4", ".aac", ".ogg", ".flac"}
+AUDIO_EXTENSIONS = {".mp3", ".m4a", ".m4b", ".aac", ".ogg", ".flac"}  # .mp4 is a video container
 
 AUDIO_META_CACHE_SIZE = 4096  # bounds memory; within a scan the 3 reads of a file are
 # consecutive (one book's processing), so the dedup win does not need a large cache — this
