@@ -89,6 +89,7 @@ def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
 
 # Short state label + Quasar color for the per-row state badge.
 _PAGE = 100  # book rows rendered per chunk (windowed list)
+_NAV_PAGE = 80  # navigator entity rows (author/series/franchise) rendered per chunk
 
 _STATE_BADGE: dict[BookState, tuple[str, str]] = {
     BookState.DETECTED: ("Detected", "grey-6"),
@@ -371,6 +372,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     }
     _list_view: dict[str, object] = {"books": [], "rendered": 0}
     _list_el: dict[str, object] = {"el": None}      # the ui.list() holding rows
+    # Navigator entity rows are windowed the same way the book list is: a slice is
+    # rendered up front and the rest fill in on scroll. `pending` holds one zero-arg
+    # render closure per entity; `el` is the ui.list() they render into.
+    _nav_view: dict[str, object] = {"pending": [], "rendered": 0, "el": None}
     _list_footer: dict[str, object] = {"el": None}  # the "Showing X of Y" caption
     list_scroll = None                              # assigned at the layout site
 
@@ -1063,6 +1068,21 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if e.vertical_percentage > 0.85 and _list_view["rendered"] < len(_list_view["books"]):
             _render_more()
 
+    def _render_nav_more() -> None:
+        pending = _nav_view["pending"]
+        start = _nav_view["rendered"]
+        end = min(start + _NAV_PAGE, len(pending))
+        if start >= end or _nav_view["el"] is None:
+            return
+        with _nav_view["el"]:
+            for render in pending[start:end]:
+                render()
+        _nav_view["rendered"] = end
+
+    def _on_nav_scroll(e) -> None:
+        if e.vertical_percentage > 0.85 and _nav_view["rendered"] < len(_nav_view["pending"]):
+            _render_nav_more()
+
     def refresh_list() -> None:
         with span("list render"):
             _refresh_list()
@@ -1429,7 +1449,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             # Authors/series shown are limited to those with books in the active
             # folder filter (when one is set), mirroring the filtered Books list.
             needs_id = [b for b in tree.needs_id if _in_folder(b)]
-            with ui.list().props("dense").classes("w-full"):
+            # The header items (All / Needs id / Needs attention / phase groups) are few and
+            # render up front. The author/series/franchise rows can number in the thousands and
+            # dominate render time, so each becomes a render closure in `nav_pending`, windowed
+            # onto the scroll area exactly like the book list — a slice now, the rest on scroll.
+            nav_pending: list = []
+            with ui.list().props("dense").classes("w-full") as nav_list:
                 all_label = "All books in folder" if folder_filter["path"] else "All books"
                 _nav_item(all_label, "library_books", kind == "all", lambda: _set_scope("all", None))
                 if needs_id:
@@ -1474,26 +1499,30 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         ids = [b.id for b in s.books if _in_folder(b)]
                         if not ids:
                             continue
-                        _nav_item(
-                            s.name,
-                            "collections_bookmark",
-                            kind == "series" and key == s.name,
-                            lambda n=s.name: _set_scope("series", n),
-                            checkbox=_node_checkbox(ids),
-                            menu=lambda n=s.name: _entity_menu("series", n, nav_aliases),
+                        nav_pending.append(
+                            lambda s=s, ids=ids: _nav_item(
+                                s.name,
+                                "collections_bookmark",
+                                kind == "series" and key == s.name,
+                                lambda n=s.name: _set_scope("series", n),
+                                checkbox=_node_checkbox(ids),
+                                menu=lambda n=s.name: _entity_menu("series", n, nav_aliases),
+                            )
                         )
                 elif view["group_by"] == "franchise":
                     for f in tree.franchises:
                         ids = [b.id for b in f.books if _in_folder(b)]
                         if not ids:
                             continue
-                        _nav_item(
-                            f.name,
-                            "hub",
-                            kind == "franchise" and key == f.name,
-                            lambda n=f.name: _set_scope("franchise", n),
-                            checkbox=_node_checkbox(ids),
-                            menu=lambda n=f.name: _entity_menu("franchise", n, nav_aliases),
+                        nav_pending.append(
+                            lambda f=f, ids=ids: _nav_item(
+                                f.name,
+                                "hub",
+                                kind == "franchise" and key == f.name,
+                                lambda n=f.name: _set_scope("franchise", n),
+                                checkbox=_node_checkbox(ids),
+                                menu=lambda n=f.name: _entity_menu("franchise", n, nav_aliases),
+                            )
                         )
                 else:
                     for author in tree.authors:
@@ -1503,19 +1532,22 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         ))
                         if not aids:
                             continue  # no books from this author in the current folder
-                        _nav_item(
-                            author.name,
-                            "person",
-                            kind == "author" and key == author.name,
-                            lambda name=author.name: _set_scope("author", name),
-                            checkbox=_node_checkbox(aids),
-                            menu=lambda n=author.name: _entity_menu("author", n, nav_aliases),
+                        nav_pending.append(
+                            lambda author=author, aids=aids: _nav_item(
+                                author.name,
+                                "person",
+                                kind == "author" and key == author.name,
+                                lambda name=author.name: _set_scope("author", name),
+                                checkbox=_node_checkbox(aids),
+                                menu=lambda n=author.name: _entity_menu("author", n, nav_aliases),
+                            )
                         )
-                view_entities = {"series": tree.series, "franchise": tree.franchises}.get(
-                    str(view["group_by"]), tree.authors
-                )
-                if terms and view["group_by"] != "phase" and not view_entities:
+                if terms and view["group_by"] != "phase" and not nav_pending:
                     ui.label("No matches").classes("colophon-muted text-caption q-pa-sm")
+            _nav_view["pending"] = nav_pending
+            _nav_view["rendered"] = 0
+            _nav_view["el"] = nav_list
+            _render_nav_more()
 
     def _update_count() -> None:
         n = len(selected_ids)
@@ -1913,7 +1945,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         with ui.card().classes("column colophon-pane-nav"):
             ui.label("Library").classes("text-subtitle1")
             ui.separator()
-            with ui.scroll_area().classes("col"):
+            with ui.scroll_area(on_scroll=_on_nav_scroll).classes("col"):
                 nav_container = ui.column().classes("w-full gap-0")
         ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
         with ui.card().classes("column colophon-pane-mid"):
