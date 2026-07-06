@@ -1721,8 +1721,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     "Attention", value=view["facets"]["findings"],
                     on_change=lambda e: _set_facet("findings", e.value),
                 ).props("dense").tooltip(
-                    "Only books needing attention — an unresolved finding like duplicates, "
-                    "mixed works, or an unclear folder layout."
+                    "Only books with an unresolved structural finding — duplicates, mixed works, "
+                    "or an unclear folder layout."
                 )
                 ui.checkbox(
                     "Blocking errors", value=view["facets"]["errors"],
