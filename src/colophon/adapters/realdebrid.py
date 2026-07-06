@@ -69,6 +69,7 @@ class RealDebridSource(Protocol):
     async def torrent_info(self, torrent_id: str) -> RdTorrentInfo: ...
     async def unrestrict_link(self, link: str) -> RdUnrestrictedLink: ...
     async def add_magnet(self, magnet: str) -> str: ...
+    async def add_torrent_file(self, content: bytes) -> str: ...
     async def select_files(self, torrent_id: str, file_ids: str) -> None: ...
 
 
@@ -94,6 +95,10 @@ class RealDebridClient:
     @HTTP_RETRY
     async def _post(self, path: str, data: dict[str, str]) -> httpx.Response:
         return await self._client.post(f"{self._base}{path}", data=data, headers=self._headers)
+
+    @HTTP_RETRY
+    async def _put(self, path: str, content: bytes) -> httpx.Response:
+        return await self._client.put(f"{self._base}{path}", content=content, headers=self._headers)
 
     @staticmethod
     def _raise_for_status(resp: httpx.Response) -> None:
@@ -122,6 +127,12 @@ class RealDebridClient:
 
     async def add_magnet(self, magnet: str) -> str:
         resp = await self._post("/torrents/addMagnet", {"magnet": magnet})
+        self._raise_for_status(resp)
+        return str((resp.json() or {}).get("id", ""))
+
+    async def add_torrent_file(self, content: bytes) -> str:
+        """Upload a raw .torrent file's bytes; returns the new torrent id."""
+        resp = await self._put("/torrents/addTorrent", content)
         self._raise_for_status(resp)
         return str((resp.json() or {}).get("id", ""))
 

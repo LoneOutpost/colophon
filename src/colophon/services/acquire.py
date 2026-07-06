@@ -124,18 +124,37 @@ async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list
     return candidates
 
 
-async def add_torrent(client: RealDebridSource, magnet: str, *, audio_only: bool = False) -> str:
-    """Add a magnet to Real-Debrid and select its files. By default selects ALL files so
-    RD caches the whole torrent (every file gets a link, so the picker and structure work).
-    `audio_only=True` selects just the audio files (falling back to all when none are
-    detected). Returns the new torrent id; it surfaces in `list_candidates` once ready."""
-    torrent_id = await client.add_magnet(magnet)
+async def _select_after_add(
+    client: RealDebridSource, torrent_id: str, *, audio_only: bool
+) -> None:
+    """Tell RD which files to prepare for a freshly-added torrent. By default selects ALL
+    files so RD caches the whole torrent (every file gets a link, so the picker and structure
+    work). `audio_only=True` selects just the audio files, falling back to all when none are
+    detected."""
     if not audio_only:
         await client.select_files(torrent_id, "all")
-        return torrent_id
+        return
     info = await client.torrent_info(torrent_id)
     audio_ids = [str(f.id) for f in info.files if is_audio_file(Path(f.path))]
     await client.select_files(torrent_id, ",".join(audio_ids) if audio_ids else "all")
+
+
+async def add_torrent(client: RealDebridSource, magnet: str, *, audio_only: bool = False) -> str:
+    """Add a magnet to Real-Debrid and select its files (see `_select_after_add`). Returns
+    the new torrent id; it surfaces in `list_candidates` once ready."""
+    torrent_id = await client.add_magnet(magnet)
+    await _select_after_add(client, torrent_id, audio_only=audio_only)
+    return torrent_id
+
+
+async def add_torrent_file(
+    client: RealDebridSource, content: bytes, *, audio_only: bool = False
+) -> str:
+    """Upload a .torrent file's bytes to Real-Debrid and select its files (see
+    `_select_after_add`). Returns the new torrent id; it surfaces in `list_candidates`
+    once ready."""
+    torrent_id = await client.add_torrent_file(content)
+    await _select_after_add(client, torrent_id, audio_only=audio_only)
     return torrent_id
 
 
