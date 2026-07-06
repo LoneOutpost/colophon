@@ -1183,8 +1183,8 @@ async def persist_dialog(
                 await controller.write_tags_books(
                     books,
                     progress=lambda done, book, res: log.update(
-                        book.id, "tagged" if getattr(res, "ok", True) else "tag failed",
-                        kind="ok" if getattr(res, "ok", True) else "fail",
+                        book.id, "tagged" if res.ok else "tag failed",
+                        kind="ok" if res.ok else "fail",
                     ),
                 )
             if opts.encode or opts.organize:
@@ -1202,7 +1202,11 @@ async def persist_dialog(
                 note += f", {c['fail']} failed"
             if c.get("skip"):
                 note += f", {c['skip']} cancelled"
-            log.finish(note, on_close=_close)
+
+            def _retry(ids: list[str]) -> object:
+                return run_persist([b for b in books if b.id in ids], do_tag, opts)
+
+            log.finish(note, on_close=_close, on_retry=_retry)
 
         dialog.open()
         show_options()
