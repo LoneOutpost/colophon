@@ -247,7 +247,7 @@ def test_sanitize_name_clamps_length_and_keeps_extension():
     assert out.endswith(".mp3")
 
 
-async def test_add_torrent_selects_audio_files_only():
+async def test_add_torrent_selects_all_by_default():
     from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
     from colophon.services.acquire import add_torrent
 
@@ -258,18 +258,37 @@ async def test_add_torrent_selects_audio_files_only():
             return "TID"
         async def torrent_info(self, tid):
             return RdTorrentInfo(id="TID", files=[
-                RdTorrentFile(id=1, path="book.mp3"),
-                RdTorrentFile(id=2, path="cover.jpg"),
-                RdTorrentFile(id=3, path="part2.m4b"),
+                RdTorrentFile(id=1, path="book.mp3"), RdTorrentFile(id=2, path="cover.jpg"),
             ])
         async def select_files(self, tid, file_ids):
             selected["ids"] = file_ids
 
     assert await add_torrent(FakeRd(), "magnet:?x") == "TID"
-    assert selected["ids"] == "1,3"  # only the audio files
+    assert selected["ids"] == "all"  # prepare everything so the picker sees all files
 
 
-async def test_add_torrent_falls_back_to_all_when_no_audio():
+async def test_add_torrent_audio_only_selects_audio_ids():
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
+    from colophon.services.acquire import add_torrent
+
+    selected = {}
+
+    class FakeRd:
+        async def add_magnet(self, magnet):
+            return "TID"
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id="TID", files=[
+                RdTorrentFile(id=1, path="book.mp3"), RdTorrentFile(id=2, path="cover.jpg"),
+                RdTorrentFile(id=3, path="part2.m4b"),
+            ])
+        async def select_files(self, tid, file_ids):
+            selected["ids"] = file_ids
+
+    await add_torrent(FakeRd(), "magnet:?x", audio_only=True)
+    assert selected["ids"] == "1,3"  # audio files only
+
+
+async def test_add_torrent_audio_only_falls_back_to_all_when_no_audio():
     from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo
     from colophon.services.acquire import add_torrent
 
@@ -283,7 +302,7 @@ async def test_add_torrent_falls_back_to_all_when_no_audio():
         async def select_files(self, tid, file_ids):
             selected["ids"] = file_ids
 
-    await add_torrent(FakeRd(), "magnet:?x")
+    await add_torrent(FakeRd(), "magnet:?x", audio_only=True)
     assert selected["ids"] == "all"
 
 

@@ -124,11 +124,15 @@ async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list
     return candidates
 
 
-async def add_torrent(client: RealDebridSource, magnet: str) -> str:
-    """Add a magnet to Real-Debrid and select its audio files (falling back to all
-    files when none are detected). Returns the new torrent id; RD downloads it
-    server-side and it surfaces in `list_candidates` once ready."""
+async def add_torrent(client: RealDebridSource, magnet: str, *, audio_only: bool = False) -> str:
+    """Add a magnet to Real-Debrid and select its files. By default selects ALL files so
+    RD caches the whole torrent (every file gets a link, so the picker and structure work).
+    `audio_only=True` selects just the audio files (falling back to all when none are
+    detected). Returns the new torrent id; it surfaces in `list_candidates` once ready."""
     torrent_id = await client.add_magnet(magnet)
+    if not audio_only:
+        await client.select_files(torrent_id, "all")
+        return torrent_id
     info = await client.torrent_info(torrent_id)
     audio_ids = [str(f.id) for f in info.files if is_audio_file(Path(f.path))]
     await client.select_files(torrent_id, ",".join(audio_ids) if audio_ids else "all")
