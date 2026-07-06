@@ -10,7 +10,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.downloader import DownloadCancelled, stream_download
@@ -70,6 +70,22 @@ def sanitize_name(name: str) -> str:
         suffix = suffix if len(suffix) <= 16 else ""  # ignore absurdly long "extensions"
         cleaned = cleaned[: _MAX_NAME - len(suffix)] + suffix
     return cleaned
+
+
+def structured_dests(paths: list[str], folder: Path) -> list[Path]:
+    """Destination for each torrent-relative path under `folder`, preserving structure.
+    Strips a first component shared by every path when at least one file is nested
+    below it (it duplicates the torrent-named `folder`); keeps everything below. Each
+    component is sanitized. `paths` and the result are 1:1 and order-preserving."""
+    comps = [list(PurePosixPath(p.strip("/")).parts) for p in paths]
+    firsts = {c[0] for c in comps if c}
+    nested = any(len(c) > 1 for c in comps)
+    strip = len(firsts) == 1 and nested
+    dests: list[Path] = []
+    for c in comps:
+        rel = c[1:] if (strip and len(c) > 1) else c
+        dests.append(folder.joinpath(*[sanitize_name(part) for part in rel]) if rel else folder)
+    return dests
 
 
 def _unique_dir(root: Path, name: str) -> Path:
