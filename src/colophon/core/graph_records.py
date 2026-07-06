@@ -33,7 +33,10 @@ def entity_node_id(kind: str, name: str, root: Path) -> str:
     return f"{kind}:{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}"
 
 
-_SEMANTIC_DIR_KINDS = {"author", "series", "franchise"}
+# Directory kinds that carry a semantic facet onto their node (so the explorer gives them a
+# distinct glyph, not the generic folder). 'title' is included so an identified single-book
+# title folder reads differently from an unidentified container/grouping folder.
+_SEMANTIC_DIR_KINDS = {"author", "series", "franchise", "title"}
 
 
 def _ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
@@ -50,7 +53,7 @@ def _ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
 class NodeRecord(_Base):
     id: str
     physical: str | None       # 'directory' | 'file' | None (logical-only, e.g. a book)
-    semantic: str | None       # 'book' | 'author' | 'series' | 'franchise' | None
+    semantic: str | None       # 'book' | 'author' | 'series' | 'franchise' | 'title' | None
     root: str
     attrs: dict[str, object] = {}  # noqa: RUF012 - pydantic field default, copied per instance
 
