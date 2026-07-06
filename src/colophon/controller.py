@@ -478,6 +478,34 @@ class AppController:
             flush()
         return changed
 
+    def reprobe_book(self, book: BookUnit) -> bool:
+        """Re-read one book's file durations from disk and reconcile its EMPTY_AUDIO finding,
+        persisting if anything changed. For the At-a-Glance 'Re-probe' action after a user has
+        replaced a corrupt file. Returns True when the book was updated."""
+        from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+        from colophon.core.classify import empty_audio_finding
+
+        clear_audio_metadata_cache()
+        new_files = list(book.source_files)
+        moved = False
+        for i, sf in enumerate(book.source_files):
+            if sf.duration_seconds > 0 or not sf.path.exists():
+                continue
+            fresh = read_audio_metadata(sf.path)[0]
+            if fresh.duration_seconds != sf.duration_seconds:
+                new_files[i] = fresh
+                moved = True
+        finding = empty_audio_finding([(sf.size, sf.duration_seconds) for sf in new_files])
+        others = [f for f in book.findings if f.code is not FindingCode.EMPTY_AUDIO]
+        new_findings = others + ([finding] if finding is not None else [])
+        if not (moved or new_findings != book.findings):
+            return False
+        book.source_files = new_files
+        book.findings = new_findings
+        book.touch()
+        self.ctx.books.upsert(book)
+        return True
+
     def active_jobs(self) -> list[Job]:
         """Snapshot of running background jobs, for the app-bar indicator (shared across sessions)."""
         return self.ctx.jobs.active()

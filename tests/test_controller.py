@@ -981,6 +981,25 @@ def test_write_tags_books_skips_blocking_error(tmp_path):
     ctx.close()
 
 
+def test_reprobe_book_clears_flag_when_file_recovers(tmp_path, make_audio):
+    from colophon.core.models import Finding, FindingCode, FindingSeverity, SourceFile
+
+    ctx = _ctx(tmp_path)
+    f = make_audio("b/01.m4b", seconds=1)  # a real, readable file
+    book = BookUnit.new(source_folder=f.parent)
+    # Simulate a stale 0-duration read that had produced an EMPTY_AUDIO finding.
+    book.source_files = [SourceFile(path=f, size=f.stat().st_size, duration_seconds=0.0, ext="m4b")]
+    book.findings = [Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="x")]
+    ctx.books.upsert(book)
+
+    changed = AppController(ctx).reprobe_book(book)
+    assert changed is True
+    reloaded = ctx.books.get(book.id)
+    assert reloaded.source_files[0].duration_seconds > 0
+    assert all(fd.code is not FindingCode.EMPTY_AUDIO for fd in reloaded.findings)
+    ctx.close()
+
+
 def test_process_book_skips_blocking_error(tmp_path):
     """The encode/organize worker refuses a book whose files are gone — status 'skipped'."""
     from colophon.controller import EncodeJobOptions
