@@ -8,6 +8,7 @@ from pathlib import Path
 from nicegui import background_tasks, ui
 
 from colophon.controller import AppController
+from colophon.services.acquire import AcquireMode
 from colophon.services.filetree import (
     FolderNode,
     build_file_tree,
@@ -125,6 +126,22 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                     "This book's folder", icon="folder",
                     on_click=lambda: loc_input.set_value(str(book.source_folder)),
                 ).props("flat dense no-caps")
+
+        # How a download resolves an existing target folder (session-sticky on the controller).
+        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+            ui.select(
+                {"indexed": "Indexed (new folder)", "add": "Add to existing",
+                 "overwrite": "Overwrite existing"},
+                value=controller.acquire_mode.value, label="If it exists",
+                on_change=lambda e: (
+                    setattr(controller, "acquire_mode", AcquireMode(e.value)),
+                    overwrite_note.set_visibility(e.value == "overwrite"),
+                ),
+            ).props("dense outlined options-dense").style("min-width: 14rem")
+            overwrite_note = ui.label("Replaces existing files in the folder.").classes(
+                "text-caption colophon-muted"
+            )
+            overwrite_note.set_visibility(controller.acquire_mode is AcquireMode.OVERWRITE)
 
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             load_btn = ui.button("Load torrents", icon="refresh")
