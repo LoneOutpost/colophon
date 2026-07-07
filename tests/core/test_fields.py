@@ -14,7 +14,7 @@ def test_editable_fields_list():
     assert EDITABLE_FIELDS == [
         "title", "subtitle", "author", "narrator", "series",
         "sequence", "year", "asin", "isbn", "language", "publisher", "description",
-        "genre", "tag",
+        "genre", "tag", "franchise",
     ]
 
 
@@ -128,3 +128,19 @@ def test_bookunit_has_optional_franchise_field(tmp_path):
     d = b.model_dump()
     d.pop("franchise")
     assert BookUnit.model_validate(d).franchise is None
+
+
+def test_franchise_is_an_editable_scalar_field(tmp_path):
+    from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field, set_field
+    from colophon.core.models import BookUnit
+
+    assert "franchise" in EDITABLE_FIELDS
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    assert get_field(b, "franchise") is None
+    set_field(b, "franchise", "Star Wars")
+    assert b.franchise == "Star Wars"
+    assert get_field(b, "franchise") == "Star Wars"
+    set_field(b, "franchise", "")
+    assert b.franchise is None
+    b.provenance["franchise"] = "manual"
+    assert field_provenance(b, "franchise") == "manual"

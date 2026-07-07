@@ -14,10 +14,10 @@ from colophon.core.textlist import join_list, split_list
 EDITABLE_FIELDS = [
     "title", "subtitle", "author", "narrator", "series",
     "sequence", "year", "asin", "isbn", "language", "publisher", "description",
-    "genre", "tag",
+    "genre", "tag", "franchise",
 ]
 
-_SCALARS = {"title", "subtitle", "asin", "isbn", "language", "publisher", "description"}
+_SCALARS = {"title", "subtitle", "asin", "isbn", "language", "publisher", "description", "franchise"}
 
 # Editable-field key -> the key under which its provenance is stored on BookUnit.
 # (List/derived fields differ: "author" edits BookUnit.authors, stored as "authors".)
@@ -36,6 +36,7 @@ EDITABLE_TO_PROVENANCE = {
     "description": "description",
     "genre": "genres",
     "tag": "tags",
+    "franchise": "franchise",
 }
 
 
