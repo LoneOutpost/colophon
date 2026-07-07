@@ -1113,6 +1113,8 @@ class AppController:
             )
             book_ids = [b.id for b in books]
         entry.status = "paused" if cancelled else ("done" if result.any_ok else "failed")
+        if not result.any_ok and result.note:
+            entry.detail = result.note  # surface why nothing landed (e.g. a single-archive torrent)
         return result, book_ids
 
     async def rd_download(

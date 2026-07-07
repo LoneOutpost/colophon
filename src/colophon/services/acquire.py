@@ -27,6 +27,8 @@ from colophon.core.cancel import CancelToken
 logger = logging.getLogger(__name__)
 
 _READY_STATUS = "downloaded"
+# RD statuses that mean the torrent is dead on arrival: no files will ever come from it.
+_ERROR_STATUSES = frozenset({"error", "magnet_error", "dead", "virus"})
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
 
@@ -49,6 +51,25 @@ class AcquireCandidate:
     def is_audiobook(self) -> bool:
         return bool(self.audio_files)
 
+    @property
+    def is_errored(self) -> bool:
+        """RD failed this torrent (dead magnet, removed, flagged): nothing to download."""
+        return self.torrent.status in _ERROR_STATUSES
+
+
+def visible_candidates(
+    candidates: list[AcquireCandidate], *, show_all: bool
+) -> list[AcquireCandidate]:
+    """The candidates worth showing. `show_all` reveals everything (including errored and
+    non-audiobook torrents); the default view hides errored ones and keeps just audiobooks
+    plus still-preparing torrents (so a fresh add is visible while RD works on it)."""
+    if show_all:
+        return list(candidates)
+    return [
+        c for c in candidates
+        if not c.is_errored and (c.is_audiobook or not c.is_ready)
+    ]
+
 
 @dataclass
 class AcquiredFile:
@@ -63,6 +84,7 @@ class AcquiredFile:
 class AcquireResult:
     folder: Path
     files: list[AcquiredFile] = field(default_factory=list)
+    note: str | None = None  # a human-readable reason when the download can't proceed
 
     @property
     def any_ok(self) -> bool:
@@ -360,6 +382,15 @@ async def download_torrent(
                 progress(idx, total, unr.filename)
             if not await _fetch(unr.download, container / sanitize_name(unr.filename), unr.filename):
                 break
+    if not result.any_ok and len(torrent.links) == 1 and len(selected) > 1:
+        # Real-Debrid handed back a single link for a many-file torrent and it matched none
+        # of the picked files: RD is serving the whole torrent as one archive (its RAR quirk),
+        # so per-file picks can't be fulfilled. Say so plainly instead of a bare "failed".
+        result.note = (
+            f"Real-Debrid is serving this torrent as a single archive "
+            f"({len(selected)} files bundled into one link), so individual files can't be "
+            f"downloaded. Re-add it on Real-Debrid, or use a source that keeps files separate."
+        )
     if not result.any_ok:
         # Nothing landed; drop the staging dir if it is empty (leave it if .part
         # remnants remain, so a retry/cleanup can still find them).
