@@ -48,3 +48,27 @@ def test_known_franchises_unions_declared_builtin_and_present(tmp_path):
     assert names == sorted(names, key=str.casefold)
     assert set(ctrl.builtin_franchises()).issubset(set(names))
     ctx.close()
+
+
+def test_resync_fills_franchise_from_declared_folder(tmp_path):
+    scan = tmp_path / "scan"
+    (scan / "Star Wars" / "A Book").mkdir(parents=True)
+    (scan / "Star Wars" / "A Book" / "01.mp3").write_bytes(b"")
+    ctx = AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib", scan_paths=[scan])
+    )
+    from colophon.core.graph_records import graph_records
+    ctrl = AppController(ctx)
+    ctrl.add_franchise("Star Wars")   # declare so the classifier tags the folder
+
+    g = build_graph(ctx.books, scan, template="$Author - $Title")
+    books = [bn.book for bn in g.books.values()]
+    for b in books:
+        ctx.books.upsert(b)
+    ctx.library_graph.replace_root(str(scan), *graph_records(g, books, root=scan))
+
+    ctrl._resync_roots({scan})
+
+    stored = ctx.books.get(books[0].id)
+    assert stored.franchise == "Star Wars"
+    ctx.close()

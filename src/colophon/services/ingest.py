@@ -462,6 +462,7 @@ def plan_scan_graph(
     from collections import defaultdict
 
     from colophon.core.graph_classify import classify_graph
+    from colophon.core.graph_records import fill_book_franchise
     from colophon.core.graph_resolve import propagate_overrides
     from colophon.core.node_classify import classify_nodes
     from colophon.services.graph_build import build_graph, project
@@ -521,6 +522,8 @@ def plan_scan_graph(
     if node_overrides:
         propagate_overrides(graph, plan.units, root=root)
         _phase("propagate_overrides")
+    for _b in plan.units:
+        fill_book_franchise(graph, _b, root)
     # classify_nodes just stamped each unit's local-identification confidence; the state derived
     # back in _adopt_and_identify predates it, so re-derive now that identity_confidence is known
     # (else a locally-confident book would persist as NEEDS_REVIEW instead of IDENTIFIED).

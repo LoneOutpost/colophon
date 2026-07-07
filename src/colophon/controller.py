@@ -31,6 +31,7 @@ from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_records import (
     book_node_id,
     book_records,
+    fill_book_franchise,
     graph_from_records,
     skeleton_records,
 )
@@ -410,10 +411,11 @@ class AppController:
             # `recon`'s node confidences (the classify above ran on copies, so the stored books
             # keep their fields; only these two derived caches move). Collect the movers to write.
             for book in root_books:
+                moved = fill_book_franchise(recon, book, root)
                 old_ic, old_state = book.identity_confidence, book.state
                 book.identity_confidence = book_identity_confidence(book, recon, root)
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
-                if book.identity_confidence != old_ic or book.state is not old_state:
+                if moved or book.identity_confidence != old_ic or book.state is not old_state:
                     changed.append(book)
         for i, book in enumerate(changed):
             self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
