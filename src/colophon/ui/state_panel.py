@@ -19,6 +19,7 @@ from colophon.core.models import BookState, BookUnit, FindingCode, Phase, PhaseS
 from colophon.core.phases import state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.review import review_reasons
+from colophon.core.state_labels import phase_state_description, state_description
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
     with ui.column().classes("w-full q-gutter-xs q-pa-sm"):
         with ui.row().classes("items-center q-gutter-sm"):
             label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
-            ui.badge(label).props(f"color={color} outline")
+            ui.badge(label).props(f"color={color} outline").tooltip(state_description(book.state))
             # The two confidences are distinct and both shown here, labelled: identity is the
             # pre-match local-identification rollup from the graph; match is the post-match score.
             ui.badge(f"Identity {book.identity_confidence:.0f}").props(
@@ -200,7 +201,9 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                     ui.icon("circle", color=row.color, size="10px")
                     ui.icon(row.icon, size="18px").classes("colophon-muted")
                     ui.label(row.label).classes("col")
-                    ui.badge(row.state.value).props(f"color={row.color} outline")
+                    ui.badge(row.state.value).props(f"color={row.color} outline").tooltip(
+                        phase_state_description(row.state)
+                    )
                     if row.updated_at is not None:
                         ui.label(row.updated_at.strftime("%Y-%m-%d %H:%M")).classes(
                             "colophon-muted text-caption"
