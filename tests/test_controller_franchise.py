@@ -71,4 +71,9 @@ def test_resync_fills_franchise_from_declared_folder(tmp_path):
 
     stored = ctx.books.get(books[0].id)
     assert stored.franchise == "Star Wars"
+    # The graph edge must exist after a SINGLE resync (not lag a pass behind the field), so the
+    # franchise navigator and the detail view agree.
+    fr = [e for e in ctx.library_graph.edges
+          if e.kind == "franchise" and e.src == book_node_id(books[0].id)]
+    assert len(fr) == 1
     ctx.close()
