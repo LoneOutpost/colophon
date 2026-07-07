@@ -78,13 +78,19 @@ def jobs_indicator(controller: AppController) -> None:
 
 
 @contextmanager
-def page_toolbar() -> Iterator[None]:
+def page_toolbar(*, sticky: bool = False) -> Iterator[None]:
     """A recessive sub-header band for a page's controls and state-of-play, set off from
     the body by a surface step and a hairline rule (the page -> surface -> line tonal
     rule). Put the page's control row(s) and any summary/worklist inside the `with` body;
     the page body that follows sits on the warm page background, so the two zones read as
-    distinct. Shared so every page gains the same hierarchy in one place."""
-    with ui.column().classes("colophon-toolbar w-full q-gutter-xs q-pa-none"):
+    distinct. Shared so every page gains the same hierarchy in one place.
+
+    `sticky=True` pins the band to the top of the scroll area (just below the app bar) so
+    its controls stay reachable while a long body scrolls."""
+    classes = "colophon-toolbar w-full q-gutter-xs q-pa-none"
+    if sticky:
+        classes += " colophon-toolbar-sticky"
+    with ui.column().classes(classes):
         yield
 
 

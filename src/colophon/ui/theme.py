@@ -167,6 +167,10 @@ body.body--dark { color: #ece4d8; }
 .colophon-toolbar { background: var(--colophon-surface); border-bottom: 1px solid var(--colophon-line);
   padding: 10px 16px; }
 .body--dark .colophon-toolbar { background: #262019; }
+/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins below the fixed 50px app
+   bar so the controls stay reachable while the body scrolls. The toolbar's own opaque
+   surface background keeps scrolled content from showing through. */
+.colophon-toolbar-sticky { position: sticky; top: 50px; z-index: 10; }
 /* Reading-column cap for form/prose pages: left-anchored (not centered), so the page
    frame stays identical to full-bleed pages while fields keep a scannable width. */
 .colophon-measure-read { max-width: 768px; }
