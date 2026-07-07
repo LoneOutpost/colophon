@@ -488,3 +488,19 @@ async def test_file_ids_count_mismatch_falls_back_to_filename(tmp_path, monkeypa
     monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
     await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={1})
     assert got == ["http://dl/keep"]  # fetched all links, kept only keep.mp3 by name
+
+
+def test_container_for_indexed_dedups_but_base_reuses(tmp_path):
+    from colophon.services.acquire import AcquireMode, _container_for
+
+    (tmp_path / "Book").mkdir()  # base already exists
+    assert _container_for(tmp_path, "Book", AcquireMode.INDEXED) == tmp_path / "Book-2"
+    assert _container_for(tmp_path, "Book", AcquireMode.ADD) == tmp_path / "Book"
+    assert _container_for(tmp_path, "Book", AcquireMode.OVERWRITE) == tmp_path / "Book"
+
+
+def test_acquired_file_has_skipped_default_false(tmp_path):
+    from colophon.services.acquire import AcquiredFile
+
+    f = AcquiredFile(filename="x", path=tmp_path / "x", ok=True)
+    assert f.skipped is False

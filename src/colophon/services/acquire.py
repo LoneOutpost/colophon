@@ -11,6 +11,7 @@ import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
 from colophon.adapters.audio import is_audio_file
@@ -28,6 +29,13 @@ logger = logging.getLogger(__name__)
 _READY_STATUS = "downloaded"
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
+
+
+class AcquireMode(StrEnum):
+    """How a download resolves an existing target folder."""
+    INDEXED = "indexed"      # allocate a fresh deduped folder (today's behavior)
+    ADD = "add"              # write into the base folder; skip existing files, resume .part
+    OVERWRITE = "overwrite"  # write into the base folder; replace each file cleanly
 
 
 @dataclass
@@ -48,6 +56,7 @@ class AcquiredFile:
     path: Path | None
     ok: bool
     error: str | None = None
+    skipped: bool = False
 
 
 @dataclass
@@ -113,6 +122,17 @@ def _unique_dir(root: Path, name: str) -> Path:
         candidate = root / f"{safe}-{i}"
         i += 1
     return candidate
+
+
+def _base_dir(root: Path, name: str) -> Path:
+    """The un-suffixed child of `root` for `name` (reused if it already exists)."""
+    return root / sanitize_name(name)
+
+
+def _container_for(root: Path, name: str, mode: AcquireMode) -> Path:
+    """The download container for `name` under `root`: a fresh deduped folder for INDEXED,
+    the base folder (reused if present) for ADD/OVERWRITE."""
+    return _unique_dir(root, name) if mode is AcquireMode.INDEXED else _base_dir(root, name)
 
 
 async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list[AcquireCandidate]:
