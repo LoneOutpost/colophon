@@ -270,7 +270,8 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
             ids = {f.id for f in node.files}
             fr: dict = {"node": node, "ids": ids, "file_cbs": {}, "built": {"on": False}}
             r["folders"][node.name] = fr
-            f_exp = ui.expansion().props("dense expand-icon-toggle").classes("w-full")
+            f_exp = ui.expansion().props(
+                "dense expand-icon-toggle switch-toggle-side").classes("w-full")
             fr["exp"] = f_exp
             with f_exp.add_slot("header"):
                 with ui.row().classes("items-center w-full no-wrap gap-2"):
@@ -321,7 +322,8 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         r: dict = {"cand": cand, "folders": {}}
         refs[tid] = r
 
-        exp = ui.expansion().props("dense expand-icon-toggle").classes("w-full")
+        exp = ui.expansion().props(
+            "dense expand-icon-toggle switch-toggle-side").classes("w-full")
         with exp.add_slot("header"):
             with ui.row().classes("items-center w-full no-wrap gap-2"):
                 r["master"] = ui.checkbox(
@@ -329,6 +331,14 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                     on_change=lambda e, t=tid: None if suppress["on"] else _select_all(t, e.value),
                 ).props("dense")
                 r["master"].on("click.stop")
+                # All/None sit in the left control cluster (next to the master checkbox), not out
+                # by the name, so the actionable controls stay together on the left.
+                ui.button("All", on_click=lambda _e, t=tid: _select_all(t, True)).props(
+                    "flat dense"
+                ).on("click.stop")
+                ui.button("None", on_click=lambda _e, t=tid: _select_all(t, False)).props(
+                    "flat dense"
+                ).on("click.stop")
                 with ui.column().classes("col gap-0"):
                     ui.label(cand.torrent.filename or "(unnamed)")
                     r["total"] = ui.label(_candidate_caption(cand, picks, tree)).classes(
@@ -336,12 +346,6 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                     )
                 if not cand.is_audiobook:
                     ui.badge("no audio").props("outline").classes("colophon-chip")
-                ui.button("All", on_click=lambda _e, t=tid: _select_all(t, True)).props(
-                    "flat dense"
-                ).on("click.stop")
-                ui.button("None", on_click=lambda _e, t=tid: _select_all(t, False)).props(
-                    "flat dense"
-                ).on("click.stop")
         with exp:  # content must live inside the expansion so collapse hides it
             body = ui.column().classes("w-full gap-0 q-pl-md")
         built = {"on": False}
