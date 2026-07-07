@@ -780,10 +780,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
                                 with ui.item_section().props("side"):
                                     with ui.row().classes("q-gutter-xs no-wrap"):
-                                        ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').set_enabled(idx > 0)
-                                        ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').set_enabled(idx < len(book.source_files) - 1)
-                                        ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"')
-                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"')
+                                        ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
+                                        ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
+                                        ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"').tooltip("Rename file")
+                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
 
                     # chapters: applied named chapters (book.chapters) or file-boundary default
                     applied = bool(book.chapters)
@@ -1380,8 +1380,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     # with thousands of author/series rows, eagerly constructing
                     # every (almost never opened) menu dominated nav render time.
                     with ui.button(icon="more_vert").props(
-                        "flat dense round size=sm"
-                    ).on("click.stop", lambda: None):
+                        'flat dense round size=sm aria-label="Node actions"'
+                    ).tooltip("Node actions").on("click.stop", lambda: None):
                         node_menu = ui.menu()
                         built = {"done": False}
 

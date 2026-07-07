@@ -30,8 +30,8 @@ def render_franchises(controller: AppController) -> None:
                     with ui.row().classes("items-center no-wrap"):
                         ui.label(name)
                         ui.button(icon="delete", on_click=lambda n=name: _remove(n)).props(
-                            "flat dense round"
-                        )
+                            'flat dense round aria-label="Remove franchise"'
+                        ).tooltip("Remove this franchise")
 
         def _remove(name: str) -> None:
             controller.remove_franchise(name)
