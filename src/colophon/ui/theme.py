@@ -32,6 +32,7 @@ _LIGHT_VARS = {
     "colophon-accent": ACCENT_LIGHT,
     "colophon-sel": "rgba(176, 78, 48, .12)",
     "colophon-hover": "rgba(176, 78, 48, .06)",
+    "colophon-zebra": "rgba(60, 50, 40, .035)",  # neutral row-stripe, subtler than hover
     "colophon-ring": "rgba(176, 78, 48, .45)",
     "colophon-line": "#e7ded2",
     "colophon-border": BORDER_LIGHT,
@@ -45,6 +46,7 @@ _DARK_VARS = {
     "colophon-accent": ACCENT_DARK,
     "colophon-sel": "rgba(214, 117, 79, .18)",
     "colophon-hover": "rgba(214, 117, 79, .08)",
+    "colophon-zebra": "rgba(255, 250, 244, .04)",  # neutral row-stripe, subtler than hover
     "colophon-ring": "rgba(214, 117, 79, .5)",
     "colophon-line": "#473f35",
     "colophon-border": BORDER_DARK,
@@ -134,6 +136,9 @@ body.body--dark { color: #ece4d8; }
   background: var(--colophon-sel);
   box-shadow: inset 0 0 0 1px var(--colophon-ring);
 }
+/* Zebra rows: a faint neutral stripe on even children so a wide row's leading control
+   reads straight across to its name. Hover (terracotta) still shows on top. */
+.colophon-zebra > *:nth-child(even) { background: var(--colophon-zebra); }
 /* Let the title ellipsize instead of forcing the row wide: a flex child won't shrink
    below its content unless min-width is 0, and without this the right-pinned
    confidence/state badges get pushed off the (often narrow) list pane. */

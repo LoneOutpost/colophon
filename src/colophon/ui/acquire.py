@@ -13,11 +13,14 @@ from colophon.services.filetree import (
     FolderNode,
     build_file_tree,
     default_selection,
+    matching_file_ids,
 )
 from colophon.ui.chrome import page_body, page_header, page_toolbar
 from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
+
+_FILTER_MIN_FILES = 12  # show the per-torrent file filter only once a list is long enough to need it
 
 # status -> (Quasar colour, icon) for a download row
 _STATUS_META = {
@@ -237,6 +240,28 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         file_picks[tid] = set(_all_ids(tid)) if on else set()
         _refresh(tid)
 
+    def _apply_file_filter(tid: str, query: str) -> None:
+        """Narrow the visible file/folder rows to name matches (view-only; selection is
+        untouched). While a filter is active, matching folders auto-expand and non-matching
+        folders/files hide; clearing it restores the normal collapsed tree."""
+        r = refs.get(tid)
+        if not r:
+            return
+        keep = matching_file_ids(trees.get(tid, []), query)
+        active = bool(query.strip())
+        for fr in r["folders"].values():
+            hit = fr["ids"] & keep
+            fr["exp"].set_visibility(not active or bool(hit))
+            if active and hit:
+                fr["build"](True)          # ensure the file rows exist before toggling them
+                fr["exp"].set_value(True)  # auto-expand so matches are visible
+                for fid, cb in fr["file_cbs"].items():
+                    cb.set_visibility(fid in keep)
+            elif not active:
+                fr["exp"].set_value(False)  # restore the collapsed tree
+                for cb in fr["file_cbs"].values():
+                    cb.set_visibility(True)
+
     # rendering ---------------------------------------------------------------
     def _render_tree(tid: str, tree: list[FolderNode]) -> None:
         picks = _picks(tid)
@@ -246,6 +271,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
             fr: dict = {"node": node, "ids": ids, "file_cbs": {}, "built": {"on": False}}
             r["folders"][node.name] = fr
             f_exp = ui.expansion().props("dense expand-icon-toggle").classes("w-full")
+            fr["exp"] = f_exp
             with f_exp.add_slot("header"):
                 with ui.row().classes("items-center w-full no-wrap gap-2"):
                     cb = ui.checkbox(
@@ -258,7 +284,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                         "text-caption colophon-muted"
                     )
             with f_exp:  # files must live inside the expansion so collapse hides them
-                fbody = ui.column().classes("w-full gap-0 q-pl-lg")
+                fbody = ui.column().classes("w-full gap-0 q-pl-lg colophon-zebra")
 
             def _build_files(open_state: bool, body=fbody, nd=node, t=tid, frr=fr) -> None:
                 if frr["built"]["on"] or not open_state:
@@ -273,6 +299,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                             on_change=lambda e, tt=t, fid=f.id: _set_file(tt, fid, e.value),
                         ).props("dense").classes("colophon-muted")
 
+            fr["build"] = _build_files
             f_exp.on_value_change(lambda e, fn=_build_files: fn(e.value))
 
     def _render_candidate(cand) -> None:
@@ -324,7 +351,14 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                 return
             b["on"] = True
             with container:
-                _render_tree(t, tr)
+                if sum(len(n.files) for n in tr) >= _FILTER_MIN_FILES:
+                    ui.input(placeholder="Filter files").props(
+                        'dense clearable outlined aria-label="Filter files"'
+                    ).classes("w-full q-mb-xs").on_value_change(
+                        lambda e, tt=t: _apply_file_filter(tt, e.value or "")
+                    )
+                with ui.column().classes("w-full gap-0 colophon-zebra"):
+                    _render_tree(t, tr)
 
         exp.on_value_change(lambda e, fn=_build_body: fn(e.value))
 
