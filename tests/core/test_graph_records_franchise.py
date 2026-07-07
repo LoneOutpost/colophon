@@ -54,3 +54,22 @@ def test_fill_book_franchise_from_classified_ancestor(tmp_path):
     assert fill_book_franchise(g, book, scan) is False
     assert book.franchise == "Manual Pick"
     ctx.close()
+
+
+def test_resolve_book_franchise_precedence(tmp_path):
+    from colophon.core.graph_records import resolve_book_franchise
+    from colophon.core.models import BookUnit
+
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    # Absent book franchise: folder value is used.
+    assert resolve_book_franchise(b, "Folder Fr") == "Folder Fr"
+    # Weak (folder-filled) book franchise yields to a fresh folder value (e.g. an override).
+    b.franchise = "Stale"
+    b.provenance["franchise"] = "directory"
+    assert resolve_book_franchise(b, "Override Fr") == "Override Fr"
+    # A strong (manual) book franchise wins over the folder value.
+    b.franchise = "Manual Pick"
+    b.provenance["franchise"] = "manual"
+    assert resolve_book_franchise(b, "Folder Fr") == "Manual Pick"
+    # No folder value: fall back to whatever the book has.
+    assert resolve_book_franchise(b, None) == "Manual Pick"

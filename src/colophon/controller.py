@@ -29,10 +29,12 @@ from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_records import (
+    _ancestor_franchise,
+    apply_franchise_fill,
     book_node_id,
     book_records,
-    fill_book_franchise,
     graph_from_records,
+    resolve_book_franchise,
     skeleton_records,
 )
 from colophon.core.graph_resolve import (
@@ -383,7 +385,8 @@ class AppController:
             ]
             franchise_of: dict[str, str] = {}
             for b in root_books:
-                fname = b.franchise or franchise_for(b.source_folder, overrides, root=root)
+                fname = resolve_book_franchise(
+                    b, franchise_for(b.source_folder, overrides, root=root))
                 if fname:
                     franchise_of[b.id] = fname
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
@@ -411,7 +414,12 @@ class AppController:
             # `recon`'s node confidences (the classify above ran on copies, so the stored books
             # keep their fields; only these two derived caches move). Collect the movers to write.
             for book in root_books:
-                moved = fill_book_franchise(recon, book, root)
+                # Fill folder-derived franchise onto the stored book. Prefer a node override's
+                # verbatim value (what the edge above used) over the classified ancestor's
+                # (proper-cased) name, so book.franchise and the graph edge agree.
+                folder_fr = (franchise_for(book.source_folder, overrides, root=root)
+                             or _ancestor_franchise(recon, book.source_folder, root))
+                moved = apply_franchise_fill(book, folder_fr)
                 old_ic, old_state = book.identity_confidence, book.state
                 book.identity_confidence = book_identity_confidence(book, recon, root)
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
