@@ -22,6 +22,10 @@ from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
 
+_CLASSIFICATION_BADGE_TIP = (
+    "Folder classification. A trailing ? means tentative; · manual means you set it."
+)
+
 _LEGEND = (
     "Badges show each folder's classification and confidence (0 to 1). "
     "'author?' and 'series?' are suggestions you confirm; '· manual' marks a classification "
@@ -39,7 +43,9 @@ def _render_node(node: GraphTreeNode, on_classify=None) -> None:
                 if node.tooltip:
                     lbl.tooltip(node.tooltip)
                 for b in node.badges:
-                    ui.badge(b).props("outline").classes("colophon-chip")
+                    ui.badge(b).props("outline").classes("colophon-chip").tooltip(
+                        _CLASSIFICATION_BADGE_TIP
+                    )
                 if on_classify is not None and node.path is not None:
                     on_classify(node)
         with exp:
@@ -51,7 +57,9 @@ def _render_node(node: GraphTreeNode, on_classify=None) -> None:
         ui.icon(icon, color="primary" if node.node_kind == "book" else "grey-6")
         ui.label(node.label)
         for b in node.badges:
-            ui.badge(b).props("outline").classes("colophon-chip")
+            ui.badge(b).props("outline").classes("colophon-chip").tooltip(
+                _CLASSIFICATION_BADGE_TIP
+            )
 
 
 def _settled_line(s) -> str:
