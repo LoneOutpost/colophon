@@ -39,15 +39,49 @@ def entity_node_id(kind: str, name: str, root: Path) -> str:
 _SEMANTIC_DIR_KINDS = {"author", "series", "franchise", "title"}
 
 
-def _ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
-    """The franchise name of the nearest ancestor directory classified `franchise`, or
-    None. Franchise is never on a book field — only a directory classification (a manual
-    override) — so it's read from the ancestry."""
+def ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
+    """The franchise name of the nearest ancestor directory classified `franchise`, or None.
+    This is the folder-derived franchise; a book can also carry its own `franchise` field (a
+    manual edit, or this value filled down), resolved by `resolve_book_franchise`."""
     for path in _ancestor_paths(folder, root):
         d = graph.directories.get(DirectoryNode.id_for(path))
         if d is not None and d.kind == "franchise" and d.kind_value:
             return d.kind_value
     return None
+
+
+# Franchise provenance weak enough to be overwritten by a fresh folder classification
+# (a manual assignment is stronger and is preserved).
+_WEAK_FRANCHISE_PROV = {"directory", "filename"}
+
+
+def apply_franchise_fill(book: BookUnit, franchise_name: str | None) -> bool:
+    """Fill a book's empty-or-weak franchise with `franchise_name`, stamped 'directory'. A
+    manual (or otherwise strong) franchise is left untouched. Returns whether the book changed.
+    Callers resolve `franchise_name` with the resolver appropriate to their site (a node
+    override's verbatim value, or the nearest classified ancestor)."""
+    if book.franchise and book.provenance.get("franchise") not in _WEAK_FRANCHISE_PROV:
+        return False
+    if not franchise_name or book.franchise == franchise_name:
+        return False
+    book.franchise = franchise_name
+    book.provenance["franchise"] = "directory"
+    return True
+
+
+def fill_book_franchise(graph: Graph, book: BookUnit, root: Path) -> bool:
+    """Fill a book's empty-or-weak franchise from its nearest ancestor directory classified
+    `franchise` (the scan-time resolver). Returns whether the book changed."""
+    return apply_franchise_fill(book, ancestor_franchise(graph, book.source_folder, root))
+
+
+def resolve_book_franchise(book: BookUnit, folder_franchise: str | None) -> str | None:
+    """The franchise name for a book's graph edge. A strong (manual) book franchise wins;
+    otherwise the folder-derived value takes precedence over a weak (directory/filename) book
+    value, so a fresh folder override is not shadowed by a stale folder-fill on the book."""
+    if book.franchise and book.provenance.get("franchise") not in _WEAK_FRANCHISE_PROV:
+        return book.franchise
+    return folder_franchise or book.franchise
 
 
 class NodeRecord(_Base):
@@ -233,7 +267,7 @@ def graph_records(
     from the scan graph's ancestor classification (manual overrides)."""
     franchise_of: dict[str, str] = {}
     for u in units:
-        fname = _ancestor_franchise(graph, u.source_folder, root)
+        fname = resolve_book_franchise(u, ancestor_franchise(graph, u.source_folder, root))
         if fname:
             franchise_of[u.id] = fname
     sk_nodes, sk_edges = skeleton_records(graph, root=root)

@@ -29,9 +29,12 @@ from colophon.core.genre_policy import GenrePolicy
 from colophon.core.graph import Graph
 from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_records import (
+    ancestor_franchise,
+    apply_franchise_fill,
     book_node_id,
     book_records,
     graph_from_records,
+    resolve_book_franchise,
     skeleton_records,
 )
 from colophon.core.graph_resolve import (
@@ -381,9 +384,12 @@ class AppController:
                 e for e in lib.edges
                 if e.root == r and e.kind == "contains" and not e.dst.startswith("book:")
             ]
+            # First-pass franchise edges (from the current book field), used only to reconstruct
+            # and classify the graph. The persisted edges are rebuilt post-fill below.
             franchise_of: dict[str, str] = {}
             for b in root_books:
-                fname = franchise_for(b.source_folder, overrides, root=root)
+                fname = resolve_book_franchise(
+                    b, franchise_for(b.source_folder, overrides, root=root))
                 if fname:
                     franchise_of[b.id] = fname
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
@@ -399,6 +405,25 @@ class AppController:
             classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
                            overrides=overrides, known_franchises=self.ctx.franchises.active(),
                            directory_scheme=self.ctx.config.directory_scheme)
+            # Fill folder-derived franchise onto the STORED books before building the persisted
+            # franchise edges, so the graph edge and book.franchise agree in one pass (a
+            # declared/builtin franchise folder is only visible via the reclassified `recon`). Prefer
+            # a node override's verbatim value over the classifier's (proper-cased) ancestor name.
+            moved_ids: set[str] = set()
+            for book in root_books:
+                folder_fr = (franchise_for(book.source_folder, overrides, root=root)
+                             or ancestor_franchise(recon, book.source_folder, root))
+                if apply_franchise_fill(book, folder_fr):
+                    moved_ids.add(book.id)
+            # Second pass: rebuild the franchise edges from the now-filled books, then serialize.
+            franchise_of = {}
+            for b in root_books:
+                fname = resolve_book_franchise(
+                    b, franchise_for(b.source_folder, overrides, root=root)
+                    or ancestor_franchise(recon, b.source_folder, root))
+                if fname:
+                    franchise_of[b.id] = fname
+            book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
             sk_nodes, sk_edges = skeleton_records(recon, root=root)
             nodes = sk_nodes + book_nodes
             edges = sk_edges + book_edges
@@ -406,15 +431,14 @@ class AppController:
             # in-memory graph unchanged so the two never diverge.
             self.ctx.graph.replace_subgraph(root, nodes, edges)
             lib.replace_root(r, nodes, edges)
-            # Stamp local-identification confidence + re-derive state onto the STORED books
-            # from the freshly-reclassified graph. Read each stored book's own identity against
-            # `recon`'s node confidences (the classify above ran on copies, so the stored books
-            # keep their fields; only these two derived caches move). Collect the movers to write.
+            # Stamp local-identification confidence + re-derive state onto the STORED books from the
+            # freshly-reclassified graph (classify ran on copies, so the stored books keep their
+            # fields; only these two derived caches move). Collect the movers to write.
             for book in root_books:
                 old_ic, old_state = book.identity_confidence, book.state
                 book.identity_confidence = book_identity_confidence(book, recon, root)
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
-                if book.identity_confidence != old_ic or book.state is not old_state:
+                if book.id in moved_ids or book.identity_confidence != old_ic or book.state is not old_state:
                     changed.append(book)
         for i, book in enumerate(changed):
             self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
@@ -1686,6 +1710,13 @@ class AppController:
         in Manage -> Franchises so a user can see what is recognized without declaring it."""
         from colophon.core.franchise_seeds import DEFAULT_FRANCHISE_NAMES
         return sorted(DEFAULT_FRANCHISE_NAMES, key=str.casefold)
+
+    def known_franchises(self) -> list[str]:
+        """Franchise names for autocomplete: declared + built-in + any already assigned to a
+        book. Sorted case-insensitively."""
+        names = set(self.list_franchises()) | set(self.builtin_franchises())
+        names |= {b.franchise for b in self.ctx.books.list_all() if b.franchise}
+        return sorted(names, key=str.casefold)
 
     def add_franchise(self, name: str) -> None:
         """Declare a franchise; invalidate the graph cache so the next build reclassifies."""

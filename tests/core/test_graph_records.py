@@ -197,7 +197,7 @@ def test_two_editions_share_one_series_entity(tmp_path):
 
 def test_graph_records_equals_skeleton_plus_book_records(tmp_path):
     from colophon.core.graph_records import (
-        _ancestor_franchise,
+        ancestor_franchise,
         book_records,
         skeleton_records,
     )
@@ -207,7 +207,7 @@ def test_graph_records_equals_skeleton_plus_book_records(tmp_path):
     nodes, edges = graph_records(g, [unit], root=tmp_path)
     franchise_of = {}
     for u in [unit]:
-        fname = _ancestor_franchise(g, u.source_folder, tmp_path)
+        fname = ancestor_franchise(g, u.source_folder, tmp_path)
         if fname:
             franchise_of[u.id] = fname
     sk_n, sk_e = skeleton_records(g, root=tmp_path)

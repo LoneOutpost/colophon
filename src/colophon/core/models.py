@@ -210,6 +210,7 @@ class BookUnit(_Base):
     authors: list[str] = []
     narrators: list[str] = []
     series: list[SeriesRef] = []
+    franchise: str | None = None  # the franchise this book belongs to; manual edit or folder-derived
     publish_year: int | None = None
     publisher: str | None = None
     description: str | None = None
