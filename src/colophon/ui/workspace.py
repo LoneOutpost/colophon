@@ -1691,12 +1691,15 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     on_change=lambda e: _set_sort(e.value),
                 ).props("dense outlined options-dense").style("min-width: 8.5rem; max-width: 11rem")
             with ui.row().classes("items-center q-gutter-md"):
-                needs_work_n = sum(1 for b in _scoped_books() if needs_human(b))
+                # Count over scope+folder (not the text search): the toolbar isn't rebuilt on
+                # every keystroke, so a text-inclusive count would go stale. Scope/folder changes
+                # do rebuild it, keeping this current.
+                needs_work_n = sum(1 for b in _books_for_scope() if needs_human(b))
                 ui.checkbox(
                     f"Needs work ({needs_work_n})", value=view["facets"]["needs_work"],
                     on_change=lambda e: _set_facet("needs_work", e.value),
                 ).props("dense").tooltip(
-                    "Only books that are not yet finished — anything still in progress "
+                    "Only books that are not yet finished: anything still in progress "
                     "(not Ready, Organized, Encoded, or Skipped)."
                 )
                 ui.checkbox(
