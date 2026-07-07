@@ -11,6 +11,7 @@ import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
 from colophon.adapters.audio import is_audio_file
@@ -28,6 +29,13 @@ logger = logging.getLogger(__name__)
 _READY_STATUS = "downloaded"
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
+
+
+class AcquireMode(StrEnum):
+    """How a download resolves an existing target folder."""
+    INDEXED = "indexed"      # allocate a fresh deduped folder (today's behavior)
+    ADD = "add"              # write into the base folder; skip existing files, resume .part
+    OVERWRITE = "overwrite"  # write into the base folder; replace each file cleanly
 
 
 @dataclass
@@ -48,6 +56,7 @@ class AcquiredFile:
     path: Path | None
     ok: bool
     error: str | None = None
+    skipped: bool = False
 
 
 @dataclass
@@ -80,7 +89,8 @@ def sanitize_name(name: str) -> str:
 
 
 def structured_dests(
-    paths: list[str], dest_dir: Path, torrent_name: str, *, pinned: Path | None = None
+    paths: list[str], dest_dir: Path, torrent_name: str, *,
+    pinned: Path | None = None, mode: AcquireMode = AcquireMode.INDEXED,
 ) -> tuple[Path, list[Path]]:
     """Return (container, dests): reproduce each torrent-relative path faithfully under a
     container in `dest_dir`. When every path shares a top-level folder (the torrent's own
@@ -93,9 +103,9 @@ def structured_dests(
     if pinned is not None:
         container = pinned
     elif shared is not None:
-        container = _unique_dir(dest_dir, shared)
+        container = _container_for(dest_dir, shared, mode)
     else:
-        container = _unique_dir(dest_dir, torrent_name)
+        container = _container_for(dest_dir, torrent_name, mode)
     rels = [c[1:] if shared is not None else c for c in comps]
     dests = [
         container.joinpath(*[sanitize_name(p) for p in rel]) if rel else container
@@ -113,6 +123,17 @@ def _unique_dir(root: Path, name: str) -> Path:
         candidate = root / f"{safe}-{i}"
         i += 1
     return candidate
+
+
+def _base_dir(root: Path, name: str) -> Path:
+    """The un-suffixed child of `root` for `name` (reused if it already exists)."""
+    return root / sanitize_name(name)
+
+
+def _container_for(root: Path, name: str, mode: AcquireMode) -> Path:
+    """The download container for `name` under `root`: a fresh deduped folder for INDEXED,
+    the base folder (reused if present) for ADD/OVERWRITE."""
+    return _unique_dir(root, name) if mode is AcquireMode.INDEXED else _base_dir(root, name)
 
 
 async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list[AcquireCandidate]:
@@ -209,6 +230,7 @@ def plan_pairs(
 def _fallback_dest_map(
     selected: list[RdTorrentFile], file_ids: set[int] | None,
     dest_root: Path, torrent_name: str, pinned: Path | None,
+    *, mode: AcquireMode = AcquireMode.INDEXED,
 ) -> tuple[Path, dict[str, Path], set[str]]:
     """For the count-mismatch path (RD returns fewer links than selected files): pick the target
     files (by `file_ids`, else the audio+cover default), compute their structured destinations,
@@ -221,7 +243,7 @@ def _fallback_dest_map(
     else:
         targets = [f for f in selected if _keep_file(f.path)]
     container, dests = structured_dests(
-        [f.path for f in targets], dest_root, torrent_name, pinned=pinned)
+        [f.path for f in targets], dest_root, torrent_name, pinned=pinned, mode=mode)
     names = [PurePosixPath(f.path).name for f in targets]
     counts = Counter(names)
     dest_by_name = {n: d for n, d in zip(names, dests, strict=True) if counts[n] == 1}
@@ -238,6 +260,7 @@ async def download_torrent(
     progress: Callable[[int, int, str], None] | None = None,
     byte_progress: Callable[[int, int], None] | None = None,
     cancel: CancelToken | None = None,
+    mode: AcquireMode = AcquireMode.INDEXED,
 ) -> AcquireResult:
     """Unrestrict each of `torrent`'s links and stream the audio/cover files into a
     subfolder of `dest_root`. Per-file failures are isolated and reported.
@@ -252,20 +275,28 @@ async def download_torrent(
     if pairs is not None:
         # RD's contract held (links[i] <-> selected[i]): map by index, using the torrent path.
         container, dests = structured_dests(
-            [p for p, _ in pairs], dest_root, torrent.filename, pinned=folder)
+            [p for p, _ in pairs], dest_root, torrent.filename, pinned=folder, mode=mode)
     elif selected:
         # RD returned a different number of links than selected files (a known quirk for large
         # torrents). Recover structure by matching each link's unrestricted filename to a selected
         # file's real path — not flattening.
         container, dest_by_name, target_names = _fallback_dest_map(
-            selected, file_ids, dest_root, torrent.filename, folder)
+            selected, file_ids, dest_root, torrent.filename, folder, mode=mode)
     else:
-        container = folder or _unique_dir(dest_root, torrent.filename)  # no file list: flat default
+        container = folder or _container_for(dest_root, torrent.filename, mode)  # no file list: flat default
     container.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=container)
 
     async def _fetch(url: str, dest: Path, display: str) -> bool:
         """Stream one file; record the outcome. Returns False to stop the batch (cancel)."""
+        part = dest.with_name(dest.name + ".part")
+        if mode is AcquireMode.ADD and dest.exists():
+            result.files.append(
+                AcquiredFile(filename=display, path=dest, ok=True, skipped=True))
+            return True  # already present; keep it, don't re-fetch
+        if mode is AcquireMode.OVERWRITE:
+            dest.unlink(missing_ok=True)
+            part.unlink(missing_ok=True)  # drop any stale partial so the re-fetch is clean
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             await stream_download(url, dest, progress=byte_progress, cancel=cancel)

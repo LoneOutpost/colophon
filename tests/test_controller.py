@@ -1165,7 +1165,7 @@ async def test_rd_download_ingests_downloaded_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
 
     async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
-                            progress=None, byte_progress=None, cancel=None):
+                            progress=None, byte_progress=None, cancel=None, mode=None):
         folder = folder or dest_root / "Mistborn"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "01.mp3").write_bytes(b"")
@@ -1200,7 +1200,7 @@ async def test_resume_download_reuses_the_interrupted_folder(tmp_path, monkeypat
     folders_seen: list = []
 
     async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
-                            progress=None, byte_progress=None, cancel=None):
+                            progress=None, byte_progress=None, cancel=None, mode=None):
         folders_seen.append(folder)
         used = folder or (dest_root / "Mistborn-7")  # a deduped name on the first call
         used.mkdir(parents=True, exist_ok=True)
@@ -1242,7 +1242,7 @@ async def test_rd_download_threads_file_ids(tmp_path, monkeypatch):
     captured = {}
 
     async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
-                            progress=None, byte_progress=None, cancel=None):
+                            progress=None, byte_progress=None, cancel=None, mode=None):
         captured["file_ids"] = file_ids
         used = folder or (dest_root / "Bundle")
         used.mkdir(parents=True, exist_ok=True)
@@ -1276,7 +1276,7 @@ async def test_rd_download_uses_given_dest_dir_and_tracks_file_counts(tmp_path, 
     captured = {}
 
     async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
-                            progress=None, byte_progress=None, cancel=None):
+                            progress=None, byte_progress=None, cancel=None, mode=None):
         captured["dest_root"] = dest_root
         used = folder or (dest_root / "Bk")
         used.mkdir(parents=True, exist_ok=True)
@@ -1352,7 +1352,7 @@ async def test_resume_download_reapplies_file_ids(tmp_path, monkeypatch):
     seen = []
 
     async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
-                            progress=None, byte_progress=None, cancel=None):
+                            progress=None, byte_progress=None, cancel=None, mode=None):
         seen.append(file_ids)
         used = folder or (dest_root / "Bundle")
         used.mkdir(parents=True, exist_ok=True)
