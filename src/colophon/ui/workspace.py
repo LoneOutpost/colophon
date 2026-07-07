@@ -214,14 +214,6 @@ def book_haystack(book: BookUnit) -> str:
     ).lower()
 
 
-def _opening_mode(initial_filter: str) -> str:
-    """The Books mode the Library opens in. Defaults to Triage (worst-confidence,
-    needs-a-human first). But an explicit ?filter= jump — Manage/Stats "Show in Library" —
-    means "show me these books"; open in Browse so a match already past triage
-    (Ready/Organized/Encoded/Skipped) isn't hidden by the needs-a-human filter."""
-    return "browse" if initial_filter else "triage"
-
-
 def _editor_text(widget) -> str:
     """Read an editor widget's value as a '; '-joined string. Chip selects hold a
     list of values; text inputs hold a plain string."""
@@ -432,12 +424,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         book_filter["text"] = _restored.filter_text
     selected_ids.update(_restored.selected_ids)
 
-    # Triage view-state is ephemeral — default to Triage on open (not persisted). A jump
-    # carrying an explicit ?filter= opens in Browse instead, so books already past triage
-    # aren't hidden from the very filter that navigated to them.
-    view["mode"] = _opening_mode(initial_filter)
     view["facets"] = dict(FACET_DEFAULTS)
-    view["sort"] = "conf_asc" if view["mode"] == "triage" else "title"
+    view["sort"] = "title"
 
     def _selected_books() -> list:
         return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
@@ -478,17 +466,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         hay = f"{book_haystack(book)} {controller.book_filename(book).lower()}"
         return all(term in hay for term in terms)
 
-    def _visible_books() -> list:
-        """Scope ∧ folder ∧ text, then (Triage) the needs-a-human filter, the active facets,
-        and the chosen sort. Triage opens worst-confidence-first on the books needing attention."""
+    def _scoped_books() -> list:
+        """Scope ∧ folder ∧ text — the candidate set before facets/sort."""
         books = _books_for_scope()
         terms = book_filter["text"].lower().split()
         if terms:
             books = [b for b in books if _matches_filter(b, terms)]
-        if view["mode"] == "triage":
-            books = [b for b in books if needs_human(b)]
-        books = apply_facets(books, view["facets"])
-        return sort_books(books, view["sort"])
+        return books
+
+    def _visible_books() -> list:
+        """Scope ∧ folder ∧ text, then the active facets and the chosen sort."""
+        return sort_books(apply_facets(_scoped_books(), view["facets"]), view["sort"])
 
     # --- attention pane (findings + guided actions) ---
     def render_attention_pane(book) -> None:
@@ -1656,11 +1644,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _update_count()
         refresh_list()
 
-    def _set_mode(value: str) -> None:
-        view["mode"] = value
-        view["sort"] = "conf_asc" if value == "triage" else "title"
-        _render_middle()  # rebuild so the sort control reflects the new default, then refreshes
-
     def _render_middle() -> None:
         middle_title.text = "Books"
         # Show a folder-filter indicator in the Books header.
@@ -1675,20 +1658,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 ui.button(icon="close", on_click=_clear_folder_filter).props(
                     'flat dense round size=sm color=primary aria-label="Clear folder filter"'
                 ).tooltip("Clear folder filter")
-        # Books toolbar: triage/browse mode + facet bar + free-text filter + selection controls.
+        # Books toolbar: facet bar + free-text filter + selection controls.
         middle_toolbar.clear()
         with middle_toolbar:
-            ui.toggle(
-                {"triage": "Triage", "browse": "Browse"}, value=view["mode"],
-                on_change=lambda e: _set_mode(e.value),
-            ).props("dense no-caps").tooltip(
-                "Triage: books needing attention, worst-confidence first. Browse: the whole scope."
-            )
-            ui.label(
-                "Books that still need a human — anything not Ready or Skipped, worst confidence first."
-                if view["mode"] == "triage"
-                else "Every book in the current scope, sorted by title."
-            ).classes("text-caption colophon-muted")
+            ui.label("Every book in the current scope.").classes("text-caption colophon-muted")
             with ui.row().classes("items-center w-full q-gutter-xs"):
                 ui.select(
                     {"detected": "Detected", "identified": "Identified",
@@ -1718,6 +1691,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     on_change=lambda e: _set_sort(e.value),
                 ).props("dense outlined options-dense").style("min-width: 8.5rem; max-width: 11rem")
             with ui.row().classes("items-center q-gutter-md"):
+                needs_work_n = sum(1 for b in _scoped_books() if needs_human(b))
+                ui.checkbox(
+                    f"Needs work ({needs_work_n})", value=view["facets"]["needs_work"],
+                    on_change=lambda e: _set_facet("needs_work", e.value),
+                ).props("dense").tooltip(
+                    "Only books that are not yet finished — anything still in progress "
+                    "(not Ready, Organized, Encoded, or Skipped)."
+                )
                 ui.checkbox(
                     "Attention", value=view["facets"]["findings"],
                     on_change=lambda e: _set_facet("findings", e.value),
