@@ -618,3 +618,67 @@ async def test_overwrite_mode_leaves_unrelated_files_alone(tmp_path, monkeypatch
 
     assert (base / "01.mp3").read_bytes() == b"FRESH"
     assert (base / "notes.txt").read_bytes() == b"keep me"  # untouched
+
+
+async def test_download_single_archive_link_reports_clear_reason(tmp_path, monkeypatch):
+    # RD packed a many-file torrent into ONE archive link (e.g. a 500GB .rar): the single link
+    # is the archive, not any of the selected files, so a per-file pick matches nothing. We
+    # fail with a clear note instead of a bare failure, and never fetch the giant archive.
+    torrent = RdTorrentInfo(
+        id="a", filename="TE_Audiobooks_A", status="downloaded", links=["L_rar"],
+        files=[
+            RdTorrentFile(id=1, path="/TE/A Cleeves/Raven Black/01.mp3", selected=True),
+            RdTorrentFile(id=2, path="/TE/A Cleeves/Raven Black/02.mp3", selected=True),
+            RdTorrentFile(id=3, path="/TE/A Milne/Pooh/01.mp3", selected=True),
+        ],
+    )
+    # the lone link resolves to the archive, whose name matches none of the picked files
+    links = {"L_rar": RdUnrestrictedLink(filename="TE_Audiobooks_A.rar", download="http://dl/rar")}
+    called = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        called.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={1})
+    assert result.any_ok is False
+    assert called == []                       # never streamed the 500GB archive
+    assert result.note and "archive" in result.note.lower()
+
+
+async def test_download_single_file_torrent_still_downloads(tmp_path, monkeypatch):
+    # Guard: one link for one selected file is legitimate (counts match) and must not be
+    # mistaken for an archive.
+    torrent = RdTorrentInfo(
+        id="a", filename="Solo", status="downloaded", links=["L1"],
+        files=[RdTorrentFile(id=1, path="/Solo/01.mp3", selected=True)],
+    )
+    links = {"L1": RdUnrestrictedLink(filename="01.mp3", download="http://dl/1")}
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    assert result.any_ok is True
+    assert result.note is None
+
+
+def test_visible_candidates_hides_errored_by_default_shows_under_show_all():
+    from colophon.services.acquire import AcquireCandidate, visible_candidates
+    book = AcquireCandidate(
+        torrent=RdTorrentInfo(id="a", filename="Bk", status="downloaded",
+                              files=[RdTorrentFile(id=1, path="/Bk/01.mp3")]),
+        audio_files=[RdTorrentFile(id=1, path="/Bk/01.mp3")], total_files=1, is_ready=True)
+    errored = AcquireCandidate(
+        torrent=RdTorrent(id="b", filename="Vid", status="error"),
+        audio_files=[], total_files=0, is_ready=False)
+    inprogress = AcquireCandidate(
+        torrent=RdTorrent(id="c", filename="Pending", status="downloading"),
+        audio_files=[], total_files=0, is_ready=False)
+
+    assert errored.is_errored is True and book.is_errored is False
+    default = {c.torrent.id for c in visible_candidates([book, errored, inprogress], show_all=False)}
+    assert default == {"a", "c"}   # errored hidden; audiobook + in-progress shown
+    everything = {c.torrent.id for c in visible_candidates([book, errored, inprogress], show_all=True)}
+    assert everything == {"a", "b", "c"}   # Show all reveals errored too
