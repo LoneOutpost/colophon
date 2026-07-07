@@ -90,6 +90,7 @@ from colophon.services.acquire import (
     sanitize_name,
 )
 from colophon.services.catalog import apply_catalog_mapping
+from colophon.services.cleanup import CleanupReport, find_cleanup_candidates
 from colophon.services.cover import ensure_cached_cover, thumbnail_bytes
 from colophon.services.editing import (
     apply_fields,
@@ -537,6 +538,34 @@ class AppController:
         loop."""
         present = {n.root for n in self.ctx.library_graph.nodes.values()}
         return [p for p in self.ctx.config.scan_paths if str(p) not in present]
+
+    def cleanup_report(self) -> CleanupReport:
+        """Review-only: bucket persisted books whose files are gone from disk or no
+        longer under any scan path. Computes nothing destructive."""
+        return find_cleanup_candidates(self.ctx.books.list_all(), self.ctx.config.scan_paths)
+
+    def cleanup_remove(self, book_ids: Iterable[str]) -> int:
+        """Delete the given stale books and their satellite rows (edit history,
+        operations) in one transaction, then re-derive the affected graph roots so
+        the removed books' nodes and edges are pruned. Entity aliases, known
+        entities and node overrides are left untouched — user-declared, not
+        file-derived. Returns the number of books removed."""
+        ids = list(book_ids)
+        if not ids:
+            return 0
+        removal = set(ids)
+        roots = {
+            Path(n.root)
+            for n in self.ctx.library_graph.nodes.values()
+            if n.attrs.get("book_id") in removal
+        }
+        last = len(ids) - 1
+        for i, bid in enumerate(ids):
+            self.ctx.history.delete_for_book(bid, commit=False)
+            self.ctx.operations.delete_for_book(bid, commit=False)
+            self.ctx.books.delete(bid, commit=(i == last))  # final delete flushes the batch
+        self._resync_roots(roots)
+        return len(ids)
 
     def remove_missing(self, book: BookUnit) -> None:
         """Delete an orphaned (missing) book record and its history/operations rows.
