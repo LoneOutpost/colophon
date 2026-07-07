@@ -98,7 +98,8 @@ def test_has_open_findings():
 
 def test_facet_defaults_are_no_constraint():
     assert FACET_DEFAULTS == {"state": [], "confidence": [], "trust": None,
-                              "missing": [], "findings": False, "errors": False}
+                              "missing": [], "findings": False, "errors": False,
+                              "needs_work": False}
     books = [_book(confidence=10.0), _book(confidence=90.0)]
     assert apply_facets(books, dict(FACET_DEFAULTS)) == books  # nothing filtered
 
@@ -180,3 +181,25 @@ def test_is_ready_to_persist():
     assert not is_ready_to_persist(_book(state=BookState.IDENTIFIED))
     assert not is_ready_to_persist(_book(state=BookState.NEEDS_REVIEW))
     assert not is_ready_to_persist(_book(state=BookState.DETECTED))
+
+
+def test_needs_work_facet_keeps_only_unfinished():
+    from pathlib import Path
+
+    from colophon.core.models import BookState, BookUnit
+    from colophon.core.triage import FACET_DEFAULTS, apply_facets
+
+    unfinished = BookUnit.new(source_folder=Path("/x/a"))
+    unfinished.state = BookState.NEEDS_REVIEW
+    done = BookUnit.new(source_folder=Path("/x/b"))
+    done.state = BookState.READY
+    books = [unfinished, done]
+
+    # Default: no constraint.
+    assert apply_facets(books, dict(FACET_DEFAULTS)) == books
+    assert "needs_work" in FACET_DEFAULTS and FACET_DEFAULTS["needs_work"] is False
+
+    # On: only the unfinished book survives.
+    facets = dict(FACET_DEFAULTS)
+    facets["needs_work"] = True
+    assert apply_facets(books, facets) == [unfinished]

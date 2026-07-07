@@ -2,7 +2,7 @@ from pathlib import Path
 
 from colophon.core.models import BookUnit
 from colophon.ui.dialogs import _fmt_series_label
-from colophon.ui.workspace import _editor_text, _opening_mode, book_haystack
+from colophon.ui.workspace import _editor_text, book_haystack
 
 
 def test_fmt_series_label_drops_trailing_zero():
@@ -35,16 +35,17 @@ def test_book_haystack_includes_genres_and_tags():
     assert "tolkien" in hay
 
 
-def test_opening_mode_triage_by_default():
-    # A plain Library open (no ?filter=) lands in Triage: worst-confidence, needs-a-human first.
-    assert _opening_mode("") == "triage"
+def test_triage_mode_removed_and_needs_work_facet_present():
+    import inspect
 
+    from colophon.core.triage import FACET_DEFAULTS
+    from colophon.ui import workspace
 
-def test_opening_mode_browse_on_filter_jump():
-    # A "Show in Library" jump from Manage/Stats carries an explicit ?filter=. It must open in
-    # Browse so a match that's already past triage (e.g. a Ready book) isn't hidden — the regression
-    # where an author counted as "1 book" showed no books when filtered.
-    assert _opening_mode("Armin Shimerman") == "browse"
+    assert not hasattr(workspace, "_opening_mode")
+    assert "needs_work" in FACET_DEFAULTS
+    src = inspect.getsource(workspace)
+    assert "Triage" not in src
+    assert '"triage"' not in src
 
 
 def test_editor_text_joins_list_values():

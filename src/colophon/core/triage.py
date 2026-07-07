@@ -101,6 +101,7 @@ def blocking_reason(book: BookUnit) -> str | None:
 # The "no constraint" facet selection. Copy with dict(FACET_DEFAULTS) before mutating.
 FACET_DEFAULTS = {
     "state": [], "confidence": [], "trust": None, "missing": [], "findings": False, "errors": False,
+    "needs_work": False,
 }
 
 
@@ -113,6 +114,7 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
     missing = set(facets.get("missing") or ())
     findings = bool(facets.get("findings"))
     errors = bool(facets.get("errors"))
+    needs_work = bool(facets.get("needs_work"))
 
     out: list[BookUnit] = []
     for b in books:
@@ -129,6 +131,8 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
         if findings and not has_open_findings(b):
             continue
         if errors and not has_blocking_error(b):
+            continue
+        if needs_work and not needs_human(b):
             continue
         out.append(b)
     return out
