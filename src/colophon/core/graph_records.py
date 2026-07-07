@@ -50,6 +50,25 @@ def _ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
     return None
 
 
+# Franchise provenance weak enough to be overwritten by a fresh folder classification
+# (a manual assignment is stronger and is preserved).
+_WEAK_FRANCHISE_PROV = {"directory", "filename"}
+
+
+def fill_book_franchise(graph: Graph, book: BookUnit, root: Path) -> bool:
+    """Fill a book's empty-or-weak franchise from its nearest ancestor directory classified
+    `franchise`, stamped 'directory'. A manual (or otherwise strong) franchise is left
+    untouched. Returns whether the book changed."""
+    if book.franchise and book.provenance.get("franchise") not in _WEAK_FRANCHISE_PROV:
+        return False
+    fname = _ancestor_franchise(graph, book.source_folder, root)
+    if not fname or book.franchise == fname:
+        return False
+    book.franchise = fname
+    book.provenance["franchise"] = "directory"
+    return True
+
+
 class NodeRecord(_Base):
     id: str
     physical: str | None       # 'directory' | 'file' | None (logical-only, e.g. a book)

@@ -24,3 +24,33 @@ def test_franchise_edge_prefers_book_field(tmp_path):
     dst_names = {n.id: n.attrs.get("name", "") for n in nodes}
     assert any("star" in dst_names.get(e.dst, "").lower() for e in fr_edges)
     ctx.close()
+
+
+def test_fill_book_franchise_from_classified_ancestor(tmp_path):
+    from colophon.core.graph import DirectoryNode
+    from colophon.core.graph_records import fill_book_franchise
+
+    scan = tmp_path / "scan"
+    (scan / "Star Wars" / "A Book").mkdir(parents=True)
+    (scan / "Star Wars" / "A Book" / "01.mp3").write_bytes(b"")
+
+    import colophon.app_context as app_context
+    from colophon.adapters.config import Config
+    ctx = app_context.AppContext.create(
+        Config(db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib", scan_paths=[scan])
+    )
+    g = build_graph(ctx.books, scan, template="$Author - $Title")
+    book = next(bn.book for bn in g.books.values())
+    d = g.directories[DirectoryNode.id_for(scan / "Star Wars")]
+    d.kind = "franchise"
+    d.kind_value = "Star Wars"
+
+    assert fill_book_franchise(g, book, scan) is True
+    assert book.franchise == "Star Wars"
+    assert book.provenance.get("franchise") == "directory"
+
+    book.franchise = "Manual Pick"
+    book.provenance["franchise"] = "manual"
+    assert fill_book_franchise(g, book, scan) is False
+    assert book.franchise == "Manual Pick"
+    ctx.close()
