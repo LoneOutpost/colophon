@@ -33,3 +33,18 @@ def test_resync_derives_franchise_edge_from_book_field(tmp_path):
           if e.kind == "franchise" and e.src == book_node_id(book.id)]
     assert len(fr) == 1
     ctx.close()
+
+
+def test_known_franchises_unions_declared_builtin_and_present(tmp_path):
+    ctx, _scan, book = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ctrl.add_franchise("Declared One")
+    book.franchise = "In Library"
+    ctx.books.upsert(book)
+
+    names = ctrl.known_franchises()
+    assert "Declared One" in names
+    assert "In Library" in names
+    assert names == sorted(names, key=str.casefold)
+    assert set(ctrl.builtin_franchises()).issubset(set(names))
+    ctx.close()

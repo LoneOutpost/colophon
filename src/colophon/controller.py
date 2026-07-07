@@ -1658,6 +1658,13 @@ class AppController:
         from colophon.core.franchise_seeds import DEFAULT_FRANCHISE_NAMES
         return sorted(DEFAULT_FRANCHISE_NAMES, key=str.casefold)
 
+    def known_franchises(self) -> list[str]:
+        """Franchise names for autocomplete: declared + built-in + any already assigned to a
+        book. Sorted case-insensitively."""
+        names = set(self.list_franchises()) | set(self.builtin_franchises())
+        names |= {b.franchise for b in self.ctx.books.list_all() if b.franchise}
+        return sorted(names, key=str.casefold)
+
     def add_franchise(self, name: str) -> None:
         """Declare a franchise; invalidate the graph cache so the next build reclassifies."""
         name = name.strip()

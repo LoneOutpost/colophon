@@ -529,7 +529,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 # editable fields, each prefilled with its value + provenance badge
                 inputs: dict[str, ui.input | ui.textarea] = {}
                 originals: dict[str, str] = {}
-                autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
+                autocomplete = {
+                    "author": controller.known_authors(),
+                    "series": controller.known_series(),
+                    "franchise": controller.known_franchises(),
+                }
 
                 def _build_field(field: str) -> None:
                     value = get_field(book, field) or ""
@@ -737,7 +741,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         # --- grouped fields ---
                         ui.label("Identity").classes("colophon-seccap")
                         with ui.grid(columns=2).classes("w-full"):
-                            for f in ("title", "subtitle", "author", "narrator", "series", "sequence"):
+                            for f in ("title", "subtitle", "author", "narrator", "series",
+                                      "sequence", "franchise"):
                                 _build_field(f)
                         ui.label("Description").classes("colophon-seccap")
                         _build_field("description")
@@ -898,7 +903,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             inputs: dict[str, ui.input | ui.textarea] = {}
             originals: dict[str, object] = {}
-            autocomplete = {"author": controller.known_authors(), "series": controller.known_series()}
+            autocomplete = {
+                "author": controller.known_authors(),
+                "series": controller.known_series(),
+                "franchise": controller.known_franchises(),
+            }
             for field in EDITABLE_FIELDS:
                 values = {(get_field(b, field) or "") for b in books}
                 mixed = len(values) > 1
