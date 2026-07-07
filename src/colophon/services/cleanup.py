@@ -29,9 +29,10 @@ class CleanupCandidate:
     reason: CleanupReason
 
 
-@dataclass(frozen=True)
+@dataclass
 class CleanupReport:
-    """The two disjoint buckets of removable books."""
+    """The two disjoint buckets of removable books. Not frozen: it holds lists, so
+    `frozen=True` would only guarantee shallow immutability and mislead callers."""
 
     removed_from_disk: list[CleanupCandidate]
     outside_scan_paths: list[CleanupCandidate]

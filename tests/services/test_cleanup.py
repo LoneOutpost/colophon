@@ -59,8 +59,13 @@ def test_organized_book_is_never_a_candidate(tmp_path):
 
 
 def test_unreachable_root_excludes_removed_from_disk(tmp_path):
+    from colophon.services.cleanup import _containing_scan_path
+
     missing_root = tmp_path / "unmounted"
     book_folder = missing_root / "Book"
+    # The book IS under the scan path — the unmount guard is what suppresses it,
+    # not it happening to fall outside every scan path.
+    assert _containing_scan_path(book_folder, [missing_root]) is not None
     report = find_cleanup_candidates([_book(book_folder)], [missing_root])
     assert report.removed_from_disk == []
     assert report.outside_scan_paths == []
