@@ -85,6 +85,7 @@ from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
 from colophon.services.acquire import (
     AcquireCandidate,
+    AcquireMode,
     AcquireResult,
     add_torrent,
     add_torrent_file,
@@ -229,6 +230,7 @@ class AppController:
         self._downloads: dict[str, DownloadEntry] = {}
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
+        self.acquire_mode: AcquireMode = AcquireMode.INDEXED
         self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
         # Derived-view memos, valid while their input generations (books/aliases/graph) hold. Keyed
         # by those generations so any write rebuilds automatically — no manual invalidation to forget.
@@ -1003,6 +1005,7 @@ class AppController:
         *, file_ids: list[int] | None = None,
         progress: Callable[[int, int, str], None] | None = None,
         dest_dir: Path | None = None,
+        mode: AcquireMode = AcquireMode.INDEXED,
     ) -> tuple[AcquireResult, list[str]]:
         """Download one torrent and ingest its folder, tracking progress/status in
         the registry. A pause leaves the entry 'paused' (its .part files retained
@@ -1031,6 +1034,7 @@ class AppController:
                 folder=self._download_folders.get(torrent_id),
                 file_ids=set(file_ids) if file_ids is not None else None,
                 progress=_prog, byte_progress=_byte_progress, cancel=token,
+                mode=mode,
             )
         finally:
             await client.aclose()
@@ -1054,16 +1058,18 @@ class AppController:
         file_ids: list[int] | None = None,
         progress: Callable[[int, int, str], None] | None = None,
         dest_dir: Path | None = None,
+        mode: AcquireMode | None = None,
     ) -> tuple[AcquireResult, list[str]]:
         """Download a torrent (optionally only `file_ids`), then ingest the folder,
         tracked in the registry. Returns the download result and the ids of any newly
         registered books. `name` is the display label for the Downloads section
         (defaults to the torrent id); `file_ids=None` keeps the default audio+cover
         set; `progress(idx, total, filename)` is the existing per-file callback;
-        `dest_dir` overrides the download location."""
+        `dest_dir` overrides the download location. `mode` overrides the session-sticky
+        acquire mode for this download only; None falls back to `self.acquire_mode`."""
         return await self._run_download(
             torrent_id, name or torrent_id, file_ids=file_ids, progress=progress,
-            dest_dir=dest_dir,
+            dest_dir=dest_dir, mode=mode if mode is not None else self.acquire_mode,
         )
 
     async def resume_download(self, key: str) -> tuple[AcquireResult, list[str]]:
