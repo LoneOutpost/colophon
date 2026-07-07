@@ -66,6 +66,35 @@ def test_cleanup_remove_deletes_records_and_prunes_graph(tmp_path):
     ctx.close()
 
 
+def test_cleanup_remove_multiple_books_flushes_whole_batch(tmp_path):
+    # Two books removed in one call: the intermediate commit=False deletes must not be
+    # lost, so both books and both their history rows are gone after the single final commit.
+    scan = tmp_path / "scan"
+    for title in ["Dune", "Hyperion"]:
+        (scan / "Author" / title).mkdir(parents=True)
+        (scan / "Author" / title / "01.mp3").write_bytes(b"")
+    ctx = _ctx(tmp_path, [scan])
+
+    g = build_graph(ctx.books, scan, template="$Author - $Title")
+    books = [bn.book for bn in g.books.values()]
+    for b in books:
+        ctx.books.upsert(b)
+    ctx.library_graph.replace_root(str(scan), *graph_records(g, books, root=scan))
+    assert len(books) == 2
+    for i, b in enumerate(books):
+        ctx.history.record(f"batch-{i}", [EditChange(book_id=b.id, field="title",
+                                                     old_value="a", new_value="b")])
+
+    n = AppController(ctx).cleanup_remove([b.id for b in books])
+
+    assert n == 2
+    for i, b in enumerate(books):
+        assert ctx.books.get(b.id) is None
+        assert ctx.history.list_batch(f"batch-{i}") == []
+        assert book_node_id(b.id) not in ctx.library_graph.nodes
+    ctx.close()
+
+
 def test_cleanup_remove_empty_is_noop(tmp_path):
     ctx = _ctx(tmp_path, [tmp_path / "scan"])
     assert AppController(ctx).cleanup_remove([]) == 0
