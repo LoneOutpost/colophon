@@ -504,3 +504,71 @@ def test_acquired_file_has_skipped_default_false(tmp_path):
 
     f = AcquiredFile(filename="x", path=tmp_path / "x", ok=True)
     assert f.skipped is False
+
+
+async def test_add_mode_skips_existing_and_reuses_base(tmp_path, monkeypatch):
+    from colophon.services.acquire import AcquireMode
+
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded",
+                        links=["L_mp3", "L_jpg"])
+    links = {
+        "L_mp3": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3"),
+        "L_jpg": RdUnrestrictedLink(filename="cover.jpg", download="http://dl/cover.jpg"),
+    }
+    base = tmp_path / "Mistborn"
+    base.mkdir()
+    (base / "01.mp3").write_bytes(b"STALE")
+
+    downloaded = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"FRESH")
+        downloaded.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, mode=AcquireMode.ADD)
+
+    assert result.folder == base
+    assert (base / "01.mp3").read_bytes() == b"STALE"
+    assert "http://dl/01.mp3" not in downloaded
+    assert (base / "cover.jpg").read_bytes() == b"FRESH"
+    skipped = [f for f in result.files if f.skipped]
+    assert [f.filename for f in skipped] == ["01.mp3"]
+
+
+async def test_overwrite_mode_replaces_existing_and_stale_part(tmp_path, monkeypatch):
+    from colophon.services.acquire import AcquireMode
+
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded", links=["L_mp3"])
+    links = {"L_mp3": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+    base = tmp_path / "Mistborn"
+    base.mkdir()
+    (base / "01.mp3").write_bytes(b"STALE")
+    (base / "01.mp3.part").write_bytes(b"leftover")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        assert not Path(str(dest) + ".part").exists()
+        Path(dest).write_bytes(b"FRESH")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, mode=AcquireMode.OVERWRITE)
+
+    assert result.folder == base
+    assert (base / "01.mp3").read_bytes() == b"FRESH"
+    assert not (base / "01.mp3.part").exists()
+
+
+async def test_indexed_mode_unchanged_allocates_new_folder(tmp_path, monkeypatch):
+    from colophon.services.acquire import AcquireMode
+
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded", links=["L_mp3"])
+    links = {"L_mp3": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+    (tmp_path / "Mistborn").mkdir()
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"data")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, mode=AcquireMode.INDEXED)
+
+    assert result.folder == tmp_path / "Mistborn-2"
