@@ -1,6 +1,8 @@
+import inspect
 from pathlib import Path
 
 from colophon.services.cleanup import CleanupCandidate, CleanupReport
+from colophon.ui import manage
 from colophon.ui.manage import _selected_cleanup_ids
 
 
@@ -24,3 +26,10 @@ def test_selects_only_checked_categories():
         "d1", "o1", "o2"
     }
     assert _selected_cleanup_ids(r, set()) == []
+
+
+def test_cleanup_dialog_is_defined_and_sync():
+    assert hasattr(manage, "_cleanup_dialog")
+    assert not inspect.iscoroutinefunction(manage._cleanup_dialog)
+    params = list(inspect.signature(manage._cleanup_dialog).parameters)
+    assert params == ["controller", "report"]

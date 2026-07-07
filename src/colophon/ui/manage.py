@@ -50,35 +50,137 @@ def _selected_cleanup_ids(report: CleanupReport, checked: set[str]) -> list[str]
     return ids
 
 
+def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
+    """Preview modal: per-category counts with expandable detail lists and a
+    confirm-to-remove button. Disjoint categories, so counts add up cleanly."""
+    groups: list[tuple[str, str, list[CleanupCandidate]]] = [
+        ("removed_from_disk", "Entries whose folder was removed from disk",
+         report.removed_from_disk),
+        ("outside_scan_paths", "Entries no longer under any scan path",
+         report.outside_scan_paths),
+    ]
+    total = sum(len(items) for _key, _label, items in groups)
+
+    with modal() as dialog, ui.card().classes("w-[32rem]"):
+        ui.label("Clean up library").classes("text-subtitle1")
+
+        if total == 0:
+            ui.label("Nothing to clean up — every entry is accounted for.").classes(
+                "text-caption colophon-muted"
+            )
+            with ui.row().classes("w-full justify-end q-mt-sm"):
+                ui.button("Close", on_click=dialog.close).props("flat")
+            dialog.open()
+            return
+
+        checks: dict[str, ui.checkbox] = {}
+        for key, label, items in groups:
+            cb = ui.checkbox(f"{label} ({len(items)})").props("dense")
+            if not items:
+                cb.props("disable")
+            checks[key] = cb
+            if items:
+                with ui.expansion("Show details").props("dense").classes("w-full q-ml-md"):
+                    for c in items[:_CLEANUP_DETAIL_CAP]:
+                        ui.label(c.title).classes("text-body2")
+                        ui.label(str(c.source_folder)).classes("text-caption colophon-muted")
+                    if len(items) > _CLEANUP_DETAIL_CAP:
+                        ui.label(
+                            f"...and {len(items) - _CLEANUP_DETAIL_CAP} more"
+                        ).classes("text-caption colophon-muted")
+
+        ui.label(
+            "Removed entries lose data that lives only in the app — manual edits, the "
+            "chosen cover, chapter edits. A re-scan cannot restore them."
+        ).classes("text-caption colophon-muted q-mt-sm")
+
+        async def _confirm() -> None:
+            checked = {key for key, cb in checks.items() if cb.value}
+            ids = _selected_cleanup_ids(report, checked)
+            if not ids:
+                return
+            remove_btn.props("loading")
+            try:
+                removed = await asyncio.to_thread(controller.cleanup_remove, ids)
+            except Exception:
+                logger.exception("clean-up remove failed")
+                ui.notify("Clean-up failed (see logs)", type="negative")
+                return
+            finally:
+                remove_btn.props(remove="loading")
+            dialog.close()
+            ui.notify(f"Removed {removed} " + ("entry" if removed == 1 else "entries"))
+
+        with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+            remove_btn = ui.button("Remove", icon="delete", on_click=_confirm).props(
+                "unelevated color=negative"
+            )
+
+        def _sync_enabled() -> None:
+            if any(cb.value for cb in checks.values()):
+                remove_btn.props(remove="disable")
+            else:
+                remove_btn.props("disable")
+
+        for cb in checks.values():
+            cb.on_value_change(_sync_enabled)
+        _sync_enabled()  # start disabled until a box is ticked
+
+    dialog.open()
+
+
 def _render_utilities(controller: AppController) -> None:
     """Library-wide maintenance actions (the Utilities tab). One-off repairs run on demand — kept
     apart from the vocabulary editing so an action button never sits next to a form's Save."""
-    with page_body("read"), page_section(
-        "Durations",
-        "Re-read length from disk for books that scanned as 0:00 — for example after a download "
-        "that was incomplete at scan time has finished. Files with no readable audio are flagged.",
-    ):
-        reprobe_btn = ui.button("Re-probe durations", icon="timer").props("unelevated")
+    with page_body("read"):
+        with page_section(
+            "Durations",
+            "Re-read length from disk for books that scanned as 0:00 — for example after a download "
+            "that was incomplete at scan time has finished. Files with no readable audio are flagged.",
+        ):
+            reprobe_btn = ui.button("Re-probe durations", icon="timer").props("unelevated")
 
-        async def _reprobe() -> None:
-            reprobe_btn.props("loading")
-            try:
-                n = await asyncio.to_thread(controller.reprobe_durations)
-            except Exception:
-                logger.exception("re-probe durations failed")
-                ui.notify("Re-probe failed (see logs)", type="negative")
-                return
-            finally:
-                reprobe_btn.props(remove="loading")
-            ui.notify(
-                f"Re-probed durations: updated {n} book(s)" if n
-                else "All readable files already have a duration"
-            )
+            async def _reprobe() -> None:
+                reprobe_btn.props("loading")
+                try:
+                    n = await asyncio.to_thread(controller.reprobe_durations)
+                except Exception:
+                    logger.exception("re-probe durations failed")
+                    ui.notify("Re-probe failed (see logs)", type="negative")
+                    return
+                finally:
+                    reprobe_btn.props(remove="loading")
+                ui.notify(
+                    f"Re-probed durations: updated {n} book(s)" if n
+                    else "All readable files already have a duration"
+                )
 
-        reprobe_btn.on_click(_reprobe)
-        ui.label("Runs in the background — watch the app-bar jobs indicator for progress.").classes(
-            "text-caption colophon-muted"
-        )
+            reprobe_btn.on_click(_reprobe)
+            ui.label(
+                "Runs in the background — watch the app-bar jobs indicator for progress."
+            ).classes("text-caption colophon-muted")
+
+        with page_section(
+            "Clean up",
+            "Remove library entries whose files are gone — deleted from disk, or no longer "
+            "under any scan path. You review the counts and confirm before anything is removed.",
+        ):
+            cleanup_btn = ui.button("Review clean-up", icon="cleaning_services").props("unelevated")
+
+            async def _review_cleanup() -> None:
+                cleanup_btn.props("loading")
+                try:
+                    report = await asyncio.to_thread(controller.cleanup_report)
+                except Exception:
+                    logger.exception("clean-up report failed")
+                    ui.notify("Could not compute clean-up (see logs)", type="negative")
+                    return
+                finally:
+                    cleanup_btn.props(remove="loading")
+                _cleanup_dialog(controller, report)
+
+            cleanup_btn.on_click(_review_cleanup)
 
 
 def render_manage(controller: AppController, initial_kind: str | None = None,
