@@ -99,7 +99,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
             return
         ui.notify("Added. It will appear here once Real-Debrid finishes preparing it.")
 
-    with page_toolbar():
+    with page_toolbar(sticky=True):
         # One row to add a source: paste a magnet, or browse/drop a .torrent.
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             magnet_input = (
