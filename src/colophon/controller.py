@@ -382,7 +382,7 @@ class AppController:
             ]
             franchise_of: dict[str, str] = {}
             for b in root_books:
-                fname = franchise_for(b.source_folder, overrides, root=root)
+                fname = b.franchise or franchise_for(b.source_folder, overrides, root=root)
                 if fname:
                     franchise_of[b.id] = fname
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)

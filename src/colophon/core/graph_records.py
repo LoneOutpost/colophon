@@ -233,7 +233,7 @@ def graph_records(
     from the scan graph's ancestor classification (manual overrides)."""
     franchise_of: dict[str, str] = {}
     for u in units:
-        fname = _ancestor_franchise(graph, u.source_folder, root)
+        fname = u.franchise or _ancestor_franchise(graph, u.source_folder, root)
         if fname:
             franchise_of[u.id] = fname
     sk_nodes, sk_edges = skeleton_records(graph, root=root)
