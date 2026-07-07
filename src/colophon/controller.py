@@ -90,6 +90,7 @@ from colophon.services.acquire import (
     sanitize_name,
 )
 from colophon.services.catalog import apply_catalog_mapping
+from colophon.services.cleanup import CleanupReport, find_cleanup_candidates
 from colophon.services.cover import ensure_cached_cover, thumbnail_bytes
 from colophon.services.editing import (
     apply_fields,
@@ -537,6 +538,11 @@ class AppController:
         loop."""
         present = {n.root for n in self.ctx.library_graph.nodes.values()}
         return [p for p in self.ctx.config.scan_paths if str(p) not in present]
+
+    def cleanup_report(self) -> CleanupReport:
+        """Review-only: bucket persisted books whose files are gone from disk or no
+        longer under any scan path. Computes nothing destructive."""
+        return find_cleanup_candidates(self.ctx.books.list_all(), self.ctx.config.scan_paths)
 
     def remove_missing(self, book: BookUnit) -> None:
         """Delete an orphaned (missing) book record and its history/operations rows.
