@@ -21,6 +21,7 @@ from colophon.controller import AppController
 from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookUnit
+from colophon.core.normalize import normalize_name
 from colophon.core.pathscheme import sample_target
 from colophon.core.phases import LOCAL
 from colophon.core.sources import SourceResult
@@ -141,28 +142,67 @@ def _cover_thumb(url: str | None) -> None:
             ui.icon("menu_book", size="18px").classes("colophon-muted")
 
 
+def _clean_authors(authors: list[str]) -> list[str]:
+    return [a.strip() for a in authors if a and a.strip()]
+
+
+def authors_align(current: list[str], matched: list[str]) -> bool:
+    """Whether a candidate's authors are consistent with the book's current authors.
+
+    True when the two normalized author sets are equal, and also when either side is
+    empty (no baseline to contradict), so a match is only flagged as a wrong book when
+    both sides name an author and they disagree. Normalization matches the rest of the
+    app (`normalize_name`, casefolded), so case/spacing/order differences still align."""
+    cur = {normalize_name(a).casefold() for a in _clean_authors(current)}
+    mat = {normalize_name(a).casefold() for a in _clean_authors(matched)}
+    if not cur or not mat:
+        return True
+    return cur == mat
+
+
+def _render_author_line(current: list[str], matched: list[str]) -> None:
+    """Show the book's current author against the candidate's, so a wrong-book match is
+    obvious. A green check when they align (or there's nothing to contradict); a warning
+    when they name different authors."""
+    cur = ", ".join(_clean_authors(current))
+    mat = ", ".join(_clean_authors(matched)) or "unknown"
+    aligned = authors_align(current, matched)
+    with ui.row().classes("items-center no-wrap q-gutter-xs"):
+        ui.icon("check_circle" if aligned else "warning", size="16px",
+                color="positive" if aligned else "warning")
+        if not cur:
+            text = f"Author: (none) → {mat}"     # no current author to compare against
+        elif aligned:
+            text = f"Author: {mat}"              # current and match agree
+        else:
+            text = f"Author: {cur} → {mat}"      # different author: likely a different book
+        ui.label(text).classes("text-caption colophon-muted")
+
+
 def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) -> None:
-    """Render a candidate's metadata block (captions + runtime/abridged row),
-    comparing runtime against `book`. Emits NiceGUI elements into the current
-    layout context; the caller owns any surrounding row/checkbox/expansion.
-    Empty fields are omitted."""
-    authors = ", ".join(result.authors) or "unknown"
+    """Render a candidate's metadata block (author comparison, captions, runtime/abridged
+    row), comparing author + runtime against `book`. Emits NiceGUI elements into the current
+    layout context; the caller owns any surrounding row/checkbox/expansion. Empty fields are
+    omitted. Text uses the theme-aware `colophon-muted` token (not Quasar's `caption` prop,
+    whose fixed light-theme colour reads as black on the dark dialog surface)."""
+    _render_author_line(book.authors, result.authors)
+
     year = f" ({result.publish_year})" if result.publish_year else ""
-    ui.item_label(f"{source_label} · {authors}{year}").props("caption")
+    ui.label(f"{source_label}{year}").classes("text-caption colophon-muted")
 
     if result.narrators:
-        ui.item_label(f"Narr: {', '.join(result.narrators)}").props("caption")
+        ui.label(f"Narr: {', '.join(result.narrators)}").classes("text-caption colophon-muted")
 
     series = _fmt_series_label(result.series_name, result.series_sequence)
     pub_bits = [bit for bit in (series, result.publisher) if bit]
     if pub_bits:
-        ui.item_label(" · ".join(pub_bits)).props("caption")
+        ui.label(" · ".join(pub_bits)).classes("text-caption colophon-muted")
 
     rt = _fmt_runtime_delta(result.runtime_ms, book.duration_ms)
     if rt or result.abridged is not None:
         with ui.row().classes("items-center no-wrap q-gutter-xs"):
             if rt:
-                ui.item_label(rt).props("caption").classes("colophon-mono")
+                ui.label(rt).classes("text-caption colophon-mono colophon-muted")
             if result.abridged is not None:
                 ui.badge("Abridged" if result.abridged else "Unabridged").props("outline").classes("colophon-chip")
 

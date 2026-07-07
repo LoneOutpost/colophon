@@ -1,7 +1,29 @@
 import inspect
 
 from colophon.services.ingest import ScanScope
-from colophon.ui.dialogs import _DEPTH_TO_SCOPE, match_dialog, persist_dialog, scan_dialog
+from colophon.ui.dialogs import (
+    _DEPTH_TO_SCOPE,
+    authors_align,
+    match_dialog,
+    persist_dialog,
+    scan_dialog,
+)
+
+
+def test_authors_align_matches_ignoring_case_order_and_spacing():
+    assert authors_align(["Ann Cleeves"], ["ann  cleeves"]) is True
+    assert authors_align(["Ann Cleeves", "Jane Doe"], ["Jane Doe", "Ann Cleeves"]) is True
+
+
+def test_authors_align_flags_a_different_author():
+    assert authors_align(["Ann Cleeves"], ["Anne Cleveland"]) is False
+
+
+def test_authors_align_true_when_no_baseline_to_contradict():
+    # No current author (e.g. inferred) or a match without author info: nothing to flag.
+    assert authors_align([], ["Ann Cleeves"]) is True
+    assert authors_align(["  "], ["Ann Cleeves"]) is True
+    assert authors_align(["Ann Cleeves"], []) is True
 
 
 def test_depth_maps_to_scope():
