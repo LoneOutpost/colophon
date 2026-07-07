@@ -26,7 +26,7 @@ from colophon.core.graph_resolve import _name_key
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.perf import span
-from colophon.core.review import review_reasons
+from colophon.core.state_labels import state_badge_tooltip, state_description
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.triage import (
     FACET_DEFAULTS,
@@ -172,25 +172,11 @@ def _primary_confidence(book: BookUnit, threshold: float) -> tuple[float, str, s
     return (book.identity_confidence, _confidence_color(book.identity_confidence), _IDENTITY_TOOLTIP)
 
 
-# States that are finished/verified — a review-reason tooltip on their badge would be noise.
-_DONE_BADGE_STATES = frozenset({BookState.READY, BookState.ORGANIZED, BookState.ENCODED})
-
-
-def _review_tooltip(book: BookUnit) -> str | None:
-    """A one-line 'why this needs review' for the state badge, or None when nothing is wrong."""
-    if book.state in _DONE_BADGE_STATES:
-        return None
-    reasons = review_reasons(book)
-    return " ".join(reasons) if reasons else None
-
-
 def _state_badge(book: BookUnit) -> None:
-    """Render the per-book state badge, with a review-reason tooltip when the book is uncertain."""
+    """Render the per-book state badge. The tooltip always explains the state, and appends
+    the specific review reasons when the book is uncertain."""
     label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
-    badge = ui.badge(label).props(f"color={color} outline")
-    tip = _review_tooltip(book)
-    if tip:
-        badge.tooltip(tip)
+    ui.badge(label).props(f"color={color} outline").tooltip(state_badge_tooltip(book))
 
 
 _CHIP_FIELDS = ("genre", "tag")
@@ -787,10 +773,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
                                 with ui.item_section().props("side"):
                                     with ui.row().classes("q-gutter-xs no-wrap"):
-                                        ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').set_enabled(idx > 0)
-                                        ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').set_enabled(idx < len(book.source_files) - 1)
-                                        ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"')
-                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"')
+                                        ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
+                                        ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
+                                        ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"').tooltip("Rename file")
+                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
 
                     # chapters: applied named chapters (book.chapters) or file-boundary default
                     applied = bool(book.chapters)
@@ -1391,8 +1377,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     # with thousands of author/series rows, eagerly constructing
                     # every (almost never opened) menu dominated nav render time.
                     with ui.button(icon="more_vert").props(
-                        "flat dense round size=sm"
-                    ).on("click.stop", lambda: None):
+                        'flat dense round size=sm aria-label="Node actions"'
+                    ).tooltip("Node actions").on("click.stop", lambda: None):
                         node_menu = ui.menu()
                         built = {"done": False}
 
@@ -1809,7 +1795,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             for state, label, color in _STATUS_BADGES:
                 count = stats.get(state, 0)
                 if count:
-                    ui.badge(f"{label} {count}").props(f"color={color}")
+                    ui.badge(f"{label} {count}").props(f"color={color}").tooltip(
+                        state_description(BookState(state))
+                    )
             ui.space()
             if selected_ids:
                 ui.label(f"{len(selected_ids)} selected").classes("text-caption colophon-muted")
