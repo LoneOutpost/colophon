@@ -34,3 +34,48 @@ def test_splits_into_disjoint_categories(tmp_path):
         {c.source_folder for c in report.removed_from_disk}
         & {c.source_folder for c in report.outside_scan_paths}
     )
+
+
+def test_broader_scan_path_keeps_book(tmp_path):
+    downloads = tmp_path / "downloads"
+    inner = downloads / "inner-scan" / "Book"
+    inner.mkdir(parents=True)
+    report = find_cleanup_candidates([_book(inner)], [downloads])
+    assert report.removed_from_disk == []
+    assert report.outside_scan_paths == []
+
+
+def test_organized_book_is_never_a_candidate(tmp_path):
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    gone_under = scan / "Gone"
+    gone_outside = tmp_path / "away" / "Gone"
+    out = tmp_path / "lib" / "x.m4b"
+    report = find_cleanup_candidates(
+        [_book(gone_under, output=out), _book(gone_outside, output=out)], [scan]
+    )
+    assert report.removed_from_disk == []
+    assert report.outside_scan_paths == []
+
+
+def test_unreachable_root_excludes_removed_from_disk(tmp_path):
+    missing_root = tmp_path / "unmounted"
+    book_folder = missing_root / "Book"
+    report = find_cleanup_candidates([_book(book_folder)], [missing_root])
+    assert report.removed_from_disk == []
+    assert report.outside_scan_paths == []
+
+
+def test_empty_scan_paths_puts_everything_outside(tmp_path):
+    a = tmp_path / "A"
+    a.mkdir()
+    b = tmp_path / "B"
+    report = find_cleanup_candidates([_book(a), _book(b)], [])
+    assert {c.source_folder for c in report.outside_scan_paths} == {a, b}
+    assert report.removed_from_disk == []
+
+
+def test_title_falls_back_to_folder_name(tmp_path):
+    folder = tmp_path / "away" / "Some Book"
+    c = find_cleanup_candidates([_book(folder, title=None)], [tmp_path / "scan"])
+    assert c.outside_scan_paths[0].title == "Some Book"
