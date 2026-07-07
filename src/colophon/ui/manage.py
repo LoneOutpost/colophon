@@ -12,6 +12,7 @@ from nicegui import ui
 
 from colophon.controller import AppController
 from colophon.core.perf import span
+from colophon.services.cleanup import CleanupCandidate, CleanupReport
 from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
 from colophon.ui.dialogs import modal
 from colophon.ui.filter_input import filter_input
@@ -19,6 +20,8 @@ from colophon.ui.filter_input import filter_input
 logger = logging.getLogger(__name__)
 
 _PAGE = 100  # vocabulary rows rendered per chunk; the rest fill in via "Show more"
+
+_CLEANUP_DETAIL_CAP = 50  # rows shown per category in the clean-up preview before eliding
 
 _KIND_LABELS = {
     "author": "Authors",
@@ -34,6 +37,17 @@ _KIND_LABELS = {
 def _valid_kind(kind: str | None) -> str:
     """A safe manage vocabulary kind, defaulting to 'author' for anything unrecognized."""
     return kind if kind in _KIND_LABELS else "author"
+
+
+def _selected_cleanup_ids(report: CleanupReport, checked: set[str]) -> list[str]:
+    """The book ids to remove given which category checkboxes are ticked. The two
+    categories are disjoint, so this is a simple concatenation in category order."""
+    ids: list[str] = []
+    if "removed_from_disk" in checked:
+        ids += [c.book_id for c in report.removed_from_disk]
+    if "outside_scan_paths" in checked:
+        ids += [c.book_id for c in report.outside_scan_paths]
+    return ids
 
 
 def _render_utilities(controller: AppController) -> None:
