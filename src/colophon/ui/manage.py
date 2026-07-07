@@ -14,7 +14,7 @@ from colophon.controller import AppController
 from colophon.core.perf import span
 from colophon.services.cleanup import CleanupCandidate, CleanupReport
 from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
-from colophon.ui.dialogs import modal
+from colophon.ui.dialogs import busy, modal
 from colophon.ui.filter_input import filter_input
 
 logger = logging.getLogger(__name__)
@@ -99,15 +99,15 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
             ids = _selected_cleanup_ids(report, checked)
             if not ids:
                 return
-            remove_btn.props("loading")
+            remove_btn.props("disable")  # block a double-click while the deletes run
             try:
-                removed = await asyncio.to_thread(controller.cleanup_remove, ids)
+                with busy(remove_btn):
+                    removed = await asyncio.to_thread(controller.cleanup_remove, ids)
             except Exception:
                 logger.exception("clean-up remove failed")
                 ui.notify("Clean-up failed (see logs)", type="negative")
+                _sync_enabled()  # re-enable per the current checkbox state so a retry is possible
                 return
-            finally:
-                remove_btn.props(remove="loading")
             dialog.close()
             ui.notify(f"Removed {removed} " + ("entry" if removed == 1 else "entries"))
 
