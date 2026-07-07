@@ -65,7 +65,7 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
         ui.label("Clean up library").classes("text-subtitle1")
 
         if total == 0:
-            ui.label("Nothing to clean up — every entry is accounted for.").classes(
+            ui.label("Nothing to clean up. Every entry is accounted for.").classes(
                 "text-caption colophon-muted"
             )
             with ui.row().classes("w-full justify-end q-mt-sm"):
@@ -90,7 +90,7 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
                         ).classes("text-caption colophon-muted")
 
         ui.label(
-            "Removed entries lose data that lives only in the app — manual edits, the "
+            "Removed entries lose data that lives only in the app: manual edits, the "
             "chosen cover, chapter edits. A re-scan cannot restore them."
         ).classes("text-caption colophon-muted q-mt-sm")
 
@@ -163,7 +163,7 @@ def _render_utilities(controller: AppController) -> None:
 
         with page_section(
             "Clean up",
-            "Remove library entries whose files are gone — deleted from disk, or no longer "
+            "Remove library entries whose files are gone: deleted from disk, or no longer "
             "under any scan path. You review the counts and confirm before anything is removed.",
         ):
             cleanup_btn = ui.button("Review clean-up", icon="cleaning_services").props("unelevated")
