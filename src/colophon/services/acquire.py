@@ -230,7 +230,7 @@ def plan_pairs(
 def _fallback_dest_map(
     selected: list[RdTorrentFile], file_ids: set[int] | None,
     dest_root: Path, torrent_name: str, pinned: Path | None,
-    mode: AcquireMode = AcquireMode.INDEXED,
+    *, mode: AcquireMode = AcquireMode.INDEXED,
 ) -> tuple[Path, dict[str, Path], set[str]]:
     """For the count-mismatch path (RD returns fewer links than selected files): pick the target
     files (by `file_ids`, else the audio+cover default), compute their structured destinations,
@@ -281,7 +281,7 @@ async def download_torrent(
         # torrents). Recover structure by matching each link's unrestricted filename to a selected
         # file's real path — not flattening.
         container, dest_by_name, target_names = _fallback_dest_map(
-            selected, file_ids, dest_root, torrent.filename, folder, mode)
+            selected, file_ids, dest_root, torrent.filename, folder, mode=mode)
     else:
         container = folder or _container_for(dest_root, torrent.filename, mode)  # no file list: flat default
     container.mkdir(parents=True, exist_ok=True)

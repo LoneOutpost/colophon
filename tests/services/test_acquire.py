@@ -572,3 +572,49 @@ async def test_indexed_mode_unchanged_allocates_new_folder(tmp_path, monkeypatch
     result = await download_torrent(FakeRd(links=links), torrent, tmp_path, mode=AcquireMode.INDEXED)
 
     assert result.folder == tmp_path / "Mistborn-2"
+
+
+async def test_add_mode_resumes_a_partial_not_yet_complete(tmp_path, monkeypatch):
+    from colophon.services.acquire import AcquireMode
+
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded", links=["L_mp3"])
+    links = {"L_mp3": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+    base = tmp_path / "Mistborn"
+    base.mkdir()
+    # An interrupted prior attempt: only a .part exists (no final file). ADD must NOT skip;
+    # it re-invokes stream_download (which, in real life, resumes the .part via Range).
+    (base / "01.mp3.part").write_bytes(b"half")
+
+    fetched = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        assert Path(str(dest) + ".part").exists()  # the partial is still there to resume
+        Path(dest).write_bytes(b"FRESH")
+        fetched.append(url)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, mode=AcquireMode.ADD)
+
+    assert fetched == ["http://dl/01.mp3"]           # resumed, not skipped
+    assert [f for f in result.files if f.skipped] == []
+    assert (base / "01.mp3").read_bytes() == b"FRESH"
+
+
+async def test_overwrite_mode_leaves_unrelated_files_alone(tmp_path, monkeypatch):
+    from colophon.services.acquire import AcquireMode
+
+    torrent = RdTorrent(id="a", filename="Mistborn", status="downloaded", links=["L_mp3"])
+    links = {"L_mp3": RdUnrestrictedLink(filename="01.mp3", download="http://dl/01.mp3")}
+    base = tmp_path / "Mistborn"
+    base.mkdir()
+    (base / "01.mp3").write_bytes(b"STALE")
+    (base / "notes.txt").write_bytes(b"keep me")  # unrelated file this download never touches
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).write_bytes(b"FRESH")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    await download_torrent(FakeRd(links=links), torrent, tmp_path, mode=AcquireMode.OVERWRITE)
+
+    assert (base / "01.mp3").read_bytes() == b"FRESH"
+    assert (base / "notes.txt").read_bytes() == b"keep me"  # untouched
