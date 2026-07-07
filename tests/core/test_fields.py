@@ -115,3 +115,16 @@ def test_isbn_field_roundtrip(tmp_path):
     set_field(b, "isbn", "9780306406157")
     assert b.isbn == "9780306406157"
     assert get_field(b, "isbn") == "9780306406157"
+
+
+def test_bookunit_has_optional_franchise_field(tmp_path):
+    from colophon.core.models import BookUnit
+
+    b = BookUnit.new(source_folder=tmp_path / "b")
+    assert b.franchise is None
+    b.franchise = "Star Wars"
+    reloaded = BookUnit.model_validate(b.model_dump())
+    assert reloaded.franchise == "Star Wars"
+    d = b.model_dump()
+    d.pop("franchise")
+    assert BookUnit.model_validate(d).franchise is None
