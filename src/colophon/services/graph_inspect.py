@@ -57,7 +57,7 @@ def _provenance_of(books: BookUnitRepo):
                 src = book.provenance.get(field)
                 if src:
                     lines.append(f"{field.capitalize()} from {src}")
-            lines.append(f"Confidence {book.confidence:.2f}")
+            lines.append(f"Confidence {book.confidence:.0f}%")
             return lines
         if node.physical == "directory":
             if "kind" not in node.attrs:
@@ -69,7 +69,7 @@ def _provenance_of(books: BookUnitRepo):
             conf = node.attrs.get("kind_confidence")
             head = f"Classified as {k} · {'confirmed manually' if manual else 'auto rule'}"
             if conf:
-                head += f" · confidence {float(conf):.2f}"
+                head += f" · confidence {float(conf):.0%}"
             out = [head]
             out.extend(str(x) for x in (node.attrs.get("kind_evidence") or []))
             return out

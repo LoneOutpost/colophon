@@ -382,7 +382,7 @@ def _explorer_panel(view, focal_id: str | None) -> None:
                 "flat dense no-caps").classes("colophon-muted")
     cap = view.type_caption.upper()
     if view.confidence is not None:
-        cap += f" · {view.confidence:.0%}"
+        cap += f" · {view.confidence:.0f}%"
     ui.label(cap).classes("colophon-seccap")
     for label, value in view.rows:
         ui.label(f"{label}: {value}").classes("text-caption")
