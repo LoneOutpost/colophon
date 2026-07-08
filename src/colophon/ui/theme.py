@@ -190,13 +190,11 @@ body.body--dark { color: #ece4d8; }
 .colophon-catalog-list .q-item { break-inside: avoid; }
 .colophon-attention { border: 1px solid var(--colophon-line); border-left: 3px solid #b45309;
   border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
-/* Primary save actions pin to the TOP of the detail scroll so they stay reachable
-   from anywhere in a long editor. Opaque surface + z-index so scrolling fields pass
-   underneath. */
-.colophon-actionbar { position: sticky; top: 0; z-index: 10; margin-bottom: 8px;
-  padding: 8px 0; background: var(--colophon-surface);
+/* Primary save actions: a fixed toolbar above the detail scroll area (not inside it),
+   so Save / Write tags / Mark ready stay visible however far the fields scroll. The
+   hairline rule separates the toolbar from the scrolling content below. */
+.colophon-actionbar { padding: 4px 0 10px; margin-bottom: 4px;
   border-bottom: 1px solid var(--colophon-line); }
-.body--dark .colophon-actionbar { background: #262019; }
 /* Page sub-header band: a recessive surface zone with a hairline rule, separating a
    page's controls + state-of-play from its body (the page -> surface -> line tonal
    rule). Shared across pages via chrome.page_toolbar. */
