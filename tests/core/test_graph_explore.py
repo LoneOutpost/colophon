@@ -243,6 +243,18 @@ def test_to_echart_folder_classified_node_uses_folder_glyph_and_classification_t
     assert node["itemStyle"]["color"] == KIND_COLOR["author"]
 
 
+def test_to_echart_classified_folder_sized_like_its_entity():
+    from colophon.core.graph_explore import neighborhood, to_echart
+    g = _graph_with_author_folder()
+    sub = neighborhood(g, "root", hops=1)
+    opt = to_echart(g, sub, "root",
+                    label_of=lambda n: n.attrs.get("name", ""),
+                    confidence_of=lambda n: None)
+    af = next(d for d in opt["series"][0]["data"] if d["id"] == "af")
+    # author folder sized like an author entity (20), not shrunk to plain-folder size (14)
+    assert af["symbolSize"] == 20
+
+
 def test_to_echart_folder_filter_hides_classified_folders():
     from colophon.core.graph_explore import neighborhood, to_echart
     g = _graph_with_author_folder()

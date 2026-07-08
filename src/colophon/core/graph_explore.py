@@ -201,7 +201,9 @@ def to_echart(
     for nid in visible:
         node = graph.nodes[nid]
         bucket = filter_bucket(node)
-        base = 20 if bucket in ("author", "series", "franchise") else 14
+        # Size by classification, not bucket, so a classified author/series/franchise *folder*
+        # reads at the same weight as the entity node of that kind (not shrunk to folder size).
+        base = 20 if node.semantic in ("author", "series", "franchise") else 14
         if nid == focal_id:
             item_style = {"color": node_tint(node), "borderColor": _FOCAL_RING, "borderWidth": 3,
                           "shadowColor": _FOCAL_GLOW, "shadowBlur": 10}

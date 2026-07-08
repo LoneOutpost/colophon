@@ -27,3 +27,15 @@ def test_search_caption_labels_classified_folder_vs_entity():
     kinds = {h["id"]: h["kind"] for h in hits}
     assert kinds["af"] == "Author Folder"
     assert kinds["ae"] == "Author"
+
+
+def test_provenance_confidence_rendered_as_percent():
+    """A folder's classification confidence (kind_confidence, 0..1) renders as a percent, not a
+    raw 0.00-1.00 float, so it reads consistently with the book/match confidences shown elsewhere."""
+    from colophon.core.graph_records import NodeRecord
+    from colophon.services.graph_inspect import _provenance_of
+
+    prov = _provenance_of(MagicMock())
+    folder = NodeRecord(id="af", physical="directory", semantic="author", root="/lib",
+                        attrs={"name": "X", "kind": "author", "kind_confidence": 1.0})
+    assert "confidence 100%" in prov(folder)[0]
