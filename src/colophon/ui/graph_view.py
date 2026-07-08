@@ -14,7 +14,7 @@ from nicegui import app, ui
 
 from colophon.controller import AppController
 from colophon.core.graph import DirectoryNode
-from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
+from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KIND_LABEL, KINDS
 from colophon.core.graph_records import book_node_id
 from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
 from colophon.ui.chrome import body_column, empty_state, page_header, page_toolbar
@@ -362,7 +362,7 @@ def _explorer_legend(focal_id: str, hidden: frozenset[str], depth: int = 1) -> N
             entry.tooltip(f"{'Show' if is_hidden else 'Hide'} {kind} nodes")
             with entry:
                 ui.icon(KIND_ICON[kind], size="1.75rem").style(f"color:{KIND_COLOR[kind]}")
-                label = ui.label(kind).classes("text-caption")
+                label = ui.label(KIND_LABEL[kind]).classes("text-caption")
                 if is_hidden:
                     label.style("text-decoration: line-through")
 
