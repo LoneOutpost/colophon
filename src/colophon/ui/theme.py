@@ -31,6 +31,7 @@ _LIGHT_VARS = {
     "col-radius": "12px",
     "colophon-accent": ACCENT_LIGHT,
     "colophon-sel": "rgba(176, 78, 48, .12)",
+    "colophon-tag-bg": "rgba(176, 78, 48, .06)",  # quiet tonal fill for genre/tag chips (kept faint so accent text clears AA; the border carries the pill shape)
     "colophon-hover": "rgba(176, 78, 48, .06)",
     "colophon-zebra": "rgba(60, 50, 40, .035)",  # neutral row-stripe, subtler than hover
     "colophon-ring": "rgba(176, 78, 48, .45)",
@@ -45,6 +46,7 @@ _DARK_VARS = {
     "q-primary": f"{ACCENT_DARK} !important",
     "colophon-accent": ACCENT_DARK,
     "colophon-sel": "rgba(214, 117, 79, .18)",
+    "colophon-tag-bg": "rgba(214, 117, 79, .06)",  # quiet tonal fill for genre/tag chips (kept faint so accent text clears AA; the border carries the pill shape)
     "colophon-hover": "rgba(214, 117, 79, .08)",
     "colophon-zebra": "rgba(255, 250, 244, .04)",  # neutral row-stripe, subtler than hover
     "colophon-ring": "rgba(214, 117, 79, .5)",
@@ -199,6 +201,25 @@ body.body--dark { color: #ece4d8; }
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }
 .colophon-chip { color: var(--colophon-muted); border-color: var(--colophon-border); }
+/* Genre/tag chips on book rows: a quiet tonal pill (low-opacity terracotta fill +
+   terracotta text) so the metadata recedes under the title and clears AA, replacing
+   NiceGUI's loud solid-primary default (dark text on full terracotta = 4.0:1). */
+.colophon-tag-chip.q-chip {
+  background: var(--colophon-tag-bg);
+  color: var(--colophon-accent);
+  border: 1px solid color-mix(in srgb, var(--colophon-accent) 30%, transparent);
+  font-weight: 500;
+  padding: 2px 9px;
+  min-height: 0;
+  max-width: 13rem;
+}
+.colophon-tag-chip.q-chip .q-chip__content { overflow: hidden; text-overflow: ellipsis; }
+/* The "+N more" overflow pill recedes further: neutral tint, muted ink. */
+.colophon-tag-more.q-chip {
+  background: color-mix(in srgb, var(--colophon-muted) 7%, transparent);
+  color: var(--colophon-muted);
+  border-color: color-mix(in srgb, var(--colophon-muted) 28%, transparent);
+}
 .body--dark .q-btn.bg-primary, .body--dark .q-btn.bg-primary .q-btn__content {
   color: #1c1916 !important;  /* dark accent fails white-on-fill; beats Quasar .text-white */
 }
