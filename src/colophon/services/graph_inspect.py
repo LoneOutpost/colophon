@@ -8,7 +8,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo
-from colophon.core.graph_explore import display_kind, neighborhood, search_nodes, to_echart
+from colophon.core.graph_explore import (
+    display_kind,
+    neighborhood,
+    search_nodes,
+    to_echart,
+    type_label,
+)
 from colophon.core.graph_inspect import NodeInspection
 from colophon.core.graph_inspect import inspect as _inspect
 from colophon.core.graph_records import NodeRecord
@@ -75,7 +81,7 @@ def search(graph: LibraryGraph, books: BookUnitRepo, query: str) -> list[dict]:
     """Focal candidates for the explorer search box: [{id, label, kind}]."""
     name_of = _name_of(books)
     ids = search_nodes(graph, query, name_of=name_of)
-    return [{"id": nid, "label": name_of(graph.nodes[nid]), "kind": display_kind(graph.nodes[nid])}
+    return [{"id": nid, "label": name_of(graph.nodes[nid]), "kind": type_label(graph.nodes[nid])}
             for nid in ids]
 
 
