@@ -1782,7 +1782,7 @@ def test_set_cover_upload_png_writes_file(tmp_path):
     res = AppController(ctx).set_cover_upload(book, _PNG, "art.png")
     assert res.ok
     p = ctx.books.get(book.id)
-    assert p.cover_path == book.source_folder / "cover.png"
+    assert p.cover_path == book.source_folder / f"cover-{book.id}.png"  # per-book, collision-safe
     assert p.cover_path.read_bytes() == _PNG
     assert p.cover_url is None
     ctx.close()
@@ -1795,7 +1795,7 @@ def test_set_cover_upload_jpeg_extension(tmp_path):
     ctx.books.upsert(book)
     res = AppController(ctx).set_cover_upload(book, _JPEG, "art.jpg")
     assert res.ok
-    assert ctx.books.get(book.id).cover_path == book.source_folder / "cover.jpg"
+    assert ctx.books.get(book.id).cover_path == book.source_folder / f"cover-{book.id}.jpg"
     ctx.close()
 
 
@@ -3571,3 +3571,27 @@ def test_books_for_scope_and_pipeline_counts(tmp_path):
     scope = ctrl.scope_counts()
     assert scope["ready"] == counts["ready"]
     assert scope["total"] == len(ctrl.books_for_scope("all"))
+
+
+def test_dedupe_colliding_covers_clears_only_shared_paths(tmp_path):
+    # Clustered books that shared a folder cached to one folder-keyed file (pre-fix), so
+    # a cover_path held by >1 book is a collision. The repair clears exactly those, leaving
+    # a solo book's unique cover untouched, and is idempotent.
+    ctx = _ctx(tmp_path)
+    shared = tmp_path / "C S Lewis"
+    collide = shared / "cover.jpg"
+    a = BookUnit.new(source_folder=shared)
+    a.id, a.cover_path, a.cover_url = "aaaa000000000001", collide, "https://x/a.jpg"
+    b = BookUnit.new(source_folder=shared)
+    b.id, b.cover_path, b.cover_url = "bbbb000000000002", collide, "https://x/b.jpg"
+    solo = BookUnit.new(source_folder=tmp_path / "Solo")
+    solo.cover_path = tmp_path / "Solo" / "cover.jpg"
+    for bk in (a, b, solo):
+        ctx.books.upsert(bk)
+
+    assert AppController(ctx).dedupe_colliding_covers() == 2
+    assert ctx.books.get(a.id).cover_path is None
+    assert ctx.books.get(b.id).cover_path is None
+    assert ctx.books.get(solo.id).cover_path is not None  # unique, untouched
+    assert AppController(ctx).dedupe_colliding_covers() == 0  # idempotent once healed
+    ctx.close()

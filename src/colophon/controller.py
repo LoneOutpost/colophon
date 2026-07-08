@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
@@ -752,7 +753,9 @@ class AppController:
         ext = _detect_image_ext(data)
         if ext is None:
             return CoverSetResult(ok=False, error="Not a JPEG or PNG image")
-        path = book.source_folder / f"cover{ext}"
+        # Per-book name (not a folder-shared "cover.<ext>") so clustered books that
+        # share this folder don't overwrite each other's uploaded cover.
+        path = book.source_folder / f"cover-{book.id}{ext}"
         try:
             book.source_folder.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
@@ -788,6 +791,25 @@ class AppController:
         book.cover_path = None
         book.touch()
         self.ctx.books.upsert(book)
+
+    def dedupe_colliding_covers(self) -> int:
+        """One-time repair for covers cached before the fix that keyed the cache file
+        on the folder. Clustered books that share a source folder all wrote to the same
+        `cover.<ext>`, so any cover_path value held by more than one book is a collision:
+        all but one book points at the wrong image. Clear cover_path on every book whose
+        cover_path is shared, so each re-fetches its own cover_url into its per-book path.
+        A shared cover with no cover_url loses an already-incorrect image. Idempotent —
+        once healed, per-book paths are unique and this writes nothing. Returns the count
+        cleared."""
+        books = self.ctx.books.list_all()
+        counts = Counter(str(b.cover_path) for b in books if b.cover_path is not None)
+        shared = {p for p, n in counts.items() if n > 1}
+        stale = [b for b in books if b.cover_path is not None and str(b.cover_path) in shared]
+        for i, book in enumerate(stale):
+            book.cover_path = None
+            book.touch()
+            self.ctx.books.upsert(book, commit=(i == len(stale) - 1))
+        return len(stale)
 
     def books_all(self) -> list[BookUnit]:
         """All persisted books (used by callers that need the full set)."""
