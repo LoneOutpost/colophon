@@ -79,6 +79,15 @@ def main() -> None:
             logger.info(f"identity: backfilled {updated} book(s) from the graph classification")
     except Exception:
         logger.exception("identity backfill failed; starting with stored confidence/state as loaded")
+    # Heal covers cached under the old folder-keyed name: clustered books sharing a folder
+    # all collided on one file. Clearing the shared cover_path re-fetches each from its own
+    # cover_url into a per-book path. Idempotent and non-fatal — never blocks startup.
+    try:
+        healed_covers = controller.dedupe_colliding_covers()
+        if healed_covers:
+            logger.info(f"covers: cleared {healed_covers} colliding cover reference(s) to re-fetch")
+    except Exception:
+        logger.exception("cover dedupe failed; starting with cover references as loaded")
     create_app(controller)
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:

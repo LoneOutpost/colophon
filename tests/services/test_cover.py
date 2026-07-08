@@ -23,9 +23,27 @@ async def test_caches_cover_and_sets_cover_path(tmp_path: Path):
         return httpx.Response(200, content=_PNG, headers={"content-type": "image/png"})
 
     path = await ensure_cached_cover(book, dest_dir=tmp_path, client=_client(handler))
-    assert path == tmp_path / "cover.png"
+    assert path == tmp_path / f"cover-{book.id}.png"  # per-book name, not a folder-shared "cover.png"
     assert path.read_bytes() == _PNG
     assert book.cover_path == path
+
+
+async def test_books_sharing_a_folder_get_distinct_cover_paths(tmp_path: Path):
+    # Multi-book directory: two clustered books share one source folder but own distinct
+    # ids and distinct cover URLs. Caching must key on book identity, not the folder, or
+    # they collide on one file and all show the same image.
+    a = BookUnit.new(source_folder=tmp_path)
+    a.id, a.cover_url = "aaaa000000000001", "https://covers.example/a.png"
+    b = BookUnit.new(source_folder=tmp_path)
+    b.id, b.cover_url = "bbbb000000000002", "https://covers.example/b.png"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_PNG, headers={"content-type": "image/png"})
+
+    pa = await ensure_cached_cover(a, dest_dir=tmp_path, client=_client(handler))
+    pb = await ensure_cached_cover(b, dest_dir=tmp_path, client=_client(handler))
+    assert pa != pb
+    assert a.cover_path != b.cover_path
 
 
 async def test_no_cover_url_returns_none(tmp_path: Path):
