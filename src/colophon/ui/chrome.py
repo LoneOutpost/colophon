@@ -22,10 +22,14 @@ def brand_mark() -> None:
     """The Colophon emblem for the app header. Renders both tone variants; CSS shows
     the warm-ink mark on the light header and the warm-paper mark on the dark header
     (via `body--dark`), so one brand mark reads on either surface."""
+    # width/height attributes give the mark a sane size immediately, before the
+    # stylesheet loads — otherwise a slow page (the Library) briefly paints the SVG at
+    # its 1254px natural size. The .colophon-brand CSS then refines to the responsive
+    # height once applied.
     ui.html(
-        '<img src="/assets/brand/colophon-mark-light.svg" alt="Colophon"'
+        '<img src="/assets/brand/colophon-mark-light.svg" alt="Colophon" width="44" height="44"'
         ' class="colophon-brand colophon-brand-light">'
-        '<img src="/assets/brand/colophon-mark-dark.svg" alt="" aria-hidden="true"'
+        '<img src="/assets/brand/colophon-mark-dark.svg" alt="" aria-hidden="true" width="44" height="44"'
         ' class="colophon-brand colophon-brand-dark">'
     )
 
