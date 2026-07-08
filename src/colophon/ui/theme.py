@@ -179,7 +179,7 @@ body.body--dark { color: #ece4d8; }
 .colophon-tip { max-width: 22rem; }
 /* Header brand mark: the Colophon emblem, tone-swapped by theme (warm ink on the
    light paper header, warm paper on the dark header) so it reads on either surface. */
-.colophon-brand { height: 30px; width: auto; display: inline-block; vertical-align: middle; }
+.colophon-brand { height: 34px; width: auto; display: inline-block; vertical-align: middle; }
 .colophon-brand-dark { display: none; }
 .body--dark .colophon-brand-light { display: none; }
 .body--dark .colophon-brand-dark { display: inline-block; }
