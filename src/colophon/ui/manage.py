@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 _PAGE = 100  # vocabulary rows rendered per chunk; the rest fill in via "Show more"
 
 _CLEANUP_DETAIL_CAP = 50  # rows shown per category in the clean-up preview before eliding
+_CLEANUP_STRONG_CONFIRM_AT = 25  # removals this large need a second, explicit confirmation
+
+
+def _cleanup_needs_confirm(count: int) -> bool:
+    """A removal of this many entries gets a second explicit confirmation step, so a large,
+    irreversible clean-up can't run on a single click."""
+    return count >= _CLEANUP_STRONG_CONFIRM_AT
 
 _KIND_LABELS = {
     "author": "Authors",
@@ -94,10 +101,21 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
             "chosen cover, chapter edits. A re-scan cannot restore them."
         ).classes("text-caption colophon-muted q-mt-sm")
 
+        armed = {"value": False}  # a large removal arms on the first click, runs on the second
+
         async def _confirm() -> None:
             checked = {key for key, cb in checks.items() if cb.value}
             ids = _selected_cleanup_ids(report, checked)
             if not ids:
+                return
+            if _cleanup_needs_confirm(len(ids)) and not armed["value"]:
+                armed["value"] = True
+                remove_btn.set_text(f"Confirm removing {len(ids)} entries")
+                confirm_note.set_text(
+                    f"This permanently removes {len(ids)} entries and their app-only data. "
+                    "Click again to confirm."
+                )
+                confirm_note.set_visibility(True)
                 return
             remove_btn.props("disable")  # block a double-click while the deletes run
             try:
@@ -111,6 +129,8 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
             dialog.close()
             ui.notify(f"Removed {removed} " + ("entry" if removed == 1 else "entries"))
 
+        confirm_note = ui.label("").classes("text-caption text-negative q-mt-xs")
+        confirm_note.set_visibility(False)
         with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
             ui.button("Cancel", on_click=dialog.close).props("flat")
             remove_btn = ui.button("Remove", icon="delete", on_click=_confirm).props(
@@ -118,6 +138,10 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
             )
 
         def _sync_enabled() -> None:
+            # Any change to the selection disarms the second-click confirm and restores the button.
+            armed["value"] = False
+            remove_btn.set_text("Remove")
+            confirm_note.set_visibility(False)
             if any(cb.value for cb in checks.values()):
                 remove_btn.props(remove="disable")
             else:

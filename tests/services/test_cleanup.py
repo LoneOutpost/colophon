@@ -71,12 +71,14 @@ def test_unreachable_root_excludes_removed_from_disk(tmp_path):
     assert report.outside_scan_paths == []
 
 
-def test_empty_scan_paths_puts_everything_outside(tmp_path):
+def test_empty_scan_paths_offers_nothing(tmp_path):
+    # Guard: with no configured scan paths we cannot tell orphaned from misconfigured, so the
+    # report is empty rather than flagging the whole library for irreversible removal.
     a = tmp_path / "A"
     a.mkdir()
     b = tmp_path / "B"
     report = find_cleanup_candidates([_book(a), _book(b)], [])
-    assert {c.source_folder for c in report.outside_scan_paths} == {a, b}
+    assert report.outside_scan_paths == []
     assert report.removed_from_disk == []
 
 
