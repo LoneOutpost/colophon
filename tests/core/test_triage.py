@@ -96,15 +96,44 @@ def test_has_open_findings():
     assert not has_open_findings(_book(findings=[loose]))
 
 
+def test_identity_tiers_maps_local_and_match():
+    from colophon.core.triage import identity_tiers
+    assert identity_tiers(_book(provenance={"authors": "filename"})) == {"filename"}
+    assert identity_tiers(_book(provenance={"authors": "tag", "series": "graphing"})) == {"tag", "graphing"}
+    # Any external match provider collapses to "match".
+    assert identity_tiers(_book(provenance={"authors": "audnexus"})) == {"match"}
+    assert identity_tiers(_book(provenance={"authors": "openlibrary", "series": "hardcover"})) == {"match"}
+    # Empty / missing provenance contributes nothing.
+    assert identity_tiers(_book(provenance={})) == set()
+    assert identity_tiers(_book(provenance={"authors": ""})) == set()
+
+
+def test_weak_identity_reason_precedence():
+    from colophon.core.triage import weak_identity_reason
+    # Author inferred -> author reason.
+    assert weak_identity_reason(_book(provenance={"authors": "filename"})) == ("author", "filename")
+    # Author trusted, series inferred -> series reason.
+    assert weak_identity_reason(
+        _book(provenance={"authors": "tag", "series": "directory"})
+    ) == ("series", "directory")
+    # Both inferred -> author governs.
+    assert weak_identity_reason(
+        _book(provenance={"authors": "graphing", "series": "filename"})
+    ) == ("author", "graphing")
+    # Fully trusted -> None.
+    assert weak_identity_reason(_book(provenance={"authors": "tag", "series": "audnexus"})) is None
+    assert weak_identity_reason(_book(provenance={})) is None
+
+
 def test_facet_defaults_are_no_constraint():
-    assert FACET_DEFAULTS == {"state": [], "confidence": [], "trust": None,
+    assert FACET_DEFAULTS == {"state": [], "confidence": [], "id_trust": [],
                               "missing": [], "findings": False, "errors": False,
                               "needs_work": False}
     books = [_book(confidence=10.0), _book(confidence=90.0)]
     assert apply_facets(books, dict(FACET_DEFAULTS)) == books  # nothing filtered
 
 
-def test_apply_facets_state_confidence_trust():
+def test_apply_facets_state_confidence_id_trust():
     low_weak = _book(state=BookState.NEEDS_REVIEW, confidence=20.0,
                      provenance={"authors": "graphing"})
     high_trusted = _book(state=BookState.READY, confidence=90.0,
@@ -112,8 +141,12 @@ def test_apply_facets_state_confidence_trust():
     books = [low_weak, high_trusted]
     assert apply_facets(books, {**FACET_DEFAULTS, "confidence": ["low"]}) == [low_weak]
     assert apply_facets(books, {**FACET_DEFAULTS, "state": ["ready"]}) == [high_trusted]
-    assert apply_facets(books, {**FACET_DEFAULTS, "trust": "weak"}) == [low_weak]
-    assert apply_facets(books, {**FACET_DEFAULTS, "trust": "trusted"}) == [high_trusted]
+    assert apply_facets(books, {**FACET_DEFAULTS, "id_trust": ["graphing"]}) == [low_weak]
+    assert apply_facets(books, {**FACET_DEFAULTS, "id_trust": ["tag"]}) == [high_trusted]
+    # A whole-group selection reproduces the old coarse "weak" behaviour.
+    assert apply_facets(
+        books, {**FACET_DEFAULTS, "id_trust": ["directory", "filename", "graphing"]}
+    ) == [low_weak]
 
 
 def test_apply_facets_missing_and_findings():

@@ -9,6 +9,9 @@ from colophon.core.models import BLOCKING_FINDINGS, SUPPRESSED_FINDINGS, BookSta
 _DONE_STATES = {BookState.READY, BookState.ORGANIZED, BookState.ENCODED, BookState.SKIPPED}
 # Provenances that mean "inferred, not asserted" — the identity is a guess.
 _WEAK_PROVENANCE = {"directory", "filename", "graphing"}
+# The local provenance tiers (where a scanned value came from without an online match).
+# Anything non-empty outside this set is an external match provider.
+_LOCAL_PROVENANCE = {"tag", "datafile", "directory", "filename", "graphing", "manual"}
 _CONF_LOW = 40.0   # < this -> "low" (red); matches the badge color thresholds
 _CONF_HIGH = 75.0  # >= this -> "high" (green); the default ready threshold
 
@@ -53,6 +56,39 @@ def has_weak_identity(book: BookUnit) -> bool:
     by a tag, datafile, manual edit, or a metadata match — i.e. the identity is a guess."""
     prov = book.provenance
     return prov.get("authors") in _WEAK_PROVENANCE or prov.get("series") in _WEAK_PROVENANCE
+
+
+def _trust_tier(provenance: str | None) -> str | None:
+    """The trust-tier token for a provenance value: a local tier as-is, any other
+    non-empty provenance as 'match', or None when absent."""
+    if not provenance:
+        return None
+    return provenance if provenance in _LOCAL_PROVENANCE else "match"
+
+
+def identity_tiers(book: BookUnit) -> set[str]:
+    """The trust-tier tokens present across the book's author and series provenance —
+    the vocabulary the ID Trust filter selects on."""
+    return {
+        t
+        for t in (_trust_tier(book.provenance.get("authors")),
+                  _trust_tier(book.provenance.get("series")))
+        if t
+    }
+
+
+def weak_identity_reason(book: BookUnit) -> tuple[str, str] | None:
+    """The governing weak identity field and its provenance, or None when trusted.
+    Author leads (it is the primary identity); series is the reason only when the
+    author is asserted but the series was inferred. `field` is "author" or "series"."""
+    prov = book.provenance
+    author = prov.get("authors")
+    if author in _WEAK_PROVENANCE:
+        return ("author", author)
+    series = prov.get("series")
+    if series in _WEAK_PROVENANCE:
+        return ("series", series)
+    return None
 
 
 def missing_fields(book: BookUnit) -> set[str]:
@@ -100,7 +136,7 @@ def blocking_reason(book: BookUnit) -> str | None:
 
 # The "no constraint" facet selection. Copy with dict(FACET_DEFAULTS) before mutating.
 FACET_DEFAULTS = {
-    "state": [], "confidence": [], "trust": None, "missing": [], "findings": False, "errors": False,
+    "state": [], "confidence": [], "id_trust": [], "missing": [], "findings": False, "errors": False,
     "needs_work": False,
 }
 
@@ -110,7 +146,7 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
     An empty list / None / False for a facet means it imposes no constraint."""
     state = set(facets.get("state") or ())
     confidence = set(facets.get("confidence") or ())
-    trust = facets.get("trust")
+    id_trust = set(facets.get("id_trust") or ())
     missing = set(facets.get("missing") or ())
     findings = bool(facets.get("findings"))
     errors = bool(facets.get("errors"))
@@ -122,9 +158,7 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
             continue
         if confidence and confidence_bucket(b) not in confidence:
             continue
-        if trust == "weak" and not has_weak_identity(b):
-            continue
-        if trust == "trusted" and has_weak_identity(b):
+        if id_trust and not (id_trust & identity_tiers(b)):
             continue
         if missing and not (missing & missing_fields(b)):
             continue
