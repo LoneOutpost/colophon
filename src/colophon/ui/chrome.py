@@ -70,7 +70,7 @@ def jobs_indicator(controller: AppController) -> None:
                         ui.item_label(j.label)
                         frac = j.fraction
                         if frac is not None:
-                            ui.linear_progress(value=frac, size="6px").props(
+                            ui.linear_progress(value=frac, size="0.375rem").props(
                                 "instant-feedback rounded color=primary"
                             ).classes("q-mt-xs")
                             tail = f" · {j.detail}" if j.detail else ""
