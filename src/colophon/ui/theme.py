@@ -183,6 +183,11 @@ body.body--dark { color: #ece4d8; }
   font-size: 1.15rem; font-weight: 600; }
 .colophon-empty-body { color: var(--colophon-muted); font-size: .85rem; line-height: 1.55;
   max-width: 26rem; text-wrap: pretty; }
+/* Catalog list flows into responsive newspaper columns (top-to-bottom, so it still
+   reads A->Z down each column) instead of one narrow column that wastes the width and
+   scrolls forever. break-inside keeps a row whole across a column boundary. */
+.colophon-catalog-list { column-width: 22rem; column-gap: 2.5rem; }
+.colophon-catalog-list .q-item { break-inside: avoid; }
 .colophon-attention { border: 1px solid var(--colophon-line); border-left: 3px solid #b45309;
   border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
 .colophon-actionbar { position: sticky; bottom: 0; margin-top: 8px; padding: 8px 0;
