@@ -928,7 +928,7 @@ class AppController:
 
     def save_fields(self, book: BookUnit, updates: dict[str, str | None]) -> str:
         """Apply manual metadata edits to `book` in one batch and re-sync its
-        sidecar. Returns the batch id (undoable via undo)."""
+        datafile sidecar. Returns the batch id (undoable via undo)."""
         batch = apply_fields(
             self.ctx.books, self.ctx.history, book, updates, provenance=Provenance.MANUAL.value
         )
@@ -1571,7 +1571,7 @@ class AppController:
 
     def _rescore_and_persist(self, proposal: QuickMatchProposal) -> bool:
         """Re-score a proposal's book against its carried results, then persist the
-        book and sync its sidecar. Returns whether the book is now Ready."""
+        book and sync its datafile sidecar. Returns whether the book is now Ready."""
         ready = self._rescore_after_match(
             proposal.book, proposal.results, author_inferred=proposal.author_inferred
         )

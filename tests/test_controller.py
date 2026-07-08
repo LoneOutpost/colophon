@@ -191,14 +191,14 @@ def _book_in(ctx, folder):
     return b
 
 
-def test_edit_field_does_not_write_sidecar(tmp_path):
+def test_edit_field_does_not_write_datafile(tmp_path):
     # colophon no longer mirrors edits into metadata.json — that file is AudiobookShelf's domain.
     ctx = _ctx(tmp_path)
     b = _book_in(ctx, tmp_path / "ingest" / "x")
     ctrl = AppController(ctx)
     ctrl.edit_field(b, "title", "Right")
     assert ctx.books.get(b.id).title == "Right"                # DB is updated
-    assert not (b.source_folder / "metadata.json").exists()    # no sidecar written
+    assert not (b.source_folder / "metadata.json").exists()    # no datafile sidecar written
     ctx.close()
 
 
@@ -232,14 +232,14 @@ def test_bulk_normalize_skips_empty_and_unchanged(tmp_path):
     ctx.close()
 
 
-def test_bulk_edit_does_not_write_sidecar(tmp_path):
+def test_bulk_edit_does_not_write_datafile(tmp_path):
     ctx = _ctx(tmp_path)
     a = _book_in(ctx, tmp_path / "ingest" / "a")
     b = _book_in(ctx, tmp_path / "ingest" / "b")
     AppController(ctx).bulk_edit([a, b], "publisher", "Tor")
     for book in (a, b):
         assert ctx.books.get(book.id).publisher == "Tor"             # DB updated
-        assert not (book.source_folder / "metadata.json").exists()   # no sidecar written
+        assert not (book.source_folder / "metadata.json").exists()   # no datafile sidecar written
     ctx.close()
 
 
@@ -564,7 +564,7 @@ def test_apply_match_sets_fields_with_provider_provenance(tmp_path):
     assert persisted.asin == "B002V1A0WE"
     assert persisted.provenance["title"] == "audnexus"
     assert persisted.provenance["authors"] == "audnexus"  # list field stored under model key
-    assert not (book.source_folder / "metadata.json").exists()  # colophon does not write sidecars
+    assert not (book.source_folder / "metadata.json").exists()  # colophon does not write datafile sidecars
     ctx.close()
 
 

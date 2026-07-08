@@ -5,7 +5,7 @@ $Token sub-pattern compiled by the filename parser, matched against the correspo
 component (raw, with no extension stripping). Inference only fires when the folder's depth
 under the scan root exactly matches the number of levels, to avoid mis-assigning fields on
 irregular layouts. Weak evidence: the caller slots the result below embedded tags, the
-sidecar, and the filename in reconcile's precedence.
+datafile sidecar, and the filename in reconcile's precedence.
 """
 
 from __future__ import annotations

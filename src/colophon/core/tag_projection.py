@@ -5,7 +5,7 @@ vocabulary. List fields join on '; ' (matching the editor's author/narrator
 display); series/sequence come from the first SeriesRef. `album` mirrors the
 title, the common audiobook convention. The tag vocabulary intentionally matches
 the read side (EmbeddedTags) for round-trip symmetry; subtitle/publisher/language
-are not part of the embedded tag set and are carried only in the sidecar.
+are not part of the embedded tag set and are carried only in the datafile sidecar.
 """
 
 from __future__ import annotations
