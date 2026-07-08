@@ -39,7 +39,10 @@ class NodeInspection:
 def _parent_dir(graph: LibraryGraph, node_id: str) -> str | None:
     """The id of the directory that `contains` node_id (its structural parent), or None."""
     for e in graph.edges:
-        if e.kind == "contains" and e.dst == node_id and graph.nodes[e.src].physical == "directory":
+        if e.kind != "contains" or e.dst != node_id:
+            continue
+        src = graph.nodes.get(e.src)  # tolerate dangling edges (src pruned but edge left behind)
+        if src is not None and src.physical == "directory":
             return e.src
     return None
 
@@ -112,11 +115,11 @@ def inspect(
         rows.append(("In folder", name_of(graph.nodes[pid]) if pid else "—"))
         for ek, elabel in (("author", "Author"), ("series", "Series"), ("franchise", "Franchise")):
             names = [name_of(graph.nodes[e.dst]) for e in graph.edges
-                     if e.src == focal_id and e.kind == ek]
+                     if e.src == focal_id and e.kind == ek and e.dst in graph.nodes]
             if names:
                 rows.append((elabel, ", ".join(names)))
         files = [name_of(graph.nodes[e.dst]) for e in graph.edges
-                 if e.src == focal_id and e.kind == "owns"]
+                 if e.src == focal_id and e.kind == "owns" and e.dst in graph.nodes]
         rows.append(("Files", str(len(files))))
         provenance = list(provenance_of(node))
     elif pk == "folder":
@@ -126,7 +129,9 @@ def inspect(
         for e in graph.edges:
             if e.kind != "contains" or e.src != focal_id:
                 continue
-            child = graph.nodes[e.dst]
+            child = graph.nodes.get(e.dst)  # tolerate dangling edges
+            if child is None:
+                continue
             if child.semantic == "book":
                 nb += 1
             elif child.physical == "directory":
@@ -141,7 +146,8 @@ def inspect(
         pid = _parent_dir(graph, focal_id)
         rows.append(("In folder", name_of(graph.nodes[pid]) if pid else "—"))
         owner = next((e.src for e in graph.edges if e.kind == "owns" and e.dst == focal_id), None)
-        rows.append(("Part of book", name_of(graph.nodes[owner]) if owner else "—"))
+        owner_node = graph.nodes.get(owner) if owner else None
+        rows.append(("Part of book", name_of(owner_node) if owner_node else "—"))
         ext = node.attrs.get("ext")
         if ext:
             rows.append(("Format", str(ext)))

@@ -44,6 +44,23 @@ def _inspect(g, focal):
                    provenance_of=lambda n: [])
 
 
+def test_inspect_tolerates_dangling_edges():
+    # A pruned node can leave edges behind (dangling endpoints). Inspecting a node touched by
+    # such edges must not raise — it should just skip the unresolvable endpoints.
+    nodes = [_n("d", physical="directory", name="D"), _n("book:b1", semantic="book", book_id="b1")]
+    edges = [
+        _e("d", "contains", "ghostchild"),          # folder framing: child missing
+        _e("ghostparent", "contains", "book:b1"),   # book framing: parent missing
+        _e("book:b1", "owns", "ghostfile"),         # files list: dst missing
+        _e("book:b1", "author", "ghostauthor"),     # author names: dst missing
+    ]
+    g = LibraryGraph.from_records(nodes, edges)
+    vf = _inspect(g, "d")
+    vb = _inspect(g, "book:b1")
+    assert vf.id == "d" and vb.id == "book:b1"
+    assert any(lbl == "Contains" for lbl, _ in vf.rows)
+
+
 def test_series_reads_books_in_series_and_linked_folders():
     got = _inspect(_graph(), "series:ss")
     assert got.kind == "series"
