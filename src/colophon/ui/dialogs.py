@@ -139,7 +139,7 @@ def _cover_thumb(url: str | None) -> None:
         with ui.element("div").classes(
             "rounded flex items-center justify-center colophon-chip"
         ).style("width: 36px; height: 54px; border: 1px solid var(--colophon-border)"):
-            ui.icon("menu_book", size="18px").classes("colophon-muted")
+            ui.icon("menu_book", size="1.125rem").classes("colophon-muted")
 
 
 def _clean_authors(authors: list[str]) -> list[str]:
@@ -168,7 +168,7 @@ def _render_author_line(current: list[str], matched: list[str]) -> None:
     mat = ", ".join(_clean_authors(matched)) or "unknown"
     aligned = authors_align(current, matched)
     with ui.row().classes("items-center no-wrap q-gutter-xs"):
-        ui.icon("check_circle" if aligned else "warning", size="16px",
+        ui.icon("check_circle" if aligned else "warning", size="1rem",
                 color="positive" if aligned else "warning")
         if not cur:
             text = f"Author: (none) → {mat}"     # no current author to compare against
@@ -1228,7 +1228,7 @@ async def persist_dialog(
             body.clear()
             with body:
                 with ui.row().classes("items-center q-gutter-sm"):
-                    ui.icon("warning", color="warning", size="24px")
+                    ui.icon("warning", color="warning", size="1.5rem")
                     ui.label("Some books aren't ready").classes("text-subtitle1")
                 ui.label(
                     f"{notready} of {len(books)} books aren't marked Ready or confirmed. Persisting "

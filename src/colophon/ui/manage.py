@@ -340,7 +340,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
                         "Merge selected", icon="merge", on_click=_merge_dialog
                     ).props("flat")
                     undo_btn = ui.button("Undo", icon="undo", on_click=_do_undo).props("flat")
-                    ui.button("Franchises", icon="hub",
+                    ui.button("Franchises", icon="collections_bookmark",
                               on_click=lambda: ui.navigate.to("/franchises")).props("flat no-caps")
             with page_body("read"):
                 list_box = ui.column().classes("w-full gap-0")

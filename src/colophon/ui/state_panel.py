@@ -106,7 +106,7 @@ def _render_review_reasons(book: BookUnit) -> None:
     with ui.column().classes("w-full q-gutter-xs"):
         for reason in reasons:
             with ui.row().classes("items-start no-wrap q-gutter-xs"):
-                ui.icon("error_outline", size="16px", color="warning").classes("q-mt-xs")
+                ui.icon("error_outline", size="1rem", color="warning").classes("q-mt-xs")
                 ui.label(reason).classes("col text-caption")
 
 
@@ -198,8 +198,8 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                 with ui.row().classes("items-center w-full no-wrap q-gutter-sm q-py-xs").style(
                     "border-bottom: 1px solid var(--colophon-hairline, rgba(0,0,0,0.08))"
                 ):
-                    ui.icon("circle", color=row.color, size="10px")
-                    ui.icon(row.icon, size="18px").classes("colophon-muted")
+                    ui.icon("circle", color=row.color, size="0.625rem")
+                    ui.icon(row.icon, size="1.125rem").classes("colophon-muted")
                     ui.label(row.label).classes("col")
                     ui.badge(row.state.value).props(f"color={row.color} outline").tooltip(
                         phase_state_description(row.state)
@@ -253,7 +253,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                 g = finding_guidance(f.code)
                 with ui.column().classes("w-full q-gutter-none q-mb-sm"):
                     with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                        ui.icon("flag", color=fc, size="16px")
+                        ui.icon("flag", color=fc, size="1rem")
                         ui.label(f.detail).classes("col text-caption")
                     ui.label(g.suggestion).classes("colophon-muted text-caption q-pl-lg")
                     with ui.row().classes("q-pl-lg q-gutter-xs"):

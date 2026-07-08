@@ -93,7 +93,7 @@ def main() -> None:
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:
         run_kwargs["root_path"] = ctx.config.root_path
-    favicon = Path(__file__).parent / "ui" / "assets" / "brand" / "colophon-logo.svg"
+    favicon = Path(__file__).parent / "ui" / "assets" / "brand" / "colophon-favicon.svg"
     ui.run(
         title="Colophon", reload=False, show=False, port=ctx.config.port,
         favicon=str(favicon), storage_secret=ctx.config.storage_secret, **run_kwargs,
