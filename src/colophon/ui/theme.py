@@ -168,7 +168,13 @@ body.body--dark { color: #ece4d8; }
 /* Detail-pane structure: section captions, tool groups, sticky action bar. */
 .colophon-seccap { font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
   color: var(--colophon-accent); font-weight: 700; margin: 10px 0 4px; }
-.colophon-toolgroup { border: 1px solid var(--colophon-line); border-radius: 8px; padding: 6px 8px; }
+/* Detail-pane action groups: flat labeled clusters (caption + buttons) separated by
+   space, NOT nested bordered boxes inside the panel (which read as cards-in-a-card).
+   The caption + the gap carry the grouping. */
+.colophon-toolgroups { display: flex; flex-wrap: wrap; align-items: flex-start;
+  column-gap: 28px; row-gap: 2px; }
+.colophon-toolgroup { display: flex; flex-direction: column; }
+.colophon-toolgroup .colophon-seccap { margin-top: 2px; }
 .colophon-attention { border: 1px solid var(--colophon-line); border-left: 3px solid #b45309;
   border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
 .colophon-actionbar { position: sticky; bottom: 0; margin-top: 8px; padding: 8px 0;

@@ -662,8 +662,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ).props("flat dense no-caps").classes("q-mt-xs")
 
                         # --- metadata tool groups ---
-                        with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
-                            with ui.element("div").classes("colophon-toolgroup col"):
+                        with ui.row().classes("w-full q-mb-sm colophon-toolgroups"):
+                            with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Fetch from sources").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
                                     ui.button("Matches", icon="travel_explore", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
