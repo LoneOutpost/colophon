@@ -17,7 +17,7 @@ from colophon.core.graph import DirectoryNode
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KINDS
 from colophon.core.graph_records import book_node_id
 from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
-from colophon.ui.chrome import body_column, page_header, page_toolbar
+from colophon.ui.chrome import body_column, empty_state, page_header, page_toolbar
 from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
@@ -446,9 +446,12 @@ def render_explorer(controller: AppController, focal_id: str | None,
                     )
                 _explorer_legend(focal_id, hidden, depth)
             else:
-                ui.label("Nothing focused yet — search below.").classes(
-                    "text-caption colophon-muted q-pa-md"
-                )
+                with empty_state(
+                    "hub", "Explore the library graph",
+                    "Search for an author, series, or book above, then click a result to "
+                    "see how it connects across authors, series, and franchises.",
+                ):
+                    pass
         with ui.column().classes("col-4 gap-1"):
             _explorer_panel(controller.graph_inspect(focal_id) if focal_id else None, focal_id)
 

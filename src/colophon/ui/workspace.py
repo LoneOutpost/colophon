@@ -41,7 +41,7 @@ from colophon.core.triage import (
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
-from colophon.ui.chrome import brand_mark, jobs_indicator
+from colophon.ui.chrome import brand_mark, empty_state, jobs_indicator
 from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
@@ -495,9 +495,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         with detail_container:
             if book is None:
                 _clear_editor_state()
-                with ui.column().classes("w-full items-center q-pa-lg"):
-                    ui.icon("menu_book").classes("text-h3 text-grey-5")
-                    ui.label("Select a book to see its details").classes("colophon-muted")
+                with empty_state(
+                    "menu_book", "Select a book",
+                    "Pick a title from the list to view its metadata, match it against "
+                    "sources, edit fields, and set the cover.",
+                ):
+                    pass
                 return
 
             def _details_body() -> None:
@@ -662,8 +665,8 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 ).props("flat dense no-caps").classes("q-mt-xs")
 
                         # --- metadata tool groups ---
-                        with ui.row().classes("w-full no-wrap q-gutter-sm q-mb-sm"):
-                            with ui.element("div").classes("colophon-toolgroup col"):
+                        with ui.row().classes("w-full q-mb-sm colophon-toolgroups"):
+                            with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Fetch from sources").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
                                     ui.button("Matches", icon="travel_explore", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
@@ -1172,11 +1175,21 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _list_view["rendered"] = 0
         with list_container:
             if not books:
-                msg = (
-                    "No books match the filter" if book_filter["text"].strip()
-                    else "No books in this view"
-                )
-                ui.label(msg).classes("colophon-muted q-pa-md")
+                if book_filter["text"].strip():
+                    with empty_state(
+                        "search_off", "No books match your filter",
+                        "Try a different term, or clear the filter to see everything in view.",
+                    ):
+                        pass
+                else:
+                    with empty_state(
+                        "auto_stories", "No books here yet",
+                        "Scan a folder and Colophon reads each audiobook's metadata, lines "
+                        "them up, and lets you review before anything is written.",
+                    ):
+                        ui.button("Scan a folder", icon="radar", on_click=_do_scan).props(
+                            "unelevated no-caps"
+                        )
                 _list_el["el"] = None
                 _list_footer["el"] = None
                 return

@@ -133,6 +133,19 @@ def page_body(measure: str = "full") -> Iterator[None]:
 
 
 @contextmanager
+def empty_state(icon: str, heading: str, body: str | None = None) -> Iterator[None]:
+    """A calm empty / first-run state: a muted icon, a bookish (Spectral) heading, an
+    optional supporting line, and room for a call-to-action added in the `with` body.
+    Teaches what belongs here instead of just stating that it's empty."""
+    with ui.column().classes("w-full items-center q-pa-lg gap-2 colophon-empty"):
+        ui.icon(icon).classes("colophon-empty-icon")
+        ui.label(heading).classes("colophon-empty-head")
+        if body:
+            ui.label(body).classes("colophon-empty-body")
+        yield
+
+
+@contextmanager
 def page_section(title: str, subtitle: str | None = None) -> Iterator[None]:
     """A titled content card: a heading, an optional caption, and a body stack that the
     `with` body fills. Shared so every page groups content the same way (settings panels,
