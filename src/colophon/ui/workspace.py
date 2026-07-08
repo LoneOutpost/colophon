@@ -491,6 +491,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if _guard_nav(book_id, lambda: show_detail(book_id)):
             return
         detail_container.clear()
+        detail_actions.clear()
         book = controller.get_book(book_id)
         with detail_container:
             if book is None:
@@ -619,10 +620,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                 blocked = has_blocking_error(book)
                 block_tip = blocking_reason(book) if blocked else None
-                # Primary actions pinned to the top of the detail scroll (see
-                # .colophon-actionbar), so Save / Write tags / Mark ready stay reachable
-                # from anywhere in a long editor without scrolling.
-                with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
+                # Render the primary actions into the fixed slot ABOVE the scroll area
+                # (detail_actions), not inline, so Save / Write tags / Mark ready stay
+                # visible from anywhere in a long editor. These closures keep access to
+                # _save / _save_pending even though they mount in an outer container.
+                with detail_actions:
                     ui.button("Save", icon="save", on_click=_save).props("unelevated")
                     write_btn = ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
                     write_btn.set_enabled(not blocked)
@@ -2084,7 +2086,12 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
         with ui.card().classes("col column"):
             ui.label("Details").classes("text-subtitle1")
-            ui.separator()
+            # Primary save actions live here, OUTSIDE the scroll area, so they stay
+            # visible no matter how far the fields scroll. (position:sticky is unreliable
+            # inside Quasar's QScrollArea + nested tab panels, so this is structural.)
+            detail_actions = ui.row().classes(
+                "colophon-actionbar w-full no-wrap items-center q-gutter-sm"
+            )
             with ui.scroll_area().classes("col"):
                 detail_container = ui.column().classes("w-full gap-1")
 
