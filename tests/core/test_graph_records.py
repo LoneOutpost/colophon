@@ -2,9 +2,12 @@ from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, FileNode, FileRole, Graph
 from colophon.core.graph_records import (
+    EdgeRecord,
+    NodeRecord,
     book_node_id,
     entity_node_id,
     graph_records,
+    prune_dangling_edges,
     skeleton_records,
 )
 from colophon.core.models import BookUnit, SourceFile
@@ -31,6 +34,34 @@ def _unit(folder: Path, files: list[Path], *, unit_id: str | None = None) -> Boo
         u.id = unit_id
     u.source_files = [SourceFile(path=f, size=1, duration_seconds=1.0, ext=".mp3") for f in files]
     return u
+
+
+def test_prune_dangling_edges_keeps_only_edges_with_both_endpoints():
+    nodes = [
+        NodeRecord(id="d", physical="directory", semantic=None, root="/lib", attrs={}),
+        NodeRecord(id="bk", physical=None, semantic="book", root="/lib", attrs={"book_id": "b"}),
+    ]
+    edges = [
+        EdgeRecord(src="d", kind="contains", dst="bk", root="/lib", props={}),   # both present
+        EdgeRecord(src="bk", kind="owns", dst="f-missing", root="/lib", props={}),  # dst absent
+        EdgeRecord(src="d-missing", kind="contains", dst="bk", root="/lib", props={}),  # src absent
+    ]
+    kept = prune_dangling_edges(nodes, edges)
+    assert kept == [edges[0]]
+
+
+def test_graph_records_prunes_owns_edge_for_file_absent_from_skeleton(tmp_path):
+    # A book whose source_files include a path the scan graph has no file node for (e.g. moved
+    # by an organize, or dropped by a partial rescan) must NOT produce a dangling owns edge.
+    g, folder, files = _graph_single_book(tmp_path)
+    phantom = folder / "ghost.mp3"  # never added to the graph skeleton
+    unit = _unit(folder, [*files, phantom])
+    nodes, edges = graph_records(g, [unit], root=tmp_path)
+    node_ids = {n.id for n in nodes}
+    assert all(e.src in node_ids and e.dst in node_ids for e in edges)  # no dangling edge
+    owned = {e.dst for e in edges if e.kind == "owns"}
+    assert FileNode.id_for(files[0]) in owned            # real files still owned
+    assert FileNode.id_for(phantom) not in owned         # the phantom file's edge was pruned
 
 
 def test_nodes_have_correct_facets(tmp_path):
