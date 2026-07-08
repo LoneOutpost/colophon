@@ -7,7 +7,8 @@ from colophon.controller import AppController
 from colophon.core.graph import DirectoryNode
 from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_records import graph_records
-from colophon.core.models import BookState, Phase, PhaseState
+from colophon.core.library_graph import LibraryGraph
+from colophon.core.models import BookState, Phase, PhaseState, SourceFile
 from colophon.core.node_classify import classify_nodes
 from colophon.core.phases import mark
 from colophon.services.graph_build import build_graph
@@ -89,4 +90,29 @@ def test_recompute_is_idempotent(tmp_path):
 
     assert controller.recompute_all_identity() == 0  # nothing left to move
 
+    ctx.close()
+
+
+def test_resync_does_not_persist_dangling_edges(tmp_path):
+    """A book whose source paths have drifted from the skeleton (a match/organize changed them)
+    must not leave the write-through with a dangling owns/contains edge — neither in memory nor
+    in the store."""
+    ctx = _seed_author_library(tmp_path)
+    controller = AppController(ctx)
+
+    # Point a stored book at a file the skeleton has no node for, then re-derive (persist first,
+    # per the _resync_roots contract).
+    book = ctx.books.list_all()[0]
+    book.source_files = [
+        SourceFile(path=book.source_folder / "ghost.mp3", size=1, duration_seconds=1.0, ext=".mp3")
+    ]
+    ctx.books.upsert(book)
+    controller._resync_roots({controller._scan_root_for_path(book.source_folder)})
+
+    lib = ctx.library_graph
+    ids = set(lib.nodes)
+    assert [e for e in lib.edges if e.src not in ids or e.dst not in ids] == []  # in memory
+    reloaded = LibraryGraph.from_records(*ctx.graph.load_all())
+    rids = set(reloaded.nodes)
+    assert [e for e in reloaded.edges if e.src not in rids or e.dst not in rids] == []  # persisted
     ctx.close()

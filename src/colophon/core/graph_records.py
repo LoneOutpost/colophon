@@ -260,6 +260,19 @@ def graph_from_records(
     return g
 
 
+def prune_dangling_edges(
+    nodes: list[NodeRecord], edges: list[EdgeRecord]
+) -> list[EdgeRecord]:
+    """Keep only edges whose endpoints are both present in `nodes`. `book_records` emits a book's
+    `contains`/`owns` edges from the book's own `source_folder`/`source_files`, regardless of
+    whether the skeleton has matching directory/file nodes — so after a match/organize moved a
+    book's paths, or a rescan dropped a file, the re-emitted edge would reference a node that
+    isn't being stored. Dropping those at assembly keeps the persisted graph internally
+    consistent (a scan that re-captures the file reconnects the edge)."""
+    ids = {n.id for n in nodes}
+    return [e for e in edges if e.src in ids and e.dst in ids]
+
+
 def graph_records(
     graph: Graph, units: list[BookUnit], *, root: Path
 ) -> tuple[list[NodeRecord], list[EdgeRecord]]:
@@ -272,4 +285,5 @@ def graph_records(
             franchise_of[u.id] = fname
     sk_nodes, sk_edges = skeleton_records(graph, root=root)
     bk_nodes, bk_edges = book_records(units, root=root, franchise_of=franchise_of)
-    return sk_nodes + bk_nodes, sk_edges + bk_edges
+    nodes = sk_nodes + bk_nodes
+    return nodes, prune_dangling_edges(nodes, sk_edges + bk_edges)

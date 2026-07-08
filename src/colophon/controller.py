@@ -35,6 +35,7 @@ from colophon.core.graph_records import (
     book_node_id,
     book_records,
     graph_from_records,
+    prune_dangling_edges,
     resolve_book_franchise,
     skeleton_records,
 )
@@ -430,7 +431,9 @@ class AppController:
             book_nodes, book_edges = book_records(root_books, root=root, franchise_of=franchise_of)
             sk_nodes, sk_edges = skeleton_records(recon, root=root)
             nodes = sk_nodes + book_nodes
-            edges = sk_edges + book_edges
+            # Drop edges to skeleton nodes the preserved skeleton doesn't have — a book whose
+            # source paths drifted (match/organize) would otherwise re-emit a dangling owns/contains.
+            edges = prune_dangling_edges(nodes, sk_edges + book_edges)
             # Store first: if the persist raises (e.g. a write conflict), leave the
             # in-memory graph unchanged so the two never diverge.
             self.ctx.graph.replace_subgraph(root, nodes, edges)
