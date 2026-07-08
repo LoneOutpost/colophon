@@ -61,6 +61,16 @@ def main() -> None:
     else:
         logger.info(f"graph: {len(ctx.library_graph.nodes)} nodes, file references present")
     controller = AppController(ctx)
+    # Reconcile first: purge graph content left behind by a removed/renamed scan path or a
+    # deleted book (orphan book nodes + their dangling edges) before the fill-in self-heal below
+    # rebuilds anything. Non-fatal like the other startup heals — a failure degrades to
+    # "not reconciled", never blocks startup.
+    try:
+        purged = controller.reconcile_graph()
+        if purged:
+            logger.info(f"graph: reconciled away {purged} stale/orphan node(s) at startup")
+    except Exception:
+        logger.exception("graph reconcile failed; starting with the graph as loaded")
     # The self-heal is an optimization, never a boot dependency: the navigator tolerates
     # books absent from the graph (they show under "Needs identification"). So a failure
     # here (e.g. a graph write conflict from an unusual scan-path config) must degrade to
