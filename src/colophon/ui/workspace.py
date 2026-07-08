@@ -617,6 +617,26 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             ui.button("Fetch", icon="cloud_download", on_click=_go)
                     dlg.open()
 
+                blocked = has_blocking_error(book)
+                block_tip = blocking_reason(book) if blocked else None
+                # Primary actions pinned to the top of the detail scroll (see
+                # .colophon-actionbar), so Save / Write tags / Mark ready stay reachable
+                # from anywhere in a long editor without scrolling.
+                with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
+                    ui.button("Save", icon="save", on_click=_save).props("unelevated")
+                    write_btn = ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
+                    write_btn.set_enabled(not blocked)
+                    if block_tip:
+                        write_btn.tooltip(f"Can't persist — {block_tip}")
+                    ui.space()
+                    ready_btn = ui.button(
+                        "Mark ready", icon="check",
+                        on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
+                    ).props("flat")
+                    ready_btn.set_enabled(not blocked)
+                    if block_tip:
+                        ready_btn.tooltip(f"Can't mark ready — {block_tip}")
+
                 with ui.row().classes("w-full no-wrap items-start q-gutter-md"):
                     # Left aside: cover, status, location.
                     with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
@@ -739,23 +759,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
                 for _inp in inputs.values():
                     _inp.on_value_change(lambda _e=None: _set_dirty(True))
-
-                blocked = has_blocking_error(book)
-                block_tip = blocking_reason(book) if blocked else None
-                with ui.row().classes("colophon-actionbar w-full no-wrap items-center q-gutter-sm"):
-                    ui.button("Save", icon="save", on_click=_save).props("unelevated")
-                    write_btn = ui.button("Write tags", icon="sell", on_click=lambda b=book: tag_dialog(controller, b, refresh_list=refresh_list, refresh_status=refresh_status, save_pending=lambda: _save_pending(b))).props("outline")
-                    write_btn.set_enabled(not blocked)
-                    if block_tip:
-                        write_btn.tooltip(f"Can't persist — {block_tip}")
-                    ui.space()
-                    ready_btn = ui.button(
-                        "Mark ready", icon="check",
-                        on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
-                    ).props("flat")
-                    ready_btn.set_enabled(not blocked)
-                    if block_tip:
-                        ready_btn.tooltip(f"Can't mark ready — {block_tip}")
 
                 editor_state.update(
                     book_id=book_id, is_dirty=_is_dirty,
