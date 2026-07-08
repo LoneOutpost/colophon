@@ -342,7 +342,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
                     undo_btn = ui.button("Undo", icon="undo", on_click=_do_undo).props("flat")
                     ui.button("Franchises", icon="collections_bookmark",
                               on_click=lambda: ui.navigate.to("/franchises")).props("flat no-caps")
-            with page_body("read"):
+            with page_body("full"):
                 list_box = ui.column().classes("w-full gap-0")
         with ui.tab_panel("utilities").classes("q-pa-none"):
             _render_utilities(controller)
@@ -406,7 +406,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
             # Authors alone can run to thousands of rows; building them all was the whole
             # cost of a manage render (the data behind them is a few ms). Render a chunk and
             # let "Show more" pull the rest, so the initial paint stays flat.
-            lst = ui.list().props("separator dense").classes("w-full")
+            lst = ui.list().props("separator dense").classes("w-full colophon-catalog-list")
             more_row = ui.row().classes("w-full justify-center q-my-sm")
             rendered = {"n": 0}
 

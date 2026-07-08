@@ -57,28 +57,31 @@ def render_stats(controller: AppController) -> None:
                 )
             return
 
-        with ui.row().classes("q-gutter-md"):
-            _stat_card("Books", str(stats.total_books))
-            _stat_card("Listening time", _fmt_hm(stats.total_duration_ms))
-            _stat_card("Library size", _fmt_size(stats.total_bytes))
-
-        with page_section("By state"):
-            peak = max((c for _, c in stats.by_state), default=1)
-            for state, count in stats.by_state:
-                with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                    ui.label(state.value.replace("_", " ").capitalize()).classes(
-                        "text-body2"
-                    ).style("min-width: 9rem")
-                    with ui.element("div").classes("col rounded").style(
-                        "height: 6px; background: var(--colophon-line)"
-                    ):
-                        ui.element("div").classes("rounded").style(
-                            f"height: 6px; width: {count / peak * 100:.1f}%; "
-                            "background: var(--colophon-accent)"
+        # Summary numbers (compact, fixed-width tiles) share the top row with the
+        # by-state distribution, which grows to fill the width — so the header band
+        # uses the screen instead of leaving half of it empty.
+        with ui.row().classes("w-full q-gutter-md items-stretch"):
+            with ui.row().classes("q-gutter-md items-stretch"):
+                _stat_card("Books", str(stats.total_books))
+                _stat_card("Listening time", _fmt_hm(stats.total_duration_ms))
+                _stat_card("Library size", _fmt_size(stats.total_bytes))
+            with ui.column().classes("col"), page_section("By state"):
+                peak = max((c for _, c in stats.by_state), default=1)
+                for state, count in stats.by_state:
+                    with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                        ui.label(state.value.replace("_", " ").capitalize()).classes(
+                            "text-body2"
+                        ).style("min-width: 9rem")
+                        with ui.element("div").classes("col rounded").style(
+                            "height: 6px; background: var(--colophon-line)"
+                        ):
+                            ui.element("div").classes("rounded").style(
+                                f"height: 6px; width: {count / peak * 100:.1f}%; "
+                                "background: var(--colophon-accent)"
+                            )
+                        ui.label(str(count)).classes("text-body2 colophon-muted").style(
+                            "min-width: 2.5rem; text-align: right"
                         )
-                    ui.label(str(count)).classes("text-body2 colophon-muted").style(
-                        "min-width: 2.5rem; text-align: right"
-                    )
 
         with ui.row().classes("w-full q-gutter-md items-stretch"):
             for kind, label in _TOP_KINDS:
