@@ -36,6 +36,7 @@ from colophon.core.triage import (
     has_open_findings,
     needs_human,
     sort_books,
+    weak_identity_reason,
 )
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
@@ -1081,7 +1082,16 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
                 line2 = f"{author} · {series}" if series else author
-                ui.item_label(line2).props("caption")
+                reason = weak_identity_reason(book)
+                if reason is None:
+                    ui.item_label(line2).props("caption")
+                else:
+                    field, prov = reason
+                    with ui.row().classes("items-center no-wrap q-gutter-xs"):
+                        ui.item_label(line2).props("caption")
+                        ui.badge(controller.source_label(prov)).props("outline").classes(
+                            "colophon-chip"
+                        ).tooltip(f"{field.capitalize()}: {controller.source_tooltip(prov)}")
                 chip_labels = book.genres + book.tags
                 if chip_labels:
                     with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
@@ -1670,10 +1680,26 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     on_change=lambda e: _set_facet("confidence", e.value),
                 ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")
                 ui.select(
-                    {"weak": "Weak", "trusted": "Trusted"}, label="Trust", clearable=True,
-                    value=view["facets"]["trust"],
-                    on_change=lambda e: _set_facet("trust", e.value),
-                ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")
+                    {
+                        "directory": "Folder (weak)",
+                        "filename": "Filename (weak)",
+                        "graphing": "Inferred (weak)",
+                        "tag": "File tag",
+                        "datafile": "Sidecar",
+                        "manual": "Edited",
+                        "match": "Match",
+                    },
+                    multiple=True, label="ID Trust", value=view["facets"]["id_trust"],
+                    on_change=lambda e: _set_facet("id_trust", e.value),
+                ).props("dense outlined options-dense").classes("col").style(
+                    "min-width: 8.5rem"
+                ).tooltip(
+                    "ID Trust reflects how the book's core identity, its author and "
+                    "series, was determined. Everything else builds on it: a match is "
+                    "searched using this identity, and manual edits assume it. When the "
+                    "identity was only inferred from a folder or file name, the matched "
+                    "and edited data resting on it is only as trustworthy as that guess."
+                )
                 ui.select(
                     {"series": "No series", "cover": "No cover", "ident": "No ASIN/ISBN",
                      "narrator": "No narrator", "year": "No year"},
