@@ -145,6 +145,8 @@ def test_to_echart_palette_border_and_label_halo():
     other = next(d for d in series["data"] if d["id"] == "b1")
     assert other["itemStyle"]["borderWidth"] == 1
     assert focal["itemStyle"]["borderWidth"] == 3
+    assert other["itemStyle"]["color"] == KIND_COLOR["book"]
+    assert focal["itemStyle"]["color"] == KIND_COLOR["author"]
     assert "borderColor" in other["itemStyle"]
     label = series["label"]
     assert label["textBorderWidth"] >= 2
@@ -213,3 +215,42 @@ def test_node_glyph_uses_folder_family_for_classified_dirs():
     assert franchise_folder.startswith("path://") and franchise_folder != _KIND_SYMBOL["franchise"]
     assert node_glyph(_n("x", physical="directory", semantic="title")) == _KIND_SYMBOL["title"]
     assert node_glyph(_n("x", physical="directory")) == _KIND_SYMBOL["folder"]
+
+
+def _graph_with_author_folder():
+    nodes = [
+        _n("root", physical="directory", name="lib"),
+        _n("af", physical="directory", semantic="author", name="CLIVE BARKER"),
+    ]
+    edges = [_e("root", "contains", "af")]
+    return LibraryGraph.from_records(nodes, edges)
+
+
+def test_to_echart_folder_classified_node_uses_folder_glyph_and_classification_tint():
+    from colophon.core.graph_explore import (
+        _FOLDER_KIND_SYMBOL,
+        KIND_COLOR,
+        neighborhood,
+        to_echart,
+    )
+    g = _graph_with_author_folder()
+    sub = neighborhood(g, "af", hops=1)
+    opt = to_echart(g, sub, "af",
+                    label_of=lambda n: n.attrs.get("name", ""),
+                    confidence_of=lambda n: None)
+    node = next(d for d in opt["series"][0]["data"] if d["id"] == "af")
+    assert node["symbol"] == _FOLDER_KIND_SYMBOL["author"]
+    assert node["itemStyle"]["color"] == KIND_COLOR["author"]
+
+
+def test_to_echart_folder_filter_hides_classified_folders():
+    from colophon.core.graph_explore import neighborhood, to_echart
+    g = _graph_with_author_folder()
+    sub = neighborhood(g, "root", hops=1)
+    opt = to_echart(g, sub, "root",
+                    label_of=lambda n: n.attrs.get("name", ""),
+                    confidence_of=lambda n: None,
+                    hidden=frozenset({"folder"}))
+    ids = {d["id"] for d in opt["series"][0]["data"]}
+    assert "af" not in ids
+    assert ids == {"root"}

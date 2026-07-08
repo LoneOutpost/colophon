@@ -192,24 +192,24 @@ def to_echart(
     renders its own bright-enabled / dim-struck-disabled legend."""
     visible = [
         nid for nid in sub.node_ids
-        if nid == focal_id or display_kind(graph.nodes[nid]) not in hidden
+        if nid == focal_id or filter_bucket(graph.nodes[nid]) not in hidden
     ]
     visible_set = set(visible)
     data = []
     for nid in visible:
         node = graph.nodes[nid]
-        kind = display_kind(node)
-        base = 20 if kind in ("author", "series", "franchise") else 14
+        bucket = filter_bucket(node)
+        base = 20 if bucket in ("author", "series", "franchise") else 14
         if nid == focal_id:
-            item_style = {"borderColor": _FOCAL_RING, "borderWidth": 3,
+            item_style = {"color": node_tint(node), "borderColor": _FOCAL_RING, "borderWidth": 3,
                           "shadowColor": _FOCAL_GLOW, "shadowBlur": 10}
         else:
-            item_style = {"borderColor": _NODE_BORDER, "borderWidth": 1}
+            item_style = {"color": node_tint(node), "borderColor": _NODE_BORDER, "borderWidth": 1}
         data.append({
             "id": nid,
             "name": label_of(node),
-            "category": _KIND_INDEX[kind],
-            "symbol": _KIND_SYMBOL[kind],
+            "category": _KIND_INDEX[bucket],
+            "symbol": node_glyph(node),
             "symbolSize": 34 if nid == focal_id else base,
             "value": confidence_of(node),
             "itemStyle": item_style,
