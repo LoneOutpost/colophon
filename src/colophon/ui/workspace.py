@@ -635,7 +635,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             )
                         if book.source_folder is not None:
                             with ui.row().classes("items-center no-wrap w-full q-gutter-xs q-mb-xs"):
-                                ui.icon("folder", size="14px").classes("colophon-muted")
+                                ui.icon("folder", size="0.875rem").classes("colophon-muted")
                                 ui.label(str(book.source_folder)).classes(
                                     "text-caption colophon-muted ellipsis col"
                                 ).style("min-width: 0; direction: rtl; text-align: left; "
@@ -653,7 +653,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         if controller._active_findings(book):
                             with ui.element("div").classes("colophon-attention w-full q-mb-sm"):
                                 with ui.row().classes("items-center q-gutter-xs q-mb-xs"):
-                                    ui.icon("warning_amber", size="18px").classes("text-warning")
+                                    ui.icon("warning_amber", size="1.125rem").classes("text-warning")
                                     ui.label("Attention").classes("text-subtitle2")
                                 render_attention_pane(book)
                                 ui.button(
@@ -1076,7 +1076,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                             "color=negative"
                         ).tooltip(blocking_reason(book) or "Blocking problem")
                     if has_open_findings(book):
-                        ui.icon("warning_amber", size="18px").classes("text-warning").tooltip(
+                        ui.icon("warning_amber", size="1.125rem").classes("text-warning").tooltip(
                             "Needs attention — see At a Glance"
                         )
                 series = book.series[0].name if book.series else ""

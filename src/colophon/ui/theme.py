@@ -70,6 +70,11 @@ _STATIC_CSS = """
   font-family: 'Spectral'; font-style: normal; font-weight: 700;
   font-display: swap; src: url('/assets/fonts/spectral-700.woff2') format('woff2');
 }
+/* Root font size scales gently with the viewport so the whole UI (all rem-based
+   type, spacing, and icons) reads larger on big high-resolution screens instead of
+   tiny. Floored at 16px so normal laptops/monitors are unchanged; only wide/high-res
+   viewports scale up, and it's capped so it never gets oversized. */
+html { font-size: clamp(16px, 0.29vw + 11.8px, 20px); }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
