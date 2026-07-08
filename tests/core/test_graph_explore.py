@@ -170,3 +170,46 @@ def test_to_echart_hidden_drops_kind_but_keeps_focal():
                        hidden=frozenset({"book"}))
     ids_b = {d["id"] for d in opts_b["series"][0]["data"]}
     assert "b1" in ids_b
+
+
+def test_filter_bucket_is_physical_first_for_directories():
+    from colophon.core.graph_explore import filter_bucket
+    assert filter_bucket(_n("x", physical="directory", semantic="author")) == "folder"
+    assert filter_bucket(_n("x", physical="directory", semantic="title")) == "folder"
+    assert filter_bucket(_n("x", physical="directory")) == "folder"
+    assert filter_bucket(_n("x", semantic="author")) == "author"
+    assert filter_bucket(_n("x", semantic="book", book_id="b")) == "book"
+    assert filter_bucket(_n("x", physical="file", name="f.mp3")) == "file"
+
+
+def test_type_label_suffixes_classified_folders():
+    from colophon.core.graph_explore import type_label
+    assert type_label(_n("x", physical="directory", semantic="author")) == "Author Folder"
+    assert type_label(_n("x", physical="directory", semantic="series")) == "Series Folder"
+    assert type_label(_n("x", physical="directory", semantic="franchise")) == "Franchise Folder"
+    assert type_label(_n("x", physical="directory", semantic="title")) == "Title Folder"
+    assert type_label(_n("x", physical="directory")) == "Folder"
+    assert type_label(_n("x", semantic="author")) == "Author"
+    assert type_label(_n("x", physical="file", name="f.mp3")) == "File"
+
+
+def test_node_tint_keeps_classification_color_for_folders():
+    from colophon.core.graph_explore import KIND_COLOR, node_tint
+    assert node_tint(_n("x", physical="directory", semantic="author")) == KIND_COLOR["author"]
+    assert node_tint(_n("x", physical="directory")) == KIND_COLOR["folder"]
+    assert node_tint(_n("x", semantic="series")) == KIND_COLOR["series"]
+    assert node_tint(_n("x", physical="file", name="f.mp3")) == KIND_COLOR["file"]
+
+
+def test_node_glyph_uses_folder_family_for_classified_dirs():
+    from colophon.core.graph_explore import _KIND_SYMBOL, node_glyph
+    author_folder = node_glyph(_n("x", physical="directory", semantic="author"))
+    assert author_folder.startswith("path://")
+    assert author_folder != _KIND_SYMBOL["author"]
+    assert author_folder != _KIND_SYMBOL["folder"]
+    series_folder = node_glyph(_n("x", physical="directory", semantic="series"))
+    assert series_folder.startswith("path://") and series_folder != _KIND_SYMBOL["series"]
+    franchise_folder = node_glyph(_n("x", physical="directory", semantic="franchise"))
+    assert franchise_folder.startswith("path://") and franchise_folder != _KIND_SYMBOL["franchise"]
+    assert node_glyph(_n("x", physical="directory", semantic="title")) == _KIND_SYMBOL["title"]
+    assert node_glyph(_n("x", physical="directory")) == _KIND_SYMBOL["folder"]

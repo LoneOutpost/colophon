@@ -47,6 +47,68 @@ _KIND_SYMBOL = {
 
 _SEMANTIC = ("author", "series", "franchise", "book", "title")
 
+# Human type labels per display bucket. A classified directory reads "<Kind> Folder".
+KIND_LABEL = {
+    "author": "Author", "series": "Series", "franchise": "Franchise",
+    "book": "Book", "title": "Title", "folder": "Folder", "file": "File",
+}
+
+# Semantic kinds that can occur on a directory node (a classified folder). Titles included;
+# 'book' is never a directory facet (a book folder classifies as 'title').
+_FOLDER_SEMANTICS = ("author", "series", "franchise", "title")
+
+# Flattened, transform-free ECharts glyphs (folder base + classification hint, one path each).
+# Source of truth: src/colophon/ui/assets/glyphs/<kind>-folder.svg. Regenerate with:
+#   uv run --with svgelements python - <<'PY'
+#   from svgelements import SVG, Path
+#   for name in ("author-folder","series-folder","franchise-folder"):
+#       svg = SVG.parse(f"src/colophon/ui/assets/glyphs/{name}.svg")
+#       ds = [Path(el).d() for el in svg.elements() if isinstance(el, Path) and Path(el).d()]
+#       print(name, "path://" + " ".join(ds))
+#   PY
+# 'title' reuses the folder+star glyph already in _KIND_SYMBOL["title"] (folder_special).
+_FOLDER_KIND_SYMBOL = {
+    "author": "path://m 10.12871624,12.26665106 q -0.67850234,-0.67850234 -0.67850234,-1.63129286 q 0,-0.95279052 0.67850234,-1.63129286 q 0.67850234,-0.67850234 1.63129286,-0.67850234 q 0.95279052,0 1.63129286,0.67850234 q 0.67850234,0.67850234 0.67850234,1.63129286 q 0,0.95279052 -0.67850234,1.63129286 q -0.67850234,0.67850234 -1.63129286,0.67850234 q -0.95279052,0 -1.63129286,-0.67850234 z m -2.98829754,5.29809274 l 0,-1.61685664 q 0,-0.49083148 0.25263385,-0.90226375 q 0.25263385,-0.41143227 0.67128423,-0.62797557 q 0.89504564,-0.44752282 1.81896372,-0.67128423 q 0.92391808,-0.22376141 1.8767086,-0.22376141 q 0.95279052,0 1.8767086,0.22376141 q 0.92391808,0.22376141 1.81896372,0.67128423 q 0.41865038,0.2165433 0.67128423,0.62797557 q 0.25263385,0.41143227 0.25263385,0.90226375 l 0,1.61685664 z m 1.1548976,-1.1548976 l 6.9293856,0 l 0,-0.46195904 q 0,-0.15879842 -0.07939921,-0.2887244 q -0.07939921,-0.12992598 -0.20932519,-0.20210708 q -0.77955588,-0.38977794 -1.57354798,-0.58466691 q -0.7939921,-0.19488897 -1.60242042,-0.19488897 q -0.80842832,0 -1.60242042,0.19488897 q -0.7939921,0.19488897 -1.57354798,0.58466691 q -0.12992598,0.0721811 -0.20932519,0.20210708 q -0.07939921,0.12992598 -0.07939921,0.2887244 z M 12.57565553,11.45100463 Q 12.9149067,11.11175346 12.9149067,10.6353582 Q 12.9149067,10.15896294 12.57565553,9.81971177 Q 12.23640436,9.4804606 11.7600091,9.4804606 q -0.47639526,0 -0.81564643,0.33925117 q -0.33925117,0.33925117 -0.33925117,0.81564643 q 0,0.47639526 0.33925117,0.81564643 q 0.33925117,0.33925117 0.81564643,0.33925117 q 0.47639526,0 0.81564643,-0.33925117 z M 11.7600091,10.6353582 Z m 0,5.774488 z M 4,20 q -0.825,0 -1.4125,-0.5875 T 2,18 l 0,-12 q 0,-0.825 0.5875,-1.4125 T 4,4 l 6,0 l 2,2 l 8,0 q 0.825,0 1.4125,0.5875 T 22,8 l 0,10 q 0,0.825 -0.5875,1.4125 T 20,20 L 4,20 Z m 0,-2 l 16,0 l 0,-10 L 11.175,8 l -2,-2 L 4,6 l 0,12 Z m 0,0 l 0,-12 l 0,12 Z",
+    "series": "path://M 4,20 q -0.825,0 -1.4125,-0.5875 T 2,18 l 0,-12 q 0,-0.825 0.5875,-1.4125 T 4,4 l 6,0 l 2,2 l 8,0 q 0.825,0 1.4125,0.5875 T 22,8 l 0,10 q 0,0.825 -0.5875,1.4125 T 20,20 L 4,20 Z m 0,-2 l 16,0 l 0,-10 L 11.175,8 l -2,-2 L 4,6 l 0,12 Z m 0,0 l 0,-12 l 0,12 Z m 11.9999999525,17.7783369965 l -4.51101357,-3.50856611 l 0.8270191545,-0.6265296625 l 3.6839944155,2.856975261 l 3.6839944155,-2.856975261 l 0.8270191545,0.6265296625 z m 0,-2.5311798365 l -4.51101357,-3.50856611 l 4.51101357,-3.50856611 l 4.51101357,3.50856611 z m 0,-3.50856611 z m 0,2.2304455985 l 2.8820364475,-2.2304455985 l -2.8820364475,-2.2304455985 l -2.8820364475,2.2304455985 z",
+    "franchise": "path://m 4,20 q -0.825,0 -1.4125,-0.5875 Q 2,18.825 2,18 l 0,-12 q 0,-0.825 0.5875,-1.4125 Q 3.175,4 4,4 l 6,0 l 2,2 l 8,0 q 0.825,0 1.4125,0.5875 q 0.5875,0.5875 0.5875,1.4125 l 0,10 q 0,0.825 -0.5875,1.4125 Q 20.825,20 20,20 Z m 0,-2 L 20,18 L 20,8 L 11.175,8 l -2,-2 L 4,6 Z m 0,0 l 0,-12 z m 10.12874363,14.85259712 l 5.61376932,0 l 0,-5.61376932 l -0.93562822,0 l 0,3.27469877 l -1.169535275,-0.701721165 l -1.169535275,0.701721165 L 12.46781418,9.2388278 L 10.12874363,9.2388278 Z m 0,0.93562822 q -0.38594664075,0 -0.660787430375,-0.274840789625 Q 9.19311541,15.2385437607 9.19311541,14.85259712 l 0,-5.61376932 q 0,-0.38594664075 0.274840789625,-0.660787430375 Q 9.74279698925,8.30319958 10.12874363,8.30319958 l 5.61376932,0 q 0.38594664075,0 0.660787430375,0.274840789625 q 0.274840789625,0.274840789625 0.274840789625,0.660787430375 l 0,5.61376932 q 0,0.38594664075 -0.274840789625,0.660787430375 Q 16.1284595908,15.78822534 15.74251295,15.78822534 Z M 8.25748719,17.65948178 q -0.38594664075,0 -0.660787430375,-0.274840789625 Q 7.32185897,17.1098002007 7.32185897,16.72385356 l 0,-6.54939754 l 0.93562822,0 l 0,6.54939754 l 6.54939754,0 l 0,0.93562822 z m 4.21032699,-8.42065398 l 2.33907055,0 z m -2.33907055,0 l 5.61376932,0 z",
+    "title": _KIND_SYMBOL["title"],
+}
+
+
+def filter_bucket(node: NodeRecord) -> str:
+    """Legend/hide/category bucket. Physical-first: every directory (classified or not) buckets
+    as 'folder' and a file as 'file', so the Folder toggle hides all folders; only purely-logical
+    nodes use their semantic kind. Mirrors graph_inspect._panel_kind's folder framing."""
+    if node.physical == "directory":
+        return "folder"
+    if node.physical == "file":
+        return "file"
+    return node.semantic if node.semantic in _SEMANTIC else "folder"
+
+
+def type_label(node: NodeRecord) -> str:
+    """Human type caption. A classified directory reads '<Kind> Folder' so it is distinct from
+    the entity node of the same kind (an author folder vs the author entity)."""
+    if node.physical == "directory" and node.semantic in _FOLDER_SEMANTICS:
+        return f"{KIND_LABEL[node.semantic]} Folder"
+    return KIND_LABEL[filter_bucket(node)]
+
+
+def node_glyph(node: NodeRecord) -> str:
+    """ECharts symbol path. A classified directory uses the folder-family glyph for its kind;
+    everything else uses the plain per-bucket glyph."""
+    if node.physical == "directory" and node.semantic in _FOLDER_SEMANTICS:
+        return _FOLDER_KIND_SYMBOL[node.semantic]
+    return _KIND_SYMBOL[filter_bucket(node)]
+
+
+def node_tint(node: NodeRecord) -> str:
+    """Fill color. Classification color when classified (an author folder stays terracotta),
+    otherwise the neutral bucket color."""
+    if node.semantic in _SEMANTIC:
+        return KIND_COLOR[node.semantic]
+    return KIND_COLOR[filter_bucket(node)]
+
 
 def display_kind(node: NodeRecord) -> str:
     """Color/category bucket: the semantic kind if set, else the physical kind mapped
