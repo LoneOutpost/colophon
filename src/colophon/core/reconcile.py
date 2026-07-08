@@ -1,9 +1,9 @@
-"""Merge embedded-tag, sidecar, directory, and filename evidence into a BookUnit.
+"""Merge embedded-tag, datafile sidecar, directory, and filename evidence into a BookUnit.
 
-Precedence per spec §6/FR-2.1: embedded tags > sidecar > directory inference >
+Precedence per spec §6/FR-2.1: embedded tags > datafile sidecar > directory inference >
 filename. Each populated field records its winning source in `book.provenance`.
 NOTE: description/genre/publisher/language beyond what is set here remain for
-later plans; this reconciles the identity-bearing fields plus sidecar extras.
+later plans; this reconciles the identity-bearing fields plus datafile sidecar extras.
 """
 
 from __future__ import annotations

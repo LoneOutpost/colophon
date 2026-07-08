@@ -1,4 +1,4 @@
-"""Read an AudiobookShelf/Audible-style metadata.json sidecar beside a book."""
+"""Read an AudiobookShelf/Audible-style metadata.json datafile sidecar beside a book."""
 
 from __future__ import annotations
 

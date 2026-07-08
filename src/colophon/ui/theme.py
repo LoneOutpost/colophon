@@ -174,6 +174,9 @@ body.body--dark { color: #ece4d8; }
 /* Reading-column cap for form/prose pages: left-anchored (not centered), so the page
    frame stays identical to full-bleed pages while fields keep a scannable width. */
 .colophon-measure-read { max-width: 768px; }
+/* Cap wide explanatory tooltips so a multi-sentence hint wraps into a readable
+   column instead of stretching across the viewport. */
+.colophon-tip { max-width: 22rem; }
 /* AA helpers (#105): warm muted text, muted outline chips, dark filled-button ink
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }

@@ -8,7 +8,7 @@ from colophon.core.models import Provenance
 
 _LABELS: dict[str, str] = {
     Provenance.TAG.value: "File tag",
-    Provenance.DATAFILE.value: "Sidecar",
+    Provenance.DATAFILE.value: "Datafile",
     Provenance.DIRECTORY.value: "Folder",
     Provenance.FILENAME.value: "Filename",
     Provenance.GRAPHING.value: "Inferred",
@@ -17,7 +17,7 @@ _LABELS: dict[str, str] = {
 
 _TOOLTIPS: dict[str, str] = {
     Provenance.TAG.value: "Read from the file's embedded tags.",
-    Provenance.DATAFILE.value: "Read from a metadata.json sidecar in the folder.",
+    Provenance.DATAFILE.value: "Read from a metadata.json datafile sidecar in the folder.",
     Provenance.DIRECTORY.value: "Inferred from the folder layout (directory scheme).",
     Provenance.FILENAME.value: "Parsed from the file name.",
     Provenance.GRAPHING.value: (

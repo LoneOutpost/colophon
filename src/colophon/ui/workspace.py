@@ -1679,27 +1679,27 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     multiple=True, label="Confidence", value=view["facets"]["confidence"],
                     on_change=lambda e: _set_facet("confidence", e.value),
                 ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")
-                ui.select(
+                id_trust_select = ui.select(
                     {
                         "directory": "Folder (weak)",
                         "filename": "Filename (weak)",
                         "graphing": "Inferred (weak)",
                         "tag": "File tag",
-                        "datafile": "Sidecar",
+                        "datafile": "Datafile",
                         "manual": "Edited",
                         "match": "Match",
                     },
                     multiple=True, label="ID Trust", value=view["facets"]["id_trust"],
                     on_change=lambda e: _set_facet("id_trust", e.value),
-                ).props("dense outlined options-dense").classes("col").style(
-                    "min-width: 8.5rem"
-                ).tooltip(
-                    "ID Trust reflects how the book's core identity, its author and "
-                    "series, was determined. Everything else builds on it: a match is "
-                    "searched using this identity, and manual edits assume it. When the "
-                    "identity was only inferred from a folder or file name, the matched "
-                    "and edited data resting on it is only as trustworthy as that guess."
-                )
+                ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")
+                with id_trust_select:
+                    ui.tooltip(
+                        "ID Trust reflects how the book's core identity, its author and "
+                        "series, was determined. Everything else builds on it: a match is "
+                        "searched using this identity, and manual edits assume it. When the "
+                        "identity was only inferred from a folder or file name, the matched "
+                        "and edited data resting on it is only as trustworthy as that guess."
+                    ).classes("colophon-tip")
                 ui.select(
                     {"series": "No series", "cover": "No cover", "ident": "No ASIN/ISBN",
                      "narrator": "No narrator", "year": "No year"},
