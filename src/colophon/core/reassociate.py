@@ -58,12 +58,22 @@ def reassociate(
 
 
 def is_missing(book: BookUnit, *, root_accessible: bool) -> bool:
-    """A tracked book is missing when its scan root is reachable but its own source
-    folder is gone, and it is not yet organized (an organized book's source is meant
-    to be gone — its canonical artifact is the output). `root_accessible` is the unmount
-    guard: a whole root falling offline must never flag every book under it as missing."""
+    """A tracked book is missing when its scan root is reachable but its own content is
+    gone, and it is not yet organized (an organized book's source is meant to be gone —
+    its canonical artifact is the output). `root_accessible` is the unmount guard: a
+    whole root falling offline must never flag every book under it as missing.
+
+    Content, not the containing directory, is the test. Several books can share one
+    download directory (multi-book clustering), so a book whose own files were deleted
+    is gone even while a sibling keeps the shared directory alive. A book is missing
+    when its source folder is gone, or the folder remains but none of its owned source
+    files survive. A book with no owned files falls back to folder existence."""
     if not root_accessible:
         return False
     if book.output_path is not None:
         return False
-    return not Path(book.source_folder).exists()
+    if not Path(book.source_folder).exists():
+        return True
+    if not book.source_files:
+        return False
+    return not any(sf.path.exists() for sf in book.source_files)

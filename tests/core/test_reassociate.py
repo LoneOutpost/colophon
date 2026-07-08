@@ -97,3 +97,31 @@ def test_is_missing_false_when_organized(tmp_path):
 def test_is_missing_false_when_root_inaccessible(tmp_path):
     b = BookUnit.new(source_folder=tmp_path / "gone")
     assert is_missing(b, root_accessible=False) is False  # unmount guard
+
+
+def test_is_missing_when_own_files_gone_but_dir_kept_by_sibling(tmp_path):
+    # Multi-book download directory: two books share one folder. The folder still
+    # exists because a sibling's file remains, but THIS book's own audio was deleted.
+    # A directory-existence check alone wrongly reports it present; the book is gone.
+    shared = tmp_path / "TE_Audiobooks_C"
+    shared.mkdir()
+    (shared / "sibling.mp3").write_bytes(b"x")  # a sibling book keeps the folder alive
+    b = _book(shared, [("Lightless.mp3", 166, 41587.0)])  # its own file was never created
+    assert is_missing(b, root_accessible=True) is True
+
+
+def test_is_missing_false_when_own_file_present_in_shared_dir(tmp_path):
+    shared = tmp_path / "TE_Audiobooks_C"
+    shared.mkdir()
+    (shared / "Lightless.mp3").write_bytes(b"x")
+    b = _book(shared, [("Lightless.mp3", 166, 41587.0)])
+    assert is_missing(b, root_accessible=True) is False
+
+
+def test_is_missing_false_when_any_own_file_survives(tmp_path):
+    # Partial deletion is not "missing": a book with content left is still present.
+    shared = tmp_path / "book"
+    shared.mkdir()
+    (shared / "a.mp3").write_bytes(b"x")  # b.mp3 deleted, a.mp3 survives
+    b = _book(shared, [("a.mp3", 100, 60.0), ("b.mp3", 200, 70.0)])
+    assert is_missing(b, root_accessible=True) is False
