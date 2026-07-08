@@ -18,17 +18,30 @@ from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 
+def brand_mark() -> None:
+    """The Colophon emblem for the app header. Renders both tone variants; CSS shows
+    the warm-ink mark on the light header and the warm-paper mark on the dark header
+    (via `body--dark`), so one brand mark reads on either surface."""
+    ui.html(
+        '<img src="/assets/brand/colophon-mark-light.svg" alt="Colophon"'
+        ' class="colophon-brand colophon-brand-light">'
+        '<img src="/assets/brand/colophon-mark-dark.svg" alt="" aria-hidden="true"'
+        ' class="colophon-brand colophon-brand-dark">'
+    )
+
+
 @contextmanager
 def page_header(
-    controller: AppController, active: str, *, icon: str, label: str = "Colophon"
+    controller: AppController, active: str, *, label: str = "Colophon"
 ) -> Iterator[None]:
-    """Standard page chrome. `active` is the nav tab to highlight; `icon` is the
-    brand icon for the page; `label` defaults to the app name. Action buttons added
-    in the `with` body appear between the spacer and the dark-mode toggle."""
+    """Standard page chrome. `active` is the nav tab to highlight; `label` defaults to
+    the app name. The header shows the Colophon brand mark (uniform across pages).
+    Action buttons added in the `with` body appear between the spacer and the dark-mode
+    toggle."""
     apply_theme()
     dark = setup_dark_mode()
     with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon(icon, color="primary").classes("text-h5")
+        brand_mark()
         ui.label(label).classes("text-h6 q-ml-sm text-weight-medium")
         app_tabs(controller, active)
         ui.space()

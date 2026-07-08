@@ -177,6 +177,12 @@ body.body--dark { color: #ece4d8; }
 /* Cap wide explanatory tooltips so a multi-sentence hint wraps into a readable
    column instead of stretching across the viewport. */
 .colophon-tip { max-width: 22rem; }
+/* Header brand mark: the Colophon emblem, tone-swapped by theme (warm ink on the
+   light paper header, warm paper on the dark header) so it reads on either surface. */
+.colophon-brand { height: 30px; width: auto; display: inline-block; vertical-align: middle; }
+.colophon-brand-dark { display: none; }
+.body--dark .colophon-brand-light { display: none; }
+.body--dark .colophon-brand-dark { display: inline-block; }
 /* AA helpers (#105): warm muted text, muted outline chips, dark filled-button ink
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }

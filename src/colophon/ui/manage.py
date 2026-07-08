@@ -192,7 +192,7 @@ def render_manage(controller: AppController, initial_kind: str | None = None,
         "last_batch": None,
     }
 
-    with page_header(controller, "manage", icon="category"):
+    with page_header(controller, "manage"):
         pass
 
     def _selected() -> set[str]:

@@ -10,7 +10,7 @@ from colophon.ui.chrome import page_body, page_header
 
 
 def render_franchises(controller: AppController) -> None:
-    with page_header(controller, "manage", icon="hub"):
+    with page_header(controller, "manage"):
         pass
 
     with page_body("read"):

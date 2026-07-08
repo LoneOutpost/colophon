@@ -59,7 +59,7 @@ def _folder_caption(node: FolderNode, picks: set[int]) -> str:
 
 
 def render_acquire(controller: AppController, book_id: str = "") -> None:
-    with page_header(controller, "acquire", icon="cloud_download", label="Acquire"):
+    with page_header(controller, "acquire", label="Acquire"):
         pass
 
     # Optional book context (from ?book=), so a fix can download into that book's folder.

@@ -41,7 +41,7 @@ from colophon.core.triage import (
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
-from colophon.ui.chrome import jobs_indicator
+from colophon.ui.chrome import brand_mark, jobs_indicator
 from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
@@ -1990,7 +1990,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                              clear_selection=selected_ids.clear)
 
     with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon("auto_stories", color="primary").classes("text-h5")
+        brand_mark()
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         app_tabs(controller, "library")
         ui.space()

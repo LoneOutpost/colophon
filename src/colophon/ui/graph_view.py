@@ -472,7 +472,7 @@ def render_graph(
     """/graph: an interactive neighborhood Explorer (default) or the Classic classification tree.
     `mode`, `focal`, `hide`, and `depth` come from the URL query string so every view is a stable
     full render."""
-    with page_header(controller, "graph", icon="account_tree"):
+    with page_header(controller, "graph"):
         pass
     ui.toggle(
         {"explorer": "Nodes", "classic": "Tree"}, value=mode,
