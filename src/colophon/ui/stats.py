@@ -42,7 +42,7 @@ def _stat_card(label: str, value: str) -> None:
 
 
 def render_stats(controller: AppController) -> None:
-    with page_header(controller, "stats", icon="insights", label="Stats"):
+    with page_header(controller, "stats", label="Stats"):
         pass
 
     books = controller.books_all()

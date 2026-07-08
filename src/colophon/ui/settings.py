@@ -56,7 +56,7 @@ def _token_reference() -> None:
 def render_settings(controller: AppController) -> None:
     cfg = controller.ctx.config
 
-    with page_header(controller, "settings", icon="auto_stories"):
+    with page_header(controller, "settings"):
         pass
 
     field = "outlined dense"

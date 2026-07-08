@@ -41,7 +41,7 @@ from colophon.core.triage import (
 from colophon.core.view_state import snapshot_to_view, view_to_snapshot
 from colophon.services.ingest import auto_scan_needs_confirmation
 from colophon.ui import state_panel
-from colophon.ui.chrome import jobs_indicator
+from colophon.ui.chrome import brand_mark, jobs_indicator
 from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
@@ -59,7 +59,7 @@ from colophon.ui.dialogs import (
     tag_dialog,
 )
 from colophon.ui.filter_input import filter_input
-from colophon.ui.graph_view import grid_url_for_book
+from colophon.ui.graph_view import nodes_url_for_book
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
@@ -628,10 +628,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                 "colophon-book-title text-h6 col ellipsis"
                             )
                             ui.button(
-                                icon="grid_view",
-                                on_click=lambda b=book: ui.navigate.to(grid_url_for_book(b.id)),
-                            ).props('flat dense round aria-label="Show in the graph grid"').tooltip(
-                                "Show this book in the graph grid"
+                                icon="hub",
+                                on_click=lambda b=book: ui.navigate.to(nodes_url_for_book(b.id)),
+                            ).props('flat dense round aria-label="Show in the graph"').tooltip(
+                                "Show this book in the graph"
                             )
                         if book.source_folder is not None:
                             with ui.row().classes("items-center no-wrap w-full q-gutter-xs q-mb-xs"):
@@ -657,7 +657,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                     ui.label("Attention").classes("text-subtitle2")
                                 render_attention_pane(book)
                                 ui.button(
-                                    "Full details in At a Glance", icon="insights",
+                                    "Full details in At a Glance", icon="visibility",
                                     on_click=lambda: _tabs.set_value("state"),
                                 ).props("flat dense no-caps").classes("q-mt-xs")
 
@@ -816,7 +816,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
             with ui.tabs().props("dense no-caps").classes("w-full") as _tabs:
                 ui.tab("details", label="Details", icon="edit")
-                ui.tab("state", label="At a Glance", icon="insights")
+                ui.tab("state", label="At a Glance", icon="visibility")
             with ui.tab_panels(_tabs, value="details").classes("w-full"):
                 with ui.tab_panel("details").classes("q-pa-none"):
                     _details_body()
@@ -1990,7 +1990,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                              clear_selection=selected_ids.clear)
 
     with ui.header(elevated=True).classes("items-center q-px-md"):
-        ui.icon("auto_stories", color="primary").classes("text-h5")
+        brand_mark()
         ui.label("Colophon").classes("text-h6 q-ml-sm text-weight-medium")
         app_tabs(controller, "library")
         ui.space()

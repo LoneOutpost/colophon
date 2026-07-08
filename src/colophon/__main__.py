@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+from pathlib import Path
 
 from nicegui import ui
 
@@ -92,9 +93,10 @@ def main() -> None:
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:
         run_kwargs["root_path"] = ctx.config.root_path
+    favicon = Path(__file__).parent / "ui" / "assets" / "brand" / "colophon-logo.svg"
     ui.run(
         title="Colophon", reload=False, show=False, port=ctx.config.port,
-        storage_secret=ctx.config.storage_secret, **run_kwargs,
+        favicon=str(favicon), storage_secret=ctx.config.storage_secret, **run_kwargs,
     )
 
 

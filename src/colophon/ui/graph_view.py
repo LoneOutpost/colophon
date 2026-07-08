@@ -159,7 +159,7 @@ def render_classic_tree(controller: AppController) -> None:
             ui.menu_item("Clear classification", lambda node=node: _clear_classify(node))
             ui.separator()
             ui.menu_item(
-                "Show in grid",
+                "Show in nodes",
                 lambda node=node: ui.navigate.to(
                     _mode_url("explorer", DirectoryNode.id_for(node.path))),
             )
@@ -318,15 +318,15 @@ def _graph_url(focal_id: str, hidden: frozenset[str], *, depth: int = 1) -> str:
     return url
 
 
-def grid_url_for_book(book_id: str) -> str:
-    """The /graph Grid-explorer URL focused on a book's node — for the detail pane's
-    'Show in grid' jump. Keeps the explorer URL format in one place."""
+def nodes_url_for_book(book_id: str) -> str:
+    """The /graph Nodes-explorer URL focused on a book's node — for the detail pane's
+    'Show in the graph' jump. Keeps the explorer URL format in one place."""
     return _mode_url("explorer", book_node_id(book_id))
 
 
 def _mode_url(mode: str, focal: str | None) -> str:
-    """A /graph URL for `mode` (grid=explorer / tree=classic) that carries the focal node across the
-    flip, so switching Tree<->Grid keeps you on the same node."""
+    """A /graph URL for `mode` (nodes=explorer / tree=classic) that carries the focal node across the
+    flip, so switching Tree<->Nodes keeps you on the same node."""
     url = f"/graph?mode={mode}"
     if focal:
         url += f"&focal={quote(focal)}"
@@ -472,10 +472,10 @@ def render_graph(
     """/graph: an interactive neighborhood Explorer (default) or the Classic classification tree.
     `mode`, `focal`, `hide`, and `depth` come from the URL query string so every view is a stable
     full render."""
-    with page_header(controller, "graph", icon="account_tree"):
+    with page_header(controller, "graph"):
         pass
     ui.toggle(
-        {"explorer": "Grid", "classic": "Tree"}, value=mode,
+        {"explorer": "Nodes", "classic": "Tree"}, value=mode,
         on_change=lambda e: ui.navigate.to(_mode_url(e.value, focal)),
     ).props("dense no-caps").classes("q-ma-sm")
     if mode == "classic":

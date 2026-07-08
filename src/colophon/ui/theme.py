@@ -96,7 +96,13 @@ body.body--dark { color: #ece4d8; }
 .body--dark .q-card { background: #262019; box-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
 /* Neutral, flat header/footer with a hairline rule (accent is reserved for
    actions, not the whole app bar). */
+/* App-bar height scales with the viewport so the chrome (and the brand mark that
+   fills it) doesn't read tiny on large high-resolution screens. Bounded so it stays
+   sane on small and huge viewports. Everything that keys off the header height reads
+   this one variable, so they can't drift. */
+:root { --colophon-header-h: clamp(3.15rem, 0.9vw + 2.75rem, 4rem); }
 .q-header {
+  min-height: var(--colophon-header-h);
   box-shadow: none;
   background: var(--colophon-surface);
   color: #2c271f;
@@ -167,16 +173,23 @@ body.body--dark { color: #ece4d8; }
 .colophon-toolbar { background: var(--colophon-surface); border-bottom: 1px solid var(--colophon-line);
   padding: 10px 16px; }
 .body--dark .colophon-toolbar { background: #262019; }
-/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins below the fixed 50px app
-   bar so the controls stay reachable while the body scrolls. The toolbar's own opaque
-   surface background keeps scrolled content from showing through. */
-.colophon-toolbar-sticky { position: sticky; top: 50px; z-index: 10; }
+/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins directly below the app
+   bar (whose height scales, so read the shared variable) so the controls stay reachable
+   while the body scrolls. The toolbar's own opaque surface background keeps scrolled
+   content from showing through. */
+.colophon-toolbar-sticky { position: sticky; top: var(--colophon-header-h); z-index: 10; }
 /* Reading-column cap for form/prose pages: left-anchored (not centered), so the page
    frame stays identical to full-bleed pages while fields keep a scannable width. */
 .colophon-measure-read { max-width: 768px; }
 /* Cap wide explanatory tooltips so a multi-sentence hint wraps into a readable
    column instead of stretching across the viewport. */
 .colophon-tip { max-width: 22rem; }
+/* Header brand mark: the Colophon emblem, tone-swapped by theme (warm ink on the
+   light paper header, warm paper on the dark header) so it reads on either surface. */
+.colophon-brand { height: calc(var(--colophon-header-h) - 0.9rem); width: auto; display: inline-block; vertical-align: middle; }
+.colophon-brand-dark { display: none; }
+.body--dark .colophon-brand-light { display: none; }
+.body--dark .colophon-brand-dark { display: inline-block; }
 /* AA helpers (#105): warm muted text, muted outline chips, dark filled-button ink
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }
