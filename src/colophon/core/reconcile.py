@@ -41,49 +41,49 @@ def reconcile(
     book: BookUnit,
     *,
     embedded: EmbeddedTags,
-    sidecar: DatafileSidecar | None = None,
+    datafile: DatafileSidecar | None = None,
     dir_title: str | None,
     filename_fields: dict[str, str],
     directory_fields: dict[str, str] | None = None,
 ) -> None:
     """Populate `book`'s candidate fields and provenance in place."""
-    sc = sidecar  # alias for brevity
+    df = datafile  # alias for brevity
     dirf = directory_fields or {}
 
-    # title: embedded.title -> embedded.album -> sidecar -> directory -> filename
+    # title: embedded.title -> embedded.album -> datafile -> directory -> filename
     if not book.title:
         picked = _first([
             (embedded.title, Provenance.TAG),
             (embedded.album, Provenance.TAG),
-            (sc.title if sc else None, Provenance.DATAFILE),
+            (df.title if df else None, Provenance.DATAFILE),
             (dir_title, Provenance.DIRECTORY),
             (filename_fields.get("title"), Provenance.FILENAME),
         ])
         if picked:
             book.title, book.provenance["title"] = picked
 
-    # subtitle: embedded has none -> sidecar
-    if not book.subtitle and sc and sc.subtitle:
-        book.subtitle, book.provenance["subtitle"] = sc.subtitle, Provenance.DATAFILE.value
+    # subtitle: embedded has none -> datafile
+    if not book.subtitle and df and df.subtitle:
+        book.subtitle, book.provenance["subtitle"] = df.subtitle, Provenance.DATAFILE.value
 
-    # authors: embedded.artist -> sidecar -> filename
+    # authors: embedded.artist -> datafile -> filename
     if not book.authors:
         if embedded.artist:
             book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
-        elif sc and sc.authors:
-            book.authors, book.provenance["authors"] = list(sc.authors), Provenance.DATAFILE.value
+        elif df and df.authors:
+            book.authors, book.provenance["authors"] = list(df.authors), Provenance.DATAFILE.value
         elif dirf.get("author"):
             book.authors, book.provenance["authors"] = [dirf["author"]], Provenance.DIRECTORY.value
         elif filename_fields.get("author"):
             book.authors = [filename_fields["author"]]
             book.provenance["authors"] = Provenance.FILENAME.value
 
-    # narrators: embedded.narrator -> sidecar -> filename
+    # narrators: embedded.narrator -> datafile -> filename
     if not book.narrators:
         if embedded.narrator:
             book.narrators, book.provenance["narrators"] = _split_people(embedded.narrator), Provenance.TAG.value
-        elif sc and sc.narrators:
-            book.narrators, book.provenance["narrators"] = list(sc.narrators), Provenance.DATAFILE.value
+        elif df and df.narrators:
+            book.narrators, book.provenance["narrators"] = list(df.narrators), Provenance.DATAFILE.value
         elif dirf.get("narrator"):
             book.narrators = [dirf["narrator"]]
             book.provenance["narrators"] = Provenance.DIRECTORY.value
@@ -91,14 +91,14 @@ def reconcile(
             book.narrators = [filename_fields["narrator"]]
             book.provenance["narrators"] = Provenance.FILENAME.value
 
-    # series: embedded -> sidecar -> directory -> filename (each tier builds a
+    # series: embedded -> datafile -> directory -> filename (each tier builds a
     # non-empty [SeriesRef], so a present source always yields a truthy value)
     if not book.series:
         picked = _first([
             ([SeriesRef(name=embedded.series, sequence=embedded.sequence)]
              if embedded.series else None, Provenance.TAG),
-            ([SeriesRef(name=sc.series_name, sequence=sc.series_sequence)]
-             if sc and sc.series_name else None, Provenance.DATAFILE),
+            ([SeriesRef(name=df.series_name, sequence=df.series_sequence)]
+             if df and df.series_name else None, Provenance.DATAFILE),
             ([SeriesRef(name=dirf["series"], sequence=to_float(dirf.get("sequence")))]
              if dirf.get("series") else None, Provenance.DIRECTORY),
             ([SeriesRef(name=filename_fields["series"],
@@ -108,12 +108,12 @@ def reconcile(
         if picked:
             book.series, book.provenance["series"] = picked
 
-    # publish_year: embedded -> sidecar -> filename
+    # publish_year: embedded -> datafile -> filename
     if book.publish_year is None:
         if embedded.year is not None:
             book.publish_year, book.provenance["publish_year"] = embedded.year, Provenance.TAG.value
-        elif sc and sc.publish_year is not None:
-            book.publish_year, book.provenance["publish_year"] = sc.publish_year, Provenance.DATAFILE.value
+        elif df and df.publish_year is not None:
+            book.publish_year, book.provenance["publish_year"] = df.publish_year, Provenance.DATAFILE.value
         elif dirf.get("year"):
             year = to_int(dirf["year"])
             if year is not None:
@@ -125,31 +125,31 @@ def reconcile(
                 book.publish_year = year
                 book.provenance["publish_year"] = Provenance.FILENAME.value
 
-    # publisher: embedded has none -> sidecar
-    if not book.publisher and sc and sc.publisher:
-        book.publisher, book.provenance["publisher"] = sc.publisher, Provenance.DATAFILE.value
+    # publisher: embedded has none -> datafile
+    if not book.publisher and df and df.publisher:
+        book.publisher, book.provenance["publisher"] = df.publisher, Provenance.DATAFILE.value
 
-    # description: embedded -> sidecar
+    # description: embedded -> datafile
     if not book.description:
         picked = _first([
             (embedded.description, Provenance.TAG),
-            (sc.description if sc else None, Provenance.DATAFILE),
+            (df.description if df else None, Provenance.DATAFILE),
         ])
         if picked:
             book.description, book.provenance["description"] = picked
 
-    # asin: embedded -> sidecar
+    # asin: embedded -> datafile
     if not book.asin:
         picked = _first([
             (embedded.asin, Provenance.TAG),
-            (sc.asin if sc else None, Provenance.DATAFILE),
+            (df.asin if df else None, Provenance.DATAFILE),
         ])
         if picked:
             book.asin, book.provenance["asin"] = picked
 
-    # isbn: embedded -> sidecar (normalized)
+    # isbn: embedded -> datafile (normalized)
     if not book.isbn:
         if embedded.isbn:
             book.isbn, book.provenance["isbn"] = normalize_isbn(embedded.isbn), Provenance.TAG.value
-        elif sc and sc.isbn:
-            book.isbn, book.provenance["isbn"] = normalize_isbn(sc.isbn), Provenance.DATAFILE.value
+        elif df and df.isbn:
+            book.isbn, book.provenance["isbn"] = normalize_isbn(df.isbn), Provenance.DATAFILE.value

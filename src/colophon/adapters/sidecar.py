@@ -56,7 +56,7 @@ def read_datafile_sidecar(folder: Path) -> DatafileSidecar | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"unreadable sidecar at {path}: {e}")
+        logger.warning(f"unreadable datafile sidecar at {path}: {e}")
         return None
     if not isinstance(data, dict):
         return None

@@ -50,7 +50,7 @@ class Evidence(_Base):
 
 
 # Fields reconcile can fill from a datafile sidecar (the DATAFILE tier), each with the
-# empty value it resets to. Mirrors core/reconcile.py's sidecar branches.
+# empty value it resets to. Mirrors core/reconcile.py's datafile branches.
 _DATAFILE_FIELDS: dict[str, object] = {
     "title": "", "subtitle": "", "authors": [], "narrators": [], "series": [],
     "publish_year": None, "publisher": "", "description": "", "asin": "", "isbn": "",
@@ -110,7 +110,7 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
     reconcile(
         book,
         embedded=evidence.embedded,
-        sidecar=evidence.datafile,
+        datafile=evidence.datafile,
         dir_title=book.source_folder.name,
         filename_fields=evidence.filename_fields,
         directory_fields=evidence.directory_fields,
@@ -176,7 +176,7 @@ def run_identify(
     book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
 ) -> None:
     """Run the IDENTIFY pipeline for `book`, mutating it in place. Fields orphaned by a
-    removed/vetted datafile are always dropped so they re-derive — the sidecar being gone
+    removed/vetted datafile are always dropped so they re-derive — the datafile sidecar being gone
     is the trigger, not the scan mode, so this holds on every scan (not just Refresh)."""
     evidence = gather(book, root=root, pattern=pattern, scheme=scheme)
     drop_orphaned_datafile_fields(book, evidence)

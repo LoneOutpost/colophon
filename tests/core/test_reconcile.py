@@ -77,19 +77,19 @@ def test_series_from_embedded_builds_series_ref():
     assert book.provenance["series"] == "tag"
 
 
-def test_sidecar_fills_gaps_below_embedded():
+def test_datafile_fills_gaps_below_embedded():
     book = _unit()
     embedded = EmbeddedTags(title="Embedded Title", artist="Douglas Adams")  # no series/year/narrator
-    sidecar = DatafileSidecar(
-        title="Sidecar Title", authors=["Someone Else"], narrators=["Douglas Adams"],
+    datafile = DatafileSidecar(
+        title="Datafile Title", authors=["Someone Else"], narrators=["Douglas Adams"],
         series_name="Dirk Gently", series_sequence=1.0, publish_year=2010,
         description="desc", asin="B0041G6CSI",
     )
-    reconcile(book, embedded=embedded, sidecar=sidecar, dir_title="Folder", filename_fields={})
+    reconcile(book, embedded=embedded, datafile=datafile, dir_title="Folder", filename_fields={})
     # embedded wins where present:
     assert book.title == "Embedded Title" and book.provenance["title"] == "tag"
     assert book.authors == ["Douglas Adams"] and book.provenance["authors"] == "tag"
-    # sidecar fills the gaps embedded lacked:
+    # datafile fills the gaps embedded lacked:
     assert book.narrators == ["Douglas Adams"] and book.provenance["narrators"] == "datafile"
     assert book.series[0].name == "Dirk Gently" and book.series[0].sequence == 1.0
     assert book.provenance["series"] == "datafile"
@@ -105,36 +105,36 @@ def test_embedded_isbn_is_normalized_onto_book():
     assert book.isbn == "9780306406157" and book.provenance["isbn"] == "tag"
 
 
-def test_sidecar_isbn_fills_when_embedded_lacks_it():
+def test_datafile_isbn_fills_when_embedded_lacks_it():
     book = _unit()
-    sidecar = DatafileSidecar(isbn="0-306-40615-2")
-    reconcile(book, embedded=EmbeddedTags(title="T"), sidecar=sidecar, dir_title=None, filename_fields={})
+    datafile = DatafileSidecar(isbn="0-306-40615-2")
+    reconcile(book, embedded=EmbeddedTags(title="T"), datafile=datafile, dir_title=None, filename_fields={})
     assert book.isbn == "0306406152" and book.provenance["isbn"] == "datafile"
 
 
-def test_sidecar_title_used_when_no_embedded_title():
+def test_datafile_title_used_when_no_embedded_title():
     book = _unit()
     reconcile(
         book,
         embedded=EmbeddedTags(),
-        sidecar=DatafileSidecar(title="Sidecar Title", authors=["A"]),
+        datafile=DatafileSidecar(title="Datafile Title", authors=["A"]),
         dir_title="Folder Title",
         filename_fields={},
     )
-    assert book.title == "Sidecar Title"
-    assert book.provenance["title"] == "datafile"  # sidecar outranks directory
+    assert book.title == "Datafile Title"
+    assert book.provenance["title"] == "datafile"  # datafile outranks directory
 
 
-def test_reconcile_without_sidecar_still_works():
+def test_reconcile_without_datafile_still_works():
     book = _unit()
-    reconcile(book, embedded=EmbeddedTags(title="T", artist="A"), sidecar=None, dir_title=None, filename_fields={})
+    reconcile(book, embedded=EmbeddedTags(title="T", artist="A"), datafile=None, dir_title=None, filename_fields={})
     assert book.title == "T" and book.authors == ["A"]
 
 
 def test_comma_joined_embedded_artist_splits_into_authors():
     book = _unit()
     reconcile(book, embedded=EmbeddedTags(artist="Terry Jones, Douglas Adams"),
-              sidecar=None, dir_title=None, filename_fields={})
+              datafile=None, dir_title=None, filename_fields={})
     assert book.authors == ["Terry Jones", "Douglas Adams"]
     assert book.provenance["authors"] == "tag"
 
@@ -142,21 +142,21 @@ def test_comma_joined_embedded_artist_splits_into_authors():
 def test_comma_joined_embedded_narrator_splits():
     book = _unit()
     reconcile(book, embedded=EmbeddedTags(narrator="Stephen Fry, Martin Freeman"),
-              sidecar=None, dir_title=None, filename_fields={})
+              datafile=None, dir_title=None, filename_fields={})
     assert book.narrators == ["Stephen Fry", "Martin Freeman"]
 
 
 def test_single_embedded_author_stays_single():
     book = _unit()
     reconcile(book, embedded=EmbeddedTags(artist="Douglas Adams"),
-              sidecar=None, dir_title=None, filename_fields={})
+              datafile=None, dir_title=None, filename_fields={})
     assert book.authors == ["Douglas Adams"]
 
 
-def test_directory_fields_fill_author_and_series_below_sidecar():
+def test_directory_fields_fill_author_and_series_below_datafile():
     book = BookUnit.new(source_folder=Path("/x"))
     reconcile(
-        book, embedded=EmbeddedTags(title="T"), sidecar=None, dir_title="T",
+        book, embedded=EmbeddedTags(title="T"), datafile=None, dir_title="T",
         filename_fields={}, directory_fields={"author": "Brandon Sanderson", "series": "Stormlight Archive"},
     )
     assert book.authors == ["Brandon Sanderson"]
@@ -168,7 +168,7 @@ def test_directory_fields_fill_author_and_series_below_sidecar():
 def test_embedded_outranks_directory_fields():
     book = BookUnit.new(source_folder=Path("/x"))
     reconcile(
-        book, embedded=EmbeddedTags(artist="Tagged Author"), sidecar=None, dir_title=None,
+        book, embedded=EmbeddedTags(artist="Tagged Author"), datafile=None, dir_title=None,
         filename_fields={}, directory_fields={"author": "Dir Author"},
     )
     assert book.authors == ["Tagged Author"]

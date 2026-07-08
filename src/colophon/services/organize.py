@@ -60,5 +60,5 @@ def organize_book(
     book.touch()
     repo.upsert(book)
     # colophon does not write a destination metadata.json — that is AudiobookShelf's domain.
-    # A future explicit "export to ABS" utility can opt into writing sidecars.
+    # A future explicit "export to ABS" utility can opt into writing datafile sidecars.
     return OrganizeResult(book_id=book.id, target_path=target, moved=True)

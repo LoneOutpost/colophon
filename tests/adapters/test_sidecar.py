@@ -16,11 +16,11 @@ def _write(folder: Path, data: dict) -> Path:
     return folder
 
 
-def test_absent_sidecar_returns_none(tmp_path):
+def test_absent_datafile_returns_none(tmp_path):
     assert read_datafile_sidecar(tmp_path) is None
 
 
-def test_reads_abs_style_sidecar(tmp_path):
+def test_reads_abs_style_datafile(tmp_path):
     folder = _write(tmp_path / "book", {
         "title": "Dirk Gently's Holistic Detective Agency",
         "subtitle": None,
@@ -144,7 +144,7 @@ def test_write_leaves_no_tmp_file(tmp_path):
     assert leftovers == []
 
 
-def test_write_over_corrupt_existing_sidecar(tmp_path):
+def test_write_over_corrupt_existing_datafile(tmp_path):
     folder = tmp_path / "book"
     folder.mkdir()
     (folder / "metadata.json").write_text("{ not json")

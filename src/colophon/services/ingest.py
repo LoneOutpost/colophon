@@ -94,7 +94,7 @@ def _run_local(
 
     SEARCH: re-probe source_files from on-disk audio (requires unit_files).
     CATEGORIZE: build FileFeatures and run classify; sets classification fields.
-    IDENTIFY: read embedded/sidecar/filename/directory fields; calls reconcile.
+    IDENTIFY: read embedded/datafile/filename/directory fields; calls reconcile.
 
     Raises on failure — callers decide how to mark the phase (FRESH or FAILED).
     `unit_files` is required for SEARCH; ignored for CATEGORIZE and IDENTIFY.

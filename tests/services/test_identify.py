@@ -241,8 +241,8 @@ def test_run_identify_rederive_clears_when_datafile_vetted_as_container(tmp_path
 
 
 def test_run_identify_clears_orphaned_datafile_on_any_scan(tmp_path):
-    # The sidecar being gone is the trigger, not the scan mode: an orphaned DATAFILE field is
-    # dropped on every scan (not just Refresh), so a plain rescan heals stale sidecar data.
+    # The datafile sidecar being gone is the trigger, not the scan mode: an orphaned DATAFILE field is
+    # dropped on every scan (not just Refresh), so a plain rescan heals stale datafile sidecar data.
     from colophon.services.identify import run_identify
 
     folder = tmp_path / "Some Author" / "Some Book"

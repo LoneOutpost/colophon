@@ -91,7 +91,7 @@ def test_organize_move_failure_returns_error(tmp_path, monkeypatch):
     assert not target.exists()
 
 
-def test_organize_does_not_write_destination_sidecar(tmp_path):
+def test_organize_does_not_write_destination_datafile(tmp_path):
     # colophon does not write metadata.json — that is AudiobookShelf's domain.
     repo = _repo(tmp_path)
     book = _book(tmp_path)

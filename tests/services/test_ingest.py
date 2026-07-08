@@ -108,7 +108,7 @@ def test_scan_ingest_is_idempotent(tmp_path: Path):
     assert len(repo.list_all()) == 1  # same folder -> same id -> upsert
 
 
-def test_scan_ingest_uses_sidecar_for_series(tmp_path):
+def test_scan_ingest_uses_datafile_for_series(tmp_path):
     ingest = tmp_path / "ingest"
     book_dir = ingest / "Dirk Gently"
     book_dir.mkdir(parents=True)
@@ -563,13 +563,13 @@ def test_plan_scan_fresh_ignores_persisted_state(tmp_path: Path):
 
 def _ingest_single_with_datafile_publisher(tmp_path: Path) -> tuple[BookUnitRepo, Path, Path]:
     """Scan one SINGLE book whose metadata.json sets a DATAFILE-provenance publisher
-    (no embedded publisher tag, so the field's only source is the sidecar)."""
+    (no embedded publisher tag, so the field's only source is the datafile)."""
     ingest = tmp_path / "ingest"
     book_dir = ingest / "Frank Herbert" / "Dune"
     book_dir.mkdir(parents=True)
     (book_dir / "01.mp3").write_bytes(b"")
-    sidecar = book_dir / "metadata.json"
-    sidecar.write_text(json.dumps({"publisher": "Tantor Audio"}))
+    datafile = book_dir / "metadata.json"
+    datafile.write_text(json.dumps({"publisher": "Tantor Audio"}))
 
     repo = _repo(tmp_path)
     plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
@@ -578,12 +578,12 @@ def _ingest_single_with_datafile_publisher(tmp_path: Path) -> tuple[BookUnitRepo
     [book] = plan.units
     assert book.publisher == "Tantor Audio"
     assert book.provenance["publisher"] == Provenance.DATAFILE.value
-    return repo, ingest, sidecar
+    return repo, ingest, datafile
 
 
 def test_refresh_rederives_orphaned_datafile_field(tmp_path: Path):
-    repo, ingest, sidecar = _ingest_single_with_datafile_publisher(tmp_path)
-    sidecar.unlink()  # the bad/removed datafile
+    repo, ingest, datafile = _ingest_single_with_datafile_publisher(tmp_path)
+    datafile.unlink()  # the bad/removed datafile
 
     plan = plan_scan_graph(
         repo, ingest, template="$Author - $Title",
@@ -596,8 +596,8 @@ def test_refresh_rederives_orphaned_datafile_field(tmp_path: Path):
 
 
 def test_update_keeps_orphaned_datafile_field(tmp_path: Path):
-    repo, ingest, sidecar = _ingest_single_with_datafile_publisher(tmp_path)
-    sidecar.unlink()
+    repo, ingest, datafile = _ingest_single_with_datafile_publisher(tmp_path)
+    datafile.unlink()
 
     plan = plan_scan_graph(
         repo, ingest, template="$Author - $Title",
