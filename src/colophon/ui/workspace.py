@@ -1095,11 +1095,18 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 chip_labels = book.genres + book.tags
                 if chip_labels:
                     with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
-                        for label in chip_labels[:4]:
-                            ui.chip(label).props(
+                        for label in chip_labels[:3]:
+                            ui.chip(label, color=None).props(
                                 "dense square size=sm clickable"
-                            ).on(
+                            ).classes("colophon-tag-chip").tooltip(label).on(
                                 "click.stop", lambda lbl=label: _filter_to(lbl)
+                            )
+                        rest = chip_labels[3:]
+                        if rest:
+                            ui.chip(f"+{len(rest)}", color=None).props(
+                                "dense square size=sm"
+                            ).classes("colophon-tag-chip colophon-tag-more").tooltip(
+                                " · ".join(rest)
                             )
 
     def _update_list_footer() -> None:
