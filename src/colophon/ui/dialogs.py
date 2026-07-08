@@ -809,6 +809,9 @@ async def quick_match_dialog(
                                         ui.space()
                                         ui.badge(f"{p.confidence:.0f}").props(
                                             f"color={_confidence_color(p.confidence)}"
+                                        ).tooltip(
+                                            "Match confidence: how closely this candidate "
+                                            "matches the book. Higher means a closer match."
                                         )
                                 with exp:
                                     _candidate_meta(
