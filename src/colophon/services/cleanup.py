@@ -66,6 +66,11 @@ def find_cleanup_candidates(
     - outside_scan_paths: under no current scan path. Organized books are excluded
       here too — their durable artifact means they are finished, not orphaned.
     """
+    if not scan_paths:
+        # With no configured scan paths, "orphaned" is indistinguishable from "we lost our
+        # bearings" (a reset or half-written config). Offer nothing rather than flag the whole
+        # library for irreversible removal.
+        return CleanupReport(removed_from_disk=[], outside_scan_paths=[])
     removed: list[CleanupCandidate] = []
     outside: list[CleanupCandidate] = []
     root_exists: dict[Path, bool] = {}

@@ -3,7 +3,11 @@ from pathlib import Path
 
 from colophon.services.cleanup import CleanupCandidate, CleanupReport
 from colophon.ui import manage
-from colophon.ui.manage import _selected_cleanup_ids
+from colophon.ui.manage import (
+    _CLEANUP_STRONG_CONFIRM_AT,
+    _cleanup_needs_confirm,
+    _selected_cleanup_ids,
+)
 
 
 def _report():
@@ -26,6 +30,13 @@ def test_selects_only_checked_categories():
         "d1", "o1", "o2"
     }
     assert _selected_cleanup_ids(r, set()) == []
+
+
+def test_large_removal_needs_a_second_confirm():
+    assert _cleanup_needs_confirm(_CLEANUP_STRONG_CONFIRM_AT) is True
+    assert _cleanup_needs_confirm(_CLEANUP_STRONG_CONFIRM_AT + 100) is True
+    assert _cleanup_needs_confirm(_CLEANUP_STRONG_CONFIRM_AT - 1) is False
+    assert _cleanup_needs_confirm(1) is False
 
 
 def test_cleanup_dialog_is_defined_and_sync():
