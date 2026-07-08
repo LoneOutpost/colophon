@@ -45,6 +45,7 @@ from colophon.core.graph_resolve import (
 )
 from colophon.core.graph_view import grouping_cohort
 from colophon.core.jobs import Job
+from colophon.core.library_graph import reconcile
 from colophon.core.models import (
     SUPPRESSED_FINDINGS,
     BookState,
@@ -540,6 +541,30 @@ class AppController:
     def active_jobs(self) -> list[Job]:
         """Snapshot of running background jobs, for the app-bar indicator (shared across sessions)."""
         return self.ctx.jobs.active()
+
+    def reconcile_graph(self) -> int:
+        """Self-heal: drop graph content that can no longer be valid — book nodes whose book was
+        deleted, and nodes/edges on roots that are no longer scan paths — then persist the cleaned
+        per-root subgraphs. Cures leftovers from a removed/renamed scan path (whose old-root
+        subgraph `replace_subgraph` never revisits) and from book deletions. Returns the number of
+        nodes removed; a no-op on a healthy graph. Never purges when no scan paths are configured,
+        so a transient empty config can't wipe the whole graph."""
+        active = {str(p) for p in self.ctx.config.scan_paths}
+        if not active:
+            return 0
+        book_ids = {b.id for b in self.ctx.books.list_all()}
+        result = reconcile(self.ctx.library_graph, active_roots=active, book_ids=book_ids)
+        if not result:
+            return 0
+        for r in result.affected_roots:
+            nodes_r = [n for n in self.ctx.library_graph.nodes.values() if n.root == r]
+            edges_r = [e for e in self.ctx.library_graph.edges if e.root == r]
+            self.ctx.graph.replace_subgraph(Path(r), nodes_r, edges_r)
+        logger.info(
+            f"graph reconcile: removed {len(result.removed_node_ids)} orphan node(s) and "
+            f"{result.removed_edges} dangling edge(s) across {len(result.affected_roots)} root(s)"
+        )
+        return len(result.removed_node_ids)
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its

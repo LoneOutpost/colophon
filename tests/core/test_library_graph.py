@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from colophon.core.graph_records import EdgeRecord, NodeRecord
-from colophon.core.library_graph import LibraryGraph, check_file_references
+from colophon.core.library_graph import LibraryGraph, check_file_references, reconcile
+
+
+def _bookn(id_, book_id, root="/lib"):
+    return NodeRecord(id=id_, physical=None, semantic="book", root=root, attrs={"book_id": book_id})
 
 
 def _dir(id_, path, root="/lib"):
@@ -35,6 +39,56 @@ def test_validity_all_present_is_empty():
     )
     report = check_file_references(g, exists=lambda p: True)
     assert report.missing_dirs == [] and report.missing_files == []
+
+
+def test_reconcile_removes_orphan_book_nodes_and_dangling_edges():
+    live = _bookn("book:live", "b1")
+    orphan = _bookn("book:orphan", "gone")  # book_id no longer in the store
+    d = _dir("d", "/lib/a")
+    edges = [
+        EdgeRecord(src="d", kind="contains", dst="book:live", root="/lib", props={}),
+        EdgeRecord(src="dghost", kind="contains", dst="book:orphan", root="/lib", props={}),
+        EdgeRecord(src="book:orphan", kind="owns", dst="fghost", root="/lib", props={}),
+    ]
+    g = LibraryGraph.from_records([live, orphan, d], edges)
+    result = reconcile(g, active_roots={"/lib"}, book_ids={"b1"})
+    assert result.removed_node_ids == {"book:orphan"}
+    assert set(g.nodes) == {"book:live", "d"}
+    assert g.edges == [edges[0]]          # only the live book's edge survives
+    assert result.removed_edges == 2
+    assert result.affected_roots == {"/lib"}
+    assert bool(result) is True
+
+
+def test_reconcile_purges_nodes_on_dead_roots():
+    keep = _bookn("book:k", "b1", root="/active")
+    stale = _bookn("book:s", "b2", root="/gone")  # dead root, and book gone too
+    g = LibraryGraph.from_records([keep, stale], [])
+    result = reconcile(g, active_roots={"/active"}, book_ids={"b1"})
+    assert set(g.nodes) == {"book:k"}
+    assert result.affected_roots == {"/gone"}
+
+
+def test_reconcile_never_purges_a_root_with_live_books():
+    # Safety net: a root missing from active_roots but still holding a live book is kept,
+    # so a momentarily-empty or renamed scan-path config can't wipe live data.
+    live = _bookn("book:k", "b1", root="/not-in-config")
+    g = LibraryGraph.from_records([live], [])
+    result = reconcile(g, active_roots=set(), book_ids={"b1"})
+    assert set(g.nodes) == {"book:k"}
+    assert not result
+
+
+def test_reconcile_clean_graph_is_a_noop():
+    live = _bookn("book:k", "b1")
+    d = _dir("d", "/lib/a")
+    e = EdgeRecord(src="d", kind="contains", dst="book:k", root="/lib", props={})
+    g = LibraryGraph.from_records([live, d], [e])
+    gen = g.generation
+    result = reconcile(g, active_roots={"/lib"}, book_ids={"b1"})
+    assert not result
+    assert g.generation == gen            # no write counter bump when nothing changed
+    assert len(g.nodes) == 2 and len(g.edges) == 1
 
 
 def test_validity_flags_deleted_file():
