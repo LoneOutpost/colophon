@@ -96,8 +96,17 @@ def test_classified_folder_uses_folder_structure_and_display_kind():
 
 def test_missing_focal_is_empty():
     got = _inspect(_graph(), "nope")
-    assert got == NodeInspection(id="nope", label="", kind="", confidence=None,
+    assert got == NodeInspection(id="nope", label="", kind="", type_caption="", confidence=None,
                                  rows=[], linked_folders=[], files=[], provenance=[], links=[])
+
+
+def test_inspect_type_caption_distinguishes_folder_from_entity():
+    folder = _n("af", physical="directory", semantic="author", name="Clive Barker")
+    entity = _n("ae", semantic="author", name="Clive Barker")
+    g = LibraryGraph.from_records([folder, entity], [])
+    assert _inspect(g, "af").type_caption == "Author Folder"
+    assert _inspect(g, "af").kind == "author"   # kind unchanged (routes links)
+    assert _inspect(g, "ae").type_caption == "Author"
 
 
 def test_provenance_passthrough():

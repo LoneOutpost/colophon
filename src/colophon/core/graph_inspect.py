@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from colophon.core.graph_explore import display_kind
+from colophon.core.graph_explore import display_kind, type_label
 from colophon.core.graph_records import NodeRecord
 from colophon.core.library_graph import LibraryGraph
 
@@ -27,6 +27,7 @@ class NodeInspection:
     id: str
     label: str
     kind: str                       # display kind, or "" when the focal is missing
+    type_caption: str               # human caption: "Author Folder" vs "Author"
     confidence: float | None
     rows: list[tuple[str, str]]     # ordered (label, value) rows, framed per kind
     linked_folders: list[str]       # entity nodes only (0..N folder names); else []
@@ -87,7 +88,7 @@ def inspect(
     at any explorer depth. Returns an empty inspection when the focal node is absent."""
     node = graph.nodes.get(focal_id)
     if node is None:
-        return NodeInspection(id=focal_id, label="", kind="", confidence=None,
+        return NodeInspection(id=focal_id, label="", kind="", type_caption="", confidence=None,
                               rows=[], linked_folders=[], files=[], provenance=[], links=[])
     disp = display_kind(node)          # caption + links + node-color parity (semantic-first)
     pk = _panel_kind(node)             # relationship framing (physical-aware)
@@ -150,7 +151,8 @@ def inspect(
     if pk == "file" and owner is not None:
         links = [NodeLink("Jump to its book", f"/graph?focal={quote(owner)}")]
     return NodeInspection(
-        id=focal_id, label=name_of(node), kind=disp, confidence=confidence_of(node),
+        id=focal_id, label=name_of(node), kind=disp, type_caption=type_label(node),
+        confidence=confidence_of(node),
         rows=rows, linked_folders=linked_folders, files=files, provenance=provenance,
         links=links,
     )

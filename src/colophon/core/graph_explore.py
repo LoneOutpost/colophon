@@ -105,6 +105,8 @@ def node_glyph(node: NodeRecord) -> str:
 def node_tint(node: NodeRecord) -> str:
     """Fill color. Classification color when classified (an author folder stays terracotta),
     otherwise the neutral bucket color."""
+    # _SEMANTIC includes "book", but _SEMANTIC_DIR_KINDS in graph_records.py ensures a directory
+    # never carries semantic="book", so KIND_COLOR["book"] is only reached for logical book nodes.
     if node.semantic in _SEMANTIC:
         return KIND_COLOR[node.semantic]
     return KIND_COLOR[filter_bucket(node)]

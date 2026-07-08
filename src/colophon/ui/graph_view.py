@@ -380,7 +380,7 @@ def _explorer_panel(view, focal_id: str | None) -> None:
             ui.button("Show in tree", icon="account_tree",
                       on_click=lambda: ui.navigate.to(_mode_url("classic", focal_id))).props(
                 "flat dense no-caps").classes("colophon-muted")
-    cap = view.kind.upper()
+    cap = view.type_caption.upper()
     if view.confidence is not None:
         cap += f" · {view.confidence:.0%}"
     ui.label(cap).classes("colophon-seccap")
