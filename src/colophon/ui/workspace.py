@@ -672,7 +672,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                     color = "positive" if sig.points >= 0 else "negative"
                                     ui.badge(f"{sig.name.replace('_', ' ')} {sig.points:+d}").props(
                                         f"color={color} outline"
-                                    ).tooltip(sig.detail)
+                                    ).classes("colophon-signal").tooltip(sig.detail)
 
                         # Attention sits up top, right under the confidence read-out, so the score,
                         # the signals behind it, and the problems that need a human read as one story.
