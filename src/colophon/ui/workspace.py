@@ -482,8 +482,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     def _ack(c=code, b=book) -> None:
                         controller.acknowledge_finding(b, c)
                         ui.notify("Acknowledged", type="info")
-                        refresh_nav()
-                        _render_middle()
+                        repaint(nav=True, middle=True)
 
                     ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
 
@@ -1369,9 +1368,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 # Defer view refresh until close so rebuilding list_container can't
                 # tear down this dialog while it is still open.
                 dialog.close()
-                refresh_nav()
-                _render_middle()
-                refresh_status()
+                repaint(nav=True, middle=True, status=True)
                 if selected_ids:
                     _after_select()
 
@@ -1431,10 +1428,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             if canonical and scope["kind"] == kind and scope["key"] == name:
                 _set_scope(kind, canonical)
             elif scope["kind"] == kind:
-                refresh_nav()
-                _render_middle()
+                repaint(nav=True, middle=True)
             else:
-                refresh_nav()
+                repaint(nav=True)
 
         def _apply_alias(value: str | None, dialog) -> None:
             canonical = (value or "").strip()
@@ -1735,7 +1731,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 # Count over scope+folder (not the text search): the toolbar isn't rebuilt on
                 # every keystroke, so a text-inclusive count would go stale. Scope/folder changes
                 # do rebuild it, keeping this current.
-                needs_work_n = sum(1 for b in _books_for_scope() if needs_human(b))
+                needs_work_n = (
+                    sum(1 for b in _books_for_scope() if needs_human(b))
+                    if controller.library_tree_warm() else 0
+                )
                 ui.checkbox(
                     f"Needs work ({needs_work_n})", value=view["facets"]["needs_work"],
                     on_change=lambda e: _set_facet("needs_work", e.value),
@@ -1874,7 +1873,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         if detail_book_id is not None:
             show_detail(detail_book_id)
         _stepper_refresh["fn"]()
-        if len(selected_ids) >= 2:
+        if detail_book_id is None and len(selected_ids) >= 2:
             show_bulk()
 
     def _refresh_all() -> None:
@@ -1895,21 +1894,18 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     _warming = {"active": False}
 
     async def _warm_tree() -> None:
-        """Derive library_tree off the event loop (once), then repaint the heavy panes
-        synchronously now that the cache is warm. Single-flight: concurrent cold paints
-        share one warmer."""
-        if _warming["active"]:
-            return
-        _warming["active"] = True
+        """Derive library_tree off the event loop, then repaint the heavy panes and the
+        toolbar count now that the cache is warm."""
         try:
             await asyncio.to_thread(controller.library_tree)  # under the store lock, off-loop
         finally:
             _warming["active"] = False
-        _ui_safe(lambda: repaint(nav=True, list=True))
+        _ui_safe(lambda: repaint(nav=True, middle=True))
 
     def _ensure_warm() -> None:
-        """Schedule the warmer if the tree is cold and not already warming."""
+        """Schedule the warmer once if the tree is cold and not already warming."""
         if not controller.library_tree_warm() and not _warming["active"]:
+            _warming["active"] = True
             ui.timer(0.01, _warm_tree, once=True)
 
     async def _run(button, action, done_msg: str) -> None:
