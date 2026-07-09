@@ -1363,6 +1363,15 @@ class AppController:
                 operations=self.ctx.operations, batch_id=batch_id,
             )
             results.append(result)
+            # A clean write (every file written, none failed) makes the on-disk tags
+            # current, so the Tag phase is fresh. A partial/failed write leaves it as-is
+            # so it doesn't read as fully tagged. Later field edits re-stale it via invalidate().
+            if result.ok and result.written > 0:
+                if not book.phases:
+                    ensure_phases(book)
+                mark(book, Phase.TAG, PhaseState.FRESH)
+                resync_state(book)
+                self.ctx.books.upsert(book)
             if progress is not None:
                 progress(len(results), book, result)
         return results
