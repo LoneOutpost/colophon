@@ -188,7 +188,22 @@ body.body--dark { color: #ece4d8; }
    scrolls forever. break-inside keeps a row whole across a column boundary. */
 .colophon-catalog-list { column-width: 22rem; column-gap: 2.5rem; }
 .colophon-catalog-list .q-item { break-inside: avoid; }
-.colophon-attention { border: 1px solid var(--colophon-line); border-left: 3px solid #b45309;
+/* Polish: list captions (the author · series sub-line) ship at Quasar's 1.2
+   line-height; 1.35 gives them room without loosening the dense rows much. */
+.q-item__label--caption { line-height: 1.35; }
+/* Confidence-signal badges get a little vertical inset so the text isn't flush. */
+.colophon-signal.q-badge { padding: 2px 7px; }
+/* Honor prefers-reduced-motion (a PRODUCT.md accessibility commitment): collapse
+   motion so transitions/animations resolve instantly instead of animating. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+.colophon-attention { border: 1px solid rgba(180, 83, 9, .38);
   border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
 /* Primary save actions: a fixed toolbar above the detail scroll area (not inside it),
    so Save / Write tags / Mark ready stay visible however far the fields scroll. The
