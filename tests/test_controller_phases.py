@@ -1,7 +1,7 @@
 import pytest
 
 from colophon.controller import AppController
-from colophon.core.models import BookState, BookUnit, Phase, PhaseState
+from colophon.core.models import BookState, BookUnit, Phase, PhaseState, SourceFile
 from colophon.core.phases import mark, resync_state, state_of
 from tests.test_controller import _ctx
 
@@ -135,6 +135,53 @@ def test_rerun_phase_deferred_raises(tmp_path):
     book = BookUnit.new(source_folder=tmp_path / "x")
     with pytest.raises(NotImplementedError):
         ctrl.rerun_phase([book], Phase.ENCODE)
+
+
+async def test_write_tags_marks_tag_phase_fresh_then_edit_restales(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path]
+    d = tmp_path / "Author" / "Book"
+    d.mkdir(parents=True)
+    f = d / "01.mp3"
+    f.write_bytes(b"")
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=d)
+    book.title = "Mistborn"
+    book.authors = ["Brandon Sanderson"]
+    book.source_files = [SourceFile(path=f, size=1, duration_seconds=60.0, ext="mp3")]
+    mark(book, Phase.IDENTIFY, PhaseState.FRESH)   # coherent prior state; TAG still PENDING
+    resync_state(book)
+    ctx.books.upsert(book)
+    assert state_of(book, Phase.TAG) is PhaseState.PENDING
+
+    result = await ctrl.write_tags(book)
+    assert result.ok and result.written == 1
+    tagged = ctx.books.get(book.id)
+    assert state_of(tagged, Phase.TAG) is PhaseState.FRESH      # write made on-disk tags current
+
+    ctrl.edit_field(tagged, "title", "A Different Title")       # later field edit re-stales it
+    edited = ctx.books.get(book.id)
+    assert state_of(edited, Phase.TAG) is PhaseState.STALE
+
+
+async def test_write_tags_leaves_tag_phase_stale_on_failed_write(tmp_path):
+    ctx = _ctx(tmp_path)
+    d = tmp_path / "Author" / "Book"
+    d.mkdir(parents=True)
+    missing = d / "gone" / "gone.mp3"               # parent dir absent -> save() fails
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=d)
+    book.title = "Mistborn"
+    book.authors = ["Brandon Sanderson"]
+    book.source_files = [SourceFile(path=missing, size=1, duration_seconds=60.0, ext="mp3")]
+    mark(book, Phase.TAG, PhaseState.STALE)
+    resync_state(book)
+    ctx.books.upsert(book)
+
+    result = await ctrl.write_tags(book)
+    assert not result.ok                            # the write failed
+    stale = ctx.books.get(book.id)
+    assert state_of(stale, Phase.TAG) is PhaseState.STALE   # not promoted to fresh
 
 
 def test_get_book_hydrates_legacy_phase_map(tmp_path):
