@@ -44,6 +44,10 @@ class BatchLog:
                         cap = ui.item_label("queued").props("caption").classes("colophon-muted")
                         self._captions[it.id] = cap
                         self._kinds[it.id] = "queued"
+        with ui.row().classes("w-full items-center q-gutter-xs q-mt-xs") as self._progress_row:
+            self._progress = ui.label("").classes("text-caption colophon-muted")
+            self._progress_fail = ui.label("").classes("text-caption text-negative")
+        self._progress_row.set_visibility(False)
         self._actions = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
 
     def update(self, item_id: str, status: str, *, kind: str) -> None:
@@ -53,6 +57,13 @@ class BatchLog:
         cap.set_text(status)
         cap.classes(replace=_KIND_CLASS.get(kind, "colophon-muted"))
         self._kinds[item_id] = kind
+
+    def set_progress(self, done: int, total: int, *, failed: int = 0) -> None:
+        """Show a live 'Processing X of Y · Z failed' line while the run is in flight.
+        The caller drives this as items reach a terminal state; `finish` hides it."""
+        self._progress.set_text(f"Processing {done} of {total}")
+        self._progress_fail.set_text(f"·  {failed} failed" if failed else "")
+        self._progress_row.set_visibility(True)
 
     def failed_ids(self) -> list[str]:
         return [i for i, k in self._kinds.items() if k == "fail"]
@@ -80,6 +91,7 @@ class BatchLog:
         """Replace the action row: summary + each `extra` (label, icon, on_click) button +
         Retry failed (when on_retry is set and there are failed items) + Close. Handlers may
         be async (NiceGUI awaits a returned coroutine)."""
+        self._progress_row.set_visibility(False)  # the summary below supersedes the live line
         self._actions.clear()
         with self._actions:
             ui.label(summary).classes("text-body2 q-mr-auto self-center")

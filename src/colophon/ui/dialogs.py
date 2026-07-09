@@ -1270,26 +1270,46 @@ async def persist_dialog(
         async def run_persist(books, do_tag, opts) -> None:
             body.clear()
             token = CancelToken()
-            _KIND = {"done": "ok", "failed": "fail", "cancelled": "skip"}
+            _KIND = {"done": "ok", "failed": "fail", "cancelled": "skip", "skipped": "skip"}
+            _TERMINAL = {"done", "failed", "cancelled", "skipped"}
             with body:
                 ui.label(f"Persisting {len(books)} book(s)").classes("text-subtitle1")
                 log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in books])
             log.cancel_action(token.cancel)
 
+            # Live progress across both phases. Tag and encode/organize each contribute one
+            # unit of work per book, so the total spans whichever operations were chosen.
+            do_process = opts.encode or opts.organize
+            total = len(books) * (int(do_tag) + int(do_process))
+            prog = {"done": 0, "fail": 0}
+
+            def _tick(failed: bool) -> None:
+                prog["done"] += 1
+                prog["fail"] += int(failed)
+                log.set_progress(prog["done"], total, failed=prog["fail"])
+
             if do_tag:
-                await controller.write_tags_books(
-                    books,
-                    progress=lambda done, book, res: log.update(
-                        book.id, "tagged" if res.ok else "tag failed",
+                def _on_tag(done, book, res) -> None:
+                    log.update(
+                        book.id,
+                        "tagged" if res.ok else f"tag failed: {res.failed} file(s)",
                         kind="ok" if res.ok else "fail",
-                    ),
-                )
-            if opts.encode or opts.organize:
-                await controller.run_encode_job(
-                    books, opts,
-                    progress=lambda bid, status: log.update(bid, status, kind=_KIND.get(status, "running")),
-                    cancel=token,
-                )
+                    )
+                    _tick(not res.ok)
+
+                await controller.write_tags_books(books, progress=_on_tag)
+            if do_process:
+                def _on_process(bid, status) -> None:
+                    log.update(bid, status, kind=_KIND.get(status, "running"))
+                    if status in _TERMINAL:
+                        _tick(status == "failed")
+
+                job = await controller.run_encode_job(books, opts, progress=_on_process, cancel=token)
+                # The progress callback only carries a status; the returned results carry the
+                # reason. Surface it on failed/skipped rows so it stays readable after the run.
+                for r in job.results:
+                    if r.status in {"failed", "skipped"} and r.detail:
+                        log.update(r.book_id, f"{r.status}: {r.detail}", kind=_KIND.get(r.status, "fail"))
             clear_selection()
             await controller.trigger_abs_scan()  # best-effort library rescan
 
@@ -1298,7 +1318,7 @@ async def persist_dialog(
             if c.get("fail"):
                 note += f", {c['fail']} failed"
             if c.get("skip"):
-                note += f", {c['skip']} cancelled"
+                note += f", {c['skip']} skipped"
 
             def _retry(ids: list[str]) -> object:
                 return run_persist([b for b in books if b.id in ids], do_tag, opts)
