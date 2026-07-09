@@ -1415,11 +1415,10 @@ class AppController:
         return True
 
     def mark_ready(self, book: BookUnit) -> None:
-        book.manually_confirmed = True
-        mark(book, Phase.IDENTIFY, PhaseState.FRESH)
-        resync_state(book, ready_threshold=self.ctx.config.review_threshold)
-        book.touch()
-        self.ctx.books.upsert(book)
+        """Mark a book Ready by human approval. A person has reviewed and accepted it, so this is a
+        manual confirmation: it forces confidence to maximum rather than leaving the pre-match guess
+        in place. See confirm_confidence."""
+        self.confirm_confidence(book)
 
     def confirm_confidence(self, book: BookUnit) -> None:
         """Manually confirm a book: force confidence to 100, mark it Ready, and

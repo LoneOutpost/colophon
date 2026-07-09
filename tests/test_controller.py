@@ -2039,6 +2039,24 @@ def test_confirm_confidence_sets_100_ready_and_manual_flag(tmp_path):
     ctx.close()
 
 
+def test_mark_ready_forces_max_confidence_not_weak_value(tmp_path):
+    # A human approving a book is a manual confirmation: mark_ready must not leave the
+    # weak pre-match identity_confidence in the featured score.
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.identity_confidence = 42.0        # weak local guess before review
+    ctx.books.upsert(book)
+    AppController(ctx).mark_ready(book)
+    assert book.confidence == 100.0
+    assert book.manually_confirmed is True
+    assert book.state == BookState.READY
+    assert any(s.name == "manual_confirmation" for s in book.confidence_signals)
+    assert ctx.books.get(book.id).confidence == 100.0
+    ctx.close()
+
+
 async def test_recheck_confidence_reverts_to_auto_and_clears_flag(tmp_path):
     src = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
     ctx = _ctx(tmp_path, sources=[src])
