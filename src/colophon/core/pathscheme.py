@@ -118,6 +118,18 @@ def expand_pattern(
     )
 
 
+def _has_token(pattern: str, name: str) -> bool:
+    """True if `pattern` contains the exact $Token (not a longer look-alike)."""
+    return any(m.group(1) == name for m in _TOKEN.finditer(pattern))
+
+
+def ensure_part_placeholder(pattern: str) -> str:
+    """Guarantee a multi-part filename pattern distinguishes parts. If the pattern
+    has no $Part token, append a default ' ($Part of $Total)' suffix so N parts
+    cannot collide on one filename. No-op when $Part is already present."""
+    return pattern if _has_token(pattern, "Part") else f"{pattern} ($Part of $Total)"
+
+
 def sanitize_segment(segment: str) -> str:
     cleaned = _ILLEGAL.sub("", segment).strip()
     return cleaned.rstrip(". ")

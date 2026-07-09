@@ -4,7 +4,7 @@ import pytest
 
 from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.core.models import BookUnit, SeriesRef
-from colophon.core.pathscheme import build_target_path, expand_pattern, sanitize_segment
+from colophon.core.pathscheme import build_target_path, ensure_part_placeholder, expand_pattern, sanitize_segment
 
 
 def _book() -> BookUnit:
@@ -211,3 +211,17 @@ def test_part_total_pad_width_follows_total():
     assert expand_pattern("$Part of $Total", b, part=7, total=100) == "007 of 100"
     # single-digit total still pads to min two
     assert expand_pattern("$Part of $Total", b, part=3, total=9) == "03 of 09"
+
+
+def test_ensure_part_placeholder_appends_when_missing():
+    assert ensure_part_placeholder("$Title") == "$Title ($Part of $Total)"
+
+
+def test_ensure_part_placeholder_noop_when_present():
+    assert ensure_part_placeholder("$Title[ - Part $Part of $Total]") == \
+        "$Title[ - Part $Part of $Total]"
+
+
+def test_ensure_part_placeholder_ignores_lookalike_tokens():
+    # $Partition must not count as $Part
+    assert ensure_part_placeholder("$Partition") == "$Partition ($Part of $Total)"
