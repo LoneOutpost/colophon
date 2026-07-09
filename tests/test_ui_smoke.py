@@ -181,3 +181,12 @@ def test_scope_selector_accepts_ready_tier_params():
     params = inspect.signature(scope_selector).parameters
     assert "ready_label" in params
     assert "ready_state" in params
+
+
+def test_match_dialog_scopes_to_identified():
+    import inspect
+    import colophon.ui.dialogs as dlg
+    src = inspect.getsource(dlg.match_dialog)
+    assert "ready_state=BookState.IDENTIFIED" in src
+    assert 'ready_label="Identified"' in src
+    assert "ready to match against sources" in src  # the caption
