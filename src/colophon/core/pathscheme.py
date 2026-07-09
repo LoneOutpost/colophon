@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
+from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.core.models import BookUnit, SeriesRef
 from colophon.core.tokens import BUILD_TOKENS
 
@@ -115,7 +115,7 @@ def sanitize_segment(segment: str) -> str:
     return cleaned.rstrip(". ")
 
 
-def build_target_path(root: Path, patterns: AudiobookPatterns, book: BookUnit) -> Path:
+def build_target_path(root: Path, patterns: PathPatterns, book: BookUnit) -> Path:
     """Absolute target path = root / <sanitized folder segments> / <sanitized name>.m4b."""
     # Split the pattern on "/" first, then expand+sanitize each segment, so a
     # "/" inside an expanded token value cannot create an extra directory level.
@@ -145,7 +145,7 @@ def sample_target(folder_pattern: str, file_pattern: str) -> str:
     """Render the relative organize path for the sample book, for a Settings preview.
 
     Empty patterns fall back to the same defaults `build_target_path` uses."""
-    patterns = AudiobookPatterns(
+    patterns = PathPatterns(
         folder=folder_pattern or "$Author/$Title",
         single_file=file_pattern or "$Title",
     )

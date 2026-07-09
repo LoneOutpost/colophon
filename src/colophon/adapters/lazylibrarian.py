@@ -11,27 +11,26 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
-class AudiobookPatterns(BaseModel):
+class PathPatterns(BaseModel):
     folder: str = "$Author/$Title"
-    file: str = "$Author - $Title Part $Part of $Total"
     single_file: str = ""
 
 
-def read_audiobook_patterns(config_ini: Path) -> AudiobookPatterns:
-    """Read audiobook folder/file patterns from LL's config.ini.
+def read_audiobook_patterns(config_ini: Path) -> PathPatterns:
+    """Read the audiobook folder pattern from LL's config.ini.
 
-    Returns defaults when the file or the keys are absent.
+    Only the folder pattern is imported (its grammar is 1:1 with Colophon's);
+    file/multi-part naming is Colophon's own. Returns defaults when the file or
+    keys are absent.
     """
     if not config_ini.exists():
-        return AudiobookPatterns()
+        return PathPatterns()
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(config_ini)
     if not parser.has_section("POSTPROCESS"):
-        return AudiobookPatterns()
+        return PathPatterns()
     section = parser["POSTPROCESS"]
-    defaults = AudiobookPatterns()
-    return AudiobookPatterns(
+    defaults = PathPatterns()
+    return PathPatterns(
         folder=section.get("audiobook_dest_folder", defaults.folder) or defaults.folder,
-        file=section.get("audiobook_dest_file", defaults.file) or defaults.file,
-        single_file=section.get("audiobook_single_file", defaults.single_file),
     )

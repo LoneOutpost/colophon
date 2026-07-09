@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
+from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.core.models import BookUnit, SeriesRef
 from colophon.core.pathscheme import build_target_path, expand_pattern, sanitize_segment
 
@@ -53,14 +53,14 @@ def test_sanitize_segment_neutralizes_traversal():
 
 def test_build_target_path_uses_single_file_name(tmp_path):
     b = _book()
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "The Way of Kings" / "The Way of Kings.m4b"
 
 
 def test_build_target_path_falls_back_to_title_when_single_file_empty(tmp_path):
     b = _book()
-    pats = AudiobookPatterns(folder="$Author", single_file="")
+    pats = PathPatterns(folder="$Author", single_file="")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "The Way of Kings.m4b"
 
@@ -68,7 +68,7 @@ def test_build_target_path_falls_back_to_title_when_single_file_empty(tmp_path):
 def test_build_target_path_sanitizes_each_segment(tmp_path):
     b = _book()
     b.authors = ["AC/DC Author"]
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     target = build_target_path(tmp_path, pats, b)
     # the '/' in the author value must NOT create an extra directory level
     assert target.relative_to(tmp_path).parts[0] == "ACDC Author"
@@ -77,7 +77,7 @@ def test_build_target_path_sanitizes_each_segment(tmp_path):
 def test_build_target_path_authorless_collapses_segment(tmp_path):
     b = BookUnit.new(source_folder=Path("/ingest/x"))
     b.title = "Solo"
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     target = build_target_path(tmp_path, pats, b)
     # the empty author segment collapses — Path swallows ""
     assert target == tmp_path / "Solo" / "Solo.m4b"
@@ -169,7 +169,7 @@ def test_nested_group_raises():
 
 def test_group_within_segment_renders_in_build(tmp_path):
     b = _book()  # $SerNum == "1"
-    pats = AudiobookPatterns(folder="$Author/$Series", single_file="[$SerNum - ]$Title")
+    pats = PathPatterns(folder="$Author/$Series", single_file="[$SerNum - ]$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "Stormlight Archive" / "1 - The Way of Kings.m4b"
 
@@ -177,7 +177,7 @@ def test_group_within_segment_renders_in_build(tmp_path):
 def test_group_drops_in_filename_while_folder_segment_collapses(tmp_path):
     b = BookUnit.new(source_folder=Path("/ingest/x"))
     b.title = "Solo"  # no author (segment collapses), no series (group drops)
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="[$SerNum - ]$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="[$SerNum - ]$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Solo" / "Solo.m4b"
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
+from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
 from colophon.core.models import BookState, BookUnit
 from colophon.core.pathscheme import build_target_path
@@ -33,7 +33,7 @@ def test_organize_moves_and_marks_organized(tmp_path):
     repo.upsert(book)
     m4b = _make_m4b(tmp_path)
     library = tmp_path / "library"
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
 
     target = build_target_path(library, pats, book)
     result = organize_book(repo, book, m4b, target=target)
@@ -53,7 +53,7 @@ def test_organize_detects_collision_and_does_not_overwrite(tmp_path):
     repo.upsert(book)
     m4b = _make_m4b(tmp_path)
     library = tmp_path / "library"
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     # pre-create the destination
     dest = library / "Frank Herbert" / "Dune" / "Dune.m4b"
     dest.parent.mkdir(parents=True)
@@ -74,7 +74,7 @@ def test_organize_move_failure_returns_error(tmp_path, monkeypatch):
     repo.upsert(book)
     m4b = _make_m4b(tmp_path)
     library = tmp_path / "library"
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
 
     def _boom(*args, **kwargs):
         raise OSError("disk full")
@@ -99,7 +99,7 @@ def test_organize_does_not_write_destination_datafile(tmp_path):
     repo.upsert(book)
     m4b = _make_m4b(tmp_path)
     library = tmp_path / "library"
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
 
     target = build_target_path(library, pats, book)
     result = organize_book(repo, book, m4b, target=target)

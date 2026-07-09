@@ -2456,7 +2456,7 @@ async def test_retry_identify_requeries_only_given_ids_and_merges(tmp_path):
 
 
 def test_organize_targets_uses_overridden_patterns(tmp_path):
-    from colophon.adapters.lazylibrarian import AudiobookPatterns
+    from colophon.adapters.lazylibrarian import PathPatterns
     ctx = _ctx(tmp_path)
     ctx.config.library_root = tmp_path / "lib"
     book = BookUnit.new(source_folder=tmp_path / "x")
@@ -2464,7 +2464,7 @@ def test_organize_targets_uses_overridden_patterns(tmp_path):
     book.authors = ["Frank Herbert"]
     ctx.books.upsert(book)
     targets = AppController(ctx).organize_targets(
-        [book], patterns=AudiobookPatterns(folder="$Author", single_file="$Title")
+        [book], patterns=PathPatterns(folder="$Author", single_file="$Title")
     )
     bid, target = targets[0]
     assert bid == book.id
@@ -3150,13 +3150,13 @@ def test_clear_entity_alias_reverts(tmp_path):
 
 
 def _controller(tmp_path):
-    from colophon.adapters.lazylibrarian import AudiobookPatterns
+    from colophon.adapters.lazylibrarian import PathPatterns
 
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
     # Folder pattern carries both $Author and $Series so canonical-projection
     # assertions on the organize path are meaningful (the default omits $Series).
-    ctrl.ctx.patterns = AudiobookPatterns(folder="$Author/$Series/$Title", single_file="$Title")
+    ctrl.ctx.patterns = PathPatterns(folder="$Author/$Series/$Title", single_file="$Title")
     return ctrl
 
 

@@ -15,7 +15,7 @@ from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.downloader import (
     DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
 )
-from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
+from colophon.adapters.lazylibrarian import PathPatterns, read_audiobook_patterns
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
@@ -214,7 +214,7 @@ class EncodeJobOptions(_Base):
     organize: bool = True
     delete_sources: bool = False
     concurrency: int = 2
-    patterns: AudiobookPatterns | None = None  # per-run organize override; None = ctx.patterns
+    patterns: PathPatterns | None = None  # per-run organize override; None = ctx.patterns
 
 
 class BookProcessResult(_Base):
@@ -2022,7 +2022,7 @@ class AppController:
         return book.source_folder / f"{stem}.m4b"
 
     def organize_targets(
-        self, books: list[BookUnit], *, patterns: AudiobookPatterns | None = None
+        self, books: list[BookUnit], *, patterns: PathPatterns | None = None
     ) -> list[tuple[str, Path]]:
         """Pure dry-run: the (book_id, target_path) each book would organize to, computed
         from `patterns` (or the saved patterns). Encodes/moves nothing."""

@@ -10,7 +10,7 @@ from platformdirs import user_data_path
 
 from colophon.adapters.audiobookshelf import AbsClient
 from colophon.adapters.config import Config, default_config_path
-from colophon.adapters.lazylibrarian import AudiobookPatterns
+from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.adapters.repository.store import (
     BookUnitRepo,
     EntityAliasRepo,
@@ -60,7 +60,7 @@ class AppContext:
     graph: GraphStore
     library_graph: LibraryGraph
     sources: list[MetadataSource]
-    patterns: AudiobookPatterns
+    patterns: PathPatterns
     abs_client: AbsClient | None
     config_path: Path
     jobs: JobRegistry = field(default_factory=JobRegistry)
@@ -70,7 +70,7 @@ class AppContext:
         db = config.db_path or default_db_path()
         conn = connect(db)
         migrate(conn)
-        patterns = AudiobookPatterns(
+        patterns = PathPatterns(
             folder=config.organize_folder_pattern,
             single_file=config.organize_file_pattern,
         )
