@@ -99,3 +99,14 @@ def test_repaint_is_defined_in_workspace_source():
     src = inspect.getsource(ws.render_workspace)
     assert "def repaint(" in src
     assert "repaint(nav=True, middle=True, status=True)" in src  # _refresh_all routes through it
+
+
+def test_field_save_repaints_nav():
+    # The field-save handler must include the navigator in its blast radius, so
+    # clearing a shared entity (e.g. series) can't leave a ghost in "By Series".
+    import inspect, re, colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    m = re.search(r"def _save\(b=book\)[^:]*:.*?(?=\n\n? {16}def |\n\n? {16}async def )", src, re.S)
+    assert m, "could not locate _save handler"
+    body = m.group(0)
+    assert "repaint(" in body and "nav=True" in body

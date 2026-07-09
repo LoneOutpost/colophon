@@ -569,8 +569,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         return
                     _set_dirty(False)
                     ui.notify("Saved")
-                    refresh_list()
-                    show_detail(b.id)
+                    repaint(list=True, nav=True, detail_book_id=b.id)
 
                 def _normalize_all() -> None:
                     for f, inp in inputs.items():
@@ -701,18 +700,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                         async def _recheck(b=book) -> None:
                                             ui.notify("Rechecking confidence...")
                                             await controller.recheck_confidence(b)
-                                            show_detail(b.id)
-                                            refresh_list()
-                                            refresh_status()
+                                            repaint(list=True, status=True, detail_book_id=b.id)
                                         ui.button("Recheck Confidence", icon="refresh", on_click=_recheck).props(
                                             "flat dense no-caps"
                                         ).tooltip("Re-query sources and revert to the computed confidence")
                                     else:
                                         def _confirm(b=book) -> None:
                                             controller.confirm_confidence(b)
-                                            show_detail(b.id)
-                                            refresh_list()
-                                            refresh_status()
+                                            repaint(list=True, status=True, detail_book_id=b.id)
                                         ui.button("Manual Confirmation", icon="verified", on_click=_confirm).props(
                                             "flat dense no-caps"
                                         ).tooltip("Confirm this book and set its confidence to 100%")
@@ -731,9 +726,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                             # The record is gone; show_detail(None-ish)
                                             # renders the empty placeholder and clears
                                             # editor state for the now-deleted id.
-                                            show_detail(b.id)
-                                            refresh_list()
-                                            refresh_status()
+                                            repaint(list=True, status=True, detail_book_id=b.id)
                                         ui.button("Remove missing", icon="delete_outline", on_click=_remove_missing).props(
                                             "flat dense no-caps color=negative"
                                         ).tooltip("Delete this orphaned record (the folder is gone)")
@@ -864,9 +857,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         the bulk Clear selection button, the navigator Deselect all, and after a
         bulk operation runs on the selection."""
         selected_ids.clear()
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         show_detail("")
 
@@ -999,9 +990,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _select_all(book_ids: list[str]) -> None:
         # Navigator "Select all": all books in the current scope (ignores filter).
         selected_ids.update(book_ids)
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1015,9 +1004,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _select_visible() -> None:
         # Books-header "Select all": additive over the filtered, visible books.
         selected_ids.update(b.id for b in _visible_books())
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1026,9 +1013,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         # Books-header "Deselect all": subtractive over the filtered, visible books;
         # selections outside the current filter are left untouched.
         selected_ids.difference_update(b.id for b in _visible_books())
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1233,9 +1218,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             selected_ids.discard(book_id)
         else:
             selected_ids.add(book_id)
-        refresh_list()  # re-render the checkbox (and re-apply the focus tint)
-        refresh_nav()   # keep navigator node checkboxes in sync
-        refresh_status()
+        repaint(list=True, nav=True, status=True)
         _update_count()
 
     def _on_key(e) -> None:
@@ -1653,8 +1636,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     def _set_filter(value: str | None) -> None:
         book_filter["text"] = value or ""
-        refresh_list()
-        refresh_nav()  # the filter is cross-panel: it narrows the navigator to the same books
+        repaint(list=True, nav=True)  # the filter is cross-panel: it narrows the navigator to the same books
         _persist_view()
 
     def _filter_to(label: str) -> None:
@@ -1663,8 +1645,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         search = refs.get("filter")
         if search is not None:
             search.set_value(label)
-        refresh_list()
-        refresh_nav()
+        repaint(list=True, nav=True)
         _persist_view()
 
     def _set_facet(name: str, value) -> None:
@@ -1827,8 +1808,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             selected_ids.update(book_ids)
         else:
             selected_ids.difference_update(book_ids)
-        refresh_list()  # reflect the change in the Books pane checkboxes
-        refresh_status()
+        repaint(list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
