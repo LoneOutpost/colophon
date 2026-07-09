@@ -122,11 +122,15 @@ def commit_tag(book: BookUnit, *, operations: OperationRepo, batch_id: str) -> T
     return result
 
 
-def tag_file(path: Path, book: BookUnit, *, operations: OperationRepo, batch_id: str) -> bool:
+def tag_file(path: Path, book: BookUnit, *, operations: OperationRepo, batch_id: str, track: int | None = None) -> bool:
     """Embed the book's projected tags (+ cached cover) into a single file (e.g.
-    the produced M4B) and log the write. Returns True on success."""
+    the produced M4B) and log the write. `track`, if given, overrides the embedded
+    track number (used to order multi-part reorg files). Returns True on success."""
+    tags = project_tags(book)
+    if track is not None:
+        tags = tags.model_copy(update={"track": track})
     return _tag_and_log(
-        path, project_tags(book), _load_cover(book),
+        path, tags, _load_cover(book),
         operations=operations, book_id=book.id, batch_id=batch_id,
     )
 

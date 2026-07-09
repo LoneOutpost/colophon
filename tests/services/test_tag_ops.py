@@ -97,3 +97,13 @@ def test_tag_file_writes_to_a_single_path_and_logs(tmp_path: Path):
     assert read_embedded_tags(out).title == "Mistborn"
     logged = ops.list_batch("b1")
     assert len(logged) == 1 and logged[0].target == str(out) and logged[0].outcome == "ok"
+
+
+def test_tag_file_track_override_embeds_given_track_number(tmp_path: Path):
+    out = tmp_path / "part.mp3"
+    out.write_bytes(b"")
+    book = _book_with_file(out)
+    ops = _ops(tmp_path)
+    ok = tag_file(out, book, operations=ops, batch_id="b2", track=3)
+    assert ok is True
+    assert read_embedded_tags(out).track == 3
