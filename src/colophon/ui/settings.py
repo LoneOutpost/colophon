@@ -125,19 +125,35 @@ def render_settings(controller: AppController) -> None:
                         ui.notify("Enter a config.ini path first", type="warning")
                         return
                     try:
-                        folder, file = controller.import_ll_patterns(Path(raw))
+                        folder = controller.import_ll_patterns(Path(raw))
                     except FileNotFoundError:
                         ui.notify(
-                            "Couldn't read LazyLibrarian patterns from that path",
+                            "Couldn't read a LazyLibrarian folder pattern from that path",
                             type="negative",
                         )
                         return
                     folder_pat.set_value(folder)
-                    file_pat.set_value(file)
                     _update_preview()
-                    ui.notify("Imported patterns from LazyLibrarian config.ini")
+                    ui.notify("Imported folder pattern from LazyLibrarian config.ini")
 
-                ui.button("Import", icon="download", on_click=_import_ll).props("flat")
+                ui.button(
+                    "Import folder pattern", icon="download", on_click=_import_ll
+                ).props("flat")
+
+            reorg_delete = ui.switch(
+                "Delete source files after a no-encode reorg (originals are copied,"
+                " then removed only once every file is verified)",
+                value=cfg.reorg_delete_sources,
+            )
+
+            ui.markdown(
+                "**Multi-part books** are named once per part using `$Part` and "
+                "`$Total`. Wrap them in a conditional group so single-file books are "
+                "unaffected, e.g. `$Title[ - Part $Part of $Total]`. If you omit "
+                "`$Part`, Colophon appends ` ($Part of $Total)` automatically so parts "
+                "never collide. `$Part` is padded to `$Total`'s width; both are empty "
+                "for single-file books."
+            ).classes("text-caption")
 
         with page_section(
             "Pattern history",
@@ -372,6 +388,7 @@ def render_settings(controller: AppController) -> None:
                     "library_root": _opt_path(library_root.value),
                     "organize_folder_pattern": folder_pat.value or "$Author/$Title",
                     "organize_file_pattern": file_pat.value or "$Title",
+                    "reorg_delete_sources": reorg_delete.value,
                     "filename_template": template.value or "$Author - $Title",
                     "directory_scheme": scheme.value,
                     "review_threshold": float(threshold.value),

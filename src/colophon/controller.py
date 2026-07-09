@@ -15,8 +15,9 @@ from colophon.adapters.cover import mime_for_suffix
 from colophon.adapters.downloader import (
     DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
 )
-from colophon.adapters.lazylibrarian import AudiobookPatterns, read_audiobook_patterns
+from colophon.adapters.lazylibrarian import PathPatterns, read_audiobook_patterns
 from colophon.adapters.realdebrid import RdUser, RealDebridClient
+from colophon.adapters.tags import read_embedded_tags
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
@@ -72,7 +73,8 @@ from colophon.core.navigator import (
 )
 from colophon.core.node_classify import book_identity_confidence, classify_nodes
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
-from colophon.core.pathscheme import build_target_path
+from colophon.core.part_order import resolve_part_order
+from colophon.core.pathscheme import build_reorg_targets, build_target_path
 from colophon.core.perf import timed
 from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
@@ -128,7 +130,7 @@ from colophon.services.ingest import (
     sweep_missing,
 )
 from colophon.services.matching import gather_matches, query_for_book
-from colophon.services.organize import organize_book
+from colophon.services.organize import organize_book, organize_book_parts
 from colophon.services.tag_ops import (
     TagCommitResult,
     TagPlan,
@@ -214,7 +216,7 @@ class EncodeJobOptions(_Base):
     organize: bool = True
     delete_sources: bool = False
     concurrency: int = 2
-    patterns: AudiobookPatterns | None = None  # per-run organize override; None = ctx.patterns
+    patterns: PathPatterns | None = None  # per-run organize override; None = ctx.patterns
 
 
 class BookProcessResult(_Base):
@@ -2022,7 +2024,7 @@ class AppController:
         return book.source_folder / f"{stem}.m4b"
 
     def organize_targets(
-        self, books: list[BookUnit], *, patterns: AudiobookPatterns | None = None
+        self, books: list[BookUnit], *, patterns: PathPatterns | None = None
     ) -> list[tuple[str, Path]]:
         """Pure dry-run: the (book_id, target_path) each book would organize to, computed
         from `patterns` (or the saved patterns). Encodes/moves nothing."""
@@ -2037,30 +2039,77 @@ class AppController:
         # in-app edit fixes it and attempting would error. Skip it even if a stale UI let it through.
         if has_blocking_error(book):
             return BookProcessResult(book_id=book.id, status="skipped", detail="blocking error")
-        if options.encode:
-            target = self._encode_target(book)
-            if target.exists() and target != book.output_path:
-                return BookProcessResult(book_id=book.id, status="failed", detail="output name collision")
-            mark(book, Phase.ENCODE, PhaseState.RUNNING)
-            resync_state(book)
-            self.ctx.books.upsert(book)
-            enc = encode_book(
-                book, target, bitrate=self.ctx.config.transcode_bitrate,
-                delete_sources=options.delete_sources, confirm_delete=options.delete_sources,
-                chapters=book.chapters or None,
-            )
-            if not enc.verified or enc.output_path is None:
-                mark(book, Phase.ENCODE, PhaseState.FAILED, detail=enc.error)
+
+        if not options.encode:
+            # No-encode reorg: copy/rename the original source files into the library,
+            # naming multi-part books one file per part. No transcoding.
+            if not book.source_files:
+                return BookProcessResult(book_id=book.id, status="skipped", detail="no source files")
+            if not options.organize:
+                return BookProcessResult(book_id=book.id, status="done")
+            library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
+            cbook = self._canonical_book(book)
+            tracks = [read_embedded_tags(sf.path).track for sf in book.source_files]
+            ordered = resolve_part_order(book.source_files, tracks)
+            if ordered is None:
+                mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail="couldn't determine part order")
                 resync_state(book)
+                book.touch()
                 self.ctx.books.upsert(book)
-                return BookProcessResult(book_id=book.id, status="failed", detail=enc.error)
-            book.output_path = enc.output_path
-            mark(book, Phase.ENCODE, PhaseState.FRESH)
+                return BookProcessResult(book_id=book.id, status="failed", detail="couldn't determine part order")
+            targets = build_reorg_targets(
+                library_root, options.patterns or self.ctx.patterns, cbook, ordered
+            )
+            pairs = list(zip([sf.path for sf in ordered], targets, strict=True))
+            org = organize_book_parts(
+                self.ctx.books, book, pairs,
+                delete_sources=options.delete_sources or self.ctx.config.reorg_delete_sources,
+            )
+            if not org.moved or org.target_path is None:
+                mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail=(org.error or "collision"))
+                resync_state(book)
+                book.touch()
+                self.ctx.books.upsert(book)
+                return BookProcessResult(
+                    book_id=book.id, status="failed",
+                    detail=("collision" if org.collision else org.error),
+                )
+            total = len(ordered)
+            batch_id = new_batch_id()
+            for idx, dst in enumerate(targets, start=1):
+                self.ctx.operations.record(OperationRecord(
+                    batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
+                    target=str(dst), before=None, outcome="ok",
+                ))
+                if not tag_file(
+                    dst, cbook, operations=self.ctx.operations, batch_id=batch_id,
+                    track=(idx if total > 1 else None),
+                ):
+                    logger.warning(f"track tag write failed for {dst} (book {book.id})")
+            return BookProcessResult(book_id=book.id, status="done")
+
+        # Encode path: transcode all source files into a single output, then organize + tag.
+        target = self._encode_target(book)
+        if target.exists() and target != book.output_path:
+            return BookProcessResult(book_id=book.id, status="failed", detail="output name collision")
+        mark(book, Phase.ENCODE, PhaseState.RUNNING)
+        resync_state(book)
+        self.ctx.books.upsert(book)
+        enc = encode_book(
+            book, target, bitrate=self.ctx.config.transcode_bitrate,
+            delete_sources=options.delete_sources, confirm_delete=options.delete_sources,
+            chapters=book.chapters or None,
+        )
+        if not enc.verified or enc.output_path is None:
+            mark(book, Phase.ENCODE, PhaseState.FAILED, detail=enc.error)
             resync_state(book)
-            book.touch()
             self.ctx.books.upsert(book)
-        elif book.output_path is None or not book.output_path.exists():
-            return BookProcessResult(book_id=book.id, status="skipped", detail="not encoded")
+            return BookProcessResult(book_id=book.id, status="failed", detail=enc.error)
+        book.output_path = enc.output_path
+        mark(book, Phase.ENCODE, PhaseState.FRESH)
+        resync_state(book)
+        book.touch()
+        self.ctx.books.upsert(book)
 
         if options.organize:
             library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
@@ -2179,13 +2228,12 @@ class AppController:
             logger.warning(f"ABS scan failed: {e}")
             return False
 
-    def import_ll_patterns(self, config_ini: Path) -> tuple[str, str]:
-        """Read folder + single-file organize patterns from a LazyLibrarian
-        config.ini, for the Settings importer. Returns (folder, file); raises
-        FileNotFoundError when the path does not exist. The file pattern falls back
-        to "$Title" (LazyLibrarian's multi-part audiobook_dest_file uses $Part/$Total,
-        which are degenerate for Colophon's single-M4B output)."""
+    @staticmethod
+    def import_ll_patterns(config_ini: Path) -> str:
+        """Read the folder organize pattern from a LazyLibrarian config.ini, for
+        the Settings importer. Returns the folder pattern; raises FileNotFoundError
+        when the path does not exist. File/multi-part naming is Colophon's own and
+        is not imported."""
         if not config_ini.exists():
             raise FileNotFoundError(config_ini)
-        pats = read_audiobook_patterns(config_ini)
-        return pats.folder, (pats.single_file or "$Title")
+        return read_audiobook_patterns(config_ini).folder

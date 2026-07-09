@@ -35,6 +35,7 @@ class Config(BaseModel):
     organize_folder_pattern: str = "$Author/$Title"  # LazyLibrarian-style $Token folder grammar
     organize_file_pattern: str = "$Title"  # the M4B file name pattern (no extension)
     library_root: Path | None = None        # destination root for organized M4Bs
+    reorg_delete_sources: bool = False  # delete originals after a verified no-encode reorg
     audiobookshelf_url: str | None = None
     audiobookshelf_token: str | None = None
     audiobookshelf_library_id: str | None = None

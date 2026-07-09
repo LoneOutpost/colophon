@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
-from colophon.core.models import BookUnit, SeriesRef
+from colophon.adapters.lazylibrarian import PathPatterns
+from colophon.core.models import BookUnit, SeriesRef, SourceFile
 from colophon.core.tokens import BUILD_TOKENS
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -27,7 +27,7 @@ def _sort_title(title: str) -> str:
     return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE)
 
 
-def _token_values(book: BookUnit) -> dict[str, str]:
+def _token_values(book: BookUnit, *, part: int | None = None, total: int | None = None) -> dict[str, str]:
     author = book.authors[0] if book.authors else ""
     series = book.series[0] if book.series else None
     sernum = ""
@@ -40,6 +40,12 @@ def _token_values(book: BookUnit) -> dict[str, str]:
     abridged = ""
     if book.abridged is not None:
         abridged = "Abridged" if book.abridged else "Unabridged"
+    part_s = ""
+    total_s = ""
+    if part is not None and total is not None:
+        width = max(2, len(str(total)))
+        part_s = str(part).zfill(width)
+        total_s = str(total).zfill(width)
     return {
         "Author": author,
         "SortAuthor": _sort_author(author),
@@ -51,8 +57,8 @@ def _token_values(book: BookUnit) -> dict[str, str]:
         "PadNum": padnum,
         "PubYear": str(book.publish_year) if book.publish_year is not None else "",
         "Narrator": narrator,
-        "Part": "",
-        "Total": "",
+        "Part": part_s,
+        "Total": total_s,
         "Abridged": abridged,
     }
 
@@ -68,14 +74,16 @@ def _group_is_empty(content: str, values: dict[str, str]) -> bool:
     return any(values.get(m.group(1), "") == "" for m in _TOKEN.finditer(content))
 
 
-def expand_pattern(pattern: str, book: BookUnit) -> str:
+def expand_pattern(
+    pattern: str, book: BookUnit, *, part: int | None = None, total: int | None = None
+) -> str:
     """Expand $Token markup, honoring [ ... ] conditional groups.
 
     A group wrapped in [ ... ] is emitted only when all of its tokens have values;
     if any is empty the whole group (literals included) is dropped. "[[" / "]]" are
     literal brackets (mirroring "$$"). Groups may not nest and must be balanced within
     a segment; an unbalanced or nested bracket raises ValueError."""
-    values = _token_values(book)
+    values = _token_values(book, part=part, total=total)
     assert values.keys() == {t.name for t in BUILD_TOKENS}, "pathscheme/tokens drift"
     protected = (
         pattern.replace("$$", _DOLLAR_SENTINEL)
@@ -110,12 +118,24 @@ def expand_pattern(pattern: str, book: BookUnit) -> str:
     )
 
 
+def _has_token(pattern: str, name: str) -> bool:
+    """True if `pattern` contains the exact $Token (not a longer look-alike)."""
+    return any(m.group(1) == name for m in _TOKEN.finditer(pattern))
+
+
+def ensure_part_placeholder(pattern: str) -> str:
+    """Guarantee a multi-part filename pattern distinguishes parts. If the pattern
+    has no $Part token, append a default ' ($Part of $Total)' suffix so N parts
+    cannot collide on one filename. No-op when $Part is already present."""
+    return pattern if _has_token(pattern, "Part") else f"{pattern} ($Part of $Total)"
+
+
 def sanitize_segment(segment: str) -> str:
     cleaned = _ILLEGAL.sub("", segment).strip()
     return cleaned.rstrip(". ")
 
 
-def build_target_path(root: Path, patterns: AudiobookPatterns, book: BookUnit) -> Path:
+def build_target_path(root: Path, patterns: PathPatterns, book: BookUnit) -> Path:
     """Absolute target path = root / <sanitized folder segments> / <sanitized name>.m4b."""
     # Split the pattern on "/" first, then expand+sanitize each segment, so a
     # "/" inside an expanded token value cannot create an extra directory level.
@@ -127,6 +147,43 @@ def build_target_path(root: Path, patterns: AudiobookPatterns, book: BookUnit) -
     for seg in segments:
         target = target / seg
     return target / filename
+
+
+def _normalized_ext(source_ext: str) -> str:
+    """A leading-dot extension, tolerant of stored values with or without the dot."""
+    ext = source_ext.strip()
+    if not ext:
+        return ""
+    return ext if ext.startswith(".") else f".{ext}"
+
+
+def _book_folder(root: Path, patterns: PathPatterns, book: BookUnit) -> Path:
+    folder = root
+    for seg in (sanitize_segment(expand_pattern(s, book)) for s in patterns.folder.split("/")):
+        folder = folder / seg
+    return folder
+
+
+def build_reorg_targets(
+    root: Path, patterns: PathPatterns, book: BookUnit, ordered_files: list[SourceFile]
+) -> list[Path]:
+    """One target path per source file for a no-encode reorg, in the given part order.
+
+    Single-file books use the filename pattern as-is with empty $Part/$Total. Multi-part
+    books (>1 file) get $Part/$Total populated and, if the pattern omits $Part, a default
+    suffix appended so parts cannot collide. Each target keeps its source file's extension.
+    """
+    folder = _book_folder(root, patterns, book)
+    total = len(ordered_files)
+    base_pattern = patterns.single_file or "$Title"
+    if total == 1:
+        name = sanitize_segment(expand_pattern(base_pattern, book))
+        return [folder / f"{name}{_normalized_ext(ordered_files[0].ext)}"]
+    name_pattern = ensure_part_placeholder(base_pattern)
+    return [
+        folder / f"{sanitize_segment(expand_pattern(name_pattern, book, part=i, total=total))}{_normalized_ext(sf.ext)}"
+        for i, sf in enumerate(ordered_files, start=1)
+    ]
 
 
 def _sample_book() -> BookUnit:
@@ -145,7 +202,7 @@ def sample_target(folder_pattern: str, file_pattern: str) -> str:
     """Render the relative organize path for the sample book, for a Settings preview.
 
     Empty patterns fall back to the same defaults `build_target_path` uses."""
-    patterns = AudiobookPatterns(
+    patterns = PathPatterns(
         folder=folder_pattern or "$Author/$Title",
         single_file=file_pattern or "$Title",
     )

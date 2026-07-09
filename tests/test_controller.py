@@ -2334,37 +2334,32 @@ async def test_run_encode_job_caches_cover_before_encode(tmp_path, make_audio, m
     assert cached == [book.id]
 
 
-def test_import_ll_patterns_reads_folder_and_single_file(tmp_path):
+def test_import_ll_patterns_returns_folder_only(tmp_path):
+    from colophon.controller import AppController
+
     ini = tmp_path / "config.ini"
     ini.write_text(
         "[POSTPROCESS]\n"
         "audiobook_dest_folder = $Author/$Series/$Title\n"
-        "audiobook_single_file = $Title ($PubYear)\n"
+        "audiobook_dest_file = $Author - $Title Part $Part of $Total\n"
     )
-    ctx = _ctx(tmp_path)
-    folder, file = AppController(ctx).import_ll_patterns(ini)
-    assert folder == "$Author/$Series/$Title"
-    assert file == "$Title ($PubYear)"
-    ctx.close()
+    assert AppController.import_ll_patterns(ini) == "$Author/$Series/$Title"
 
 
-def test_import_ll_patterns_defaults_file_to_title(tmp_path):
+def test_import_ll_patterns_reads_folder(tmp_path):
     ini = tmp_path / "config.ini"
-    ini.write_text("[POSTPROCESS]\naudiobook_dest_folder = $Author/$Title\n")
-    ctx = _ctx(tmp_path)
-    folder, file = AppController(ctx).import_ll_patterns(ini)
-    assert folder == "$Author/$Title"
-    assert file == "$Title"  # no audiobook_single_file -> sensible single-file default
-    ctx.close()
+    ini.write_text(
+        "[POSTPROCESS]\n"
+        "audiobook_dest_folder = $Author/$Series/$Title\n"
+    )
+    assert AppController.import_ll_patterns(ini) == "$Author/$Series/$Title"
 
 
 def test_import_ll_patterns_missing_file_raises(tmp_path):
     import pytest
 
-    ctx = _ctx(tmp_path)
     with pytest.raises(FileNotFoundError):
-        AppController(ctx).import_ll_patterns(tmp_path / "absent.ini")
-    ctx.close()
+        AppController.import_ll_patterns(tmp_path / "absent.ini")
 
 
 def test_rd_download_registry_and_scan_prompt(tmp_path):
@@ -2456,7 +2451,7 @@ async def test_retry_identify_requeries_only_given_ids_and_merges(tmp_path):
 
 
 def test_organize_targets_uses_overridden_patterns(tmp_path):
-    from colophon.adapters.lazylibrarian import AudiobookPatterns
+    from colophon.adapters.lazylibrarian import PathPatterns
     ctx = _ctx(tmp_path)
     ctx.config.library_root = tmp_path / "lib"
     book = BookUnit.new(source_folder=tmp_path / "x")
@@ -2464,7 +2459,7 @@ def test_organize_targets_uses_overridden_patterns(tmp_path):
     book.authors = ["Frank Herbert"]
     ctx.books.upsert(book)
     targets = AppController(ctx).organize_targets(
-        [book], patterns=AudiobookPatterns(folder="$Author", single_file="$Title")
+        [book], patterns=PathPatterns(folder="$Author", single_file="$Title")
     )
     bid, target = targets[0]
     assert bid == book.id
@@ -3150,13 +3145,13 @@ def test_clear_entity_alias_reverts(tmp_path):
 
 
 def _controller(tmp_path):
-    from colophon.adapters.lazylibrarian import AudiobookPatterns
+    from colophon.adapters.lazylibrarian import PathPatterns
 
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
     # Folder pattern carries both $Author and $Series so canonical-projection
     # assertions on the organize path are meaningful (the default omits $Series).
-    ctrl.ctx.patterns = AudiobookPatterns(folder="$Author/$Series/$Title", single_file="$Title")
+    ctrl.ctx.patterns = PathPatterns(folder="$Author/$Series/$Title", single_file="$Title")
     return ctrl
 
 
@@ -3203,12 +3198,15 @@ def test_canonical_series_flows_into_organize_and_tag(tmp_path):
 
 def test_process_book_organizes_and_tags_with_canonical_name(tmp_path):
     from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
 
     ctrl = _controller(tmp_path)
-    src = tmp_path / "out.m4b"
+    src_dir = tmp_path / "ingest" / "a-book"
+    src_dir.mkdir(parents=True)
+    src = src_dir / "a-book.m4b"
     src.write_bytes(b"\x00")
     book = _persist_book(ctrl, title="A Book", authors=["B. Sanderson"])
-    book.output_path = src
+    book.source_files = [SourceFile(path=src, size=1, duration_seconds=60.0, ext=".m4b")]
     ctrl.ctx.books.upsert(book)
     ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
     result = ctrl._process_book(book, EncodeJobOptions(
@@ -3594,4 +3592,85 @@ def test_dedupe_colliding_covers_clears_only_shared_paths(tmp_path):
     assert ctx.books.get(b.id).cover_path is None
     assert ctx.books.get(solo.id).cover_path is not None  # unique, untouched
     assert AppController(ctx).dedupe_colliding_covers() == 0  # idempotent once healed
+    ctx.close()
+
+
+def test_process_book_no_encode_reorgs_multipart(tmp_path):
+    from colophon.adapters.lazylibrarian import PathPatterns
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    src = tmp_path / "ingest" / "book"
+    src.mkdir(parents=True)
+    (src / "a.mp3").write_bytes(b"one")
+    (src / "b.mp3").write_bytes(b"two")
+
+    book = BookUnit.new(source_folder=src)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.source_files = [
+        SourceFile(path=src / "a.mp3", size=3, duration_seconds=1.0, ext=".mp3"),
+        SourceFile(path=src / "b.mp3", size=3, duration_seconds=1.0, ext=".mp3"),
+    ]
+    ctx.books.upsert(book)
+    ctx.config.library_root = tmp_path / "library"
+
+    options = EncodeJobOptions(
+        encode=False,
+        organize=True,
+        patterns=PathPatterns(
+            folder="$Author/$Title",
+            single_file="$Title[ - Part $Part of $Total]",
+        ),
+    )
+    result = ctrl._process_book(book, options)
+    assert result.status == "done", result.detail
+
+    folder = tmp_path / "library" / "Frank Herbert" / "Dune"
+    part1 = folder / "Dune - Part 01 of 02.mp3"
+    part2 = folder / "Dune - Part 02 of 02.mp3"
+    assert part1.exists(), f"expected {part1}"
+    assert part2.exists(), f"expected {part2}"
+    # tag_file writes ID3 headers onto the copy; verify via embedded track numbers
+    from colophon.adapters.tags import read_embedded_tags as _ret
+    assert _ret(part1).track == 1
+    assert _ret(part2).track == 2
+    ctx.close()
+
+
+def test_process_book_no_encode_blocks_on_ambiguous_order(tmp_path):
+    from colophon.adapters.lazylibrarian import PathPatterns
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    src = tmp_path / "ingest" / "book"
+    dup = src / "dup"
+    dup.mkdir(parents=True)
+    (src / "track.mp3").write_bytes(b"one")
+    (dup / "track.mp3").write_bytes(b"two")
+
+    book = BookUnit.new(source_folder=src)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.source_files = [
+        SourceFile(path=src / "track.mp3", size=3, duration_seconds=1.0, ext=".mp3"),
+        SourceFile(path=dup / "track.mp3", size=3, duration_seconds=1.0, ext=".mp3"),
+    ]
+    ctx.books.upsert(book)
+    ctx.config.library_root = tmp_path / "library"
+
+    options = EncodeJobOptions(
+        encode=False,
+        organize=True,
+        patterns=PathPatterns(folder="$Author", single_file="$Title"),
+    )
+    result = ctrl._process_book(book, options)
+    assert result.status == "failed"
+    assert result.detail is not None and "part order" in result.detail
     ctx.close()

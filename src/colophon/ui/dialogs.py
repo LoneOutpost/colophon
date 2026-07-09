@@ -16,7 +16,7 @@ from pathlib import Path
 
 from nicegui import ui
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
+from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.controller import AppController
 from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
@@ -1104,8 +1104,8 @@ async def persist_dialog(
             dialog.close()
             refresh_all()
 
-        def _patterns(folder_pat, file_pat) -> AudiobookPatterns:
-            return AudiobookPatterns(
+        def _patterns(folder_pat, file_pat) -> PathPatterns:
+            return PathPatterns(
                 folder=folder_pat.value or cfg.organize_folder_pattern,
                 single_file=file_pat.value or cfg.organize_file_pattern,
             )

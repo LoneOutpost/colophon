@@ -2,9 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from colophon.adapters.lazylibrarian import AudiobookPatterns
-from colophon.core.models import BookUnit, SeriesRef
-from colophon.core.pathscheme import build_target_path, expand_pattern, sanitize_segment
+from colophon.adapters.lazylibrarian import PathPatterns
+from colophon.core.models import BookUnit, SeriesRef, SourceFile
+from colophon.core.pathscheme import (
+    build_reorg_targets,
+    build_target_path,
+    ensure_part_placeholder,
+    expand_pattern,
+    sanitize_segment,
+)
 
 
 def _book() -> BookUnit:
@@ -53,14 +59,14 @@ def test_sanitize_segment_neutralizes_traversal():
 
 def test_build_target_path_uses_single_file_name(tmp_path):
     b = _book()
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "The Way of Kings" / "The Way of Kings.m4b"
 
 
 def test_build_target_path_falls_back_to_title_when_single_file_empty(tmp_path):
     b = _book()
-    pats = AudiobookPatterns(folder="$Author", single_file="")
+    pats = PathPatterns(folder="$Author", single_file="")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "The Way of Kings.m4b"
 
@@ -68,7 +74,7 @@ def test_build_target_path_falls_back_to_title_when_single_file_empty(tmp_path):
 def test_build_target_path_sanitizes_each_segment(tmp_path):
     b = _book()
     b.authors = ["AC/DC Author"]
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     target = build_target_path(tmp_path, pats, b)
     # the '/' in the author value must NOT create an extra directory level
     assert target.relative_to(tmp_path).parts[0] == "ACDC Author"
@@ -77,7 +83,7 @@ def test_build_target_path_sanitizes_each_segment(tmp_path):
 def test_build_target_path_authorless_collapses_segment(tmp_path):
     b = BookUnit.new(source_folder=Path("/ingest/x"))
     b.title = "Solo"
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
     target = build_target_path(tmp_path, pats, b)
     # the empty author segment collapses — Path swallows ""
     assert target == tmp_path / "Solo" / "Solo.m4b"
@@ -169,7 +175,7 @@ def test_nested_group_raises():
 
 def test_group_within_segment_renders_in_build(tmp_path):
     b = _book()  # $SerNum == "1"
-    pats = AudiobookPatterns(folder="$Author/$Series", single_file="[$SerNum - ]$Title")
+    pats = PathPatterns(folder="$Author/$Series", single_file="[$SerNum - ]$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "Stormlight Archive" / "1 - The Way of Kings.m4b"
 
@@ -177,7 +183,7 @@ def test_group_within_segment_renders_in_build(tmp_path):
 def test_group_drops_in_filename_while_folder_segment_collapses(tmp_path):
     b = BookUnit.new(source_folder=Path("/ingest/x"))
     b.title = "Solo"  # no author (segment collapses), no series (group drops)
-    pats = AudiobookPatterns(folder="$Author/$Title", single_file="[$SerNum - ]$Title")
+    pats = PathPatterns(folder="$Author/$Title", single_file="[$SerNum - ]$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Solo" / "Solo.m4b"
 
@@ -190,3 +196,75 @@ def test_renderer_keys_match_build_tokens():
     from colophon.core.tokens import BUILD_TOKENS
     keys = set(_token_values(BookUnit.new(source_folder=Path("/x"))))
     assert keys == {t.name for t in BUILD_TOKENS}
+
+
+def test_part_total_empty_by_default():
+    # single-file / no part context -> tokens empty, conditional group drops
+    assert expand_pattern("$Title[ - Part $Part of $Total]", _book()) == "The Way of Kings"
+
+
+def test_part_total_populated_and_padded():
+    b = _book()
+    assert expand_pattern("$Title[ - Part $Part of $Total]", b, part=1, total=12) == \
+        "The Way of Kings - Part 01 of 12"
+    assert expand_pattern("$Title[ - Part $Part of $Total]", b, part=10, total=12) == \
+        "The Way of Kings - Part 10 of 12"
+
+
+def test_part_total_pad_width_follows_total():
+    b = _book()
+    # 100 parts -> 3-digit width for both
+    assert expand_pattern("$Part of $Total", b, part=7, total=100) == "007 of 100"
+    # single-digit total still pads to min two
+    assert expand_pattern("$Part of $Total", b, part=3, total=9) == "03 of 09"
+
+
+def test_ensure_part_placeholder_appends_when_missing():
+    assert ensure_part_placeholder("$Title") == "$Title ($Part of $Total)"
+
+
+def test_ensure_part_placeholder_noop_when_present():
+    assert ensure_part_placeholder("$Title[ - Part $Part of $Total]") == \
+        "$Title[ - Part $Part of $Total]"
+
+
+def test_ensure_part_placeholder_ignores_lookalike_tokens():
+    # $Partition must not count as $Part
+    assert ensure_part_placeholder("$Partition") == "$Partition ($Part of $Total)"
+
+
+def _sf(name: str, ext: str) -> SourceFile:
+    return SourceFile(path=Path(f"/ingest/x/{name}"), size=1, duration_seconds=1.0, ext=ext)
+
+
+def test_build_reorg_targets_single_file_no_part():
+    b = _book()
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
+    files = [_sf("whole.mp3", ".mp3")]
+    targets = build_reorg_targets(Path("/lib"), pats, b, files)
+    assert targets == [Path("/lib/Brandon Sanderson/The Way of Kings/The Way of Kings.mp3")]
+
+
+def test_build_reorg_targets_multipart_numbered_with_ext():
+    b = _book()
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title[ - Part $Part of $Total]")
+    files = [_sf("a.mp3", ".mp3"), _sf("b.mp3", ".mp3"), _sf("c.mp3", ".mp3")]
+    targets = build_reorg_targets(Path("/lib"), pats, b, files)
+    base = Path("/lib/Brandon Sanderson/The Way of Kings")
+    assert targets == [
+        base / "The Way of Kings - Part 01 of 03.mp3",
+        base / "The Way of Kings - Part 02 of 03.mp3",
+        base / "The Way of Kings - Part 03 of 03.mp3",
+    ]
+
+
+def test_build_reorg_targets_multipart_autoappends_missing_part():
+    b = _book()
+    pats = PathPatterns(folder="$Author", single_file="$Title")  # no $Part
+    files = [_sf("a.m4a", ".m4a"), _sf("b.m4a", ".m4a")]
+    targets = build_reorg_targets(Path("/lib"), pats, b, files)
+    base = Path("/lib/Brandon Sanderson")
+    assert targets == [
+        base / "The Way of Kings (01 of 02).m4a",
+        base / "The Way of Kings (02 of 02).m4a",
+    ]
