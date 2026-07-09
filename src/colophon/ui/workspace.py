@@ -1286,6 +1286,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             pattern_input = ui.input("Pattern", value=initial_pattern).props(
                 "dense clearable"
             ).classes("w-full q-mt-sm")
+            ui.label(
+                "[ ... ] conditional groups are only for organize patterns, not parsing."
+            ).classes("text-caption colophon-muted")
             # Quick-pick recent patterns from a dropdown; managed (removed) in Settings.
             attach_history_menu(
                 pattern_input, controller.ctx.config.recent_filename_templates,

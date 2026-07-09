@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from colophon.adapters.lazylibrarian import AudiobookPatterns
 from colophon.core.models import BookUnit, SeriesRef
 from colophon.core.pathscheme import build_target_path, expand_pattern, sanitize_segment
@@ -120,6 +122,64 @@ def test_sample_target_falls_back_on_empty_patterns():
 
     out = sample_target("", "")
     assert out == "Brandon Sanderson/The Way of Kings/The Way of Kings.m4b"
+
+
+def test_conditional_group_dropped_when_token_empty():
+    b = BookUnit.new(source_folder=Path("/ingest/x"))
+    b.title = "Solo"
+    b.authors = ["Ann Leckie"]  # no series, so $SerNum is empty
+    assert expand_pattern("[$SerNum - ]$Author - $Title", b) == "Ann Leckie - Solo"
+
+
+def test_conditional_group_kept_when_token_present():
+    b = _book()  # series sequence 1.0 -> $SerNum == "1"
+    assert expand_pattern("[$SerNum - ]$Title", b) == "1 - The Way of Kings"
+
+
+def test_conditional_group_dropped_if_any_token_empty():
+    b = _book()  # has a series name but no narrator
+    # $Series is present, $Narrator is empty -> drop-if-any-empty drops the whole group
+    assert expand_pattern("[$Series read by $Narrator - ]$Title", b) == "The Way of Kings"
+
+
+def test_literal_brackets_via_double_escape():
+    b = _book()
+    assert expand_pattern("[[$Title]]", b) == "[The Way of Kings]"
+
+
+def test_literal_only_group_always_renders():
+    b = _book()  # a group with no token is degenerate and always emits its literals
+    assert expand_pattern("[static]$Title", b) == "staticThe Way of Kings"
+
+
+def test_unbalanced_open_bracket_raises():
+    with pytest.raises(ValueError, match="[Bb]racket"):
+        expand_pattern("[$SerNum - $Title", _book())
+
+
+def test_unbalanced_close_bracket_raises():
+    with pytest.raises(ValueError, match="[Bb]racket"):
+        expand_pattern("$Title]", _book())
+
+
+def test_nested_group_raises():
+    with pytest.raises(ValueError, match="[Nn]est"):
+        expand_pattern("[$Series[$SerNum] ]$Title", _book())
+
+
+def test_group_within_segment_renders_in_build(tmp_path):
+    b = _book()  # $SerNum == "1"
+    pats = AudiobookPatterns(folder="$Author/$Series", single_file="[$SerNum - ]$Title")
+    target = build_target_path(tmp_path, pats, b)
+    assert target == tmp_path / "Brandon Sanderson" / "Stormlight Archive" / "1 - The Way of Kings.m4b"
+
+
+def test_group_drops_in_filename_while_folder_segment_collapses(tmp_path):
+    b = BookUnit.new(source_folder=Path("/ingest/x"))
+    b.title = "Solo"  # no author (segment collapses), no series (group drops)
+    pats = AudiobookPatterns(folder="$Author/$Title", single_file="[$SerNum - ]$Title")
+    target = build_target_path(tmp_path, pats, b)
+    assert target == tmp_path / "Solo" / "Solo.m4b"
 
 
 def test_renderer_keys_match_build_tokens():

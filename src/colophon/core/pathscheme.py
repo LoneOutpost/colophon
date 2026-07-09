@@ -14,6 +14,8 @@ _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # exact (no $PadNum-vs-$Pad ambiguity) and unknown tokens map to "".
 _TOKEN = re.compile(r"\$(\w+)")
 _DOLLAR_SENTINEL = "\x00DOLLAR\x00"  # protects "$$" through token substitution
+_LBRACK_SENTINEL = "\x00LBRACK\x00"  # protects "[[" (a literal "[") from group parsing
+_RBRACK_SENTINEL = "\x00RBRACK\x00"  # protects "]]" (a literal "]") from group parsing
 
 
 def _sort_author(author: str) -> str:
@@ -55,12 +57,57 @@ def _token_values(book: BookUnit) -> dict[str, str]:
     }
 
 
+def _substitute(text: str, values: dict[str, str]) -> str:
+    """Replace every $Token in a run of text with its value (unknown tokens -> "")."""
+    return _TOKEN.sub(lambda m: values.get(m.group(1), ""), text)
+
+
+def _group_is_empty(content: str, values: dict[str, str]) -> bool:
+    """A conditional group drops if ANY $Token inside it expands to empty. A group with
+    no tokens (only literals) never drops."""
+    return any(values.get(m.group(1), "") == "" for m in _TOKEN.finditer(content))
+
+
 def expand_pattern(pattern: str, book: BookUnit) -> str:
+    """Expand $Token markup, honoring [ ... ] conditional groups.
+
+    A group wrapped in [ ... ] is emitted only when all of its tokens have values;
+    if any is empty the whole group (literals included) is dropped. "[[" / "]]" are
+    literal brackets (mirroring "$$"). Groups may not nest and must be balanced within
+    a segment; an unbalanced or nested bracket raises ValueError."""
     values = _token_values(book)
     assert values.keys() == {t.name for t in BUILD_TOKENS}, "pathscheme/tokens drift"
-    protected = pattern.replace("$$", _DOLLAR_SENTINEL)
-    expanded = _TOKEN.sub(lambda m: values.get(m.group(1), ""), protected)
-    return expanded.replace(_DOLLAR_SENTINEL, "$")
+    protected = (
+        pattern.replace("$$", _DOLLAR_SENTINEL)
+        .replace("[[", _LBRACK_SENTINEL)
+        .replace("]]", _RBRACK_SENTINEL)
+    )
+    out: list[str] = []
+    i, n = 0, len(protected)
+    while i < n:
+        ch = protected[i]
+        if ch == "[":
+            end = protected.find("]", i + 1)
+            if end == -1:
+                raise ValueError("Unbalanced '[' bracket in pattern")
+            content = protected[i + 1 : end]
+            if "[" in content:
+                raise ValueError("Nested '[' bracket in pattern; use adjacent groups instead")
+            if not _group_is_empty(content, values):
+                out.append(_substitute(content, values))
+            i = end + 1
+        elif ch == "]":
+            raise ValueError("Unbalanced ']' bracket in pattern")
+        else:
+            nxt = min((p for p in (protected.find("[", i), protected.find("]", i)) if p != -1), default=n)
+            out.append(_substitute(protected[i:nxt], values))
+            i = nxt
+    return (
+        "".join(out)
+        .replace(_DOLLAR_SENTINEL, "$")
+        .replace(_LBRACK_SENTINEL, "[")
+        .replace(_RBRACK_SENTINEL, "]")
+    )
 
 
 def sanitize_segment(segment: str) -> str:

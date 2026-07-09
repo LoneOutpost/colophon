@@ -37,7 +37,10 @@ table below lists every setting.
 | `scan_paths` | empty list | yes, to scan | Folders to ingest. Each folder that directly contains audio files is one book. |
 | `library_root` | unset | yes, to organize | Destination root for organized M4B files. |
 | `lazylibrarian_config_ini` | unset | no | Path to LazyLibrarian's config.ini. Its audiobook folder and file patterns are read so output matches your LazyLibrarian layout. |
-| `filename_template` | `%author% - %title%` | no | Pattern for extracting metadata from filenames when embedded tags are missing. |
+| `filename_template` | `$Author - $Title` | no | `$Token` pattern for extracting metadata from filenames when embedded tags are missing. |
+| `directory_scheme` | empty | no | `$Token` pattern for inferring fields from the folder hierarchy, e.g. `$Author/$Series/$Title`. Blank disables it. |
+| `organize_folder_pattern` | `$Author/$Title` | no | `$Token` pattern for the folder layout of organized M4Bs. Wrap optional text in `[ ... ]` to render it only when its token has a value; a group drops if any token inside is empty; use `[[` and `]]` for literal brackets. |
+| `organize_file_pattern` | `$Title` | no | `$Token` pattern for the organized file name (no extension). Supports the same `[ ... ]` conditional groups, e.g. `[$SerNum - ]$Title`. |
 | `review_threshold` | `75.0` | no | Confidence (0 to 100) at or above which a book is marked ready automatically. |
 | `transcode_bitrate` | `64k` | no | AAC bitrate used when transcoding MP3 sources into M4B. |
 | `port` | `8080` | no | Port the web interface listens on. |

@@ -1134,8 +1134,12 @@ async def persist_dialog(
                 file_pat = ui.input("File name pattern", value=cfg.organize_file_pattern).props(
                     "outlined dense"
                 ).classes("w-full")
+                pat_hint = ui.label(
+                    "Wrap optional text in [ ... ] so it appears only when its token has a "
+                    "value, e.g. [$SerNum - ]$Title. Use [[ and ]] for literal brackets."
+                ).classes("text-caption colophon-muted")
                 preview = ui.label("").classes("text-caption colophon-muted")
-                for el in (folder_pat, file_pat, preview):
+                for el in (folder_pat, file_pat, pat_hint, preview):
                     el.bind_visibility_from(org, "value")
 
                 def _preview() -> None:
