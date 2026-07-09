@@ -3688,3 +3688,26 @@ def test_library_tree_warm_predicate(tmp_path):
     b.title = "T"
     ctrl.ctx.books.upsert(b)
     assert ctrl.library_tree_warm() is False
+
+
+def test_books_for_scope_ready_state_param(tmp_path):
+    from colophon.core.models import BookState, BookUnit
+    ctrl = _controller(tmp_path)
+
+    def _mk(name: str, state: BookState) -> BookUnit:
+        b = BookUnit.new(source_folder=tmp_path / name)
+        b.title = name
+        b.state = state
+        ctrl.ctx.books.upsert(b)
+        return b
+
+    _mk("ident", BookState.IDENTIFIED)
+    _mk("ready", BookState.READY)
+
+    # default ready_state is READY (Persist behavior, unchanged)
+    assert {b.title for b in ctrl.books_for_scope("ready")} == {"ready"}
+    # Match passes IDENTIFIED
+    assert {b.title for b in ctrl.books_for_scope("ready", ready_state=BookState.IDENTIFIED)} == {"ident"}
+    # scope_counts follows the same tier
+    assert ctrl.scope_counts()["ready"] == 1
+    assert ctrl.scope_counts(ready_state=BookState.IDENTIFIED)["ready"] == 1

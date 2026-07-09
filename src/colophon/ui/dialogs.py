@@ -20,7 +20,7 @@ from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.controller import AppController
 from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
-from colophon.core.models import BookUnit
+from colophon.core.models import BookState, BookUnit
 from colophon.core.normalize import normalize_name
 from colophon.core.pathscheme import sample_target
 from colophon.core.phases import LOCAL
@@ -981,6 +981,7 @@ async def scan_dialog(
 
 async def match_dialog(
     controller: AppController, *, refresh_all: Callable[[], None], selected_ids: set[str],
+    on_review_weak: Callable[[], None],
 ) -> None:
     """Match books against the metadata sources. First choose the scope (Selected / Ready / All)
     — warning when the set carries weakly-identified books whose match query is only a guess —
@@ -995,16 +996,30 @@ async def match_dialog(
                 ui.label("Look up metadata and preview matches before applying.").classes(
                     "text-caption colophon-muted"
                 )
-                scope = scope_selector(controller, selected_ids)
-                warn = ui.label("").classes("text-caption text-warning q-mt-xs")
+                scope = scope_selector(
+                    controller, selected_ids,
+                    ready_label="Identified", ready_state=BookState.IDENTIFIED,
+                )
+                ui.label(
+                    "Books with an inferred identity, ready to match against sources."
+                ).classes("text-caption colophon-muted")
+                with ui.row().classes("items-center q-gutter-xs q-mt-xs") as warn_row:
+                    warn = ui.label("").classes("text-caption text-warning")
+                    ui.button(
+                        "Review in Library", icon="filter_alt",
+                        on_click=lambda: (dialog.close(), on_review_weak()),
+                    ).props("flat dense no-caps color=warning")
 
                 def _refresh_warn() -> None:
-                    books = controller.books_for_scope(scope.value, selected_ids)
+                    books = controller.books_for_scope(
+                        scope.value, selected_ids, ready_state=BookState.IDENTIFIED
+                    )
                     weak = sum(1 for b in books if has_weak_identity(b))
                     warn.set_text(
-                        f"⚠ {weak} of {len(books)} have only a weakly-inferred identity — matches "
-                        f"may be unreliable." if weak else ""
+                        f"⚠ {weak} of {len(books)} have only a weakly-inferred identity — "
+                        f"matches may be unreliable." if weak else ""
                     )
+                    warn_row.set_visibility(bool(weak))
 
                 scope.on_value_change(lambda _e: _refresh_warn())
                 _refresh_warn()
@@ -1016,7 +1031,9 @@ async def match_dialog(
                     ).props("unelevated")
 
         async def _start(scope_value: str) -> None:
-            books = controller.books_for_scope(scope_value, selected_ids)
+            books = controller.books_for_scope(
+                scope_value, selected_ids, ready_state=BookState.IDENTIFIED
+            )
             if not books:
                 ui.notify("No books in that scope")
                 return

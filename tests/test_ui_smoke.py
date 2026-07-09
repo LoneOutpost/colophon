@@ -173,3 +173,41 @@ def test_render_workspace_does_not_self_apply_theme():
     src = inspect.getsource(ws.render_workspace)
     assert "apply_theme()" not in src
     assert "setup_dark_mode()" not in src
+
+
+def test_scope_selector_accepts_ready_tier_params():
+    import inspect
+
+    from colophon.ui.scope import scope_selector
+    params = inspect.signature(scope_selector).parameters
+    assert "ready_label" in params
+    assert "ready_state" in params
+
+
+def test_weak_id_trust_tiers_are_the_three_weak_provenances():
+    from colophon.core.triage import WEAK_ID_TRUST_TIERS
+    assert set(WEAK_ID_TRUST_TIERS) == {"directory", "filename", "graphing"}
+
+
+def test_match_dialog_has_review_weak_link_and_workspace_wires_it():
+    import inspect
+
+    import colophon.ui.dialogs as dlg
+    import colophon.ui.workspace as ws
+    dsrc = inspect.getsource(dlg.match_dialog)
+    assert "on_review_weak" in inspect.signature(dlg.match_dialog).parameters
+    assert "Review in Library" in dsrc
+    wsrc = inspect.getsource(ws.render_workspace)
+    assert "def _review_weak_identity" in wsrc
+    assert "WEAK_ID_TRUST_TIERS" in wsrc
+    assert "on_review_weak=_review_weak_identity" in wsrc
+
+
+def test_match_dialog_scopes_to_identified():
+    import inspect
+
+    import colophon.ui.dialogs as dlg
+    src = inspect.getsource(dlg.match_dialog)
+    assert "ready_state=BookState.IDENTIFIED" in src
+    assert 'ready_label="Identified"' in src
+    assert "ready to match against sources" in src  # the caption
