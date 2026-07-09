@@ -75,10 +75,13 @@ def default_selection(tree: list[FolderNode]) -> set[int]:
 
 
 def matching_file_ids(tree: list[FolderNode], query: str) -> set[int]:
-    """Ids of files whose name contains `query` (case-insensitive). A blank query means
-    "no filter" and returns every file id, so callers can treat the result uniformly."""
+    """Ids of files whose path contains `query` (case-insensitive). The full path is
+    matched, not just the basename, so filtering by a folder/author name surfaces the
+    files under it even when their names don't carry it (e.g. "01 - Chapter One.mp3").
+    A blank query means "no filter" and returns every file id, so callers can treat the
+    result uniformly."""
     q = query.strip().casefold()
     ids = {f.id for node in tree for f in node.files}
     if not q:
         return ids
-    return {f.id for node in tree for f in node.files if q in f.name.casefold()}
+    return {f.id for node in tree for f in node.files if q in f.path.casefold()}

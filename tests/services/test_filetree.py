@@ -79,3 +79,18 @@ def test_matching_file_ids_no_match_is_empty():
     from colophon.services.filetree import matching_file_ids
 
     assert matching_file_ids(_tree(), "zzz") == set()
+
+
+def test_matching_file_ids_matches_folder_or_author_name():
+    from colophon.services.filetree import matching_file_ids
+
+    # Audiobook files are named like "01 - Chapter One.mp3"; the author surname lives
+    # only in the containing folder. Filtering by author must still surface the files.
+    tree = build_file_tree([
+        RdTorrentFile(id=1, path="/Ann Cleeves/01 - Chapter One.mp3", bytes=1, selected=True),
+        RdTorrentFile(id=2, path="/Ann Cleeves/02 - Chapter Two.mp3", bytes=1, selected=True),
+        RdTorrentFile(id=3, path="/Peter May/01 - Chapter One.mp3", bytes=1, selected=True),
+    ])
+    assert matching_file_ids(tree, "cleeves") == {1, 2}   # matches on the folder/author name
+    assert matching_file_ids(tree, "peter") == {3}         # ditto, other author
+    assert matching_file_ids(tree, "chapter one") == {1, 3}  # still matches on the basename
