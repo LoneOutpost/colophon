@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from nicegui import app, ui
+from nicegui import app, background_tasks, ui
 
 from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
@@ -1903,10 +1903,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _ui_safe(lambda: repaint(nav=True, middle=True))
 
     def _ensure_warm() -> None:
-        """Schedule the warmer once if the tree is cold and not already warming."""
+        """Schedule the warmer once if the tree is cold and not already warming.
+
+        Uses background_tasks.create rather than ui.timer: a ui.timer is an Element
+        bound to the slot active at creation time, and a cold repaint clears the very
+        containers whose slot the timer would attach to — so the timer fires into a
+        deleted slot ("The parent slot of the element has been deleted"), its body
+        never runs, and `_warming` stays wedged True until a full page reload. A
+        background task has no parent slot and always runs."""
         if not controller.library_tree_warm() and not _warming["active"]:
             _warming["active"] = True
-            ui.timer(0.01, _warm_tree, once=True)
+            background_tasks.create(_warm_tree(), name="library-warm")
 
     async def _run(button, action, done_msg: str) -> None:
         _ui_safe(lambda: button.props("loading=true"))
