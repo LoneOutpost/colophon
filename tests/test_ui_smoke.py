@@ -127,3 +127,49 @@ def test_cold_build_paints_skeleton_and_warms_off_thread():
     assert "def _ensure_warm" in src
     assert "library_tree_warm()" in src                          # sync fast path guard
     assert "skeleton_rows(" in src                               # skeletons on cold path
+
+
+def test_warmer_uses_background_task_not_parentless_timer():
+    # A ui.timer created inside an event-handler-triggered repaint has an empty
+    # slot_stack, so the Timer element gets no parent and never fires — wedging the
+    # warm flag so panes stick on the skeleton until a full page reload. The warmer
+    # must be scheduled via background_tasks.create, which runs regardless of slot
+    # context. See systematic-debugging root cause for the library async repaint work.
+    import inspect
+    import re
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    m = re.search(r" {4}def _ensure_warm\(\)[^:]*:.*?(?=\n {4}(?:async )?def )", src, re.S)
+    assert m, "could not locate _ensure_warm"
+    body = m.group(0)
+    assert "background_tasks.create" in body, "_ensure_warm must schedule via background_tasks.create"
+    assert "ui.timer(" not in body, "_ensure_warm must not schedule the warmer with a parentless ui.timer"
+
+
+def test_index_applies_theme_before_awaiting_client():
+    # The theme (incl. the .body--dark class) must ship in the initial HTML, before
+    # the async index page awaits the client. Otherwise the Library page flashes the
+    # light (warm/orangish) theme until dark-mode + _CSS land post-connect (FOUC).
+    import inspect
+    import re
+
+    import colophon.ui as ui_pkg
+    src = inspect.getsource(ui_pkg.create_app)
+    m = re.search(r"async def index\(.*?(?=\n    @ui\.page|\n    @app\.get|\Z)", src, re.S)
+    assert m, "could not locate index page function"
+    body = m.group(0)
+    assert "apply_theme()" in body and "setup_dark_mode()" in body
+    assert body.index("apply_theme()") < body.index("client.connected()")
+    assert body.index("setup_dark_mode()") < body.index("client.connected()")
+
+
+def test_render_workspace_does_not_self_apply_theme():
+    # Theme is now applied by the page handler before the await, not inside the
+    # deferred render — so render_workspace must not call them itself.
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "apply_theme()" not in src
+    assert "setup_dark_mode()" not in src

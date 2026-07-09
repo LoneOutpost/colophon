@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from nicegui import app, ui
+from nicegui import app, background_tasks, ui
 
 from colophon.controller import AppController
 from colophon.core.chapters import file_boundary_chapters
@@ -63,7 +63,7 @@ from colophon.ui.graph_view import nodes_url_for_book
 from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
-from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
+from colophon.ui.theme import dark_mode_button
 
 logger = logging.getLogger(__name__)
 
@@ -238,8 +238,10 @@ def _render_cover(
             ui.icon("menu_book", color="grey-6").classes(icon)
 
 
-def render_workspace(controller: AppController, initial_filter: str = "") -> None:
-    apply_theme()
+def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filter: str = "") -> None:
+    # Theme + dark-mode are applied by the page handler *before* it awaits the client
+    # (so they ship in the initial HTML and the page doesn't flash the light theme);
+    # `dark` is passed in for the header toggle rather than created here.
     # Make the content area fill exactly between the fixed header and footer so the
     # three-pane workspace never spills into a page-level scroll (each pane scrolls
     # internally). Flex-fill the Quasar page instead of a fragile fixed height.
@@ -309,7 +311,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "document.documentElement.style.removeProperty(VAR[k]);});fit();};"
         "})();"
     )
-    dark = setup_dark_mode()
     selected_ids: set[str] = set()
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
@@ -1903,10 +1904,17 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         _ui_safe(lambda: repaint(nav=True, middle=True))
 
     def _ensure_warm() -> None:
-        """Schedule the warmer once if the tree is cold and not already warming."""
+        """Schedule the warmer once if the tree is cold and not already warming.
+
+        Uses background_tasks.create rather than ui.timer: a ui.timer is an Element
+        bound to the slot active at creation time, and a cold repaint clears the very
+        containers whose slot the timer would attach to — so the timer fires into a
+        deleted slot ("The parent slot of the element has been deleted"), its body
+        never runs, and `_warming` stays wedged True until a full page reload. A
+        background task has no parent slot and always runs."""
         if not controller.library_tree_warm() and not _warming["active"]:
             _warming["active"] = True
-            ui.timer(0.01, _warm_tree, once=True)
+            background_tasks.create(_warm_tree(), name="library-warm")
 
     async def _run(button, action, done_msg: str) -> None:
         _ui_safe(lambda: button.props("loading=true"))
