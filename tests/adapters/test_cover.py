@@ -52,6 +52,17 @@ async def test_fetch_falls_back_to_url_extension_for_mime():
     assert cover is not None and cover.mime == "image/jpeg"
 
 
+async def test_fetch_follows_redirects():
+    # OpenLibrary's cover endpoint 302s to an archive.org URL; we must follow it.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "covers.example":
+            return httpx.Response(302, headers={"location": "https://archive.example/olcovers/476272-L.jpg"})
+        return httpx.Response(200, content=_PNG, headers={"content-type": "image/jpeg"})
+
+    cover = await fetch_cover("https://covers.example/b/id/476272-L.jpg", client=_client(handler))
+    assert cover == CoverImage(data=_PNG, mime="image/jpeg")
+
+
 async def test_fetch_returns_none_on_http_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404)
