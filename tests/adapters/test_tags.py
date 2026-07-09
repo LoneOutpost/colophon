@@ -210,3 +210,53 @@ def test_write_clears_legacy_cmt_description_atom_mp4(make_audio):
     # A managed write with description=None must clear it (not leave \xa9cmt shadowing).
     write_embedded_tags(path, EmbeddedTags(title="X"))
     assert read_embedded_tags(path).description is None
+
+
+def test_embedded_tags_has_track_field_default_none():
+    assert EmbeddedTags().track is None
+    assert EmbeddedTags(track=3).track == 3
+
+
+def test_write_then_read_roundtrips_track_mp3(tmp_path: Path):
+    path = tmp_path / "part01.mp3"
+    path.write_bytes(b"")
+    tags = EmbeddedTags(title="The Way of Kings", track=5)
+    write_embedded_tags(path, tags)
+    result = read_embedded_tags(path)
+    assert result.track == 5
+
+
+def test_write_then_read_roundtrips_track_mp4(make_audio):
+    path = make_audio("part01.m4b", seconds=1)
+    tags = EmbeddedTags(title="Mistborn", track=5)
+    write_embedded_tags(path, tags)
+    result = read_embedded_tags(path)
+    assert result.track == 5
+
+
+def test_write_clears_track_when_none_mp3(tmp_path: Path):
+    path = tmp_path / "ch.mp3"
+    path.write_bytes(b"")
+    write_embedded_tags(path, EmbeddedTags(track=7))
+    assert read_embedded_tags(path).track == 7
+    write_embedded_tags(path, EmbeddedTags(track=None))
+    assert read_embedded_tags(path).track is None
+
+
+def test_write_clears_track_when_none_mp4(make_audio):
+    path = make_audio("ch.m4b", seconds=1)
+    write_embedded_tags(path, EmbeddedTags(track=7))
+    assert read_embedded_tags(path).track == 7
+    write_embedded_tags(path, EmbeddedTags(track=None))
+    assert read_embedded_tags(path).track is None
+
+
+def test_trck_frame_with_total_is_parsed_correctly(tmp_path: Path):
+    """TRCK frames like '3/12' (track of total) should extract just the track number."""
+    from mutagen.id3 import TRCK
+    path = tmp_path / "ch.mp3"
+    path.write_bytes(b"")
+    id3 = ID3()
+    id3.add(TRCK(encoding=3, text=["3/12"]))
+    id3.save(path)
+    assert read_embedded_tags(path).track == 3

@@ -83,6 +83,9 @@ def _tags_from_id3(tags) -> EmbeddedTags:
                 return str(frame.text[0])
         return None
 
+    trck = str(tags.get("TRCK", "")).split("/")[0].strip()
+    track = int(trck) if trck.isdigit() else None
+
     return EmbeddedTags(
         title=frame_text("TIT2"),
         album=frame_text("TALB"),
@@ -95,6 +98,7 @@ def _tags_from_id3(tags) -> EmbeddedTags:
         description=comm(),
         asin=txxx("asin"),
         isbn=txxx("isbn"),
+        track=track,
     )
 
 
@@ -110,6 +114,9 @@ def _tags_from_mp4(m) -> EmbeddedTags:
             return raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
         return None
 
+    trkn = m.get("trkn") if m.tags else None
+    track = trkn[0][0] if trkn and trkn[0] and trkn[0][0] else None
+
     return EmbeddedTags(
         title=_first(m.get("\xa9nam")),
         album=_first(m.get("\xa9alb")),
@@ -122,6 +129,7 @@ def _tags_from_mp4(m) -> EmbeddedTags:
         description=_first(m.get("desc")) or _first(m.get("\xa9cmt")),
         asin=freeform("asin"),
         isbn=freeform("isbn"),
+        track=track,
     )
 
 
@@ -159,6 +167,7 @@ def _write_mp3(path: Path, tags: EmbeddedTags) -> None:
         TDRC,
         TIT2,
         TPE1,
+        TRCK,
         TXXX,
         ID3NoHeaderError,
     )
@@ -193,6 +202,7 @@ def _write_mp3(path: Path, tags: EmbeddedTags) -> None:
     set_txxx("sequence", tags.sequence)
     set_txxx("asin", tags.asin)
     set_txxx("isbn", tags.isbn)
+    set_text(TRCK, tags.track)
     id3.save(path, v2_version=3)
 
 
@@ -226,6 +236,9 @@ def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
     set_freeform("sequence", tags.sequence)
     set_freeform("asin", tags.asin)
     set_freeform("isbn", tags.isbn)
+    m.pop("trkn", None)
+    if tags.track is not None:
+        m["trkn"] = [(tags.track, 0)]
     m.save()
 
 

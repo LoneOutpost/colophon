@@ -320,3 +320,4 @@ class EmbeddedTags(_Base):
     description: str | None = None
     asin: str | None = None
     isbn: str | None = None
+    track: int | None = None
