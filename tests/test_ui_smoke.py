@@ -173,3 +173,11 @@ def test_render_workspace_does_not_self_apply_theme():
     src = inspect.getsource(ws.render_workspace)
     assert "apply_theme()" not in src
     assert "setup_dark_mode()" not in src
+
+
+def test_scope_selector_accepts_ready_tier_params():
+    import inspect
+    from colophon.ui.scope import scope_selector
+    params = inspect.signature(scope_selector).parameters
+    assert "ready_label" in params
+    assert "ready_state" in params
