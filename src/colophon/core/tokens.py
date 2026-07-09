@@ -33,8 +33,8 @@ TOKENS: list[Token] = [
     Token("SortTitle", None, False, True, "Build only: title with a leading article dropped."),
     Token("SerName", None, False, True, "LazyLibrarian's name for $Series.", hidden=True),
     Token("PadNum", None, False, True, "Build only: $SerNum zero-padded to two digits."),
-    Token("Part", None, False, True, "Build only: multi-part index (currently empty)."),
-    Token("Total", None, False, True, "Build only: multi-part total (currently empty)."),
+    Token("Part", None, False, True, "Build only: multi-part index, padded to $Total's width; empty for single-file books."),
+    Token("Total", None, False, True, "Build only: multi-part total; empty for single-file books."),
     Token("Abridged", None, False, True, "Build only: 'Abridged' or 'Unabridged'."),
 ]
 

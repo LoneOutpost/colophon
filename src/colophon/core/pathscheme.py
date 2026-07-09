@@ -27,7 +27,7 @@ def _sort_title(title: str) -> str:
     return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE)
 
 
-def _token_values(book: BookUnit) -> dict[str, str]:
+def _token_values(book: BookUnit, *, part: int | None = None, total: int | None = None) -> dict[str, str]:
     author = book.authors[0] if book.authors else ""
     series = book.series[0] if book.series else None
     sernum = ""
@@ -40,6 +40,12 @@ def _token_values(book: BookUnit) -> dict[str, str]:
     abridged = ""
     if book.abridged is not None:
         abridged = "Abridged" if book.abridged else "Unabridged"
+    part_s = ""
+    total_s = ""
+    if part is not None and total is not None:
+        width = max(2, len(str(total)))
+        part_s = str(part).zfill(width)
+        total_s = str(total).zfill(width)
     return {
         "Author": author,
         "SortAuthor": _sort_author(author),
@@ -51,8 +57,8 @@ def _token_values(book: BookUnit) -> dict[str, str]:
         "PadNum": padnum,
         "PubYear": str(book.publish_year) if book.publish_year is not None else "",
         "Narrator": narrator,
-        "Part": "",
-        "Total": "",
+        "Part": part_s,
+        "Total": total_s,
         "Abridged": abridged,
     }
 
@@ -68,14 +74,16 @@ def _group_is_empty(content: str, values: dict[str, str]) -> bool:
     return any(values.get(m.group(1), "") == "" for m in _TOKEN.finditer(content))
 
 
-def expand_pattern(pattern: str, book: BookUnit) -> str:
+def expand_pattern(
+    pattern: str, book: BookUnit, *, part: int | None = None, total: int | None = None
+) -> str:
     """Expand $Token markup, honoring [ ... ] conditional groups.
 
     A group wrapped in [ ... ] is emitted only when all of its tokens have values;
     if any is empty the whole group (literals included) is dropped. "[[" / "]]" are
     literal brackets (mirroring "$$"). Groups may not nest and must be balanced within
     a segment; an unbalanced or nested bracket raises ValueError."""
-    values = _token_values(book)
+    values = _token_values(book, part=part, total=total)
     assert values.keys() == {t.name for t in BUILD_TOKENS}, "pathscheme/tokens drift"
     protected = (
         pattern.replace("$$", _DOLLAR_SENTINEL)

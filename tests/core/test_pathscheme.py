@@ -190,3 +190,24 @@ def test_renderer_keys_match_build_tokens():
     from colophon.core.tokens import BUILD_TOKENS
     keys = set(_token_values(BookUnit.new(source_folder=Path("/x"))))
     assert keys == {t.name for t in BUILD_TOKENS}
+
+
+def test_part_total_empty_by_default():
+    # single-file / no part context -> tokens empty, conditional group drops
+    assert expand_pattern("$Title[ - Part $Part of $Total]", _book()) == "The Way of Kings"
+
+
+def test_part_total_populated_and_padded():
+    b = _book()
+    assert expand_pattern("$Title[ - Part $Part of $Total]", b, part=1, total=12) == \
+        "The Way of Kings - Part 01 of 12"
+    assert expand_pattern("$Title[ - Part $Part of $Total]", b, part=10, total=12) == \
+        "The Way of Kings - Part 10 of 12"
+
+
+def test_part_total_pad_width_follows_total():
+    b = _book()
+    # 100 parts -> 3-digit width for both
+    assert expand_pattern("$Part of $Total", b, part=7, total=100) == "007 of 100"
+    # single-digit total still pads to min two
+    assert expand_pattern("$Part of $Total", b, part=3, total=9) == "03 of 09"
