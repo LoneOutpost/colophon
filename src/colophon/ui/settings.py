@@ -50,6 +50,11 @@ def _token_reference() -> None:
         + "\n".join(f"- {line(t)}" for t in TOKENS if not t.hidden)
         + "\n\nUse `$$` for a literal `$`. Unknown tokens and missing values render empty; "
         "`$Skip` matches and discards a run when parsing."
+        "\n\nIn organize patterns, wrap optional text in `[ ... ]` so it appears only when its "
+        "token has a value: `[$SerNum - ]$Title` renders `1 - The Way of Kings` with a series "
+        "number and just `The Way of Kings` without one. A group drops if any token inside is "
+        "empty; use `[[` and `]]` for literal brackets. Conditional groups are not valid in the "
+        "scan patterns above."
     ).classes("text-caption text-grey")
 
 

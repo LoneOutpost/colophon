@@ -32,8 +32,10 @@ def compile_template(template: str) -> Pattern[str]:
     """Turn a template like '$Author - $Title' into an anchored regex.
 
     Parseable tokens become non-greedy named groups; $Skip matches and discards a run;
-    literal whitespace is lenient. Raises ValueError on an unknown/non-parseable token
-    or a reused field."""
+    literal whitespace is lenient. Raises ValueError on an unknown/non-parseable token,
+    a reused field, or a [ ... ] conditional group (those are organize-only)."""
+    if "[" in template or "]" in template:
+        raise ValueError("[ ... ] conditional groups are only valid in organize patterns, not parse patterns")
     protected = template.replace("$$", _DOLLAR_SENTINEL)
     parts: list[str] = []
     seen: set[str] = set()

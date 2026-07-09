@@ -114,6 +114,9 @@ filename_template = "$Author - $Title"
 # Organize naming. LazyLibrarian-style $Token patterns used when organizing M4Bs
 # into the library, so the layout matches a LazyLibrarian library. Tokens include
 # $Author $SortAuthor $Title $SortTitle $Series $SerNum $PadNum $PubYear $Narrator.
+# Wrap optional text in [ ... ] so it renders only when its token has a value, e.g.
+# "[$SerNum - ]$Title" drops the "N - " prefix for books with no series number. A
+# group drops if any token inside is empty; use [[ and ]] for literal brackets.
 # organize_folder_pattern = "$Author/$Title"
 # organize_file_pattern = "$Title"
 

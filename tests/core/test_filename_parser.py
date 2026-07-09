@@ -83,3 +83,11 @@ def test_unknown_or_build_only_token_raises():
 def test_duplicate_field_raises():
     with pytest.raises(ValueError, match="more than once"):
         compile_template("$Title $Title")
+
+
+def test_conditional_group_bracket_rejected_in_parse_pattern():
+    # [ ... ] conditional groups are a build-only feature; parse patterns must reject them.
+    with pytest.raises(ValueError, match="organize"):
+        compile_template("[$SerNum - ]$Title")
+    with pytest.raises(ValueError, match="organize"):
+        compile_template("$Title]")
