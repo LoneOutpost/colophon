@@ -241,9 +241,10 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         _refresh(tid)
 
     def _apply_file_filter(tid: str, query: str) -> None:
-        """Narrow the visible file/folder rows to name matches (view-only; selection is
-        untouched). While a filter is active, matching folders auto-expand and non-matching
-        folders/files hide; clearing it restores the normal collapsed tree."""
+        """Narrow the visible file/folder rows to path matches — a file matches on its
+        name or any containing folder/author (view-only; selection is untouched). While a
+        filter is active, matching folders auto-expand and non-matching folders/files hide;
+        clearing it restores the normal collapsed tree."""
         r = refs.get(tid)
         if not r:
             return
