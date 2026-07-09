@@ -125,19 +125,20 @@ def render_settings(controller: AppController) -> None:
                         ui.notify("Enter a config.ini path first", type="warning")
                         return
                     try:
-                        folder, file = controller.import_ll_patterns(Path(raw))
+                        folder = controller.import_ll_patterns(Path(raw))
                     except FileNotFoundError:
                         ui.notify(
-                            "Couldn't read LazyLibrarian patterns from that path",
+                            "Couldn't read a LazyLibrarian folder pattern from that path",
                             type="negative",
                         )
                         return
                     folder_pat.set_value(folder)
-                    file_pat.set_value(file)
                     _update_preview()
-                    ui.notify("Imported patterns from LazyLibrarian config.ini")
+                    ui.notify("Imported folder pattern from LazyLibrarian config.ini")
 
-                ui.button("Import", icon="download", on_click=_import_ll).props("flat")
+                ui.button(
+                    "Import folder pattern", icon="download", on_click=_import_ll
+                ).props("flat")
 
         with page_section(
             "Pattern history",

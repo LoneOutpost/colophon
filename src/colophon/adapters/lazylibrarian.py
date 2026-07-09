@@ -1,6 +1,8 @@
-"""Read LazyLibrarian's audiobook path patterns from its config.ini.
+"""Read a LazyLibrarian folder organize pattern from its config.ini.
 
-Mirrors LL's [POSTPROCESS] keys so Colophon produces identical destinations.
+Only the [POSTPROCESS] folder key is imported; Colophon's own grammar owns
+file/multi-part naming, so this is a one-way folder-pattern convenience, not
+full LazyLibrarian parity.
 """
 
 from __future__ import annotations

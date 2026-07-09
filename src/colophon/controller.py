@@ -2179,13 +2179,12 @@ class AppController:
             logger.warning(f"ABS scan failed: {e}")
             return False
 
-    def import_ll_patterns(self, config_ini: Path) -> tuple[str, str]:
-        """Read folder + single-file organize patterns from a LazyLibrarian
-        config.ini, for the Settings importer. Returns (folder, file); raises
-        FileNotFoundError when the path does not exist. The file pattern falls back
-        to "$Title" (LazyLibrarian's multi-part audiobook_dest_file uses $Part/$Total,
-        which are degenerate for Colophon's single-M4B output)."""
+    @staticmethod
+    def import_ll_patterns(config_ini: Path) -> str:
+        """Read the folder organize pattern from a LazyLibrarian config.ini, for
+        the Settings importer. Returns the folder pattern; raises FileNotFoundError
+        when the path does not exist. File/multi-part naming is Colophon's own and
+        is not imported."""
         if not config_ini.exists():
             raise FileNotFoundError(config_ini)
-        pats = read_audiobook_patterns(config_ini)
-        return pats.folder, (pats.single_file or "$Title")
+        return read_audiobook_patterns(config_ini).folder
