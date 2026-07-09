@@ -153,17 +153,17 @@ def test_literal_only_group_always_renders():
 
 
 def test_unbalanced_open_bracket_raises():
-    with pytest.raises(ValueError, match="[Bb]racket"):
+    with pytest.raises(ValueError, match=r"[Bb]racket"):
         expand_pattern("[$SerNum - $Title", _book())
 
 
 def test_unbalanced_close_bracket_raises():
-    with pytest.raises(ValueError, match="[Bb]racket"):
+    with pytest.raises(ValueError, match=r"[Bb]racket"):
         expand_pattern("$Title]", _book())
 
 
 def test_nested_group_raises():
-    with pytest.raises(ValueError, match="[Nn]est"):
+    with pytest.raises(ValueError, match=r"[Nn]est"):
         expand_pattern("[$Series[$SerNum] ]$Title", _book())
 
 
