@@ -84,3 +84,11 @@ def test_render_manage_accepts_kind_and_filter_params():
     assert "initial_filter" in sig.parameters
     assert _valid_kind("series") == "series"
     assert _valid_kind("bogus") == "author"
+
+
+def test_skeleton_helpers_exist():
+    from colophon.ui import skeleton
+    assert callable(skeleton.skeleton_rows)
+    import inspect
+    params = inspect.signature(skeleton.skeleton_rows).parameters
+    assert "count" in params and "height" in params
