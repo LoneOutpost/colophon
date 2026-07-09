@@ -177,6 +177,7 @@ def test_render_workspace_does_not_self_apply_theme():
 
 def test_scope_selector_accepts_ready_tier_params():
     import inspect
+
     from colophon.ui.scope import scope_selector
     params = inspect.signature(scope_selector).parameters
     assert "ready_label" in params
@@ -190,6 +191,7 @@ def test_weak_id_trust_tiers_are_the_three_weak_provenances():
 
 def test_match_dialog_has_review_weak_link_and_workspace_wires_it():
     import inspect
+
     import colophon.ui.dialogs as dlg
     import colophon.ui.workspace as ws
     dsrc = inspect.getsource(dlg.match_dialog)
@@ -203,6 +205,7 @@ def test_match_dialog_has_review_weak_link_and_workspace_wires_it():
 
 def test_match_dialog_scopes_to_identified():
     import inspect
+
     import colophon.ui.dialogs as dlg
     src = inspect.getsource(dlg.match_dialog)
     assert "ready_state=BookState.IDENTIFIED" in src
