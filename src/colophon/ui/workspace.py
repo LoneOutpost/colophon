@@ -60,9 +60,9 @@ from colophon.ui.dialogs import (
 )
 from colophon.ui.filter_input import filter_input
 from colophon.ui.graph_view import nodes_url_for_book
+from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
-from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
