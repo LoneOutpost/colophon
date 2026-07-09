@@ -30,6 +30,7 @@ from colophon.core.state_labels import state_badge_tooltip, state_description
 from colophon.core.tokens import PARSE_TOKENS, parse_field_for
 from colophon.core.triage import (
     FACET_DEFAULTS,
+    WEAK_ID_TRUST_TIERS,
     apply_facets,
     blocking_reason,
     has_blocking_error,
@@ -2038,8 +2039,20 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             selected_ids=set(selected_ids),
         )
 
+    def _review_weak_identity() -> None:
+        # Land on all weakly-inferred books: clear existing filters, then set ID Trust to the three
+        # weak tiers. _render_middle rebuilds the facet selects + text filter from this state, so a
+        # middle repaint syncs the widgets and re-renders the list.
+        view["facets"] = dict(FACET_DEFAULTS)
+        view["facets"]["id_trust"] = list(WEAK_ID_TRUST_TIERS)
+        book_filter["text"] = ""
+        repaint(middle=True)
+
     async def _do_match() -> None:
-        await match_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids))
+        await match_dialog(
+            controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),
+            on_review_weak=_review_weak_identity,
+        )
 
     async def _do_persist() -> None:
         await persist_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),

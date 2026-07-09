@@ -9,6 +9,8 @@ from colophon.core.models import BLOCKING_FINDINGS, SUPPRESSED_FINDINGS, BookSta
 _DONE_STATES = {BookState.READY, BookState.ORGANIZED, BookState.ENCODED, BookState.SKIPPED}
 # Provenances that mean "inferred, not asserted" — the identity is a guess.
 _WEAK_PROVENANCE = {"directory", "filename", "graphing"}
+# The ID-Trust facet tokens that mean "weakly inferred" — used to deep-filter the Library.
+WEAK_ID_TRUST_TIERS: frozenset[str] = frozenset(_WEAK_PROVENANCE)
 # The local provenance tiers (where a scanned value came from without an online match).
 # Anything non-empty outside this set is an external match provider.
 _LOCAL_PROVENANCE = {"tag", "datafile", "directory", "filename", "graphing", "manual"}
