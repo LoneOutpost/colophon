@@ -47,7 +47,7 @@ async def fetch_cover(url: str, *, client: httpx.AsyncClient | None = None) -> C
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=30.0)
     try:
-        resp = await client.get(url)
+        resp = await client.get(url, follow_redirects=True)
         resp.raise_for_status()
         return CoverImage(data=resp.content, mime=_normalize_mime(resp.headers.get("content-type"), url))
     except httpx.HTTPError as e:
