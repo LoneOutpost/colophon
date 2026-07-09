@@ -302,3 +302,8 @@ def test_organize_pattern_round_trips(tmp_path):
     path = tmp_path / "c.toml"
     save_config(Config(recent_organize_patterns=[OrganizePattern(folder="$Author", file="$Title")]), path)
     assert load_config(path).recent_organize_patterns == [OrganizePattern(folder="$Author", file="$Title")]
+
+
+def test_reorg_delete_sources_defaults_false():
+    from colophon.adapters.config import Config
+    assert Config().reorg_delete_sources is False
