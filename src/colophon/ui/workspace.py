@@ -62,6 +62,7 @@ from colophon.ui.filter_input import filter_input
 from colophon.ui.graph_view import nodes_url_for_book
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
+from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
 
 logger = logging.getLogger(__name__)
@@ -1160,6 +1161,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _refresh_list() -> None:
         list_container.clear()
         row_elements.clear()
+        if not controller.library_tree_warm():
+            with list_container:
+                skeleton_rows(8)
+            _ensure_warm()
+            return
         books = _visible_books()
         _list_view["books"] = books
         _list_view["rendered"] = 0
@@ -1488,6 +1494,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     def refresh_nav() -> None:
         nav_container.clear()
+        if not controller.library_tree_warm():
+            with nav_container:
+                skeleton_rows(6)
+            _ensure_warm()
+            return
         full = controller.library_tree()
         terms = book_filter["text"].lower().split()
         if terms or folder_filter["path"] is not None:
@@ -1880,6 +1891,26 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             fn()
         except RuntimeError:
             logger.info("skipped a UI update; the client appears to have disconnected")
+
+    _warming = {"active": False}
+
+    async def _warm_tree() -> None:
+        """Derive library_tree off the event loop (once), then repaint the heavy panes
+        synchronously now that the cache is warm. Single-flight: concurrent cold paints
+        share one warmer."""
+        if _warming["active"]:
+            return
+        _warming["active"] = True
+        try:
+            await asyncio.to_thread(controller.library_tree)  # under the store lock, off-loop
+        finally:
+            _warming["active"] = False
+        _ui_safe(lambda: repaint(nav=True, list=True))
+
+    def _ensure_warm() -> None:
+        """Schedule the warmer if the tree is cold and not already warming."""
+        if not controller.library_tree_warm() and not _warming["active"]:
+            ui.timer(0.01, _warm_tree, once=True)
 
     async def _run(button, action, done_msg: str) -> None:
         _ui_safe(lambda: button.props("loading=true"))

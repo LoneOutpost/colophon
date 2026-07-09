@@ -110,3 +110,13 @@ def test_field_save_repaints_nav():
     assert m, "could not locate _save handler"
     body = m.group(0)
     assert "repaint(" in body and "nav=True" in body
+
+
+def test_cold_build_paints_skeleton_and_warms_off_thread():
+    import inspect, colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "async def _warm_tree" in src
+    assert "asyncio.to_thread(controller.library_tree)" in src   # off-loop derive
+    assert "def _ensure_warm" in src
+    assert "library_tree_warm()" in src                          # sync fast path guard
+    assert "skeleton_rows(" in src                               # skeletons on cold path
