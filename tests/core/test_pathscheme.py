@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from colophon.adapters.lazylibrarian import PathPatterns
-from colophon.core.models import BookUnit, SeriesRef
-from colophon.core.pathscheme import build_target_path, ensure_part_placeholder, expand_pattern, sanitize_segment
+from colophon.core.models import BookUnit, SeriesRef, SourceFile
+from colophon.core.pathscheme import build_reorg_targets, build_target_path, ensure_part_placeholder, expand_pattern, sanitize_segment
 
 
 def _book() -> BookUnit:
@@ -225,3 +225,40 @@ def test_ensure_part_placeholder_noop_when_present():
 def test_ensure_part_placeholder_ignores_lookalike_tokens():
     # $Partition must not count as $Part
     assert ensure_part_placeholder("$Partition") == "$Partition ($Part of $Total)"
+
+
+def _sf(name: str, ext: str) -> SourceFile:
+    return SourceFile(path=Path(f"/ingest/x/{name}"), size=1, duration_seconds=1.0, ext=ext)
+
+
+def test_build_reorg_targets_single_file_no_part():
+    b = _book()
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
+    files = [_sf("whole.mp3", ".mp3")]
+    targets = build_reorg_targets(Path("/lib"), pats, b, files)
+    assert targets == [Path("/lib/Brandon Sanderson/The Way of Kings/The Way of Kings.mp3")]
+
+
+def test_build_reorg_targets_multipart_numbered_with_ext():
+    b = _book()
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title[ - Part $Part of $Total]")
+    files = [_sf("a.mp3", ".mp3"), _sf("b.mp3", ".mp3"), _sf("c.mp3", ".mp3")]
+    targets = build_reorg_targets(Path("/lib"), pats, b, files)
+    base = Path("/lib/Brandon Sanderson/The Way of Kings")
+    assert targets == [
+        base / "The Way of Kings - Part 01 of 03.mp3",
+        base / "The Way of Kings - Part 02 of 03.mp3",
+        base / "The Way of Kings - Part 03 of 03.mp3",
+    ]
+
+
+def test_build_reorg_targets_multipart_autoappends_missing_part():
+    b = _book()
+    pats = PathPatterns(folder="$Author", single_file="$Title")  # no $Part
+    files = [_sf("a.m4a", ".m4a"), _sf("b.m4a", ".m4a")]
+    targets = build_reorg_targets(Path("/lib"), pats, b, files)
+    base = Path("/lib/Brandon Sanderson")
+    assert targets == [
+        base / "The Way of Kings (01 of 02).m4a",
+        base / "The Way of Kings (02 of 02).m4a",
+    ]

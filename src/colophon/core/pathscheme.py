@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from colophon.adapters.lazylibrarian import PathPatterns
-from colophon.core.models import BookUnit, SeriesRef
+from colophon.core.models import BookUnit, SeriesRef, SourceFile
 from colophon.core.tokens import BUILD_TOKENS
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -147,6 +147,43 @@ def build_target_path(root: Path, patterns: PathPatterns, book: BookUnit) -> Pat
     for seg in segments:
         target = target / seg
     return target / filename
+
+
+def _normalized_ext(source_ext: str) -> str:
+    """A leading-dot extension, tolerant of stored values with or without the dot."""
+    ext = source_ext.strip()
+    if not ext:
+        return ""
+    return ext if ext.startswith(".") else f".{ext}"
+
+
+def _book_folder(root: Path, patterns: PathPatterns, book: BookUnit) -> Path:
+    folder = root
+    for seg in (sanitize_segment(expand_pattern(s, book)) for s in patterns.folder.split("/")):
+        folder = folder / seg
+    return folder
+
+
+def build_reorg_targets(
+    root: Path, patterns: PathPatterns, book: BookUnit, ordered_files: list[SourceFile]
+) -> list[Path]:
+    """One target path per source file for a no-encode reorg, in the given part order.
+
+    Single-file books use the filename pattern as-is with empty $Part/$Total. Multi-part
+    books (>1 file) get $Part/$Total populated and, if the pattern omits $Part, a default
+    suffix appended so parts cannot collide. Each target keeps its source file's extension.
+    """
+    folder = _book_folder(root, patterns, book)
+    total = len(ordered_files)
+    base_pattern = patterns.single_file or "$Title"
+    if total == 1:
+        name = sanitize_segment(expand_pattern(base_pattern, book))
+        return [folder / f"{name}{_normalized_ext(ordered_files[0].ext)}"]
+    name_pattern = ensure_part_placeholder(base_pattern)
+    return [
+        folder / f"{sanitize_segment(expand_pattern(name_pattern, book, part=i, total=total))}{_normalized_ext(sf.ext)}"
+        for i, sf in enumerate(ordered_files, start=1)
+    ]
 
 
 def _sample_book() -> BookUnit:
