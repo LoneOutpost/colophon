@@ -151,3 +151,79 @@ def test_get_book_hydrates_legacy_phase_map(tmp_path):
     assert got is not None
     assert state_of(got, Phase.IDENTIFY) is PhaseState.FRESH   # seeded from legacy state
     assert got.state is BookState.READY                        # derived, consistent with the list
+
+
+def _scan_one(tmp_path, name="Book"):
+    """Scan a single empty-mp3 book under ingest; return (ctrl, ctx, book)."""
+    ingest = tmp_path / "ingest"
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    d = ingest / "Author" / name
+    d.mkdir(parents=True)
+    (d / f"{name}.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    return ctrl, ctx, ctx.books.get(BookUnit.id_for(d))
+
+
+def test_rerun_phase_identify_stales_downstream_except_encode(tmp_path):
+    ctrl, ctx, book = _scan_one(tmp_path)
+    for p in (Phase.MATCH, Phase.TAG, Phase.ORGANIZE, Phase.ENCODE):
+        mark(book, p, PhaseState.FRESH)
+    ctx.books.upsert(book)
+
+    result = ctrl.rerun_phase([book], Phase.IDENTIFY)
+    assert result.ran is Phase.IDENTIFY
+    assert result.book_count == 1
+    assert result.staled == {Phase.MATCH, Phase.TAG, Phase.ORGANIZE}
+    assert Phase.ENCODE not in result.staled
+    assert result.failed == 0
+    refreshed = ctx.books.get(book.id)
+    assert state_of(refreshed, Phase.ENCODE) is PhaseState.FRESH   # depends only on Search
+
+
+def test_rerun_phase_search_stales_through_encode(tmp_path):
+    ctrl, ctx, book = _scan_one(tmp_path)
+    for p in (Phase.MATCH, Phase.TAG, Phase.ORGANIZE, Phase.ENCODE):
+        mark(book, p, PhaseState.FRESH)
+    ctx.books.upsert(book)
+
+    result = ctrl.rerun_phase([book], Phase.SEARCH)
+    assert result.staled == {Phase.MATCH, Phase.TAG, Phase.ORGANIZE, Phase.ENCODE}
+
+
+def test_rerun_phase_preserves_manual_and_matched_data(tmp_path):
+    ctrl, ctx, book = _scan_one(tmp_path)
+    book.title = "My Manual Title"
+    book.provenance["title"] = "manual"
+    book.manually_confirmed = True
+    book.confidence = 100.0
+    mark(book, Phase.MATCH, PhaseState.FRESH)
+    ctx.books.upsert(book)
+
+    ctrl.rerun_phase([book], Phase.IDENTIFY)
+    refreshed = ctx.books.get(book.id)
+    assert refreshed.title == "My Manual Title"          # reconcile only fills empty
+    assert refreshed.manually_confirmed is True          # never touched
+    assert refreshed.confidence == 100.0                 # never touched
+    assert state_of(refreshed, Phase.MATCH) is PhaseState.STALE   # staled, not wiped
+
+
+def test_rerun_phase_bulk_aggregates_across_books(tmp_path):
+    ingest = tmp_path / "ingest"
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [ingest]
+    for name in ("BookA", "BookB"):
+        d = ingest / "Author" / name
+        d.mkdir(parents=True)
+        (d / f"{name}.mp3").write_bytes(b"")
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    books = [ctx.books.get(BookUnit.id_for(ingest / "Author" / n)) for n in ("BookA", "BookB")]
+    for b in books:
+        mark(b, Phase.MATCH, PhaseState.FRESH)
+        ctx.books.upsert(b)
+
+    result = ctrl.rerun_phase(books, Phase.IDENTIFY)
+    assert result.book_count == 2
+    assert result.staled == {Phase.MATCH}

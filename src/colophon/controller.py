@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import Counter
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
@@ -76,7 +77,15 @@ from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize
 from colophon.core.part_order import resolve_part_order
 from colophon.core.pathscheme import build_reorg_targets, build_target_path
 from colophon.core.perf import timed
-from colophon.core.phases import LOCAL, ensure_phases, invalidate_from, mark, resync_state, state_of
+from colophon.core.phases import (
+    LOCAL,
+    ensure_phases,
+    invalidate_from,
+    mark,
+    phases_from,
+    resync_state,
+    state_of,
+)
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.quickmatch import (
     IdentifyPlan,
@@ -227,6 +236,17 @@ class BookProcessResult(_Base):
 
 class EncodeJobResult(_Base):
     results: list[BookProcessResult] = []  # noqa: RUF012 - pydantic default, copied per instance
+
+
+@dataclass(frozen=True)
+class RerunResult:
+    """Outcome of re-running a phase across a selection. `staled` is the union of
+    downstream phases left stale by the cascade across all books; `failed` counts
+    books whose target phase ended FAILED."""
+    ran: Phase
+    book_count: int
+    staled: frozenset[Phase]
+    failed: int
 
 
 class AppController:
@@ -694,15 +714,25 @@ class AppController:
                     out[phase].append(book)
         return out
 
-    def rerun_phase(self, books: list[BookUnit], phase: Phase) -> None:
-        """Re-run `phase` for each book. Local phases (Search/Categorize/Identify)
-        cascade-invalidate and auto-rerun via invalidate(). Deferred phases
-        (Match/Tag/Organize/Encode) are not yet wired — their job dispatch is a
-        follow-up — and raise NotImplementedError."""
+    def rerun_phase(self, books: list[BookUnit], phase: Phase) -> RerunResult:
+        """Re-run `phase` for each book and report the cascade. Local phases
+        (Search/Categorize/Identify) cascade-invalidate and auto-rerun via invalidate();
+        downstream deferred phases are left stale for their own explicit re-run. Deferred
+        phases are not wired here — their homes live elsewhere — and raise
+        NotImplementedError. `RerunResult.staled` is the union of downstream phases left
+        stale across the selection."""
         if phase not in LOCAL:
             raise NotImplementedError(f"re-run not yet wired for deferred phase {phase.value}")
+        staled: set[Phase] = set()
+        failed = 0
         for book in books:
             self.invalidate(book, phase)
+            staled |= {p for p in phases_from(phase)[1:] if state_of(book, p) is PhaseState.STALE}
+            if state_of(book, phase) is PhaseState.FAILED:
+                failed += 1
+        return RerunResult(
+            ran=phase, book_count=len(books), staled=frozenset(staled), failed=failed,
+        )
 
     # --- dashboard ---
     @timed("dashboard_stats")
