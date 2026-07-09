@@ -8,14 +8,14 @@ from pathlib import Path
 from nicegui import background_tasks, ui
 
 from colophon.controller import AppController
-from colophon.services.acquire import AcquireMode
+from colophon.services.acquire import AcquireMode, visible_candidates
 from colophon.services.filetree import (
     FolderNode,
     build_file_tree,
     default_selection,
     matching_file_ids,
 )
-from colophon.ui.chrome import page_body, page_header, page_toolbar
+from colophon.ui.chrome import page_body, page_footer, page_header, page_toolbar
 from colophon.ui.dialogs import modal
 
 logger = logging.getLogger(__name__)
@@ -155,13 +155,20 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
 
     with page_body("full"):
         list_box = ui.column().classes("w-full gap-0")
+
+    # Downloads live in a sticky footer so their status stays visible without scrolling past
+    # the (often very long) torrent list. The band hides itself while there are no downloads.
+    with page_footer() as downloads_footer:
         with ui.row().classes("items-center w-full"):
             downloads_title = ui.label("Downloads").classes("text-subtitle1 text-weight-medium")
             ui.space()
             ui.button("Clear finished", icon="clear_all", on_click=lambda: _clear_finished()).props(
                 "flat dense"
             )
-        downloads_box = ui.column().classes("w-full gap-0")
+        # Cap the height so several concurrent downloads scroll internally, keeping the band slim.
+        downloads_box = ui.column().classes("w-full gap-0").style(
+            "max-height: 32vh; overflow-y: auto"
+        )
 
     # --- magnet ---
     async def _add_magnet() -> None:
@@ -187,11 +194,9 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         _render_list()
 
     def _visible() -> list:
-        if show_all["value"]:
-            return candidates
-        # In-progress torrents always show (so you see what you just added); the audiobook
-        # filter only narrows the ready ones.
-        return [c for c in candidates if c.is_audiobook or not c.is_ready]
+        # Errored torrents are hidden by default; in-progress ones always show (so you see
+        # what you just added). "Show all" reveals everything. See `visible_candidates`.
+        return visible_candidates(candidates, show_all=show_all["value"])
 
     # selection helpers -------------------------------------------------------
     def _all_ids(tid: str) -> set[int]:
@@ -415,14 +420,15 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
     def _render_downloads() -> None:
         downloads_box.clear()
         entries = controller.active_downloads()
+        # The whole band hides when idle, so an empty page reclaims the footer space.
+        downloads_footer.set_visibility(bool(entries))
+        if not entries:
+            return
         queued = sum(max(0, e.files_total - e.files_done) for e in entries if e.status == "active")
         downloads_title.set_text(
             f"Downloads — {queued} file(s) downloading" if queued else "Downloads"
         )
         with downloads_box:
-            if not entries:
-                ui.label("No downloads yet").classes("colophon-muted q-pa-md")
-                return
             with ui.list().props("separator dense").classes("w-full"):
                 for entry in entries:
                     color, icon = _STATUS_META.get(entry.status, ("grey-6", "help"))

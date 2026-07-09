@@ -111,6 +111,18 @@ def page_toolbar(*, sticky: bool = False) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def page_footer() -> Iterator[ui.column]:
+    """A sticky bottom band, the mirror of `page_toolbar(sticky=True)`: it pins page-level
+    state to the bottom of the scroll area so it stays visible without scrolling past a long
+    body (the Acquire downloads list). Put the footer content inside the `with` body; the
+    yielded column is returned so the caller can show/hide the band with `.set_visibility(...)`
+    (it starts hidden) and an idle page reclaims the space."""
+    with ui.column().classes("colophon-footer w-full q-gutter-xs q-pa-none") as col:
+        col.set_visibility(False)  # revealed by the caller once there is something to show
+        yield col
+
+
 def body_column(measure: str = "full") -> ui.column:
     """The standard page body column, returned for pages that clear and rebuild it
     dynamically (the graph worklist). Most pages use `page_body` instead. One gutter and

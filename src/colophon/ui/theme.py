@@ -201,11 +201,19 @@ body.body--dark { color: #ece4d8; }
 .colophon-toolbar { background: var(--colophon-surface); border-bottom: 1px solid var(--colophon-line);
   padding: 10px 16px; }
 .body--dark .colophon-toolbar { background: #262019; }
-/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins directly below the app
-   bar (whose height scales, so read the shared variable) so the controls stay reachable
-   while the body scrolls. The toolbar's own opaque surface background keeps scrolled
-   content from showing through. */
-.colophon-toolbar-sticky { position: sticky; top: var(--colophon-header-h); z-index: 10; }
+/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins below the fixed 50px app
+   bar so the controls stay reachable while the body scrolls. The toolbar's own opaque
+   surface background keeps scrolled content from showing through. */
+.colophon-toolbar-sticky { position: sticky; top: 50px; z-index: 10; }
+/* Sticky footer band (chrome.page_footer): the mirror of the sticky toolbar, pinned to the
+   bottom of the scroll area so page-level state (e.g. the Acquire downloads list) stays in
+   view without scrolling past a long body. Its own opaque surface keeps content from showing
+   through, and a hairline top rule sets it off from the body. */
+.colophon-footer { background: var(--colophon-surface); border-top: 1px solid var(--colophon-line);
+  padding: 10px 16px; position: sticky; bottom: 0; z-index: 10;
+  /* cancel NiceGUI's 1rem content padding-bottom so the band hugs the viewport edge */
+  margin-bottom: -1rem; }
+.body--dark .colophon-footer { background: #262019; }
 /* Reading-column cap for form/prose pages: left-anchored (not centered), so the page
    frame stays identical to full-bleed pages while fields keep a scannable width. */
 .colophon-measure-read { max-width: 768px; }
