@@ -39,8 +39,8 @@ def resolve_part_order(
     if all(t is not None for t in tracks):
         nums = [int(t) for t in tracks]  # type: ignore[arg-type]
         if sorted(nums) == list(range(1, len(files) + 1)):
-            return [f for _, f in sorted(zip(nums, files), key=lambda pair: pair[0])]
+            return [f for _, f in sorted(zip(nums, files, strict=True), key=lambda pair: pair[0])]
     keys = [_natural_key(f.path.name) for f in files]
     if len(set(keys)) != len(files):
         return None
-    return [f for _, f in sorted(zip(keys, files), key=lambda pair: pair[0])]
+    return [f for _, f in sorted(zip(keys, files, strict=True), key=lambda pair: pair[0])]

@@ -4,7 +4,13 @@ import pytest
 
 from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.core.models import BookUnit, SeriesRef, SourceFile
-from colophon.core.pathscheme import build_reorg_targets, build_target_path, ensure_part_placeholder, expand_pattern, sanitize_segment
+from colophon.core.pathscheme import (
+    build_reorg_targets,
+    build_target_path,
+    ensure_part_placeholder,
+    expand_pattern,
+    sanitize_segment,
+)
 
 
 def _book() -> BookUnit:

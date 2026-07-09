@@ -2060,7 +2060,7 @@ class AppController:
             targets = build_reorg_targets(
                 library_root, options.patterns or self.ctx.patterns, cbook, ordered
             )
-            pairs = list(zip([sf.path for sf in ordered], targets))
+            pairs = list(zip([sf.path for sf in ordered], targets, strict=True))
             org = organize_book_parts(
                 self.ctx.books, book, pairs,
                 delete_sources=options.delete_sources or self.ctx.config.reorg_delete_sources,
