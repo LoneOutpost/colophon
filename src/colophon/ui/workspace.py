@@ -63,7 +63,7 @@ from colophon.ui.graph_view import nodes_url_for_book
 from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
-from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
+from colophon.ui.theme import dark_mode_button
 
 logger = logging.getLogger(__name__)
 
@@ -238,8 +238,10 @@ def _render_cover(
             ui.icon("menu_book", color="grey-6").classes(icon)
 
 
-def render_workspace(controller: AppController, initial_filter: str = "") -> None:
-    apply_theme()
+def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filter: str = "") -> None:
+    # Theme + dark-mode are applied by the page handler *before* it awaits the client
+    # (so they ship in the initial HTML and the page doesn't flash the light theme);
+    # `dark` is passed in for the header toggle rather than created here.
     # Make the content area fill exactly between the fixed header and footer so the
     # three-pane workspace never spills into a page-level scroll (each pane scrolls
     # internally). Flex-fill the Quasar page instead of a fragile fixed height.
@@ -309,7 +311,6 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         "document.documentElement.style.removeProperty(VAR[k]);});fit();};"
         "})();"
     )
-    dark = setup_dark_mode()
     selected_ids: set[str] = set()
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
