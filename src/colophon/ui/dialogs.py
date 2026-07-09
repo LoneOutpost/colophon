@@ -1000,8 +1000,8 @@ async def match_dialog(
                     controller, selected_ids,
                     ready_label="Identified", ready_state=BookState.IDENTIFIED,
                 )
-                ui.label(
-                    "Books with an inferred identity, ready to match against sources."
+                scope_hint = ui.label(
+                    "Identified: books with an inferred identity, ready to match against sources."
                 ).classes("text-caption colophon-muted")
                 with ui.row().classes("items-center q-gutter-xs q-mt-xs") as warn_row:
                     warn = ui.label("").classes("text-caption text-warning")
@@ -1021,8 +1021,13 @@ async def match_dialog(
                     )
                     warn_row.set_visibility(bool(weak))
 
-                scope.on_value_change(lambda _e: _refresh_warn())
+                def _sync_scope_hint() -> None:
+                    # The hint explains the Identified scope; hide it for Selected / All.
+                    scope_hint.set_visibility(scope.value == "ready")
+
+                scope.on_value_change(lambda _e: (_refresh_warn(), _sync_scope_hint()))
                 _refresh_warn()
+                _sync_scope_hint()
 
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
