@@ -84,3 +84,46 @@ def test_render_manage_accepts_kind_and_filter_params():
     assert "initial_filter" in sig.parameters
     assert _valid_kind("series") == "series"
     assert _valid_kind("bogus") == "author"
+
+
+def test_skeleton_helpers_exist():
+    from colophon.ui import skeleton
+    assert callable(skeleton.skeleton_rows)
+    import inspect
+    params = inspect.signature(skeleton.skeleton_rows).parameters
+    assert "count" in params and "height" in params
+
+
+def test_repaint_is_defined_in_workspace_source():
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "def repaint(" in src
+    assert "repaint(nav=True, middle=True, status=True)" in src  # _refresh_all routes through it
+
+
+def test_field_save_repaints_nav():
+    # The field-save handler must include the navigator in its blast radius, so
+    # clearing a shared entity (e.g. series) can't leave a ghost in "By Series".
+    import inspect
+    import re
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    m = re.search(r"def _save\(b=book\)[^:]*:.*?(?=\n\n? {16}def |\n\n? {16}async def )", src, re.S)
+    assert m, "could not locate _save handler"
+    body = m.group(0)
+    assert "repaint(" in body and "nav=True" in body
+
+
+def test_cold_build_paints_skeleton_and_warms_off_thread():
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "async def _warm_tree" in src
+    assert "asyncio.to_thread(controller.library_tree)" in src   # off-loop derive
+    assert "def _ensure_warm" in src
+    assert "library_tree_warm()" in src                          # sync fast path guard
+    assert "skeleton_rows(" in src                               # skeletons on cold path

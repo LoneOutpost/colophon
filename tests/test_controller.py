@@ -3674,3 +3674,17 @@ def test_process_book_no_encode_blocks_on_ambiguous_order(tmp_path):
     assert result.status == "failed"
     assert result.detail is not None and "part order" in result.detail
     ctx.close()
+
+
+def test_library_tree_warm_predicate(tmp_path):
+    from colophon.core.models import BookUnit
+    ctrl = _controller(tmp_path)
+    # cold before any derivation
+    assert ctrl.library_tree_warm() is False
+    ctrl.library_tree()                       # derive + memoize
+    assert ctrl.library_tree_warm() is True    # warm for the current generation
+    # a mutation that bumps a generation makes it cold again
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "T"
+    ctrl.ctx.books.upsert(b)
+    assert ctrl.library_tree_warm() is False

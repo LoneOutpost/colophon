@@ -921,6 +921,16 @@ class AppController:
         self._tree_cache = (key, tree)
         return tree
 
+    def library_tree_warm(self) -> bool:
+        """True when the memoized library tree is valid for the current generation
+        key, so the caller can build synchronously instead of deriving off-thread."""
+        key = (
+            self.ctx.books.generation,
+            self.ctx.aliases.generation,
+            self.ctx.library_graph.generation,
+        )
+        return self._tree_cache is not None and self._tree_cache[0] == key
+
     def navigator_view(self, book_ids: set[str] | None = None) -> LibraryTree:
         """The navigator tree narrowed to `book_ids` (the books currently visible in the list), or
         the full tree when None. The query seam: the UI passes the shared filter's match set so the

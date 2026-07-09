@@ -250,6 +250,14 @@ body.body--dark { color: #ece4d8; }
 .body--dark .q-radio__label,
 .body--dark .q-toggle__label { color: var(--colophon-muted); }
 .q-dialog .q-card { max-width: calc(100vw - 2rem); }
+/* Calm loading placeholders: tonal rows sized to real content, no shimmer.
+   --colophon-line already flips between warm stone (light) and dark teak (dark). */
+.colophon-skeleton-row {
+  background: var(--colophon-line);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  opacity: 0.6;
+}
 """
 
 _CSS = _vars_block(":root", _LIGHT_VARS) + _vars_block(".body--dark", _DARK_VARS) + _STATIC_CSS

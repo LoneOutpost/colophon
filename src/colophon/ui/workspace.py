@@ -60,6 +60,7 @@ from colophon.ui.dialogs import (
 )
 from colophon.ui.filter_input import filter_input
 from colophon.ui.graph_view import nodes_url_for_book
+from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
 from colophon.ui.theme import apply_theme, dark_mode_button, setup_dark_mode
@@ -481,8 +482,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                     def _ack(c=code, b=book) -> None:
                         controller.acknowledge_finding(b, c)
                         ui.notify("Acknowledged", type="info")
-                        refresh_nav()
-                        _render_middle()
+                        repaint(nav=True, middle=True)
 
                     ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
 
@@ -569,8 +569,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                         return
                     _set_dirty(False)
                     ui.notify("Saved")
-                    refresh_list()
-                    show_detail(b.id)
+                    repaint(list=True, nav=True, detail_book_id=b.id)
 
                 def _normalize_all() -> None:
                     for f, inp in inputs.items():
@@ -701,18 +700,14 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                         async def _recheck(b=book) -> None:
                                             ui.notify("Rechecking confidence...")
                                             await controller.recheck_confidence(b)
-                                            show_detail(b.id)
-                                            refresh_list()
-                                            refresh_status()
+                                            repaint(list=True, status=True, detail_book_id=b.id)
                                         ui.button("Recheck Confidence", icon="refresh", on_click=_recheck).props(
                                             "flat dense no-caps"
                                         ).tooltip("Re-query sources and revert to the computed confidence")
                                     else:
                                         def _confirm(b=book) -> None:
                                             controller.confirm_confidence(b)
-                                            show_detail(b.id)
-                                            refresh_list()
-                                            refresh_status()
+                                            repaint(list=True, status=True, detail_book_id=b.id)
                                         ui.button("Manual Confirmation", icon="verified", on_click=_confirm).props(
                                             "flat dense no-caps"
                                         ).tooltip("Confirm this book and set its confidence to 100%")
@@ -731,9 +726,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                                             # The record is gone; show_detail(None-ish)
                                             # renders the empty placeholder and clears
                                             # editor state for the now-deleted id.
-                                            show_detail(b.id)
-                                            refresh_list()
-                                            refresh_status()
+                                            repaint(list=True, status=True, detail_book_id=b.id)
                                         ui.button("Remove missing", icon="delete_outline", on_click=_remove_missing).props(
                                             "flat dense no-caps color=negative"
                                         ).tooltip("Delete this orphaned record (the folder is gone)")
@@ -864,9 +857,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         the bulk Clear selection button, the navigator Deselect all, and after a
         bulk operation runs on the selection."""
         selected_ids.clear()
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         show_detail("")
 
@@ -999,9 +990,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _select_all(book_ids: list[str]) -> None:
         # Navigator "Select all": all books in the current scope (ignores filter).
         selected_ids.update(book_ids)
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1015,9 +1004,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _select_visible() -> None:
         # Books-header "Select all": additive over the filtered, visible books.
         selected_ids.update(b.id for b in _visible_books())
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1026,9 +1013,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         # Books-header "Deselect all": subtractive over the filtered, visible books;
         # selections outside the current filter are left untouched.
         selected_ids.difference_update(b.id for b in _visible_books())
-        refresh_nav()
-        refresh_list()
-        refresh_status()
+        repaint(nav=True, list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1175,6 +1160,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     def _refresh_list() -> None:
         list_container.clear()
         row_elements.clear()
+        if not controller.library_tree_warm():
+            with list_container:
+                skeleton_rows(8)
+            _ensure_warm()
+            return
         books = _visible_books()
         _list_view["books"] = books
         _list_view["rendered"] = 0
@@ -1233,9 +1223,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             selected_ids.discard(book_id)
         else:
             selected_ids.add(book_id)
-        refresh_list()  # re-render the checkbox (and re-apply the focus tint)
-        refresh_nav()   # keep navigator node checkboxes in sync
-        refresh_status()
+        repaint(list=True, nav=True, status=True)
         _update_count()
 
     def _on_key(e) -> None:
@@ -1380,9 +1368,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 # Defer view refresh until close so rebuilding list_container can't
                 # tear down this dialog while it is still open.
                 dialog.close()
-                refresh_nav()
-                _render_middle()
-                refresh_status()
+                repaint(nav=True, middle=True, status=True)
                 if selected_ids:
                     _after_select()
 
@@ -1442,10 +1428,9 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             if canonical and scope["kind"] == kind and scope["key"] == name:
                 _set_scope(kind, canonical)
             elif scope["kind"] == kind:
-                refresh_nav()
-                _render_middle()
+                repaint(nav=True, middle=True)
             else:
-                refresh_nav()
+                repaint(nav=True)
 
         def _apply_alias(value: str | None, dialog) -> None:
             canonical = (value or "").strip()
@@ -1505,6 +1490,11 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     def refresh_nav() -> None:
         nav_container.clear()
+        if not controller.library_tree_warm():
+            with nav_container:
+                skeleton_rows(6)
+            _ensure_warm()
+            return
         full = controller.library_tree()
         terms = book_filter["text"].lower().split()
         if terms or folder_filter["path"] is not None:
@@ -1653,8 +1643,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
 
     def _set_filter(value: str | None) -> None:
         book_filter["text"] = value or ""
-        refresh_list()
-        refresh_nav()  # the filter is cross-panel: it narrows the navigator to the same books
+        repaint(list=True, nav=True)  # the filter is cross-panel: it narrows the navigator to the same books
         _persist_view()
 
     def _filter_to(label: str) -> None:
@@ -1663,8 +1652,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
         search = refs.get("filter")
         if search is not None:
             search.set_value(label)
-        refresh_list()
-        refresh_nav()
+        repaint(list=True, nav=True)
         _persist_view()
 
     def _set_facet(name: str, value) -> None:
@@ -1743,7 +1731,10 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
                 # Count over scope+folder (not the text search): the toolbar isn't rebuilt on
                 # every keystroke, so a text-inclusive count would go stale. Scope/folder changes
                 # do rebuild it, keeping this current.
-                needs_work_n = sum(1 for b in _books_for_scope() if needs_human(b))
+                needs_work_n = (
+                    sum(1 for b in _books_for_scope() if needs_human(b))
+                    if controller.library_tree_warm() else 0
+                )
                 ui.checkbox(
                     f"Needs work ({needs_work_n})", value=view["facets"]["needs_work"],
                     on_change=lambda e: _set_facet("needs_work", e.value),
@@ -1827,8 +1818,7 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             selected_ids.update(book_ids)
         else:
             selected_ids.difference_update(book_ids)
-        refresh_list()  # reflect the change in the Books pane checkboxes
-        refresh_status()
+        repaint(list=True, status=True)
         _update_count()
         _after_select()
         _persist_view()
@@ -1864,18 +1854,31 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     # per-stage counts stay current after a scan / match / persist.
     _stepper_refresh: dict[str, object] = {"fn": lambda: None}
 
+    def repaint(
+        *, nav: bool = False, middle: bool = False, list: bool = False,
+        status: bool = False, detail_book_id: str | None = None,
+    ) -> None:
+        """The single Library repaint path. Each flag rebuilds exactly one pane, so a
+        mutation declares its blast radius and cannot silently skip a pane. Heavy panes
+        rebuild through their existing (windowed) functions; a cold derivation renders a
+        skeleton and derives off-thread (handled inside the list/nav refreshers)."""
+        if nav:
+            refresh_nav()
+        if middle:
+            _render_middle()
+        if list:
+            refresh_list()
+        if status:
+            refresh_status()
+        if detail_book_id is not None:
+            show_detail(detail_book_id)
+        _stepper_refresh["fn"]()
+        if detail_book_id is None and len(selected_ids) >= 2:
+            show_bulk()
+
     def _refresh_all() -> None:
         with span("refresh_all"):
-            with span("nav render"):
-                refresh_nav()
-            with span("middle render"):
-                _render_middle()
-            with span("status render"):
-                refresh_status()
-            _stepper_refresh["fn"]()
-            # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
-            if len(selected_ids) >= 2:
-                show_bulk()
+            repaint(nav=True, middle=True, status=True)
 
     # --- async actions ---
     def _ui_safe(fn) -> None:
@@ -1887,6 +1890,23 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
             fn()
         except RuntimeError:
             logger.info("skipped a UI update; the client appears to have disconnected")
+
+    _warming = {"active": False}
+
+    async def _warm_tree() -> None:
+        """Derive library_tree off the event loop, then repaint the heavy panes and the
+        toolbar count now that the cache is warm."""
+        try:
+            await asyncio.to_thread(controller.library_tree)  # under the store lock, off-loop
+        finally:
+            _warming["active"] = False
+        _ui_safe(lambda: repaint(nav=True, middle=True))
+
+    def _ensure_warm() -> None:
+        """Schedule the warmer once if the tree is cold and not already warming."""
+        if not controller.library_tree_warm() and not _warming["active"]:
+            _warming["active"] = True
+            ui.timer(0.01, _warm_tree, once=True)
 
     async def _run(button, action, done_msg: str) -> None:
         _ui_safe(lambda: button.props("loading=true"))
