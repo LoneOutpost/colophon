@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from colophon.adapters.lazylibrarian import PathPatterns
@@ -18,6 +19,22 @@ _LBRACK_SENTINEL = "\x00LBRACK\x00"  # protects "[[" (a literal "[") from group 
 _RBRACK_SENTINEL = "\x00RBRACK\x00"  # protects "]]" (a literal "]") from group parsing
 
 
+@dataclass(frozen=True)
+class SeriesFormat:
+    """The three LazyLibrarian series sub-patterns that compose the $Series label.
+
+    `$FmtName` expands `name`, `$FmtNum` expands `number`, and `$Series` expands
+    `series` (which may reference both). All three render empty for a book with no
+    series, so a series segment collapses cleanly."""
+
+    series: str = "($FmtName $FmtNum)"
+    name: str = "$SerName"
+    number: str = "Book #$SerNum"
+
+
+DEFAULT_SERIES = SeriesFormat()
+
+
 def _sort_author(author: str) -> str:
     parts = author.split()
     return f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else author
@@ -27,15 +44,35 @@ def _sort_title(title: str) -> str:
     return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE)
 
 
-def _token_values(book: BookUnit, *, part: int | None = None, total: int | None = None) -> dict[str, str]:
+def _token_values(
+    book: BookUnit,
+    series_fmt: SeriesFormat = DEFAULT_SERIES,
+    *,
+    part: int | None = None,
+    total: int | None = None,
+) -> dict[str, str]:
     author = book.authors[0] if book.authors else ""
     series = book.series[0] if book.series else None
+    ser_name = series.name if series else ""
+    language = book.language or ""
+    pub_year = str(book.publish_year) if book.publish_year is not None else ""
     sernum = ""
     padnum = ""
     if series and series.sequence is not None:
         seq = series.sequence
         sernum = str(int(seq)) if seq == int(seq) else str(seq)
         padnum = sernum.zfill(2) if seq == int(seq) else sernum
+    # Compose the series label from the sub-patterns. Everything series-derived is empty
+    # when the book has no series, so $Series / $FmtName / $FmtNum drop as a unit.
+    fmt_name = fmt_num = series_label = ""
+    if series:
+        base = {
+            "SerName": ser_name, "SerNum": sernum, "PadNum": padnum,
+            "PubYear": pub_year, "Language": language,
+        }
+        fmt_name = _render(series_fmt.name, base)
+        fmt_num = _render(series_fmt.number, base)
+        series_label = _render(series_fmt.series, {**base, "FmtName": fmt_name, "FmtNum": fmt_num})
     narrator = book.narrators[0] if book.narrators else ""
     abridged = ""
     if book.abridged is not None:
@@ -51,11 +88,14 @@ def _token_values(book: BookUnit, *, part: int | None = None, total: int | None 
         "SortAuthor": _sort_author(author),
         "Title": book.title or "",
         "SortTitle": _sort_title(book.title or ""),
-        "Series": series.name if series else "",
-        "SerName": series.name if series else "",
+        "Series": series_label,
+        "SerName": ser_name,
         "SerNum": sernum,
+        "FmtName": fmt_name,
+        "FmtNum": fmt_num,
+        "Language": language,
         "PadNum": padnum,
-        "PubYear": str(book.publish_year) if book.publish_year is not None else "",
+        "PubYear": pub_year,
         "Narrator": narrator,
         "Part": part_s,
         "Total": total_s,
@@ -74,19 +114,15 @@ def _group_is_empty(content: str, values: dict[str, str]) -> bool:
     return any(values.get(m.group(1), "") == "" for m in _TOKEN.finditer(content))
 
 
-def expand_pattern(
-    pattern: str, book: BookUnit, *, part: int | None = None, total: int | None = None
-) -> str:
-    """Expand $Token markup, honoring [ ... ] conditional groups.
+def _render(text: str, values: dict[str, str]) -> str:
+    """Expand $Token markup in `text` against `values`, honoring [ ... ] conditional groups.
 
     A group wrapped in [ ... ] is emitted only when all of its tokens have values;
     if any is empty the whole group (literals included) is dropped. "[[" / "]]" are
     literal brackets (mirroring "$$"). Groups may not nest and must be balanced within
     a segment; an unbalanced or nested bracket raises ValueError."""
-    values = _token_values(book, part=part, total=total)
-    assert values.keys() == {t.name for t in BUILD_TOKENS}, "pathscheme/tokens drift"
     protected = (
-        pattern.replace("$$", _DOLLAR_SENTINEL)
+        text.replace("$$", _DOLLAR_SENTINEL)
         .replace("[[", _LBRACK_SENTINEL)
         .replace("]]", _RBRACK_SENTINEL)
     )
@@ -118,6 +154,21 @@ def expand_pattern(
     )
 
 
+def expand_pattern(
+    pattern: str,
+    book: BookUnit,
+    *,
+    part: int | None = None,
+    total: int | None = None,
+    series_fmt: SeriesFormat = DEFAULT_SERIES,
+) -> str:
+    """Expand $Token markup for `book`, honoring [ ... ] conditional groups. The series
+    sub-patterns in `series_fmt` compose the $Series / $FmtName / $FmtNum values."""
+    values = _token_values(book, series_fmt, part=part, total=total)
+    assert values.keys() == {t.name for t in BUILD_TOKENS}, "pathscheme/tokens drift"
+    return _render(pattern, values)
+
+
 def _has_token(pattern: str, name: str) -> bool:
     """True if `pattern` contains the exact $Token (not a longer look-alike)."""
     return any(m.group(1) == name for m in _TOKEN.finditer(pattern))
@@ -135,13 +186,22 @@ def sanitize_segment(segment: str) -> str:
     return cleaned.rstrip(". ")
 
 
+def _series_fmt(patterns: PathPatterns) -> SeriesFormat:
+    return SeriesFormat(
+        series=patterns.series_pattern,
+        name=patterns.series_name_pattern,
+        number=patterns.series_number_pattern,
+    )
+
+
 def build_target_path(root: Path, patterns: PathPatterns, book: BookUnit) -> Path:
     """Absolute target path = root / <sanitized folder segments> / <sanitized name>.m4b."""
+    ser = _series_fmt(patterns)
     # Split the pattern on "/" first, then expand+sanitize each segment, so a
     # "/" inside an expanded token value cannot create an extra directory level.
-    segments = [sanitize_segment(expand_pattern(s, book)) for s in patterns.folder.split("/")]
+    segments = [sanitize_segment(expand_pattern(s, book, series_fmt=ser)) for s in patterns.folder.split("/")]
     name_pattern = patterns.single_file or "$Title"
-    filename = sanitize_segment(expand_pattern(name_pattern, book)) + ".m4b"
+    filename = sanitize_segment(expand_pattern(name_pattern, book, series_fmt=ser)) + ".m4b"
     target = root
     # Empty segments (e.g. an authorless $Author) intentionally collapse: Path swallows "".
     for seg in segments:
@@ -158,8 +218,9 @@ def _normalized_ext(source_ext: str) -> str:
 
 
 def _book_folder(root: Path, patterns: PathPatterns, book: BookUnit) -> Path:
+    ser = _series_fmt(patterns)
     folder = root
-    for seg in (sanitize_segment(expand_pattern(s, book)) for s in patterns.folder.split("/")):
+    for seg in (sanitize_segment(expand_pattern(s, book, series_fmt=ser)) for s in patterns.folder.split("/")):
         folder = folder / seg
     return folder
 
@@ -173,15 +234,16 @@ def build_reorg_targets(
     books (>1 file) get $Part/$Total populated and, if the pattern omits $Part, a default
     suffix appended so parts cannot collide. Each target keeps its source file's extension.
     """
+    ser = _series_fmt(patterns)
     folder = _book_folder(root, patterns, book)
     total = len(ordered_files)
     base_pattern = patterns.single_file or "$Title"
     if total == 1:
-        name = sanitize_segment(expand_pattern(base_pattern, book))
+        name = sanitize_segment(expand_pattern(base_pattern, book, series_fmt=ser))
         return [folder / f"{name}{_normalized_ext(ordered_files[0].ext)}"]
     name_pattern = ensure_part_placeholder(base_pattern)
     return [
-        folder / f"{sanitize_segment(expand_pattern(name_pattern, book, part=i, total=total))}{_normalized_ext(sf.ext)}"
+        folder / f"{sanitize_segment(expand_pattern(name_pattern, book, part=i, total=total, series_fmt=ser))}{_normalized_ext(sf.ext)}"
         for i, sf in enumerate(ordered_files, start=1)
     ]
 
@@ -198,12 +260,24 @@ def _sample_book() -> BookUnit:
     return b
 
 
-def sample_target(folder_pattern: str, file_pattern: str) -> str:
+def sample_target(
+    folder_pattern: str,
+    file_pattern: str,
+    *,
+    series: str | None = None,
+    series_name: str | None = None,
+    series_number: str | None = None,
+) -> str:
     """Render the relative organize path for the sample book, for a Settings preview.
 
-    Empty patterns fall back to the same defaults `build_target_path` uses."""
+    Empty patterns fall back to the same defaults `build_target_path` uses. The series
+    sub-patterns, when omitted, use their LazyLibrarian defaults."""
+    defaults = SeriesFormat()
     patterns = PathPatterns(
         folder=folder_pattern or "$Author/$Title",
         single_file=file_pattern or "$Title",
+        series_pattern=series or defaults.series,
+        series_name_pattern=series_name or defaults.name,
+        series_number_pattern=series_number or defaults.number,
     )
     return str(build_target_path(Path("."), patterns, _sample_book()))

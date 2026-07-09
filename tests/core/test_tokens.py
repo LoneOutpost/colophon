@@ -22,7 +22,8 @@ def test_build_tokens_cover_renderer_keys():
     names = {t.name for t in BUILD_TOKENS}
     assert names == {
         "Author", "SortAuthor", "Title", "SortTitle", "Series", "SerName",
-        "SerNum", "PadNum", "PubYear", "Narrator", "Part", "Total", "Abridged",
+        "FmtName", "FmtNum", "Language", "SerNum", "PadNum", "PubYear",
+        "Narrator", "Part", "Total", "Abridged",
     }
 
 
@@ -46,10 +47,10 @@ def test_migrate_is_idempotent_and_leaves_unknown():
     assert migrate_filename_template("%bogus%") == "%bogus%"  # unknown left verbatim
 
 
-def test_sername_is_hidden_alias():
+def test_sername_is_build_only_raw_name():
     from colophon.core.tokens import token_by_name
     t = token_by_name("SerName")
-    assert t is not None and t.builds and t.hidden  # still renders, but not advertised
+    assert t is not None and t.builds and not t.parses  # raw series name, build-side only
 
 
 def test_migrate_directory_scheme():

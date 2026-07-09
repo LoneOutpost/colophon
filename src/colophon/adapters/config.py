@@ -34,6 +34,11 @@ class Config(BaseModel):
     directory_scheme: str = ""  # e.g. "Author/Series/Title"; "" disables directory inference
     organize_folder_pattern: str = "$Author/$Title"  # LazyLibrarian-style $Token folder grammar
     organize_file_pattern: str = "$Title"  # the M4B file name pattern (no extension)
+    # LazyLibrarian-style layered series formatting. $Series expands series_pattern, which
+    # composes $FmtName (series_name_pattern) and $FmtNum (series_number_pattern).
+    series_pattern: str = "($FmtName $FmtNum)"
+    series_name_pattern: str = "$SerName"
+    series_number_pattern: str = "Book #$SerNum"
     library_root: Path | None = None        # destination root for organized M4Bs
     reorg_delete_sources: bool = False  # delete originals after a verified no-encode reorg
     audiobookshelf_url: str | None = None

@@ -1130,6 +1130,9 @@ async def persist_dialog(
             return PathPatterns(
                 folder=folder_pat.value or cfg.organize_folder_pattern,
                 single_file=file_pat.value or cfg.organize_file_pattern,
+                series_pattern=cfg.series_pattern,
+                series_name_pattern=cfg.series_name_pattern,
+                series_number_pattern=cfg.series_number_pattern,
             )
 
         def show_options() -> None:

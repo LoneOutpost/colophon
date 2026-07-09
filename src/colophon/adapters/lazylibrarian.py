@@ -16,6 +16,11 @@ from pydantic import BaseModel
 class PathPatterns(BaseModel):
     folder: str = "$Author/$Title"
     single_file: str = ""
+    # LazyLibrarian's layered series formatting: $Series expands `series_pattern`, which
+    # composes $FmtName (series_name_pattern) and $FmtNum (series_number_pattern).
+    series_pattern: str = "($FmtName $FmtNum)"
+    series_name_pattern: str = "$SerName"
+    series_number_pattern: str = "Book #$SerNum"
 
 
 def read_audiobook_patterns(config_ini: Path) -> PathPatterns:

@@ -73,6 +73,9 @@ class AppContext:
         patterns = PathPatterns(
             folder=config.organize_folder_pattern,
             single_file=config.organize_file_pattern,
+            series_pattern=config.series_pattern,
+            series_name_pattern=config.series_name_pattern,
+            series_number_pattern=config.series_number_pattern,
         )
         sources = arrange_sources(
             build_all_sources(config),

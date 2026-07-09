@@ -101,17 +101,37 @@ def render_settings(controller: AppController) -> None:
                 "File name pattern (no extension)", value=cfg.organize_file_pattern
             ).props(field).classes("w-full")
 
+            ui.label(
+                "Series formatting — $Series expands the Series pattern, which composes "
+                "$FmtName (Series name pattern) and $FmtNum (Series number pattern). "
+                "Use $SerName / $SerNum for the raw name and number."
+            ).classes("text-caption colophon-muted q-mt-sm")
+            series_pat = ui.input(
+                "Series pattern ($Series)", value=cfg.series_pattern
+            ).props(field).classes("w-full")
+            series_name_pat = ui.input(
+                "Series name pattern ($FmtName)", value=cfg.series_name_pattern
+            ).props(field).classes("w-full")
+            series_number_pat = ui.input(
+                "Series number pattern ($FmtNum)", value=cfg.series_number_pattern
+            ).props(field).classes("w-full")
+
             _token_reference()
 
             preview = ui.label("").classes("text-caption text-weight-medium")
 
             def _update_preview() -> None:
                 preview.set_text(
-                    "Preview: " + sample_target(folder_pat.value, file_pat.value)
+                    "Preview: " + sample_target(
+                        folder_pat.value, file_pat.value,
+                        series=series_pat.value,
+                        series_name=series_name_pat.value,
+                        series_number=series_number_pat.value,
+                    )
                 )
 
-            folder_pat.on_value_change(lambda _e: _update_preview())
-            file_pat.on_value_change(lambda _e: _update_preview())
+            for _pat in (folder_pat, file_pat, series_pat, series_name_pat, series_number_pat):
+                _pat.on_value_change(lambda _e: _update_preview())
             _update_preview()
 
             with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
@@ -388,6 +408,9 @@ def render_settings(controller: AppController) -> None:
                     "library_root": _opt_path(library_root.value),
                     "organize_folder_pattern": folder_pat.value or "$Author/$Title",
                     "organize_file_pattern": file_pat.value or "$Title",
+                    "series_pattern": series_pat.value or "($FmtName $FmtNum)",
+                    "series_name_pattern": series_name_pat.value or "$SerName",
+                    "series_number_pattern": series_number_pat.value or "Book #$SerNum",
                     "reorg_delete_sources": reorg_delete.value,
                     "filename_template": template.value or "$Author - $Title",
                     "directory_scheme": scheme.value,

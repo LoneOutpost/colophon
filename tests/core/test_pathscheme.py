@@ -24,14 +24,14 @@ def _book() -> BookUnit:
 
 def test_expand_common_tokens():
     b = _book()
-    assert expand_pattern("$Author/$Series/$Title", b) == "Brandon Sanderson/Stormlight Archive/The Way of Kings"
+    assert expand_pattern("$Author/$SerName/$Title", b) == "Brandon Sanderson/Stormlight Archive/The Way of Kings"
     assert expand_pattern("$PubYear - $Title", b) == "2010 - The Way of Kings"
 
 
 def test_padnum_zero_pads_sernum():
     b = _book()
-    assert expand_pattern("$Series $PadNum", b) == "Stormlight Archive 01"
-    assert expand_pattern("$Series $SerNum", b) == "Stormlight Archive 1"
+    assert expand_pattern("$SerName $PadNum", b) == "Stormlight Archive 01"
+    assert expand_pattern("$SerName $SerNum", b) == "Stormlight Archive 1"
 
 
 def test_unknown_token_expands_empty():
@@ -119,7 +119,7 @@ def test_double_dollar_is_literal():
 def test_sample_target_renders_relative_path():
     from colophon.core.pathscheme import sample_target
 
-    out = sample_target("$Author/$Series #$PadNum - $Title", "$Title")
+    out = sample_target("$Author/$SerName #$PadNum - $Title", "$Title")
     assert out == "Brandon Sanderson/The Stormlight Archive #01 - The Way of Kings/The Way of Kings.m4b"
 
 
@@ -175,7 +175,7 @@ def test_nested_group_raises():
 
 def test_group_within_segment_renders_in_build(tmp_path):
     b = _book()  # $SerNum == "1"
-    pats = PathPatterns(folder="$Author/$Series", single_file="[$SerNum - ]$Title")
+    pats = PathPatterns(folder="$Author/$SerName", single_file="[$SerNum - ]$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Brandon Sanderson" / "Stormlight Archive" / "1 - The Way of Kings.m4b"
 
@@ -186,6 +186,52 @@ def test_group_drops_in_filename_while_folder_segment_collapses(tmp_path):
     pats = PathPatterns(folder="$Author/$Title", single_file="[$SerNum - ]$Title")
     target = build_target_path(tmp_path, pats, b)
     assert target == tmp_path / "Solo" / "Solo.m4b"
+
+
+def test_series_token_composes_default_ll_format():
+    b = _book()  # Stormlight Archive #1
+    # $Series defaults to "($FmtName $FmtNum)" -> "($SerName Book #$SerNum)"
+    assert expand_pattern("$Series", b) == "(Stormlight Archive Book #1)"
+    assert expand_pattern("$Author/$Series/$Title", b) == \
+        "Brandon Sanderson/(Stormlight Archive Book #1)/The Way of Kings"
+
+
+def test_fmtname_and_fmtnum_tokens_available():
+    b = _book()
+    assert expand_pattern("$FmtName", b) == "Stormlight Archive"
+    assert expand_pattern("$FmtNum", b) == "Book #1"
+
+
+def test_series_tokens_empty_without_series():
+    b = BookUnit.new(source_folder=Path("/x"))
+    b.title = "Solo"
+    for tok in ("$Series", "$FmtName", "$FmtNum", "$SerName", "$SerNum"):
+        assert expand_pattern(tok, b) == ""
+
+
+def test_series_sub_patterns_are_configurable():
+    from colophon.core.pathscheme import SeriesFormat
+
+    b = _book()
+    fmt = SeriesFormat(series="$FmtName, $FmtNum", name="$SerName", number="Vol. $PadNum")
+    assert expand_pattern("$Series", b, series_fmt=fmt) == "Stormlight Archive, Vol. 01"
+
+
+def test_series_number_group_drops_when_no_sequence():
+    from colophon.core.pathscheme import SeriesFormat
+
+    b = _book()
+    b.series = [SeriesRef(name="Standalone Saga")]  # name, no sequence
+    # A grouped number pattern collapses cleanly, leaving just the name in the label.
+    fmt = SeriesFormat(series="($FmtName$FmtNum)", name="$SerName", number="[ Book #$SerNum]")
+    assert expand_pattern("$Series", b, series_fmt=fmt) == "(Standalone Saga)"
+
+
+def test_language_token_renders_book_language():
+    b = _book()
+    b.language = "English"
+    assert expand_pattern("$Language", b) == "English"
+    assert expand_pattern("$Language", _book()) == ""  # empty when unset
 
 
 def test_renderer_keys_match_build_tokens():
