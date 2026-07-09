@@ -1864,18 +1864,31 @@ def render_workspace(controller: AppController, initial_filter: str = "") -> Non
     # per-stage counts stay current after a scan / match / persist.
     _stepper_refresh: dict[str, object] = {"fn": lambda: None}
 
+    def repaint(
+        *, nav: bool = False, middle: bool = False, list: bool = False,
+        status: bool = False, detail_book_id: str | None = None,
+    ) -> None:
+        """The single Library repaint path. Each flag rebuilds exactly one pane, so a
+        mutation declares its blast radius and cannot silently skip a pane. Heavy panes
+        rebuild through their existing (windowed) functions; a cold derivation renders a
+        skeleton and derives off-thread (handled inside the list/nav refreshers)."""
+        if nav:
+            refresh_nav()
+        if middle:
+            _render_middle()
+        if list:
+            refresh_list()
+        if status:
+            refresh_status()
+        if detail_book_id is not None:
+            show_detail(detail_book_id)
+        _stepper_refresh["fn"]()
+        if len(selected_ids) >= 2:
+            show_bulk()
+
     def _refresh_all() -> None:
         with span("refresh_all"):
-            with span("nav render"):
-                refresh_nav()
-            with span("middle render"):
-                _render_middle()
-            with span("status render"):
-                refresh_status()
-            _stepper_refresh["fn"]()
-            # Keep an open bulk editor truthful after a global refresh (undo, scan, etc.).
-            if len(selected_ids) >= 2:
-                show_bulk()
+            repaint(nav=True, middle=True, status=True)
 
     # --- async actions ---
     def _ui_safe(fn) -> None:

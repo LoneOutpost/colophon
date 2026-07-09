@@ -92,3 +92,10 @@ def test_skeleton_helpers_exist():
     import inspect
     params = inspect.signature(skeleton.skeleton_rows).parameters
     assert "count" in params and "height" in params
+
+
+def test_repaint_is_defined_in_workspace_source():
+    import inspect, colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "def repaint(" in src
+    assert "repaint(nav=True, middle=True, status=True)" in src  # _refresh_all routes through it
