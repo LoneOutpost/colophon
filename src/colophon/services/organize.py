@@ -75,6 +75,8 @@ def organize_book_parts(
     a book folder. Never overwrites an existing file; on any failure the copies made
     this call are removed and sources are left intact. On success sets output_path to
     the book folder, marks ORGANIZE fresh, and deletes sources only if requested."""
+    if not pairs:
+        return OrganizeResult(book_id=book.id, error="no files to organize")
     targets = [dst for _, dst in pairs]
     folder = targets[0].parent
     if any(dst.exists() for dst in targets):

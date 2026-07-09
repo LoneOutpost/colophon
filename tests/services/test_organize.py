@@ -7,6 +7,14 @@ from colophon.core.pathscheme import build_target_path
 from colophon.services.organize import organize_book, organize_book_parts
 
 
+def test_organize_parts_empty_pairs_returns_error_without_crashing(tmp_path):
+    repo = _repo(tmp_path)
+    book = _book(tmp_path)
+    repo.upsert(book)
+    result = organize_book_parts(repo, book, [], delete_sources=False)
+    assert result.moved is False and result.error == "no files to organize"
+
+
 def _repo(tmp_path) -> BookUnitRepo:
     conn = connect(tmp_path / "db.sqlite")
     migrate(conn)

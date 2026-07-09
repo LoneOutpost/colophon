@@ -2081,10 +2081,11 @@ class AppController:
                     batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
                     target=str(dst), before=None, outcome="ok",
                 ))
-                tag_file(
+                if not tag_file(
                     dst, cbook, operations=self.ctx.operations, batch_id=batch_id,
                     track=(idx if total > 1 else None),
-                )
+                ):
+                    logger.warning(f"track tag write failed for {dst} (book {book.id})")
             return BookProcessResult(book_id=book.id, status="done")
 
         # Encode path: transcode all source files into a single output, then organize + tag.
