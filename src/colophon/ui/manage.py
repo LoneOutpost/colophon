@@ -102,11 +102,12 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
         ).classes("text-caption colophon-muted q-mt-sm")
 
         armed = {"value": False}  # a large removal arms on the first click, runs on the second
+        running = {"active": False}  # re-entrancy guard so the spinner stays fully visible
 
         async def _confirm() -> None:
             checked = {key for key, cb in checks.items() if cb.value}
             ids = _selected_cleanup_ids(report, checked)
-            if not ids:
+            if not ids or running["active"]:
                 return
             if _cleanup_needs_confirm(len(ids)) and not armed["value"]:
                 armed["value"] = True
@@ -117,15 +118,19 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
                 )
                 confirm_note.set_visibility(True)
                 return
-            remove_btn.props("disable")  # block a double-click while the deletes run
+            running["active"] = True
             try:
+                # busy() shows the button's spinner (label swaps to a spinner) for the whole
+                # delete; the guard above — not disabling the button — is what blocks a re-click,
+                # so the spinner renders at full opacity instead of greyed out.
                 with busy(remove_btn):
                     removed = await asyncio.to_thread(controller.cleanup_remove, ids)
             except Exception:
                 logger.exception("clean-up remove failed")
                 ui.notify("Clean-up failed (see logs)", type="negative")
-                _sync_enabled()  # re-enable per the current checkbox state so a retry is possible
                 return
+            finally:
+                running["active"] = False
             dialog.close()
             ui.notify(f"Removed {removed} " + ("entry" if removed == 1 else "entries"))
 
