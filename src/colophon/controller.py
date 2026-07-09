@@ -2006,22 +2006,25 @@ class AppController:
             "ready": by_state.get(BookState.READY.value, 0),
         }
 
-    def scope_counts(self) -> dict[str, int]:
-        """Cheap Ready and total counts for the scope selector, from the indexed state column (no
-        hydration). Reads the same stored state as `books_for_scope`, so the toggle's 'Ready' label
-        always agrees with the header stepper and with the set that scope actually resolves to."""
+    def scope_counts(self, *, ready_state: BookState = BookState.READY) -> dict[str, int]:
+        """Cheap ready-tier and total counts for the scope selector, from the indexed state column
+        (no hydration). `ready_state` selects which state the 'ready' chip counts: READY for
+        Persist, IDENTIFIED for Match, so the toggle label always agrees with the set that scope
+        resolves to."""
         by_state = self.ctx.books.count_by_state()
-        return {"ready": by_state.get(BookState.READY.value, 0), "total": sum(by_state.values())}
+        return {"ready": by_state.get(ready_state.value, 0), "total": sum(by_state.values())}
 
     @timed("books_for_scope")
-    def books_for_scope(self, scope: str, selected_ids: set[str] | None = None) -> list[BookUnit]:
+    def books_for_scope(
+        self, scope: str, selected_ids: set[str] | None = None,
+        *, ready_state: BookState = BookState.READY,
+    ) -> list[BookUnit]:
         """Resolve a Match/Persist scope to a concrete book list (hydrated). 'selected' = the given
-        ids; 'ready' = books in the Ready state; anything else ('all') = the whole library. The ready
-        scope reads the same stored `state` column as `pipeline_counts`, so the header count and the
-        resolved set always agree. 'selected' and 'ready' fetch only their subset — no whole-library
-        hydration for a handful of books."""
+        ids; 'ready' = books in `ready_state` (READY for Persist, IDENTIFIED for Match); anything
+        else ('all') = the whole library. The ready scope reads the same stored `state` column as
+        the header counts, so the header count and the resolved set always agree."""
         if scope == "ready":
-            return self._hydrate(self.ctx.books.list_by_state(BookState.READY))
+            return self._hydrate(self.ctx.books.list_by_state(ready_state))
         if scope == "selected":
             stored = (self.ctx.books.get(i) for i in (selected_ids or set()))
             return self._hydrate([b for b in stored if b is not None])
