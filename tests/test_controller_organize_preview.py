@@ -49,3 +49,26 @@ def test_organize_preview_flags_blocked(tmp_path):
     (row,) = ctrl.organize_preview([book])
     assert row.blocked is True
     assert not row.target.exists()
+
+
+def test_remove_from_library_drops_record_keeps_output(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ctx.config.scan_paths = [tmp_path / "ingest"]
+    src = tmp_path / "ingest" / "Frank Herbert" / "Dune"
+    src.mkdir(parents=True)
+    (src / "Dune.mp3").write_bytes(b"")
+    out = tmp_path / "library" / "Frank Herbert" / "Dune.m4b"
+    out.parent.mkdir(parents=True)
+    out.write_bytes(b"organized output")
+    book = BookUnit.new(source_folder=src)
+    book.title = "Dune"
+    book.output_path = out
+    book.source_files = [SourceFile(path=src / "Dune.mp3", size=1, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    n = ctrl.remove_from_library([book.id])
+    assert n == 1
+    assert ctx.books.get(book.id) is None       # record dropped
+    assert out.exists()                          # output file NOT touched
+    assert (src / "Dune.mp3").exists()           # source originals NOT touched (that's delete-sources)

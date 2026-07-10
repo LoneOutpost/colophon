@@ -655,6 +655,13 @@ class AppController:
         self._resync_roots(roots)
         return len(ids)
 
+    def remove_from_library(self, book_ids: Iterable[str]) -> int:
+        """Drop books from Colophon after they've been organized to their destination:
+        the record + edit history + operations + graph nodes go, but their organized output
+        files (and their source originals) are left on disk. Deleting files is the separate,
+        independent delete-sources concern. Returns the number removed."""
+        return self.cleanup_remove(book_ids)
+
     def remove_missing(self, book: BookUnit) -> None:
         """Delete an orphaned (missing) book record and its history/operations rows.
         The three deletes share one transaction (commit on the last) so the record and
