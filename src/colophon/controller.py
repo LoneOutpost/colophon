@@ -2104,22 +2104,34 @@ class AppController:
         return [(b.id, build_target_path(root, pats, self._canonical_book(b))) for b in books]
 
     def organize_preview(
-        self, books: list[BookUnit], *, patterns: PathPatterns | None = None
+        self, books: list[BookUnit], *, patterns: PathPatterns | None = None, encode: bool = True
     ) -> list[OrganizePreviewRow]:
-        """Dry-run rows for the Persist preview: each book's organize destination (via
-        organize_targets), whether the target already exists (collision), and whether a
-        blocking error will skip it. Writes nothing to disk."""
+        """Dry-run rows for the Persist preview: each book's organize destination, whether it
+        collides with existing content, and whether a blocking error will skip it. Writes
+        nothing. When `encode` (the common path), the destination is the produced M4B file and
+        a collision is that file already existing. Without encode, a reorg copies the original
+        files into the book folder (one or many), so the destination shown is that folder and a
+        collision is a folder that already holds content; exact per-file collisions are still
+        caught at organize time."""
         targets = dict(self.organize_targets(books, patterns=patterns))
-        return [
-            OrganizePreviewRow(
-                book_id=b.id,
-                title=b.title or "(untitled)",
-                target=targets[b.id],
-                collision=targets[b.id].exists(),
-                blocked=has_blocking_error(b),
+        rows: list[OrganizePreviewRow] = []
+        for b in books:
+            target = targets[b.id]
+            if encode:
+                dest, collision = target, target.exists()
+            else:
+                folder = target.parent
+                dest, collision = folder, (folder.exists() and any(folder.iterdir()))
+            rows.append(
+                OrganizePreviewRow(
+                    book_id=b.id,
+                    title=b.title or "(untitled)",
+                    target=dest,
+                    collision=collision,
+                    blocked=has_blocking_error(b),
+                )
             )
-            for b in books
-        ]
+        return rows
 
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->

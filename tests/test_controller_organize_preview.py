@@ -51,6 +51,24 @@ def test_organize_preview_flags_blocked(tmp_path):
     assert not row.target.exists()
 
 
+def test_organize_preview_reorg_shows_folder_and_folder_collision(tmp_path):
+    # Without encode, a reorg copies the originals into the book folder (one or many), so the
+    # preview shows that folder (not a fake single .m4b) and flags a folder that already holds content.
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _book(ctx, tmp_path)
+    target = dict(ctrl.organize_targets([book]))[book.id]
+
+    (row,) = ctrl.organize_preview([book], encode=False)
+    assert row.target == target.parent          # destination folder, not a fake .m4b path
+    assert row.collision is False               # folder doesn't exist yet
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    (target.parent / "existing.mp3").write_bytes(b"x")
+    (row2,) = ctrl.organize_preview([book], encode=False)
+    assert row2.collision is True               # a folder that already holds content collides
+
+
 def test_remove_from_library_drops_record_keeps_output(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)

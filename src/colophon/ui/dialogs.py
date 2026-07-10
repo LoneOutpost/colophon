@@ -1253,7 +1253,6 @@ async def persist_dialog(
                             controller.record_organize_pattern(
                                 opts.patterns.folder, opts.patterns.single_file
                             )
-                        if opts.organize:
                             show_preview(books, bool(tag.value), opts, bool(rem.value))
                         else:
                             notready = sum(1 for b in books if not is_ready_to_persist(b))
@@ -1282,7 +1281,7 @@ async def persist_dialog(
                     ).props("unelevated color=warning")
 
         def show_preview(books, do_tag, opts, remove_after) -> None:
-            rows = controller.organize_preview(books, patterns=opts.patterns)
+            rows = controller.organize_preview(books, patterns=opts.patterns, encode=opts.encode)
             body.clear()
             with body:
                 ui.label("Confirm destinations").classes("text-subtitle1")
@@ -1293,12 +1292,14 @@ async def persist_dialog(
                 collisions = sum(1 for r in rows if r.collision)
                 if collisions:
                     ui.label(
-                        f"⚠ {collisions} target(s) already exist and will be skipped."
+                        f"⚠ {collisions} destination(s) already exist — those books won't be "
+                        f"moved (they'll fail rather than overwrite)."
                     ).classes("text-caption text-warning")
                 notready = sum(1 for b in books if not is_ready_to_persist(b))
                 if notready:
                     ui.label(
-                        f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed."
+                        f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed — "
+                        f"persisting may write unverified metadata."
                     ).classes("text-caption text-warning")
                 with ui.column().classes("w-full q-gutter-none").style(
                     "max-height: 16rem; overflow-y: auto"
@@ -1322,10 +1323,17 @@ async def persist_dialog(
                     ).classes("text-caption text-warning")
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Back", on_click=show_options).props("flat")
+                    # When some books aren't Ready, keep the not-ready acknowledgment visible on
+                    # the confirm action itself (warning colour + the count), so it can't be read
+                    # past — the preview replaces the old dedicated not-ready confirm screen.
+                    confirm_label = (
+                        f"Confirm & persist ({notready} not ready)" if notready else "Confirm & persist"
+                    )
+                    confirm_props = "unelevated color=warning" if notready else "unelevated"
                     ui.button(
-                        "Confirm & persist", icon="save",
+                        confirm_label, icon="save",
                         on_click=lambda: run_persist(books, do_tag, opts, remove_after),
-                    ).props("unelevated")
+                    ).props(confirm_props)
 
         async def run_persist(books, do_tag, opts, remove_after=False) -> None:
             body.clear()
