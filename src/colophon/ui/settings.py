@@ -86,12 +86,12 @@ def render_settings(controller: AppController) -> None:
 
         with page_section(
             "Organizing (write files out)",
-            "Defaults for where organized M4Bs are written and how they are named, "
+            "Defaults for where organized books are written and how they are named, "
             "using LazyLibrarian-style $Token markup. You can override these per run "
             "in the Encode + organize dialog.",
         ):
             library_root = ui.input(
-                "Library root (destination for organized M4Bs)",
+                "Library root (destination for organized books)",
                 value=str(cfg.library_root or ""),
             ).props(field).classes("w-full")
             folder_pat = ui.input(

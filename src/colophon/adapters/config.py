@@ -39,7 +39,7 @@ class Config(BaseModel):
     series_pattern: str = "($FmtName[ $FmtNum])"
     series_name_pattern: str = "$SerName"
     series_number_pattern: str = "Book #$SerNum"
-    library_root: Path | None = None        # destination root for organized M4Bs
+    library_root: Path | None = None        # final destination root for organized books
     reorg_delete_sources: bool = False  # delete originals after a verified no-encode reorg
     audiobookshelf_url: str | None = None
     audiobookshelf_token: str | None = None
@@ -105,7 +105,7 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # Required before scanning will find anything.
 scan_paths = []
 
-# Where organized M4B files are written. Required before encoding/organizing.
+# Final destination for organized books. Required before encoding/organizing.
 # library_root = "/path/to/audiobooks/library"
 
 # Template used to parse metadata from filenames when embedded tags are missing.
