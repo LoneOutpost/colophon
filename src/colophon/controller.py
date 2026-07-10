@@ -692,6 +692,10 @@ class AppController:
         if out is None:
             return None
         new_folder = out if out.is_dir() else out.parent
+        # Identity is keyed on the output path (unique per book — organize never overwrites),
+        # not on new_folder: several encoded M4Bs can share a parent folder and keying on the
+        # folder would collide. A book graduated to the library is never folder-scanned, so the
+        # id != id_for(source_folder) divergence in the encode case is intentional and harmless.
         new_id = BookUnit.id_for(out)
         old_id = book.id
         if new_id == old_id:
@@ -700,16 +704,20 @@ class AppController:
             logger.warning(f"skip re-anchor {old_id}: id {new_id} already exists at {out}")
             return None
         old_root = self._scan_root_for_path(book.source_folder)
+        # Read the output files (iterdir + probe) BEFORE any DB write, so a filesystem error
+        # can't leave a half-migrated row set (history/operations re-keyed and the old book row
+        # deleted without the new one written). All the DB writes below share one commit.
         output_files = (
             sorted(p for p in out.iterdir() if is_audio_file(p)) if out.is_dir() else [out]
         )
+        new_source_files = [read_audio_metadata(p)[0] for p in output_files]
         self.ctx.history.reassign_book(old_id, new_id, commit=False)
         self.ctx.operations.reassign_book(old_id, new_id, commit=False)
         self._migrate_cover_file(book, new_id, new_folder)
         self.ctx.books.delete(old_id, commit=False)
         book.id = new_id
         book.source_folder = new_folder
-        book.source_files = [read_audio_metadata(p)[0] for p in output_files]
+        book.source_files = new_source_files
         book.touch()
         self.ctx.books.upsert(book)
         return old_root, self._scan_root_for_path(new_folder)
