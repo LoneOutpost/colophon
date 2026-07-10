@@ -1186,6 +1186,13 @@ async def persist_dialog(
                 conc.bind_visibility_from(enc, "value")
                 dele = ui.checkbox("Delete source files after (verified)").props("dense")
                 dele.bind_visibility_from(enc, "value")
+                rem = ui.checkbox("Remove from library after organizing").props("dense")
+                rem.bind_visibility_from(org, "value")
+                ui.label(
+                    "Removed books leave Colophon; their organized files stay at the "
+                    "destination. Colophon won't manage them again unless the destination is "
+                    "added to the scan paths."
+                ).classes("text-caption colophon-muted").bind_visibility_from(rem, "value")
 
                 block_warn = ui.label("").classes("text-caption text-negative q-mt-xs")
                 warn = ui.label("").classes("text-caption text-warning q-mt-xs")
@@ -1267,10 +1274,10 @@ async def persist_dialog(
                     ui.button("Back", on_click=show_options).props("flat")
                     ui.button(
                         "Persist anyway", icon="save",
-                        on_click=lambda: run_persist(books, do_tag, opts),
+                        on_click=lambda: run_persist(books, do_tag, opts, False),
                     ).props("unelevated color=warning")
 
-        async def run_persist(books, do_tag, opts) -> None:
+        async def run_persist(books, do_tag, opts, remove_after=False) -> None:
             body.clear()
             token = CancelToken()
             _KIND = {"done": "ok", "failed": "fail", "cancelled": "skip", "skipped": "skip"}
@@ -1313,6 +1320,13 @@ async def persist_dialog(
                 for r in job.results:
                     if r.status in {"failed", "skipped"} and r.detail:
                         log.update(r.book_id, f"{r.status}: {r.detail}", kind=_KIND.get(r.status, "fail"))
+                if remove_after and opts.organize:
+                    removed_ids = [r.book_id for r in job.results if r.status == "done"]
+                    if removed_ids:
+                        n = await asyncio.to_thread(controller.remove_from_library, removed_ids)
+                        for bid in removed_ids:
+                            log.update(bid, "removed from library", kind="ok")
+                        logger.info(f"removed {n} organized book(s) from the library")
             clear_selection()
             await controller.trigger_abs_scan()  # best-effort library rescan
 
@@ -1324,7 +1338,7 @@ async def persist_dialog(
                 note += f", {c['skip']} skipped"
 
             def _retry(ids: list[str]) -> object:
-                return run_persist([b for b in books if b.id in ids], do_tag, opts)
+                return run_persist([b for b in books if b.id in ids], do_tag, opts, remove_after)
 
             log.finish(note, on_close=_close, on_retry=_retry)
 
