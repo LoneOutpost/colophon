@@ -274,6 +274,14 @@ class HistoryRepo:
         if commit:
             self.conn.commit()
 
+    def reassign_book(self, old_id: str, new_id: str, commit: bool = True) -> None:
+        """Re-key every edit-history row from `old_id` to `new_id` (identity move)."""
+        self.conn.execute(
+            "UPDATE edit_history SET book_id = ? WHERE book_id = ?", (new_id, old_id)
+        )
+        if commit:
+            self.conn.commit()
+
 
 @dataclass
 class OperationRepo:
@@ -320,6 +328,14 @@ class OperationRepo:
     def delete_for_book(self, book_id: str, commit: bool = True) -> None:
         """Remove all operation rows for a deleted book."""
         self.conn.execute("DELETE FROM operations WHERE book_id = ?", (book_id,))
+        if commit:
+            self.conn.commit()
+
+    def reassign_book(self, old_id: str, new_id: str, commit: bool = True) -> None:
+        """Re-key every operations row from `old_id` to `new_id` (identity move)."""
+        self.conn.execute(
+            "UPDATE operations SET book_id = ? WHERE book_id = ?", (new_id, old_id)
+        )
         if commit:
             self.conn.commit()
 
