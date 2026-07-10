@@ -24,10 +24,11 @@ class SeriesFormat:
     """The three LazyLibrarian series sub-patterns that compose the $Series label.
 
     `$FmtName` expands `name`, `$FmtNum` expands `number`, and `$Series` expands
-    `series` (which may reference both). All three render empty for a book with no
-    series, so a series segment collapses cleanly."""
+    `series` (which may reference both). Each derived token renders empty when the
+    variables it references are blank (a book with no series, or a series with no
+    number), so `series` brackets the separator ([ $FmtNum]) to drop it as a unit."""
 
-    series: str = "($FmtName $FmtNum)"
+    series: str = "($FmtName[ $FmtNum])"
     name: str = "$SerName"
     number: str = "Book #$SerNum"
 
@@ -70,8 +71,8 @@ def _token_values(
             "SerName": ser_name, "SerNum": sernum, "PadNum": padnum,
             "PubYear": pub_year, "Language": language,
         }
-        fmt_name = _render(series_fmt.name, base)
-        fmt_num = _render(series_fmt.number, base)
+        fmt_name = _render_derived(series_fmt.name, base)
+        fmt_num = _render_derived(series_fmt.number, base)
         series_label = _render(series_fmt.series, {**base, "FmtName": fmt_name, "FmtNum": fmt_num})
     narrator = book.narrators[0] if book.narrators else ""
     abridged = ""
@@ -112,6 +113,19 @@ def _group_is_empty(content: str, values: dict[str, str]) -> bool:
     """A conditional group drops if ANY $Token inside it expands to empty. A group with
     no tokens (only literals) never drops."""
     return any(values.get(m.group(1), "") == "" for m in _TOKEN.finditer(content))
+
+
+def _render_derived(text: str, values: dict[str, str]) -> str:
+    """Render a series sub-pattern ($FmtName / $FmtNum). Unlike a full path segment, a
+    derived token collapses to empty when every $Token it references is empty, so its
+    literal scaffolding (e.g. the "Book #" in "Book #$SerNum") can't leak into an outer
+    optional group and keep it from dropping. A pure-literal or partly-filled pattern
+    renders normally."""
+    scan = text.replace("$$", _DOLLAR_SENTINEL)  # don't count an escaped "$$" as a token
+    tokens = [m.group(1) for m in _TOKEN.finditer(scan)]
+    if tokens and all(values.get(t, "") == "" for t in tokens):
+        return ""
+    return _render(text, values)
 
 
 def _render(text: str, values: dict[str, str]) -> str:

@@ -18,7 +18,7 @@ class PathPatterns(BaseModel):
     single_file: str = ""
     # LazyLibrarian's layered series formatting: $Series expands `series_pattern`, which
     # composes $FmtName (series_name_pattern) and $FmtNum (series_number_pattern).
-    series_pattern: str = "($FmtName $FmtNum)"
+    series_pattern: str = "($FmtName[ $FmtNum])"
     series_name_pattern: str = "$SerName"
     series_number_pattern: str = "Book #$SerNum"
 

@@ -36,7 +36,7 @@ class Config(BaseModel):
     organize_file_pattern: str = "$Title"  # the M4B file name pattern (no extension)
     # LazyLibrarian-style layered series formatting. $Series expands series_pattern, which
     # composes $FmtName (series_name_pattern) and $FmtNum (series_number_pattern).
-    series_pattern: str = "($FmtName $FmtNum)"
+    series_pattern: str = "($FmtName[ $FmtNum])"
     series_name_pattern: str = "$SerName"
     series_number_pattern: str = "Book #$SerNum"
     library_root: Path | None = None        # destination root for organized M4Bs
