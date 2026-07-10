@@ -190,7 +190,7 @@ def test_group_drops_in_filename_while_folder_segment_collapses(tmp_path):
 
 def test_series_token_composes_default_ll_format():
     b = _book()  # Stormlight Archive #1
-    # $Series defaults to "($FmtName $FmtNum)" -> "($SerName Book #$SerNum)"
+    # $Series defaults to "($FmtName[ $FmtNum])" -> "($SerName Book #$SerNum)"
     assert expand_pattern("$Series", b) == "(Stormlight Archive Book #1)"
     assert expand_pattern("$Author/$Series/$Title", b) == \
         "Brandon Sanderson/(Stormlight Archive Book #1)/The Way of Kings"
@@ -225,6 +225,37 @@ def test_series_number_group_drops_when_no_sequence():
     # A grouped number pattern collapses cleanly, leaving just the name in the label.
     fmt = SeriesFormat(series="($FmtName$FmtNum)", name="$SerName", number="[ Book #$SerNum]")
     assert expand_pattern("$Series", b, series_fmt=fmt) == "(Standalone Saga)"
+
+
+def test_derived_number_collapses_when_its_variable_is_blank():
+    # A derived token ($FmtNum) chains blankness: when every variable it references is
+    # empty, its literal scaffolding ("Book #") does NOT leak — it renders empty, so an
+    # outer optional group around it drops.
+    from colophon.core.pathscheme import SeriesFormat
+
+    b = _book()
+    b.series = [SeriesRef(name="Standalone")]  # name, no sequence -> $SerNum blank
+    fmt = SeriesFormat(series="($FmtName[ $FmtNum])", name="$SerName", number="Book #$SerNum")
+    assert expand_pattern("$FmtNum", b, series_fmt=fmt) == ""           # collapsed, not "Book #"
+    assert expand_pattern("$Series", b, series_fmt=fmt) == "(Standalone)"
+
+
+def test_derived_number_kept_when_variable_present():
+    # The collapse only fires when ALL referenced variables are blank; a real number renders.
+    from colophon.core.pathscheme import SeriesFormat
+
+    b = _book()  # sequence 1.0 -> $SerNum == "1"
+    fmt = SeriesFormat(series="($FmtName[ $FmtNum])", name="$SerName", number="Book #$SerNum")
+    assert expand_pattern("$FmtNum", b, series_fmt=fmt) == "Book #1"
+    assert expand_pattern("$Series", b, series_fmt=fmt) == "(Stormlight Archive Book #1)"
+
+
+def test_default_series_pattern_drops_number_cleanly_without_sequence():
+    # The shipped default now brackets the separator, so a named series with no number
+    # renders "(Name)" rather than "(Name Book #)".
+    b = _book()
+    b.series = [SeriesRef(name="Standalone")]
+    assert expand_pattern("$Series", b) == "(Standalone)"
 
 
 def test_language_token_renders_book_language():

@@ -408,7 +408,7 @@ def render_settings(controller: AppController) -> None:
                     "library_root": _opt_path(library_root.value),
                     "organize_folder_pattern": folder_pat.value or "$Author/$Title",
                     "organize_file_pattern": file_pat.value or "$Title",
-                    "series_pattern": series_pat.value or "($FmtName $FmtNum)",
+                    "series_pattern": series_pat.value or "($FmtName[ $FmtNum])",
                     "series_name_pattern": series_name_pat.value or "$SerName",
                     "series_number_pattern": series_number_pat.value or "Book #$SerNum",
                     "reorg_delete_sources": reorg_delete.value,
