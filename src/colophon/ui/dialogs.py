@@ -1120,6 +1120,7 @@ async def persist_dialog(
 
     with modal() as dialog, ui.card().classes("w-[30rem]"):
         cfg = controller.ctx.config
+        _PREVIEW_CAP = 50
         body = ui.column().classes("w-full")
 
         def _close() -> None:
@@ -1252,11 +1253,14 @@ async def persist_dialog(
                             controller.record_organize_pattern(
                                 opts.patterns.folder, opts.patterns.single_file
                             )
-                        notready = sum(1 for b in books if not is_ready_to_persist(b))
-                        if notready:
-                            _confirm(books, bool(tag.value), opts, notready)
+                        if opts.organize:
+                            show_preview(books, bool(tag.value), opts, bool(rem.value))
                         else:
-                            await run_persist(books, bool(tag.value), opts)
+                            notready = sum(1 for b in books if not is_ready_to_persist(b))
+                            if notready:
+                                _confirm(books, bool(tag.value), opts, notready)
+                            else:
+                                await run_persist(books, bool(tag.value), opts, False)
 
                     ui.button("Persist", icon="save", on_click=_run).props("unelevated")
 
@@ -1276,6 +1280,52 @@ async def persist_dialog(
                         "Persist anyway", icon="save",
                         on_click=lambda: run_persist(books, do_tag, opts, False),
                     ).props("unelevated color=warning")
+
+        def show_preview(books, do_tag, opts, remove_after) -> None:
+            rows = controller.organize_preview(books, patterns=opts.patterns)
+            body.clear()
+            with body:
+                ui.label("Confirm destinations").classes("text-subtitle1")
+                ui.label(
+                    "Where each book will be organized under the library. Nothing moves "
+                    "until you confirm."
+                ).classes("text-caption colophon-muted")
+                collisions = sum(1 for r in rows if r.collision)
+                if collisions:
+                    ui.label(
+                        f"⚠ {collisions} target(s) already exist and will be skipped."
+                    ).classes("text-caption text-warning")
+                notready = sum(1 for b in books if not is_ready_to_persist(b))
+                if notready:
+                    ui.label(
+                        f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed."
+                    ).classes("text-caption text-warning")
+                with ui.column().classes("w-full q-gutter-none").style(
+                    "max-height: 16rem; overflow-y: auto"
+                ):
+                    for r in rows[:_PREVIEW_CAP]:
+                        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                            ui.icon(
+                                "warning" if (r.collision or r.blocked) else "east", size="1rem"
+                            ).classes("colophon-muted")
+                            ui.label(r.title).classes("col ellipsis")
+                            ui.label(str(r.target)).classes(
+                                "col ellipsis text-caption colophon-muted"
+                            )
+                    if len(rows) > _PREVIEW_CAP:
+                        ui.label(f"…and {len(rows) - _PREVIEW_CAP} more").classes(
+                            "text-caption colophon-muted"
+                        )
+                if remove_after:
+                    ui.label(
+                        "These books will be removed from the library after organizing."
+                    ).classes("text-caption text-warning")
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Back", on_click=show_options).props("flat")
+                    ui.button(
+                        "Confirm & persist", icon="save",
+                        on_click=lambda: run_persist(books, do_tag, opts, remove_after),
+                    ).props("unelevated")
 
         async def run_persist(books, do_tag, opts, remove_after=False) -> None:
             body.clear()
