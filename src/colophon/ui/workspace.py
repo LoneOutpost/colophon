@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 from nicegui import app, background_tasks, ui
 
-from colophon.controller import AppController
+from colophon.controller import AppController, RerunResult
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
@@ -840,6 +840,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         refresh_list()
                         show_detail(b.id)
 
+                    async def _rerun_one(b: BookUnit, phase: Phase) -> None:
+                        result = await asyncio.to_thread(controller.rerun_phase, [b], phase)
+                        _rerun_notify(result)
+                        repaint(list=True, status=True, detail_book_id=b.id)
+
                     _attn = state_panel.AttentionActions(
                         acquire=lambda b=book: ui.navigate.to(f"/acquire?book={quote(b.id)}"),
                         reprobe=_reprobe,
@@ -850,6 +855,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         acknowledge=lambda code, b=book: (
                             controller.acknowledge_finding(b, code), refresh_list(),
                             show_detail(b.id)),
+                        rerun_phase=_rerun_one,
                     )
                     state_panel.render(controller, book, actions=_attn)
 
@@ -981,9 +987,23 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
                 ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
-                rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline color=grey-6")
-                rerun_btn.set_enabled(False)
-                rerun_btn.tooltip("Re-run a phase across the selection — coming soon")
+                rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline")
+
+                async def _rerun_selection(phase: Phase) -> None:
+                    _ui_safe(lambda: rerun_btn.props("loading=true"))
+                    try:
+                        result = await asyncio.to_thread(controller.rerun_phase, books, phase)
+                    finally:
+                        _ui_safe(lambda: rerun_btn.props(remove="loading"))
+                    _rerun_notify(result)
+                    repaint(nav=True, list=True, status=True)
+
+                with rerun_btn, ui.menu():
+                    for _p in (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY):
+                        ui.menu_item(
+                            f"Re-run {state_panel.phase_label(_p)}",
+                            lambda p=_p: _rerun_selection(p),
+                        )
                 ui.button(
                     "Clear selection", icon="clear", on_click=_clear_selection,
                 ).props("flat")
@@ -1877,6 +1897,16 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         _stepper_refresh["fn"]()
         if detail_book_id is None and len(selected_ids) >= 2:
             show_bulk()
+
+    def _rerun_notify(result: RerunResult) -> None:
+        """Report a re-run and, crucially, which downstream phases were left stale."""
+        msg = f"Re-ran {state_panel.phase_label(result.ran)} for {result.book_count} book(s)"
+        if result.staled:
+            names = ", ".join(state_panel.phase_label(p) for p in Phase if p in result.staled)
+            msg += f" — {names} marked stale"
+        ui.notify(msg)
+        if result.failed:
+            ui.notify(f"{result.failed} failed — see their timeline", type="negative")
 
     def _refresh_all() -> None:
         with span("refresh_all"):

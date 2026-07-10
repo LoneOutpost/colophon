@@ -7,7 +7,7 @@ pipeline phases, identification scoring, classification signals, and findings.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
@@ -16,7 +16,7 @@ from nicegui import ui
 
 from colophon.core.guidance import FixAction, finding_guidance, review_guidance
 from colophon.core.models import BookState, BookUnit, FindingCode, Phase, PhaseState
-from colophon.core.phases import state_of
+from colophon.core.phases import LOCAL, state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.review import review_reasons
 from colophon.core.state_labels import phase_state_description, state_description
@@ -35,6 +35,8 @@ class AttentionActions:
     files: Callable[[], None]
     matches: Callable[[], None]
     acknowledge: Callable[[FindingCode], None]
+    rerun_phase: Callable[[BookUnit, Phase], Awaitable[None]]
+
 
 _PHASE_LABELS: dict[Phase, str] = {
     Phase.SEARCH: "Search",
@@ -45,6 +47,12 @@ _PHASE_LABELS: dict[Phase, str] = {
     Phase.ORGANIZE: "Organize",
     Phase.ENCODE: "Encode",
 }
+
+
+def phase_label(phase: Phase) -> str:
+    """The display label for a phase (public: reused by the workspace re-run controls)."""
+    return _PHASE_LABELS[phase]
+
 
 # Static, non-status icons reused by the nav phase mode and the timeline.
 _PHASE_ICONS: dict[Phase, str] = {
@@ -208,9 +216,18 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                         ui.label(row.updated_at.strftime("%Y-%m-%d %H:%M")).classes(
                             "colophon-muted text-caption"
                         )
-                    btn = ui.button(icon="refresh").props("flat dense round color=grey-6")
-                    btn.set_enabled(False)
-                    btn.tooltip("Re-run — coming soon")
+                    if row.phase in LOCAL:
+                        rerun_btn = ui.button(icon="refresh").props(
+                            "flat dense round"
+                        ).tooltip(f"Re-run {row.label}")
+
+                        async def _rerun(p=row.phase, b=book, btn=rerun_btn) -> None:
+                            # The action's repaint rebuilds this panel (and button), so the
+                            # spinner clears itself; we only need to show it while it runs.
+                            btn.props("loading=true")
+                            await actions.rerun_phase(b, p)
+
+                        rerun_btn.on("click", _rerun)
                 if row.detail:
                     ui.label(row.detail).classes("colophon-muted text-caption q-pl-lg")
 

@@ -1,13 +1,24 @@
 from pathlib import Path
 
 from colophon.core.models import BookUnit, Phase, PhaseState
-from colophon.core.phases import mark
+from colophon.core.phases import LOCAL, mark
+from colophon.ui import state_panel
 from colophon.ui.state_panel import (
     _PHASE_ICONS,
     _PHASE_LABELS,
     _PHASE_STATE_COLOR,
     phase_rows,
 )
+
+
+def test_phase_label_returns_display_names():
+    assert state_panel.phase_label(Phase.IDENTIFY) == "Identify"
+    assert state_panel.phase_label(Phase.ENCODE) == "Encode"
+
+
+def test_local_phases_are_exactly_the_rerunnable_set():
+    # The timeline enables re-run only for local phases.
+    assert set(LOCAL) == {Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY}
 
 
 def test_phase_maps_cover_all_enum_members():
