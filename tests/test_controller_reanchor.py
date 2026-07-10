@@ -1,4 +1,4 @@
-from colophon.controller import AppController
+from colophon.controller import AppController, EncodeJobOptions
 from colophon.core.models import (
     BookUnit,
     EditChange,
@@ -148,3 +148,27 @@ def test_reanchor_organized_skips_unorganized(tmp_path):
     old_id = book.id
     ctrl._reanchor_organized([book])   # no output_path -> skipped, no crash
     assert book.id == old_id
+
+
+async def test_run_encode_job_reorg_reanchors(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path / "ingest"]
+    ctx.config.library_root = tmp_path / "library"
+    ctrl = AppController(ctx)
+    src = tmp_path / "ingest" / "Brandon Sanderson" / "Elantris"
+    src.mkdir(parents=True)
+    (src / "Elantris.mp3").write_bytes(b"\x00" * 32)
+    book = BookUnit.new(source_folder=src)
+    book.title = "Elantris"
+    book.authors = ["Brandon Sanderson"]
+    book.source_files = [SourceFile(path=src / "Elantris.mp3", size=32, duration_seconds=60.0, ext="mp3")]
+    mark(book, Phase.IDENTIFY, PhaseState.FRESH)
+    resync_state(book)
+    ctx.books.upsert(book)
+
+    await ctrl.run_encode_job([book], EncodeJobOptions(encode=False, organize=True))
+
+    assert book.output_path is not None
+    assert book.id == BookUnit.id_for(book.output_path)     # re-anchored to the output folder
+    assert book.source_folder == book.output_path
+    assert ctx.books.get(book.id) is not None

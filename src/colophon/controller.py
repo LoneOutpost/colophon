@@ -2298,6 +2298,7 @@ class AppController:
                     return result
 
             results = await asyncio.gather(*(_one(b) for b in books))
+            self._reanchor_organized(books)
             return EncodeJobResult(results=list(results))
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
@@ -2306,6 +2307,7 @@ class AppController:
         res = self._process_book(
             book, EncodeJobOptions(encode=True, organize=True, delete_sources=confirm_delete),
         )
+        self._reanchor_organized([book])
         organized = res.status == "done" and book.state == BookState.ORGANIZED
         return ProcessResult(
             book_id=book.id,
