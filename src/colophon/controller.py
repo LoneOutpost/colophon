@@ -249,6 +249,17 @@ class RerunResult:
     failed: int
 
 
+@dataclass(frozen=True)
+class OrganizePreviewRow:
+    """One Persist-preview row: where a book would organize, whether that target already
+    exists (a collision that will be skipped), and whether a blocking error will skip it."""
+    book_id: str
+    title: str
+    target: Path
+    collision: bool
+    blocked: bool
+
+
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
@@ -643,6 +654,13 @@ class AppController:
             self.ctx.books.delete(bid, commit=(i == last))  # final delete flushes the batch
         self._resync_roots(roots)
         return len(ids)
+
+    def remove_from_library(self, book_ids: Iterable[str]) -> int:
+        """Drop books from Colophon after they've been organized to their destination:
+        the record + edit history + operations + graph nodes go, but their organized output
+        files (and their source originals) are left on disk. Deleting files is the separate,
+        independent delete-sources concern. Returns the number removed."""
+        return self.cleanup_remove(book_ids)
 
     def remove_missing(self, book: BookUnit) -> None:
         """Delete an orphaned (missing) book record and its history/operations rows.
@@ -2084,6 +2102,36 @@ class AppController:
         pats = patterns or self.ctx.patterns
         root = self.ctx.config.library_root or (default_db_path().parent / "library")
         return [(b.id, build_target_path(root, pats, self._canonical_book(b))) for b in books]
+
+    def organize_preview(
+        self, books: list[BookUnit], *, patterns: PathPatterns | None = None, encode: bool = True
+    ) -> list[OrganizePreviewRow]:
+        """Dry-run rows for the Persist preview: each book's organize destination, whether it
+        collides with existing content, and whether a blocking error will skip it. Writes
+        nothing. When `encode` (the common path), the destination is the produced M4B file and
+        a collision is that file already existing. Without encode, a reorg copies the original
+        files into the book folder (one or many), so the destination shown is that folder and a
+        collision is a folder that already holds content; exact per-file collisions are still
+        caught at organize time."""
+        targets = dict(self.organize_targets(books, patterns=patterns))
+        rows: list[OrganizePreviewRow] = []
+        for b in books:
+            target = targets[b.id]
+            if encode:
+                dest, collision = target, target.exists()
+            else:
+                folder = target.parent
+                dest, collision = folder, (folder.exists() and any(folder.iterdir()))
+            rows.append(
+                OrganizePreviewRow(
+                    book_id=b.id,
+                    title=b.title or "(untitled)",
+                    target=dest,
+                    collision=collision,
+                    blocked=has_blocking_error(b),
+                )
+            )
+        return rows
 
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->

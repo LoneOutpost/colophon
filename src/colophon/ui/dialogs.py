@@ -1120,6 +1120,7 @@ async def persist_dialog(
 
     with modal() as dialog, ui.card().classes("w-[30rem]"):
         cfg = controller.ctx.config
+        _PREVIEW_CAP = 50
         body = ui.column().classes("w-full")
 
         def _close() -> None:
@@ -1186,6 +1187,13 @@ async def persist_dialog(
                 conc.bind_visibility_from(enc, "value")
                 dele = ui.checkbox("Delete source files after (verified)").props("dense")
                 dele.bind_visibility_from(enc, "value")
+                rem = ui.checkbox("Remove from library after organizing").props("dense")
+                rem.bind_visibility_from(org, "value")
+                ui.label(
+                    "Removed books leave Colophon; their organized files stay at the "
+                    "destination. Colophon won't manage them again unless the destination is "
+                    "added to the scan paths."
+                ).classes("text-caption colophon-muted").bind_visibility_from(rem, "value")
 
                 block_warn = ui.label("").classes("text-caption text-negative q-mt-xs")
                 warn = ui.label("").classes("text-caption text-warning q-mt-xs")
@@ -1245,11 +1253,13 @@ async def persist_dialog(
                             controller.record_organize_pattern(
                                 opts.patterns.folder, opts.patterns.single_file
                             )
-                        notready = sum(1 for b in books if not is_ready_to_persist(b))
-                        if notready:
-                            _confirm(books, bool(tag.value), opts, notready)
+                            show_preview(books, bool(tag.value), opts, bool(rem.value))
                         else:
-                            await run_persist(books, bool(tag.value), opts)
+                            notready = sum(1 for b in books if not is_ready_to_persist(b))
+                            if notready:
+                                _confirm(books, bool(tag.value), opts, notready)
+                            else:
+                                await run_persist(books, bool(tag.value), opts, False)
 
                     ui.button("Persist", icon="save", on_click=_run).props("unelevated")
 
@@ -1267,10 +1277,65 @@ async def persist_dialog(
                     ui.button("Back", on_click=show_options).props("flat")
                     ui.button(
                         "Persist anyway", icon="save",
-                        on_click=lambda: run_persist(books, do_tag, opts),
+                        on_click=lambda: run_persist(books, do_tag, opts, False),
                     ).props("unelevated color=warning")
 
-        async def run_persist(books, do_tag, opts) -> None:
+        def show_preview(books, do_tag, opts, remove_after) -> None:
+            rows = controller.organize_preview(books, patterns=opts.patterns, encode=opts.encode)
+            body.clear()
+            with body:
+                ui.label("Confirm destinations").classes("text-subtitle1")
+                ui.label(
+                    "Where each book will be organized under the library. Nothing moves "
+                    "until you confirm."
+                ).classes("text-caption colophon-muted")
+                collisions = sum(1 for r in rows if r.collision)
+                if collisions:
+                    ui.label(
+                        f"⚠ {collisions} destination(s) already exist — those books won't be "
+                        f"moved (they'll fail rather than overwrite)."
+                    ).classes("text-caption text-warning")
+                notready = sum(1 for b in books if not is_ready_to_persist(b))
+                if notready:
+                    ui.label(
+                        f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed — "
+                        f"persisting may write unverified metadata."
+                    ).classes("text-caption text-warning")
+                with ui.column().classes("w-full q-gutter-none").style(
+                    "max-height: 16rem; overflow-y: auto"
+                ):
+                    for r in rows[:_PREVIEW_CAP]:
+                        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                            ui.icon(
+                                "warning" if (r.collision or r.blocked) else "east", size="1rem"
+                            ).classes("colophon-muted")
+                            ui.label(r.title).classes("col ellipsis")
+                            ui.label(str(r.target)).classes(
+                                "col ellipsis text-caption colophon-muted"
+                            )
+                    if len(rows) > _PREVIEW_CAP:
+                        ui.label(f"…and {len(rows) - _PREVIEW_CAP} more").classes(
+                            "text-caption colophon-muted"
+                        )
+                if remove_after:
+                    ui.label(
+                        "These books will be removed from the library after organizing."
+                    ).classes("text-caption text-warning")
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Back", on_click=show_options).props("flat")
+                    # When some books aren't Ready, keep the not-ready acknowledgment visible on
+                    # the confirm action itself (warning colour + the count), so it can't be read
+                    # past — the preview replaces the old dedicated not-ready confirm screen.
+                    confirm_label = (
+                        f"Confirm & persist ({notready} not ready)" if notready else "Confirm & persist"
+                    )
+                    confirm_props = "unelevated color=warning" if notready else "unelevated"
+                    ui.button(
+                        confirm_label, icon="save",
+                        on_click=lambda: run_persist(books, do_tag, opts, remove_after),
+                    ).props(confirm_props)
+
+        async def run_persist(books, do_tag, opts, remove_after=False) -> None:
             body.clear()
             token = CancelToken()
             _KIND = {"done": "ok", "failed": "fail", "cancelled": "skip", "skipped": "skip"}
@@ -1313,6 +1378,13 @@ async def persist_dialog(
                 for r in job.results:
                     if r.status in {"failed", "skipped"} and r.detail:
                         log.update(r.book_id, f"{r.status}: {r.detail}", kind=_KIND.get(r.status, "fail"))
+                if remove_after and opts.organize:
+                    removed_ids = [r.book_id for r in job.results if r.status == "done"]
+                    if removed_ids:
+                        n = await asyncio.to_thread(controller.remove_from_library, removed_ids)
+                        for bid in removed_ids:
+                            log.update(bid, "removed from library", kind="ok")
+                        logger.info(f"removed {n} organized book(s) from the library")
             clear_selection()
             await controller.trigger_abs_scan()  # best-effort library rescan
 
@@ -1324,7 +1396,7 @@ async def persist_dialog(
                 note += f", {c['skip']} skipped"
 
             def _retry(ids: list[str]) -> object:
-                return run_persist([b for b in books if b.id in ids], do_tag, opts)
+                return run_persist([b for b in books if b.id in ids], do_tag, opts, remove_after)
 
             log.finish(note, on_close=_close, on_retry=_retry)
 
