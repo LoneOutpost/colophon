@@ -714,6 +714,20 @@ class AppController:
         self.ctx.books.upsert(book)
         return old_root, self._scan_root_for_path(new_folder)
 
+    def _reanchor_organized(self, books: list[BookUnit]) -> None:
+        """Main-thread pass after organize: re-anchor each ORGANIZED book to its output
+        location and resync the affected graph roots once. Non-organized books are skipped.
+        Must run on the main thread (it mutates the in-memory graph)."""
+        roots: set[Path] = set()
+        for book in books:
+            if book.output_path is None or state_of(book, Phase.ORGANIZE) is not PhaseState.FRESH:
+                continue
+            moved = self._reanchor_after_organize(book)
+            if moved is not None:
+                roots.update(moved)
+        if roots:
+            self._resync_roots(roots)
+
     def _root_for(self, book: BookUnit) -> Path:
         """The configured scan root that contains `book`, for re-running local phases.
         For a book outside every scan path, fall back to its parent (best-effort one-level

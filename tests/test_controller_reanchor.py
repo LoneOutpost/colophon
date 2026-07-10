@@ -107,3 +107,44 @@ def test_reanchor_preserves_manual_and_confidence(tmp_path):
     assert stored.manually_confirmed is True
     assert stored.confidence == 100.0
     assert stored.title == "Manual Title"
+
+
+def test_reanchor_organized_keeps_author_grouping(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book, _out = _organized_book(ctx, tmp_path, author="Brandon Sanderson", name="Elantris")
+    ctrl._reanchor_organized([book])
+    tree = ctrl.library_tree()
+    author = next((a for a in tree.authors if a.name == "Brandon Sanderson"), None)
+    assert author is not None
+    grouped = {b.id for b in author.standalone} | {b.id for s in author.series for b in s.books}
+    assert book.id in grouped
+
+
+def test_reanchor_organized_still_in_organize_phase_view(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book, _out = _organized_book(ctx, tmp_path)
+    ctrl._reanchor_organized([book])
+    assert book.id in {b.id for b in ctrl.books_with_phase(Phase.ORGANIZE, PhaseState.FRESH)}
+
+
+def test_reanchor_organized_survives_reconcile(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book, _out = _organized_book(ctx, tmp_path, author="Brandon Sanderson", name="Elantris")
+    ctrl._reanchor_organized([book])
+    ctrl.reconcile_graph()   # active_roots = scan_paths; output root is NOT among them
+    tree = ctrl.library_tree()
+    assert "Brandon Sanderson" in {a.name for a in tree.authors}
+
+
+def test_reanchor_organized_skips_unorganized(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    ctx.config.scan_paths = [tmp_path / "ingest"]
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    ctx.books.upsert(book)
+    old_id = book.id
+    ctrl._reanchor_organized([book])   # no output_path -> skipped, no crash
+    assert book.id == old_id
