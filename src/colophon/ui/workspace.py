@@ -2085,8 +2085,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         )
 
     async def _do_persist() -> None:
+        # Use the canonical _clear_selection (repaints + collapses the bulk panel), not the raw
+        # set.clear — otherwise a persist that removes books leaves the "Editing N books" panel and
+        # the selection UI stale until the next full repaint.
         await persist_dialog(controller, refresh_all=_refresh_all, selected_ids=set(selected_ids),
-                             clear_selection=selected_ids.clear)
+                             clear_selection=_clear_selection)
 
     with ui.header(elevated=True).classes("items-center q-px-md"):
         brand_mark()
