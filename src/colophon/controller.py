@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -664,6 +665,54 @@ class AppController:
             if path == root or root in path.parents:
                 return root
         return path
+
+    def _migrate_cover_file(self, book: BookUnit, new_id: str, new_folder: Path) -> None:
+        """Best-effort: move the cached cover to match the new id/location. On failure,
+        drop cover_path rather than abort the re-anchor."""
+        old = book.cover_path
+        if old is None or not old.exists():
+            return
+        target = new_folder / f"cover-{new_id}{old.suffix}"
+        try:
+            shutil.move(str(old), str(target))
+            book.cover_path = target
+        except OSError as e:
+            logger.warning(f"cover migrate failed {book.id}->{new_id}: {e}")
+            book.cover_path = None
+
+    def _reanchor_after_organize(self, book: BookUnit) -> tuple[Path, Path] | None:
+        """Move an organized book's identity to its output location and migrate its
+        satellite data (edit history, operations, cover) from the old id to the new one.
+        Returns (old_scan_root, new_output_root) for the caller to resync, or None when
+        skipped (no output, id unchanged, or a target-id collision). Does NO graph work.
+        Idempotent."""
+        from colophon.adapters.audio import read_audio_metadata
+
+        out = book.output_path
+        if out is None:
+            return None
+        new_folder = out if out.is_dir() else out.parent
+        new_id = BookUnit.id_for(out)
+        old_id = book.id
+        if new_id == old_id:
+            return None
+        if self.ctx.books.get(new_id) is not None:
+            logger.warning(f"skip re-anchor {old_id}: id {new_id} already exists at {out}")
+            return None
+        old_root = self._scan_root_for_path(book.source_folder)
+        output_files = (
+            sorted(p for p in out.iterdir() if is_audio_file(p)) if out.is_dir() else [out]
+        )
+        self.ctx.history.reassign_book(old_id, new_id, commit=False)
+        self.ctx.operations.reassign_book(old_id, new_id, commit=False)
+        self._migrate_cover_file(book, new_id, new_folder)
+        self.ctx.books.delete(old_id, commit=False)
+        book.id = new_id
+        book.source_folder = new_folder
+        book.source_files = [read_audio_metadata(p)[0] for p in output_files]
+        book.touch()
+        self.ctx.books.upsert(book)
+        return old_root, self._scan_root_for_path(new_folder)
 
     def _root_for(self, book: BookUnit) -> Path:
         """The configured scan root that contains `book`, for re-running local phases.
