@@ -114,7 +114,9 @@ def test_process_ready_encodes_and_organizes(tmp_path, make_audio):
 
     results = AppController(ctx).process_ready(confirm_delete=False)
     assert len(results) == 1 and results[0].organized is True
-    persisted = ctx.books.get(book.id)
+    # Organizing re-anchors the book to its output location, so its id changes; look it
+    # up by the id the run reports, not the pre-organize id.
+    persisted = ctx.books.get(results[0].book_id)
     assert persisted.state == BookState.ORGANIZED
     assert persisted.output_path is not None and persisted.output_path.exists()
     ctx.close()
