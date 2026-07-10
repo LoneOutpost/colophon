@@ -249,6 +249,17 @@ class RerunResult:
     failed: int
 
 
+@dataclass(frozen=True)
+class OrganizePreviewRow:
+    """One Persist-preview row: where a book would organize, whether that target already
+    exists (a collision that will be skipped), and whether a blocking error will skip it."""
+    book_id: str
+    title: str
+    target: Path
+    collision: bool
+    blocked: bool
+
+
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
@@ -2084,6 +2095,24 @@ class AppController:
         pats = patterns or self.ctx.patterns
         root = self.ctx.config.library_root or (default_db_path().parent / "library")
         return [(b.id, build_target_path(root, pats, self._canonical_book(b))) for b in books]
+
+    def organize_preview(
+        self, books: list[BookUnit], *, patterns: PathPatterns | None = None
+    ) -> list[OrganizePreviewRow]:
+        """Dry-run rows for the Persist preview: each book's organize destination (via
+        organize_targets), whether the target already exists (collision), and whether a
+        blocking error will skip it. Writes nothing to disk."""
+        targets = dict(self.organize_targets(books, patterns=patterns))
+        return [
+            OrganizePreviewRow(
+                book_id=b.id,
+                title=b.title or "(untitled)",
+                target=targets[b.id],
+                collision=targets[b.id].exists(),
+                blocked=has_blocking_error(b),
+            )
+            for b in books
+        ]
 
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->
