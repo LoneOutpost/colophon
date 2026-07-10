@@ -987,12 +987,17 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
                 ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
+                rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline")
+
                 async def _rerun_selection(phase: Phase) -> None:
-                    result = await asyncio.to_thread(controller.rerun_phase, books, phase)
+                    _ui_safe(lambda: rerun_btn.props("loading=true"))
+                    try:
+                        result = await asyncio.to_thread(controller.rerun_phase, books, phase)
+                    finally:
+                        _ui_safe(lambda: rerun_btn.props(remove="loading"))
                     _rerun_notify(result)
                     repaint(nav=True, list=True, status=True)
 
-                rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline")
                 with rerun_btn, ui.menu():
                     for _p in (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY):
                         ui.menu_item(

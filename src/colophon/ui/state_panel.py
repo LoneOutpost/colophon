@@ -37,6 +37,7 @@ class AttentionActions:
     acknowledge: Callable[[FindingCode], None]
     rerun_phase: Callable[[BookUnit, Phase], Awaitable[None]]
 
+
 _PHASE_LABELS: dict[Phase, str] = {
     Phase.SEARCH: "Search",
     Phase.CATEGORIZE: "Categorize",
@@ -216,10 +217,17 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                             "colophon-muted text-caption"
                         )
                     if row.phase in LOCAL:
-                        ui.button(
-                            icon="refresh",
-                            on_click=lambda p=row.phase, b=book: actions.rerun_phase(b, p),
-                        ).props("flat dense round").tooltip(f"Re-run {row.label}")
+                        rerun_btn = ui.button(icon="refresh").props(
+                            "flat dense round"
+                        ).tooltip(f"Re-run {row.label}")
+
+                        async def _rerun(p=row.phase, b=book, btn=rerun_btn) -> None:
+                            # The action's repaint rebuilds this panel (and button), so the
+                            # spinner clears itself; we only need to show it while it runs.
+                            btn.props("loading=true")
+                            await actions.rerun_phase(b, p)
+
+                        rerun_btn.on("click", _rerun)
                 if row.detail:
                     ui.label(row.detail).classes("colophon-muted text-caption q-pl-lg")
 
