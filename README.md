@@ -1,4 +1,14 @@
-# Colophon
+<p align="center">
+  <img src="assets/colophon-logo.svg" alt="Colophon" width="140">
+</p>
+
+<h1 align="center">Colophon</h1>
+
+<p align="center">
+  <a href="https://github.com/LoneOutpost/colophon/actions/workflows/ci.yml"><img src="https://github.com/LoneOutpost/colophon/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0">
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+">
+</p>
 
 Colophon is a self-hosted tool for organizing a personal audiobook collection.
 It scans existing audiobook files, identifies them using their embedded tags and
@@ -22,8 +32,9 @@ uv sync
 uv run python -m colophon
 ```
 
-The web interface is served at http://localhost:8080 with three pages:
-dashboard (`/`), triage (`/triage`), and settings (`/settings`).
+The web interface is served at http://localhost:8080. It opens on the Library,
+where you review and curate books, and includes Manage, Stats, Graph, and
+Settings views. An Acquire view appears when you fetch downloads for a book.
 
 ## Configuration
 
@@ -66,7 +77,7 @@ controlled location.
    folder name, then the filename.
 2. Identify. It queries the configured metadata sources, scores a confidence
    value for each book, and routes each one to ready or needs review.
-3. Triage. Books are grouped by author and series, with a separate group for
+3. Review. Books are grouped by author and series, with a separate group for
    books that could not be identified. For each book you can view the field
    provenance, compare candidate matches and apply one, edit or remap fields, and
    mark the book ready. Every change is written back to the source
@@ -100,6 +111,15 @@ The code follows a ports and adapters layout: `core` holds the domain logic,
 sidecar reading and writing), `services` holds the pipeline steps, `controller.py`
 provides UI-agnostic orchestration, and `ui` holds the NiceGUI pages.
 
+## Contributing
+
+Bug reports, feature ideas, and pull requests are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to set up a development environment
+and the conventions this project follows, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. To report a
+security issue, see [SECURITY.md](SECURITY.md). Notable changes are recorded in
+the [changelog](CHANGELOG.md).
+
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE). Copyright 2026 Alexi Leontopoulos.
