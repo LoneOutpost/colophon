@@ -1031,10 +1031,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         controller,
                         ids,
                         label=f"{len(ids)} books",
-                        on_done=lambda: (
-                            _clear_selection(),
-                            repaint(nav=True, list=True, status=True),
-                        ),
+                        on_done=_clear_selection,  # already repaints nav/list/status
                     )
 
                 ui.button(
