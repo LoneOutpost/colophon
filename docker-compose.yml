@@ -1,0 +1,22 @@
+services:
+  colophon:
+    image: ghcr.io/loneoutpost/colophon:latest
+    container_name: colophon
+    ports:
+      - "8080:8080"
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Etc/UTC
+    volumes:
+      # State: config.toml and the SQLite database.
+      - ./config:/config
+      # Where Acquire/Real-Debrid downloads land; also add /downloads as a scan path.
+      - /path/to/downloads:/downloads
+      # The organize destination AudiobookShelf reads.
+      - /path/to/library:/library
+      # Optional: an existing collection to import (add as extra scan paths).
+      # - /path/to/existing/audiobooks:/media
+      # Optional, read-only: LazyLibrarian's config.ini for the pattern import button.
+      # - /path/to/lazylibrarian/config.ini:/lazylibrarian/config.ini:ro
+    restart: unless-stopped

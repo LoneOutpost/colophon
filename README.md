@@ -25,6 +25,44 @@ hardened for public internet exposure.
 * [uv](https://docs.astral.sh/uv/)
 * ffmpeg and ffprobe on your PATH (used for M4B encoding and verification)
 
+## Run with Docker
+
+The published image bundles ffmpeg, so Docker is the simplest way to run
+Colophon. It is multi-arch (amd64 and arm64), so it runs on an x86 server or an
+arm64 NAS or Raspberry Pi.
+
+```
+docker pull ghcr.io/loneoutpost/colophon:latest
+```
+
+Copy [`docker-compose.yml`](docker-compose.yml), edit the two media paths, and
+start it:
+
+```
+docker compose up -d
+```
+
+Colophon listens on port 8080. Set `PUID` and `PGID` to your media user so
+organized files land with the right ownership.
+
+| Volume | Purpose | Mode |
+|---|---|---|
+| `/config` | `config.toml` and the SQLite database | read-write |
+| `/downloads` | where Acquire downloads land; also add it as a scan path | read-write |
+| `/library` | the organize destination AudiobookShelf reads | read-write |
+| `/media` | optional: an existing collection to import, as extra scan paths | read-write |
+| `/lazylibrarian/config.ini` | optional: LazyLibrarian config for the pattern import | read-only |
+
+The input volumes must be read-write. Colophon writes a `metadata.json` sidecar
+back next to the source files and, after a verified encode and an explicit
+confirmation, deletes the originals.
+
+On first start Colophon writes a default `config.toml` to `/config`. Set
+`scan_paths` to `["/downloads"]`, `library_root` to `/library`, and the Real-Debrid
+download directory to `/downloads`, either by editing that file or from the
+Settings page, then restart. Colophon will offer to add the downloads directory
+to your scan paths.
+
 ## Install and run
 
 ```
