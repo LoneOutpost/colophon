@@ -6,7 +6,18 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "LoneOutpost" }]
+authors = [{ name = "Alexi Leontopoulos", email = "alexi@alexi.org" }]
+keywords = ["audiobook", "metadata", "m4b", "self-hosted", "audiobookshelf", "lazylibrarian"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Conversion",
+]
 dependencies = [
     "pydantic>=2.7",
     "platformdirs>=4.2",
@@ -17,6 +28,12 @@ dependencies = [
     "nicegui>=2.0",
     "pillow>=10.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/LoneOutpost/colophon"
+Repository = "https://github.com/LoneOutpost/colophon"
+Issues = "https://github.com/LoneOutpost/colophon/issues"
+Changelog = "https://github.com/LoneOutpost/colophon/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
