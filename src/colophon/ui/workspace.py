@@ -55,6 +55,7 @@ from colophon.ui.dialogs import (
     persist_dialog,
     quick_match_dialog,
     remap_dialog,
+    remove_from_library_dialog,
     rename_dialog,
     scan_dialog,
     tag_dialog,
@@ -732,6 +733,26 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button("Remove missing", icon="delete_outline", on_click=_remove_missing).props(
                                             "flat dense no-caps color=negative"
                                         ).tooltip("Delete this orphaned record (the folder is gone)")
+                            else:
+                                with ui.element("div").classes("colophon-toolgroup"):
+                                    ui.label("Library").classes("colophon-seccap")
+                                    with ui.row().classes("q-gutter-xs"):
+                                        def _remove_book(b=book) -> None:
+                                            remove_from_library_dialog(
+                                                controller,
+                                                [b.id],
+                                                label=f'"{b.title or Path(b.source_folder).name}"',
+                                                on_done=lambda bid=b.id: repaint(
+                                                    nav=True, list=True, status=True,
+                                                    detail_book_id=bid,
+                                                ),
+                                            )
+                                        ui.button(
+                                            "Remove from library", icon="delete_outline",
+                                            on_click=_remove_book,
+                                        ).props("flat dense no-caps color=negative").tooltip(
+                                            "Forget this book (files stay on disk)"
+                                        )
 
                         # --- grouped fields ---
                         ui.label("Identity").classes("colophon-seccap")
