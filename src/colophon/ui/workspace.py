@@ -1025,6 +1025,24 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             f"Re-run {state_panel.phase_label(_p)}",
                             lambda p=_p: _rerun_selection(p),
                         )
+                def _remove_selection() -> None:
+                    ids = [b.id for b in books]
+                    remove_from_library_dialog(
+                        controller,
+                        ids,
+                        label=f"{len(ids)} books",
+                        on_done=lambda: (
+                            _clear_selection(),
+                            repaint(nav=True, list=True, status=True),
+                        ),
+                    )
+
+                ui.button(
+                    "Remove from library", icon="delete_outline",
+                    on_click=_remove_selection,
+                ).props("outline color=negative").tooltip(
+                    "Forget the selected books (files stay on disk)"
+                )
                 ui.button(
                     "Clear selection", icon="clear", on_click=_clear_selection,
                 ).props("flat")
