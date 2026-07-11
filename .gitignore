@@ -1,5 +1,10 @@
-# Brainstorming visual-companion artifacts
+# Brainstorming / design-critique visual-companion artifacts
 .superpowers/
+.impeccable/
+
+# Tooling runtime state (NiceGUI storage, Playwright MCP cache)
+.nicegui/
+.playwright-mcp/
 
 # Local session/memory state
 .remember/
@@ -9,6 +14,15 @@
 tasks/
 docs/
 colophon-requirements.md
+/CLAUDE.md
+/DESIGN.md
+/PRODUCT.md
+
+# Unused local brand exports (shipped assets live in src/colophon/ui/assets/brand/)
+/colophon-logo.svg
+/colophon-logo-monochrome.svg
+/colophon-logo-monochrome-inverted.svg
+/colophon-wordmark.svg
 
 # Python
 __pycache__/
