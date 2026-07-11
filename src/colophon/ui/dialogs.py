@@ -1106,6 +1106,47 @@ async def match_dialog(
         show_scope()
 
 
+def remove_from_library_dialog(
+    controller: AppController,
+    book_ids: list[str],
+    *,
+    label: str,
+    on_done: Callable[[], None],
+) -> None:
+    """Confirm, then forget the given book(s): drop the record, edit history,
+    operations, and graph nodes, but leave every file on disk. `label` names the
+    target in the prompt ('"Dune"' for a single book, '3 books' for a bulk
+    selection). `on_done` runs after a successful removal so the caller can
+    repaint and clear any selection. There is no undo; re-scanning is the recovery
+    path, and the copy says so."""
+    with modal() as dialog, ui.card().classes("w-[28rem]"):
+        ui.label(f"Remove {label} from the library?").classes("text-subtitle1")
+        ui.label(
+            "The audio files stay on disk. Colophon's record, your edits, and the "
+            "confirmed identity are discarded. Re-scan to restore."
+        ).classes("text-caption colophon-muted")
+
+        async def _confirm() -> None:
+            with busy(confirm_btn):
+                removed = await asyncio.to_thread(controller.cleanup_remove, book_ids)
+            dialog.close()
+            ui.notify(
+                "Removed from library"
+                if removed == 1
+                else f"Removed {removed} books from library"
+            )
+            on_done()
+
+        confirm_btn = dialog_actions(
+            dialog,
+            confirm_label="Remove",
+            confirm_icon="delete_outline",
+            on_confirm=_confirm,
+            confirm_props="unelevated color=negative",
+        )
+    dialog.open()
+
+
 async def persist_dialog(
     controller: AppController,
     *,
