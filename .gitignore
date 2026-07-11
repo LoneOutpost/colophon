@@ -4,6 +4,8 @@
 # Local session/memory state
 .remember/
 .claude/
+.impeccable/
+.playwright-mcp/
 
 # Working/task docs and internal planning (kept local, not published)
 tasks/
@@ -17,6 +19,14 @@ __pycache__/
 venv/
 .ruff_cache/
 .pytest_cache/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Runtime state
+.nicegui/
 
 # Local config / secrets
 config.ini

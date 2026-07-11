@@ -1,0 +1,58 @@
+name: Bug report
+description: Report something that is not working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please do not report security
+        issues here. See SECURITY.md for how to report those privately.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the problem and what you expected instead.
+      placeholder: When I organize a book, the cover is not written to the M4B.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps so the problem can be reproduced.
+      placeholder: |
+        1. Scan a folder containing ...
+        2. Mark the book ready
+        3. Organize it
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Colophon version
+      description: The release tag or commit you are running.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.4"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any relevant log output. This is rendered as code, so no backticks are needed.
+      render: shell
+    validations:
+      required: false
