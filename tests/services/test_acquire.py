@@ -53,6 +53,24 @@ async def test_list_candidates_ready_classifies_audio_inprogress_shown():
     assert by_id["b"].torrent.progress == 42.0
 
 
+async def test_list_candidates_uploading_is_ready_and_pickable():
+    # RD moves a finished torrent through "uploading" (copying to its own hosts) *after* the
+    # file list and links are populated, so it is already retrievable. It must be pickable, not
+    # hidden behind a "still preparing" state.
+    torrents = [RdTorrent(id="u", filename="Mistborn", status="uploading", progress=100.0)]
+    infos = {
+        "u": RdTorrentInfo(id="u", filename="Mistborn", status="uploading", files=[
+            RdTorrentFile(id=1, path="/Mistborn/01.mp3"),
+            RdTorrentFile(id=2, path="/Mistborn/cover.jpg"),
+        ]),
+    }
+    cands = await list_candidates(FakeRd(torrents=torrents, infos=infos))
+    assert len(cands) == 1
+    assert cands[0].is_ready is True
+    assert cands[0].is_audiobook is True
+    assert [f.path for f in cands[0].audio_files] == ["/Mistborn/01.mp3"]
+
+
 async def test_list_candidates_isolates_info_failure():
     class Boom(FakeRd):
         async def torrent_info(self, torrent_id):

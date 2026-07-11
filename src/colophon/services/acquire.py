@@ -26,7 +26,10 @@ from colophon.core.cancel import CancelToken
 
 logger = logging.getLogger(__name__)
 
-_READY_STATUS = "downloaded"
+# RD statuses whose torrents carry a usable file list + live links, so they are pickable now.
+# "uploading" is RD copying an already-finished torrent to its own hosts: the files and links
+# are populated and retrievable well before the status flips to "downloaded".
+_READY_STATUSES = frozenset({"downloaded", "uploading"})
 # RD statuses that mean the torrent is dead on arrival: no files will ever come from it.
 _ERROR_STATUSES = frozenset({"error", "magnet_error", "dead", "virus"})
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -159,11 +162,12 @@ def _container_for(root: Path, name: str, mode: AcquireMode) -> Path:
 
 
 async def list_candidates(client: RealDebridSource, *, limit: int = 100) -> list[AcquireCandidate]:
-    """All RD torrents. Ready ones ('downloaded') carry their file list + audio classification
-    and are pickable; in-progress ones are returned with their status/progress and no file list
-    (not yet pickable). One torrent's info failing is isolated (logged), never aborting the list."""
+    """All RD torrents. Ready ones ('downloaded'/'uploading') carry their file list + audio
+    classification and are pickable; in-progress ones are returned with their status/progress and
+    no file list (not yet pickable). One torrent's info failing is isolated (logged), never
+    aborting the list."""
     torrents = await client.list_torrents(limit)
-    ready_ids = [t.id for t in torrents if t.status == _READY_STATUS]
+    ready_ids = [t.id for t in torrents if t.status in _READY_STATUSES]
 
     async def _info(tid: str):
         try:
