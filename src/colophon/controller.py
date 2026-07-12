@@ -115,6 +115,7 @@ from colophon.services.editing import (
     bulk_apply_fields,
     remap_field,
     set_field_value,
+    swap_fields,
 )
 from colophon.services.editing import (
     bulk_normalize as _svc_bulk_normalize,
@@ -124,6 +125,9 @@ from colophon.services.editing import (
 )
 from colophon.services.editing import (
     bulk_set_field as _svc_bulk_set_field,
+)
+from colophon.services.editing import (
+    bulk_swap_fields as _svc_bulk_swap,
 )
 from colophon.services.encode import encode_book
 from colophon.services.graph_build import build_graph
@@ -1453,6 +1457,15 @@ class AppController:
 
     def bulk_remap(self, books: list[BookUnit], *, src: str, dst: str, clear_source: bool) -> str:
         batch = _svc_bulk_remap(self.ctx.books, self.ctx.history, books, src=src, dst=dst, clear_source=clear_source)
+        for book in books:
+            self.invalidate(book, Phase.TAG)
+        return batch
+
+    def swap(self, book: BookUnit, *, field_a: str, field_b: str) -> str:
+        return swap_fields(self.ctx.books, self.ctx.history, book, field_a, field_b)
+
+    def bulk_swap(self, books: list[BookUnit], *, field_a: str, field_b: str) -> str:
+        batch = _svc_bulk_swap(self.ctx.books, self.ctx.history, books, field_a=field_a, field_b=field_b)
         for book in books:
             self.invalidate(book, Phase.TAG)
         return batch

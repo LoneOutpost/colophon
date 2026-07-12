@@ -207,6 +207,10 @@ def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) 
                 ui.badge("Abridged" if result.abridged else "Unabridged").props("outline").classes("colophon-chip")
 
 
+_MOVE_HINT = "Move a field's value into another field (fixes mis-tagging)."
+_SWAP_HINT = "Exchange the two fields' values."
+
+
 def remap_dialog(
     controller: AppController,
     book: BookUnit,
@@ -214,27 +218,37 @@ def remap_dialog(
     refresh_list: Callable[[], None],
     show_detail: Callable[[str], None],
 ) -> None:
-    """Move one field's value into another field (fixes mis-tagging)."""
+    """Move one field's value into another field, or swap the two (fixes mis-tagging)."""
     with modal() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
-        ui.label("Move a field's value into another field (fixes mis-tagging).").classes(
-            "text-caption colophon-muted"
-        )
+        desc = ui.label(_MOVE_HINT).classes("text-caption colophon-muted")
+        mode = ui.toggle({"move": "Move", "swap": "Swap"}, value="move").props("dense no-caps")
         src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
         dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
         clear = ui.checkbox("Clear the source field after moving", value=True)
+
+        def _on_mode() -> None:
+            swapping = mode.value == "swap"
+            clear.set_visibility(not swapping)
+            desc.set_text(_SWAP_HINT if swapping else _MOVE_HINT)
+
+        mode.on_value_change(lambda _e: _on_mode())
 
         def _apply() -> None:
             if src.value == dst.value:
                 ui.notify("Pick two different fields")
                 return
-            controller.remap(book, src=src.value, dst=dst.value, clear_source=clear.value)
+            if mode.value == "swap":
+                controller.swap(book, field_a=src.value, field_b=dst.value)
+                ui.notify(f"Swapped {src.value} and {dst.value}")
+            else:
+                controller.remap(book, src=src.value, dst=dst.value, clear_source=clear.value)
+                ui.notify(f"Moved {src.value} to {dst.value}")
             dialog.close()
-            ui.notify(f"Remapped {src.value} to {dst.value}")
             refresh_list()
             show_detail(book.id)
 
-        dialog_actions(dialog, confirm_label="Remap", confirm_icon="swap_horiz", on_confirm=_apply)
+        dialog_actions(dialog, confirm_label="Apply", confirm_icon="swap_horiz", on_confirm=_apply)
     dialog.open()
 
 
@@ -244,26 +258,43 @@ def bulk_remap_dialog(
     *,
     clear_selection: Callable[[], None],
 ) -> None:
-    """Move one field's value into another across all selected books (fixes mis-tagging)."""
+    """Move one field's value into another, or swap the two, across all selected books."""
+    n = len(books)
     with modal() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
-        ui.label(
-            f"Move a field's value into another across {len(books)} selected book(s)."
+        desc = ui.label(
+            f"Move a field's value into another across {n} selected book(s)."
         ).classes("text-caption colophon-muted")
+        mode = ui.toggle({"move": "Move", "swap": "Swap"}, value="move").props("dense no-caps")
         src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
         dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
         clear = ui.checkbox("Clear the source field after moving", value=True)
+
+        def _on_mode() -> None:
+            swapping = mode.value == "swap"
+            clear.set_visibility(not swapping)
+            desc.set_text(
+                f"Exchange the two fields' values across {n} selected book(s)."
+                if swapping
+                else f"Move a field's value into another across {n} selected book(s)."
+            )
+
+        mode.on_value_change(lambda _e: _on_mode())
 
         def _apply() -> None:
             if src.value == dst.value:
                 ui.notify("Pick two different fields")
                 return
-            controller.bulk_remap(books, src=src.value, dst=dst.value, clear_source=clear.value)
+            if mode.value == "swap":
+                controller.bulk_swap(books, field_a=src.value, field_b=dst.value)
+                ui.notify(f"Swapped {src.value} and {dst.value} for {n} book(s)")
+            else:
+                controller.bulk_remap(books, src=src.value, dst=dst.value, clear_source=clear.value)
+                ui.notify(f"Moved {src.value} to {dst.value} for {n} book(s)")
             dialog.close()
-            ui.notify(f"Remapped {src.value} to {dst.value} for {len(books)} book(s)")
             clear_selection()
 
-        dialog_actions(dialog, confirm_label="Remap", confirm_icon="swap_horiz", on_confirm=_apply)
+        dialog_actions(dialog, confirm_label="Apply", confirm_icon="swap_horiz", on_confirm=_apply)
     dialog.open()
 
 
