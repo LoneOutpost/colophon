@@ -29,7 +29,7 @@ from colophon.core.entity_graph import entity_graph_from_records
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
-from colophon.core.graph import Graph
+from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.graph_classify import classify_graph
 from colophon.core.graph_records import (
     ancestor_franchise,
@@ -159,6 +159,10 @@ logger = logging.getLogger(__name__)
 _OP_ORGANIZE = "organize"  # audit-log op_type for a move into the library
 _MATCH_CONCURRENCY = 8  # max books scanned concurrently during Identify/Quick Match
 _REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progress survives a restart
+# Author provenances that are derived from the folder classification (vs. the file's own tags,
+# a match, a manual edit, or the filename). Only these are re-derived when a folder is reclassified,
+# so a book tracks the current classification without ever clobbering authoritative author data.
+_GRAPH_AUTHOR_PROV = frozenset({Provenance.GRAPHING.value, Provenance.DIRECTORY.value})
 
 
 class CoverSetResult(_Base):
@@ -438,10 +442,23 @@ class AppController:
             # Re-derive the directory classification in memory (no disk walk) so the maintained graph
             # carries current classification: rebuild the structural graph from the preserved skeleton
             # + fresh book records, reclassify, then re-serialize the skeleton with the new kinds. The
-            # classify runs on book COPIES so its fill_down never mutates the stored books.
+            # classify runs on book COPIES so its fill_down never mutates the stored books' own fields.
+            copies = {b.id: b.model_copy(deep=True) for b in root_books}
+            # A graph-derived author (filled from a folder classified `author`) must track the CURRENT
+            # classification, not the one that first produced it: reclassifying that folder to Book must
+            # re-home the book. `_fill_down` only adds an author and treats `graphing` as sticky, so clear
+            # the copy's graph-derived author first — then it re-derives from the new kinds (landing empty
+            # when no author ancestor remains). A hard (tag/datafile/match/manual) or filename author is
+            # left untouched, so only these ids are written back below.
+            graph_author_ids = {
+                b.id for b in root_books
+                if b.authors and b.provenance.get("authors") in _GRAPH_AUTHOR_PROV
+            }
+            for bid in graph_author_ids:
+                copies[bid].authors = []
+                copies[bid].provenance.pop("authors", None)
             recon = graph_from_records(
-                skeleton_nodes + book_nodes, skeleton_edges + book_edges,
-                {b.id: b.model_copy(deep=True) for b in root_books}, root=root,
+                skeleton_nodes + book_nodes, skeleton_edges + book_edges, copies, root=root,
             )
             classify_graph(recon, root=root)
             classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
@@ -457,6 +474,22 @@ class AppController:
                              or ancestor_franchise(recon, book.source_folder, root))
                 if apply_franchise_fill(book, folder_fr):
                     moved_ids.add(book.id)
+            # Write the re-derived graph author back onto the STORED book (mirrors the franchise fill
+            # above). The copy reflects the new classification: a real ancestor author refills it, an
+            # author-turned-Book folder clears it (dropping the book to "Needs identification").
+            for book in root_books:
+                if book.id not in graph_author_ids:
+                    continue
+                rederived = copies[book.id]
+                if book.authors == rederived.authors:
+                    continue
+                book.authors = list(rederived.authors)
+                new_prov = rederived.provenance.get("authors")
+                if new_prov:
+                    book.provenance["authors"] = new_prov
+                else:
+                    book.provenance.pop("authors", None)
+                moved_ids.add(book.id)
             # Second pass: rebuild the franchise edges from the now-filled books, then serialize.
             franchise_of = {}
             for b in root_books:
@@ -1811,6 +1844,21 @@ class AppController:
         self.ctx.overrides.clear(str(path))
         self._graph_cache.clear()
         self._resync_roots({self._scan_root_for_path(path)})
+
+    def folder_classification(self, path: Path) -> str:
+        """The maintained graph's current kind for the directory `path` (e.g. 'author', 'title'),
+        or '' when the folder has no node. Used to show a book's folder classification before a
+        reclassify."""
+        node = self.ctx.library_graph.nodes.get(DirectoryNode.id_for(path))
+        return str(node.attrs.get("kind", "")) if node is not None else ""
+
+    def directory_node(self, node_id: str) -> tuple[Path, str] | None:
+        """Resolve a graph node id to its (path, kind) when it is a directory node — the only kind
+        that is classifiable. Returns None for book/file/entity nodes (nothing to reclassify)."""
+        node = self.ctx.library_graph.nodes.get(node_id)
+        if node is None or node.physical != "directory":
+            return None
+        return Path(str(node.attrs["path"])), str(node.attrs.get("kind", ""))
 
     def set_entity_alias(self, kind: str, source_name: str, canonical_name: str) -> None:
         """Merge or rename an author/series/franchise entity: alias `source_name` to

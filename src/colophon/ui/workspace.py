@@ -70,7 +70,7 @@ from colophon.ui.dialogs import (
     tag_dialog,
 )
 from colophon.ui.filter_input import filter_input
-from colophon.ui.graph_view import nodes_url_for_book
+from colophon.ui.graph_view import nodes_url_for_book, reclassify_folder_dialog
 from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
@@ -729,6 +729,15 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                 with ui.row().classes("q-gutter-xs"):
                                     ui.button("Normalize", icon="text_format", on_click=_normalize_all).props("flat dense no-caps").tooltip("Normalize all text fields")
                                     ui.button("Remap", icon="swap_horiz", on_click=lambda b=book: remap_dialog(controller, b, refresh_list=refresh_list, show_detail=show_detail)).props("flat dense no-caps").tooltip("Move one field's value to another")
+                                    _folder_kind = controller.folder_classification(book.source_folder)
+                                    ui.button(
+                                        "Reclassify", icon="sell",
+                                        on_click=lambda b=book, k=_folder_kind: reclassify_folder_dialog(
+                                            controller, b.source_folder, k,
+                                            on_done=lambda i=b.id: (refresh_list(), show_detail(i))),
+                                    ).props("flat dense no-caps").tooltip(
+                                        f"Reclassify this book's folder (now: {_folder_kind or 'unclassified'}). "
+                                        "Use when a book was mistaken for an author.")
                             if book.missing:
                                 with ui.element("div").classes("colophon-toolgroup"):
                                     ui.label("Missing").classes("colophon-seccap")

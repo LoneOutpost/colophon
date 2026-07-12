@@ -32,6 +32,52 @@ _LEGEND = (
     "you confirmed. Confirmed authors and series apply to the books on the next scan."
 )
 
+# Manual-classification targets (label shown in the menus), ordered Book-first since correcting a
+# book misread as an author is the common case. Book is stored as the `title` kind; author/series/
+# franchise carry the folder name as their entity value, book/container carry none.
+_CLASSIFY_KINDS = {
+    "title": "Book", "author": "Author", "series": "Series",
+    "franchise": "Franchise", "container": "Container",
+}
+_KINDS_WITH_VALUE = ("author", "series", "franchise")
+
+
+def reclassify_folder_dialog(controller: AppController, path: Path, current_kind: str, *,
+                             on_done=None) -> None:
+    """A small dialog to manually reclassify the folder at `path` (Book / Author / Series /
+    Franchise / Container) or clear the override. Shared by the Nodes explorer and the book detail
+    pane. `on_done` runs after the change (awaited if it returns a coroutine) so the caller can
+    refresh its view."""
+    async def _finish(message: str) -> None:
+        dialog.close()
+        ui.notify(message, type="positive")
+        if on_done is not None:
+            result = on_done()
+            if asyncio.iscoroutine(result):
+                await result
+
+    async def _apply(kind: str) -> None:
+        controller.set_node_classification(
+            path, kind, path.name if kind in _KINDS_WITH_VALUE else None)
+        await _finish(f"Marked {path.name} as {_CLASSIFY_KINDS[kind].lower()}")
+
+    async def _clear() -> None:
+        controller.clear_node_classification(path)
+        await _finish(f"Cleared the classification on {path.name}")
+
+    current = (KIND_LABEL.get(current_kind, current_kind) or "unclassified").lower()
+    with modal() as dialog, ui.card().classes("w-72"):
+        ui.label("Reclassify folder").classes("text-subtitle1")
+        ui.label(f"{path.name}: currently {current}").classes("text-caption colophon-muted")
+        with ui.column().classes("w-full gap-1 q-mt-xs"):
+            for kind, label in _CLASSIFY_KINDS.items():
+                ui.button(label, on_click=lambda k=kind: _apply(k)).props(
+                    "flat no-caps align=left").classes("w-full")
+            ui.separator()
+            ui.button("Clear classification", on_click=_clear).props(
+                "flat no-caps align=left").classes("w-full colophon-muted")
+    dialog.open()
+
 
 def _render_node(node: GraphTreeNode, on_classify=None) -> None:
     if node.node_kind == "dir":
@@ -123,17 +169,19 @@ def render_classic_tree(controller: AppController) -> None:
     body = body_column("full")
 
     async def _open_classify_dialog(node, kind: str) -> None:
+        label = _CLASSIFY_KINDS[kind]
         with modal() as dialog, ui.card():
-            ui.label(f"Classify {node.label} as {kind}")
-            name = ui.input("Name", value=node.label)
+            ui.label(f"Classify {node.label} as {label.lower()}")
+            # Only the entity kinds carry a name (which author/series/franchise); Book and Container
+            # take none, so no name field for them.
+            name = ui.input("Name", value=node.label) if kind in _KINDS_WITH_VALUE else None
             with ui.row():
                 ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
-                ui.button("Confirm",
-                          on_click=lambda: dialog.submit(name.value or "")).props("no-caps")
-        result = await dialog
-        if result is not None:
-            controller.set_node_classification(node.path, kind, result or None)
-            ui.notify(f"Marked {node.label} as {kind}", type="positive")
+                ui.button("Confirm", on_click=lambda: dialog.submit(True)).props("no-caps")
+        if await dialog:
+            controller.set_node_classification(
+                node.path, kind, (name.value or None) if name is not None else None)
+            ui.notify(f"Marked {node.label} as {label.lower()}", type="positive")
             await _render_maintained()
 
     async def _clear_classify(node) -> None:
@@ -143,17 +191,18 @@ def render_classic_tree(controller: AppController) -> None:
 
     async def _quick_classify(node, kind: str) -> None:
         """Right-click fast path: re-categorize `node` as `kind` at once, using the folder's own name
-        as the value (a container carries none). Recoverable via Clear."""
-        controller.set_node_classification(node.path, kind, node.label if kind != "container" else None)
-        ui.notify(f"Marked {node.label} as {kind}", type="positive")
+        as the value for the entity kinds (a book/container carries none). Recoverable via Clear."""
+        value = node.label if kind in _KINDS_WITH_VALUE else None
+        controller.set_node_classification(node.path, kind, value)
+        ui.notify(f"Marked {node.label} as {_CLASSIFY_KINDS[kind].lower()}", type="positive")
         await _render_maintained()
 
     def _classify_menu(node) -> None:
         # Right-click anywhere on the row for fast re-categorization (value = the folder's own name);
         # the kebab opens the dialog for the rarer case where the value should differ from the name.
         with ui.context_menu():
-            for kind in ("author", "series", "franchise", "container"):
-                ui.menu_item(f"Mark as {kind}",
+            for kind, label in _CLASSIFY_KINDS.items():
+                ui.menu_item(f"Mark as {label.lower()}",
                              lambda kind=kind, node=node: _quick_classify(node, kind))
             ui.separator()
             ui.menu_item("Clear classification", lambda node=node: _clear_classify(node))
@@ -168,8 +217,8 @@ def render_classic_tree(controller: AppController) -> None:
         ).classes("colophon-muted")
         btn.tooltip("Classify…")
         with btn, ui.menu():
-            for kind in ("author", "series", "franchise", "container"):
-                ui.menu_item(kind.capitalize(),
+            for kind, label in _CLASSIFY_KINDS.items():
+                ui.menu_item(label,
                              lambda kind=kind, node=node: _open_classify_dialog(node, kind))
             ui.separator()
             ui.menu_item("Clear", lambda node=node: _clear_classify(node))
@@ -367,8 +416,10 @@ def _explorer_legend(focal_id: str, hidden: frozenset[str], depth: int = 1) -> N
                     label.style("text-decoration: line-through")
 
 
-def _explorer_panel(view, focal_id: str | None) -> None:
-    """Render one focal node's inspect read-model (a NodeInspection) into the current container."""
+def _explorer_panel(view, focal_id: str | None, *, on_reclassify=None) -> None:
+    """Render one focal node's inspect read-model (a NodeInspection) into the current container.
+    When `on_reclassify` is given (the focal node is a classifiable folder) a Reclassify action is
+    offered, so the read-only Nodes view can still correct a misclassified folder."""
     if not view or not view.kind:
         ui.label("Search for an author, series, or book, then click a result to explore it.").classes(
             "text-caption colophon-muted"
@@ -376,10 +427,15 @@ def _explorer_panel(view, focal_id: str | None) -> None:
         return
     with ui.row().classes("items-center justify-between no-wrap w-full"):
         ui.label(view.label).classes("text-subtitle1")
-        if focal_id:
-            ui.button("Show in tree", icon="account_tree",
-                      on_click=lambda: ui.navigate.to(_mode_url("classic", focal_id))).props(
-                "flat dense no-caps").classes("colophon-muted")
+        with ui.row().classes("items-center no-wrap q-gutter-xs"):
+            if on_reclassify is not None:
+                ui.button("Reclassify", icon="sell", on_click=on_reclassify).props(
+                    "flat dense no-caps").classes("colophon-muted").tooltip(
+                    "Change this folder's classification (right-click a node does the same)")
+            if focal_id:
+                ui.button("Show in tree", icon="account_tree",
+                          on_click=lambda: ui.navigate.to(_mode_url("classic", focal_id))).props(
+                    "flat dense no-caps").classes("colophon-muted")
     cap = view.type_caption.upper()
     if view.confidence is not None:
         cap += f" · {view.confidence:.0f}%"
@@ -439,6 +495,21 @@ def render_explorer(controller: AppController, focal_id: str | None,
                         ui.navigate.to(target)
 
                 chart.on("componentClick", _on_node_click, ["componentType", "dataType", "data"])
+
+                def _on_node_contextmenu(e) -> None:
+                    args = e.args or {}
+                    if args.get("componentType") != "series" or args.get("dataType") != "node":
+                        return
+                    data = args.get("data")
+                    nid = data.get("id") if isinstance(data, dict) else None
+                    resolved = controller.directory_node(str(nid)) if nid else None
+                    if resolved is None:
+                        return  # only folders are classifiable; ignore book/entity right-clicks
+                    reclassify_folder_dialog(
+                        controller, resolved[0], resolved[1],
+                        on_done=lambda i=str(nid): ui.navigate.to(_graph_url(i, hidden, depth=depth)))
+
+                chart.on("contextmenu", _on_node_contextmenu, ["componentType", "dataType", "data"])
                 omitted = chart_view["omitted"]
                 if omitted:
                     ui.label(f"Showing a capped neighborhood — {omitted} more not shown.").classes(
@@ -453,7 +524,17 @@ def render_explorer(controller: AppController, focal_id: str | None,
                 ):
                     pass
         with ui.column().classes("col-4 gap-1"):
-            _explorer_panel(controller.graph_inspect(focal_id) if focal_id else None, focal_id)
+            recl = controller.directory_node(focal_id) if focal_id else None
+
+            def _open_reclassify(r=recl) -> None:
+                reclassify_folder_dialog(
+                    controller, r[0], r[1],
+                    on_done=lambda: ui.navigate.to(_graph_url(focal_id, hidden, depth=depth)))
+
+            _explorer_panel(
+                controller.graph_inspect(focal_id) if focal_id else None, focal_id,
+                on_reclassify=_open_reclassify if recl else None,
+            )
 
     def _run_search() -> None:
         results.clear()
