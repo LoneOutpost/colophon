@@ -23,9 +23,9 @@ from colophon.core.book_search import (
     FIELDS,
     Condition,
     book_matches,
+    build_token,
     field_label,
     format_query,
-    format_token,
     parse_query,
 )
 from colophon.core.chapters import file_boundary_chapters
@@ -1736,13 +1736,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             _set_filter(text)
         _render_filter_chips()
 
-    def _add_condition(field: str, value: str) -> None:
-        """Append a builder-produced condition to the current query. `any` adds a
-        bare term; every other field emits a `field:"value"` token."""
-        value = (value or "").strip()
-        if not value:
+    def _add_condition(field: str, value: str, *, negated: bool) -> None:
+        """Append a builder-produced condition to the current query. Commas in the
+        value become OR-alternatives (except for `any`, kept literal); `negated`
+        prepends `-`."""
+        token = build_token(field, value or "", negated=negated)
+        if not token:
             return
-        token = value if field == "any" else format_token(field, value)
         current = book_filter["text"].strip()
         _apply_query(f"{current} {token}" if current else token)
 
@@ -1762,10 +1762,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         conditions = parse_query(book_filter["text"])
         with box:
             for i, cond in enumerate(conditions):
-                text = (
-                    cond.value if cond.field is None
-                    else f"{field_label(cond.field)}: {cond.value}"
-                )
+                value = " or ".join(cond.values)
+                text = value if cond.field is None else f"{field_label(cond.field)}: {value}"
+                if cond.negated:
+                    text = f"not {text}"
                 ui.chip(text, removable=True).props("dense outline").classes(
                     "colophon-chip"
                 ).on("remove", lambda _e, idx=i: _remove_condition(idx))
@@ -1886,13 +1886,19 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             field_sel = ui.select(
                                 {tok: lbl for tok, lbl in FIELDS}, value="title",
                             ).props("dense outlined options-dense").classes("w-full")
-                            val_in = ui.input(placeholder="value").props(
+                            val_in = ui.input(placeholder="value, or a, b for either").props(
                                 "dense outlined"
                             ).classes("w-full")
+                            exclude = ui.checkbox("Exclude").props("dense").tooltip(
+                                "Match books that do not have this value"
+                            )
 
                             def _submit_condition() -> None:
-                                _add_condition(field_sel.value, val_in.value)
+                                _add_condition(
+                                    field_sel.value, val_in.value, negated=bool(exclude.value)
+                                )
                                 val_in.set_value("")
+                                exclude.set_value(False)
                                 add_menu.close()
 
                             val_in.on("keydown.enter", _submit_condition)
