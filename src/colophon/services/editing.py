@@ -97,6 +97,24 @@ def swap_fields(
     return _commit(books, hist, book, changes)
 
 
+def bulk_swap_fields(
+    books: BookUnitRepo,
+    hist: HistoryRepo,
+    items: list[BookUnit],
+    *,
+    field_a: str,
+    field_b: str,
+) -> str:
+    """Exchange two fields' values across `items` in one undoable batch. A book
+    whose two fields already hold the same value is a no-op and is skipped."""
+    def _changes(book: BookUnit) -> tuple[BookUnit, list[EditChange]]:
+        val_a = get_field(book, field_a)
+        val_b = get_field(book, field_b)
+        return book, [_apply(book, field_a, val_b), _apply(book, field_b, val_a)]
+
+    return _bulk_commit(books, hist, items, _changes)
+
+
 def bulk_set_field(
     books: BookUnitRepo, hist: HistoryRepo, items: list[BookUnit], field: str, value: str | None
 ) -> str:

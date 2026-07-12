@@ -9,6 +9,7 @@ from colophon.services.editing import (
     bulk_apply_fields,
     bulk_remap,
     bulk_set_field,
+    bulk_swap_fields,
     remap_field,
     set_field_value,
     swap_fields,
@@ -62,6 +63,44 @@ def test_swap_exchanges_two_fields(tmp_path):
     swap_fields(books, hist, b, "title", "subtitle")
     assert b.title == "B"
     assert b.subtitle == "A"
+
+
+def test_swap_undo_restores_both_fields(tmp_path):
+    books, hist = _repos(tmp_path)
+    b = _book(books)
+    b.title, b.subtitle = "A", "B"
+    books.upsert(b)
+    batch = swap_fields(books, hist, b, "title", "subtitle")
+    assert (b.title, b.subtitle) == ("B", "A")
+    undo_batch(books, hist, batch)
+    restored = books.get(b.id)
+    assert (restored.title, restored.subtitle) == ("A", "B")
+
+
+def test_bulk_swap_across_books(tmp_path):
+    books, hist = _repos(tmp_path)
+    a = BookUnit.new(source_folder=Path("/ingest/a"))
+    a.title, a.subtitle = "TA", "SA"
+    b = BookUnit.new(source_folder=Path("/ingest/b"))
+    b.title, b.subtitle = "TB", "SB"
+    books.upsert(a)
+    books.upsert(b)
+    batch = bulk_swap_fields(books, hist, [a, b], field_a="title", field_b="subtitle")
+    assert (a.title, a.subtitle) == ("SA", "TA")
+    assert (b.title, b.subtitle) == ("SB", "TB")
+    assert len({c.book_id for c in hist.list_batch(batch)}) == 2
+
+
+def test_bulk_swap_skips_noop_book(tmp_path):
+    books, hist = _repos(tmp_path)
+    same = BookUnit.new(source_folder=Path("/ingest/same"))
+    same.title = same.subtitle = "X"  # equal fields -> swap is a no-op
+    diff = BookUnit.new(source_folder=Path("/ingest/diff"))
+    diff.title, diff.subtitle = "T", "S"
+    books.upsert(same)
+    books.upsert(diff)
+    batch = bulk_swap_fields(books, hist, [same, diff], field_a="title", field_b="subtitle")
+    assert {c.book_id for c in hist.list_batch(batch)} == {diff.id}  # only diff recorded
 
 
 def test_bulk_set_field_one_batch_across_books(tmp_path):
