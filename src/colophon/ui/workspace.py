@@ -19,6 +19,15 @@ from urllib.parse import quote
 from nicegui import app, background_tasks, ui
 
 from colophon.controller import AppController, RerunResult
+from colophon.core.book_search import (
+    FIELDS,
+    Condition,
+    book_matches,
+    field_label,
+    format_query,
+    format_token,
+    parse_query,
+)
 from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
@@ -451,18 +460,19 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         # The folder filter applies on top of every scope selection.
         return [b for b in books if _in_folder(b)]
 
-    def _matches_filter(book, terms: list[str]) -> bool:
-        if not terms:
+    def _matches_filter(book, conditions: list[Condition]) -> bool:
+        if not conditions:
             return True
-        hay = f"{book_haystack(book)} {controller.book_filename(book).lower()}"
-        return all(term in hay for term in terms)
+        filename = controller.book_filename(book)
+        any_haystack = f"{book_haystack(book)} {filename.lower()}"
+        return book_matches(book, conditions, filename=filename, any_haystack=any_haystack)
 
     def _scoped_books() -> list:
         """Scope ∧ folder ∧ text — the candidate set before facets/sort."""
         books = _books_for_scope()
-        terms = book_filter["text"].lower().split()
-        if terms:
-            books = [b for b in books if _matches_filter(b, terms)]
+        conditions = parse_query(book_filter["text"])
+        if conditions:
+            books = [b for b in books if _matches_filter(b, conditions)]
         return books
 
     def _visible_books() -> list:
@@ -1554,11 +1564,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             _ensure_warm()
             return
         full = controller.library_tree()
-        terms = book_filter["text"].lower().split()
-        if terms or folder_filter["path"] is not None:
+        conditions = parse_query(book_filter["text"])
+        if conditions or folder_filter["path"] is not None:
             # Narrow the navigator to the same books the list shows (folder ∧ text), so the two
             # panels never disagree. `visible` is the shared match set; None means no active filter.
-            visible = {b.id for b in full.all_books if _in_folder(b) and _matches_filter(b, terms)}
+            visible = {b.id for b in full.all_books if _in_folder(b) and _matches_filter(b, conditions)}
             tree = controller.navigator_view(visible)
         else:
             tree = full
@@ -1614,7 +1624,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     )
                 attention = [
                     b for b in controller.books_needing_attention()
-                    if _in_folder(b) and _matches_filter(b, terms)
+                    if _in_folder(b) and _matches_filter(b, conditions)
                 ]
                 if attention:
                     counts = {"error": 0, "warn": 0, "info": 0}
@@ -1688,7 +1698,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                 menu=lambda n=author.name: _entity_menu("author", n, nav_aliases),
                             )
                         )
-                if terms and view["group_by"] != "phase" and not nav_pending:
+                if conditions and view["group_by"] != "phase" and not nav_pending:
                     ui.label("No matches").classes("colophon-muted text-caption q-pa-sm")
             _nav_view["pending"] = nav_pending
             _nav_view["rendered"] = 0
@@ -1711,7 +1721,54 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         if search is not None:
             search.set_value(label)
         repaint(list=True, nav=True)
+        _render_filter_chips()
         _persist_view()
+
+    def _apply_query(text: str) -> None:
+        """Set the filter to `text`, driving the input, the panels, and the chips
+        row from the one query string."""
+        text = text.strip()
+        book_filter["text"] = text
+        search = refs.get("filter")
+        if search is not None:
+            search.set_value(text)  # fires on_value_change -> _set_filter (repaint + persist)
+        else:
+            _set_filter(text)
+        _render_filter_chips()
+
+    def _add_condition(field: str, value: str) -> None:
+        """Append a builder-produced condition to the current query. `any` adds a
+        bare term; every other field emits a `field:"value"` token."""
+        value = (value or "").strip()
+        if not value:
+            return
+        token = value if field == "any" else format_token(field, value)
+        current = book_filter["text"].strip()
+        _apply_query(f"{current} {token}" if current else token)
+
+    def _remove_condition(idx: int) -> None:
+        """Drop the condition at `idx` (from a chip's remove control) and rewrite the query."""
+        conditions = parse_query(book_filter["text"])
+        if 0 <= idx < len(conditions):
+            del conditions[idx]
+            _apply_query(format_query(conditions))
+
+    def _render_filter_chips() -> None:
+        """Repaint the removable chip per active condition below the filter input."""
+        box = refs.get("filter_chips")
+        if box is None:
+            return
+        box.clear()
+        conditions = parse_query(book_filter["text"])
+        with box:
+            for i, cond in enumerate(conditions):
+                text = (
+                    cond.value if cond.field is None
+                    else f"{field_label(cond.field)}: {cond.value}"
+                )
+                ui.chip(text, removable=True).props("dense outline").classes(
+                    "colophon-chip"
+                ).on("remove", lambda _e, idx=i: _remove_condition(idx))
 
     def _set_facet(name: str, value) -> None:
         view["facets"][name] = value
@@ -1813,13 +1870,38 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 ).props("dense").tooltip(
                     "Only books with a fault that blocks persisting — missing or corrupt files."
                 )
-            search = filter_input(
-                _set_filter,
-                placeholder="Filter title, author, series, narrator, genre, tag, filename",
-                value=book_filter["text"],
-                aria_label="Filter the library",
-            ).classes("w-full")
-            refs["filter"] = search  # so the "/" shortcut can focus it
+            with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                search = filter_input(
+                    _set_filter,
+                    placeholder="Filter title, author, series, narrator, or field:value",
+                    value=book_filter["text"],
+                    aria_label="Filter the library",
+                ).classes("col")
+                refs["filter"] = search  # so the "/" shortcut can focus it
+                with ui.button(icon="add").props("flat dense round") as add_btn:
+                    add_btn.classes("colophon-muted").tooltip("Add a field-scoped filter")
+                    with ui.menu() as add_menu:
+                        with ui.column().classes("q-pa-sm gap-2").style("min-width: 260px"):
+                            ui.label("Add filter").classes("text-caption colophon-muted")
+                            field_sel = ui.select(
+                                {tok: lbl for tok, lbl in FIELDS}, value="title",
+                            ).props("dense outlined options-dense").classes("w-full")
+                            val_in = ui.input(placeholder="value").props(
+                                "dense outlined"
+                            ).classes("w-full")
+
+                            def _submit_condition() -> None:
+                                _add_condition(field_sel.value, val_in.value)
+                                val_in.set_value("")
+                                add_menu.close()
+
+                            val_in.on("keydown.enter", _submit_condition)
+                            ui.button("Add", on_click=_submit_condition).props(
+                                "dense no-caps unelevated color=primary"
+                            ).classes("w-full")
+            filter_chips = ui.row().classes("items-center w-full q-gutter-xs")
+            refs["filter_chips"] = filter_chips
+            _render_filter_chips()
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                 ui.button("Select all", icon="done_all", on_click=_select_visible) \
                     .props("flat dense no-caps").tooltip("Select all books matching the filter")
