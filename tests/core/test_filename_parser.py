@@ -91,3 +91,43 @@ def test_conditional_group_bracket_rejected_in_parse_pattern():
         compile_template("[$SerNum - ]$Title")
     with pytest.raises(ValueError, match="organize"):
         compile_template("$Title]")
+
+
+def test_underscore_directly_after_token_is_a_literal_separator():
+    # '$Skip_$Author' must read as $Skip, literal '_', $Author — not a 'Skip_' token.
+    pattern = compile_template("$Skip_$Author")
+    assert parse_filename(pattern, "01_STEPHEN_KING.mp3") == {"author": "STEPHEN KING"}
+
+
+def test_uppercase_tokens_resolve():
+    # token names are case-insensitive, so a caps template works
+    pattern = compile_template("$SKIP_$AUTHOR")
+    assert parse_filename(pattern, "01_STEPHEN_KING.mp3") == {"author": "STEPHEN KING"}
+
+
+def test_underscores_between_two_fields_read_as_spaces():
+    pattern = compile_template("$Author_-_$Title")
+    assert parse_filename(pattern, "STEPHEN_KING_-_THE_SHINING.mp3") == {
+        "author": "STEPHEN KING", "title": "THE SHINING",
+    }
+
+
+def test_underscore_in_value_becomes_space_for_any_separator():
+    pattern = compile_template("$Author - $Title")
+    assert parse_filename(pattern, "Brandon_Sanderson - The_Way_of_Kings.mp3") == {
+        "author": "Brandon Sanderson", "title": "The Way of Kings",
+    }
+
+
+def test_repeated_underscores_collapse_to_one_space():
+    pattern = compile_template("$Author")
+    assert parse_filename(pattern, "Stephen__King.mp3") == {"author": "Stephen King"}
+
+
+def test_numeric_tokens_and_double_dollar_unaffected_by_underscore_cleanup():
+    pattern = compile_template("$Series #$SerNum ($PubYear)")
+    assert parse_filename(pattern, "Stormlight #1 (2010).mp3") == {
+        "series": "Stormlight", "sequence": "1", "year": "2010",
+    }
+    literal = compile_template("$$_$Title")  # underscore literal after a $$ literal
+    assert parse_filename(literal, "$_Dune.mp3") == {"title": "Dune"}

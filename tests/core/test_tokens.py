@@ -34,6 +34,12 @@ def test_parse_field_for():
     assert parse_field_for("Nope") is None
 
 
+def test_token_lookup_is_case_insensitive():
+    assert token_by_name("SKIP") is token_by_name("Skip") is token_by_name("skip")
+    assert parse_field_for("AUTHOR") == "author"
+    assert parse_field_for("serNUM") == "sequence"
+
+
 def test_migrate_filename_template():
     assert migrate_filename_template("%author% - %title%") == "$Author - $Title"
     assert migrate_filename_template("%series% #%sequence%") == "$Series #$SerNum"
