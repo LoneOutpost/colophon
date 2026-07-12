@@ -45,16 +45,18 @@ TOKENS: list[Token] = [
 
 PARSE_TOKENS: list[Token] = [t for t in TOKENS if t.parses]
 BUILD_TOKENS: list[Token] = [t for t in TOKENS if t.builds]
-_BY_NAME: dict[str, Token] = {t.name: t for t in TOKENS}
+# Keyed by lowercased name so lookups are case-insensitive ($SKIP == $Skip == $skip).
+# The token names are all distinct case-insensitively, so no entry is lost.
+_BY_NAME: dict[str, Token] = {t.name.lower(): t for t in TOKENS}
 
 
 def token_by_name(name: str) -> Token | None:
-    return _BY_NAME.get(name)
+    return _BY_NAME.get(name.lower())
 
 
 def parse_field_for(name: str) -> str | None:
     """The model field a parseable token captures, or None for build-only/$Skip/unknown."""
-    tok = _BY_NAME.get(name)
+    tok = _BY_NAME.get(name.lower())
     return tok.field if (tok is not None and tok.parses) else None
 
 

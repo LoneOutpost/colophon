@@ -2,7 +2,9 @@
 
 Uses the shared LazyLibrarian $Token vocabulary (core/tokens). Parseable tokens become
 named capture groups keyed by their model field; $Skip discards a run; a run of literal
-whitespace matches leniently (\\s+); $$ is a literal $."""
+whitespace matches leniently (\\s+); $$ is a literal $. Token names are letters only, so
+a literal underscore/digit/punctuation may follow a token directly ($Skip_$Author). In
+captured values an underscore reads as a space ('Stephen_King' -> 'Stephen King')."""
 
 from __future__ import annotations
 
@@ -11,7 +13,10 @@ from re import Pattern
 
 from colophon.core.tokens import token_by_name
 
-_TOKEN = re.compile(r"\$(\w+)")
+# Token names are letters only. This lets a literal '_' (or digit/punctuation) follow a
+# token directly — '$Skip_$Author' reads as $Skip, literal '_', $Author — where '\\w+'
+# would have swallowed the underscore into the token name.
+_TOKEN = re.compile(r"\$([A-Za-z]+)")
 _DOLLAR_SENTINEL = "\x00DOLLAR\x00"  # protects "$$" through tokenization
 
 
@@ -67,9 +72,16 @@ def strip_ext(filename: str) -> str:
     return filename.rsplit(".", 1)[0] if "." in filename else filename
 
 
+def _clean_value(value: str) -> str:
+    """Tidy a captured value: underscores stand in for spaces in many filenames, so
+    turn them into spaces, collapse whitespace runs, and trim. Numeric tokens capture
+    digits only, so they pass through unchanged."""
+    return re.sub(r"\s+", " ", value.replace("_", " ")).strip()
+
+
 def parse_filename(pattern: Pattern[str], filename: str) -> dict[str, str] | None:
     """Parse a filename (extension stripped) into field values, or None if no match."""
     match = pattern.match(strip_ext(filename))
     if match is None:
         return None
-    return {key: value.strip() for key, value in match.groupdict().items()}
+    return {key: _clean_value(value) for key, value in match.groupdict().items()}
