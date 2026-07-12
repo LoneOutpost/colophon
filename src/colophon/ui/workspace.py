@@ -1905,6 +1905,21 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             ui.button("Add", on_click=_submit_condition).props(
                                 "dense no-caps unelevated color=primary"
                             ).classes("w-full")
+                with ui.icon("help_outline").classes("colophon-muted cursor-pointer"):
+                    with ui.tooltip().classes("colophon-tip"):
+                        ui.html(
+                            "<b>Filter syntax</b><br>"
+                            "Type any words to match across the book. Separate rules with "
+                            "spaces; every rule must match.<br><br>"
+                            "<code>author:sanderson</code> limits a word to one field.<br>"
+                            "<code>author:sanderson,jordan</code> matches either value.<br>"
+                            "<code>-narrator:kramer</code> excludes matches.<br>"
+                            '<code>title:"way of kings"</code> quotes a multi-word value.'
+                            "<br><br>"
+                            "Fields: title, subtitle, author, narrator, series, franchise, "
+                            "publisher, genre, tag, filename, asin, isbn, year, language, "
+                            "description."
+                        )
             filter_chips = ui.row().classes("items-center w-full q-gutter-xs")
             refs["filter_chips"] = filter_chips
             _render_filter_chips()
