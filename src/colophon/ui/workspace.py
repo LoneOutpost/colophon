@@ -1044,6 +1044,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             f"Re-run {state_panel.phase_label(_p)}",
                             lambda p=_p: _rerun_selection(p),
                         )
+                ui.button(
+                    "Re-identify…", icon="badge", on_click=lambda: _reidentify_dialog(),
+                ).props("outline").tooltip(
+                    "Re-read the selection's filenames with a chosen pattern (e.g. $PubYear - $Title)")
+
                 def _remove_selection() -> None:
                     ids = [b.id for b in books]
                     remove_from_library_dialog(
@@ -1453,6 +1458,93 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 ui.button("Cancel", on_click=dialog.close).props("flat")
                 apply_btn.on_click(_apply)
 
+            _render_preview()
+        dialog.open()
+
+    def _reidentify_dialog() -> None:
+        """Re-identify the selected books with a chosen filename pattern: clears their
+        folder/filename-derived fields and re-derives them from the pattern. Manual edits and
+        matched data are kept. A preview shows how the pattern parses each selection filename."""
+        books = _selected_books()
+        if not books:
+            ui.notify("Select one or more books first")
+            return
+        initial = controller.ctx.config.filename_template or "$Author - $Title"
+
+        with modal() as dialog, ui.card().classes("w-full").style("max-width: 720px"):
+            ui.label("Re-identify from filename").classes("text-h6")
+            ui.label(
+                f"Re-reads {len(books)} selected book(s) with the pattern below. Your manual edits "
+                "and matched data are kept."
+            ).classes("text-caption colophon-muted")
+            with ui.row().classes("items-center q-gutter-xs q-mt-xs"):
+                ui.label("Fields:").classes("text-caption colophon-muted")
+                for tok in PARSE_TOKENS:
+                    badge = ui.badge(f"${tok.name}").props("color=grey-7 outline")
+                    if tok.field is None:  # $Skip
+                        badge.props("color=grey-5").tooltip("Matches and discards a run")
+
+            pattern_input = ui.input("Pattern", value=initial).props(
+                "dense clearable").classes("w-full q-mt-sm")
+            attach_history_menu(
+                pattern_input, controller.ctx.config.recent_filename_templates,
+                lambda p: p, lambda p: pattern_input.set_value(p), tooltip="Recent patterns",
+            )
+            preview_box = ui.column().classes("w-full q-mt-sm")
+            apply_btn = ui.button("Re-identify", icon="refresh")
+
+            def _render_preview() -> None:
+                preview_box.clear()
+                pat = (pattern_input.value or "").strip()
+                try:
+                    compile_template(pat)
+                except ValueError as e:
+                    apply_btn.set_enabled(False)
+                    with preview_box:
+                        ui.label(f"Invalid pattern: {e}").classes("text-caption text-negative")
+                    return
+                apply_btn.set_enabled(True)
+                matched = 0
+                with preview_box:
+                    with ui.scroll_area().classes("w-full").style("max-height: 32vh"):
+                        with ui.list().props("dense").classes("w-full"):
+                            for b in books:
+                                parsed = controller.preview_filename_parse(b, pat)
+                                if parsed:
+                                    matched += 1
+                                with ui.item(), ui.item_section():
+                                    ui.item_label(controller.book_filename(b)).classes("ellipsis")
+                                    if parsed:
+                                        ui.item_label(
+                                            ", ".join(f"{k}={v}" for k, v in parsed.items())
+                                        ).props("caption")
+                                    else:
+                                        ui.item_label("no match").props("caption").classes(
+                                            "colophon-muted")
+                    ui.label(f"{matched} of {len(books)} filename(s) match").classes(
+                        "text-caption colophon-muted")
+
+            pattern_input.on_value_change(lambda _e: _render_preview())
+
+            async def _apply() -> None:
+                pat = (pattern_input.value or "").strip()
+                try:
+                    compile_template(pat)
+                except ValueError as e:
+                    ui.notify(f"Invalid pattern: {e}", type="negative")
+                    return
+                apply_btn.props("loading=true")
+                try:
+                    n = await asyncio.to_thread(controller.reidentify, books, template=pat)
+                finally:
+                    apply_btn.props(remove="loading")
+                ui.notify(f"Re-identified {n} book(s)")
+                dialog.close()
+                repaint(nav=True, middle=True, status=True)
+
+            with ui.row().classes("w-full justify-end q-gutter-sm q-mt-md"):
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                apply_btn.on_click(_apply)
             _render_preview()
         dialog.open()
 
