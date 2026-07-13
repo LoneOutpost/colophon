@@ -70,7 +70,11 @@ from colophon.ui.dialogs import (
     tag_dialog,
 )
 from colophon.ui.filter_input import filter_input
-from colophon.ui.graph_view import nodes_url_for_book, reclassify_folder_dialog
+from colophon.ui.graph_view import (
+    combine_folder_dialog,
+    nodes_url_for_book,
+    reclassify_folder_dialog,
+)
 from colophon.ui.skeleton import skeleton_rows
 from colophon.ui.state_panel import _PHASE_ICONS, _PHASE_LABELS
 from colophon.ui.tabs import app_tabs
@@ -738,6 +742,23 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                     ).props("flat dense no-caps").tooltip(
                                         f"Reclassify this book's folder (now: {_folder_kind or 'unclassified'}). "
                                         "Use when a book was mistaken for an author.")
+                                    if len(controller.folder_books(book.source_folder)) > 1:
+                                        ui.button(
+                                            "Combine", icon="merge",
+                                            on_click=lambda b=book: combine_folder_dialog(
+                                                controller, b.source_folder,
+                                                on_done=lambda i=b.id: (refresh_list(), show_detail(i))),
+                                        ).props("flat dense no-caps").tooltip(
+                                            "Combine this folder's files into one book (chapters). "
+                                            "Use when one book was split into many.")
+                                    elif controller.folder_is_combined(book.source_folder):
+                                        def _uncombine(b=book) -> None:
+                                            controller.uncombine_folder(b.source_folder)
+                                            ui.notify("Split back into separate books")
+                                            refresh_list()
+                                        ui.button("Uncombine", icon="call_split", on_click=_uncombine) \
+                                            .props("flat dense no-caps").tooltip(
+                                                "Split this combined book back into separate books")
                             if book.missing:
                                 with ui.element("div").classes("colophon-toolgroup"):
                                     ui.label("Missing").classes("colophon-seccap")

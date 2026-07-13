@@ -365,6 +365,48 @@ class NodeOverrideRepo:
 
 
 @dataclass
+class GroupingOverrideRepo:
+    """Persisted 'this folder's audio is one book' overrides, keyed by absolute folder path.
+    Kept separate from node-kind overrides so reclassifying a folder to Book never silently
+    regroups its files — only an explicit Combine sets this. `mode` is 'single' for v1."""
+
+    conn: sqlite3.Connection
+
+    def set_single(self, path: str, snapshot: str | None = None) -> None:
+        """Force `path` to a single book. `snapshot` is the JSON of the books this Combine
+        replaced, kept so an Uncombine can restore them exactly."""
+        self.conn.execute(
+            "INSERT INTO grouping_overrides (path, mode, snapshot) VALUES (?, 'single', ?) "
+            "ON CONFLICT(path) DO UPDATE SET mode = excluded.mode, snapshot = excluded.snapshot",
+            (path, snapshot),
+        )
+        self.conn.commit()
+
+    def snapshot(self, path: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT snapshot FROM grouping_overrides WHERE path = ?", (path,)
+        ).fetchone()
+        return row["snapshot"] if row else None
+
+    def clear(self, path: str) -> None:
+        self.conn.execute("DELETE FROM grouping_overrides WHERE path = ?", (path,))
+        self.conn.commit()
+
+    def is_single(self, path: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM grouping_overrides WHERE path = ? AND mode = 'single'", (path,)
+        ).fetchone()
+        return row is not None
+
+    def single_folders(self) -> frozenset[str]:
+        """Every folder path forced to a single book (mode='single')."""
+        rows = self.conn.execute(
+            "SELECT path FROM grouping_overrides WHERE mode = 'single'"
+        ).fetchall()
+        return frozenset(r["path"] for r in rows)
+
+
+@dataclass
 class EntityAliasRepo:
     """Persisted entity merge/rename facts, keyed by (kind, name_key).
 

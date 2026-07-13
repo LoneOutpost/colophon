@@ -15,6 +15,7 @@ from colophon.adapters.repository.store import (
     BookUnitRepo,
     EntityAliasRepo,
     GraphStore,
+    GroupingOverrideRepo,
     HistoryRepo,
     KnownFranchiseRepo,
     NodeOverrideRepo,
@@ -55,6 +56,7 @@ class AppContext:
     history: HistoryRepo
     operations: OperationRepo
     overrides: NodeOverrideRepo
+    grouping: GroupingOverrideRepo
     aliases: EntityAliasRepo
     franchises: KnownFranchiseRepo
     graph: GraphStore
@@ -95,6 +97,7 @@ class AppContext:
             history=HistoryRepo(conn),
             operations=OperationRepo(conn),
             overrides=NodeOverrideRepo(conn),
+            grouping=GroupingOverrideRepo(conn),
             aliases=EntityAliasRepo(conn),
             franchises=KnownFranchiseRepo(conn),
             graph=graph_store,

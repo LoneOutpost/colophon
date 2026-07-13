@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -59,6 +60,12 @@ def reclassify_folder_dialog(controller: AppController, path: Path, current_kind
     async def _apply(kind: str) -> None:
         controller.set_node_classification(
             path, kind, path.name if kind in _KINDS_WITH_VALUE else None)
+        # A Book folder is one book; if it still holds several, offer to combine them (never silent).
+        if kind == "title" and len(controller.folder_books(path)) > 1:
+            dialog.close()
+            ui.notify(f"Marked {path.name} as book")
+            combine_folder_dialog(controller, path, on_done=on_done)
+            return
         await _finish(f"Marked {path.name} as {_CLASSIFY_KINDS[kind].lower()}")
 
     async def _clear() -> None:
@@ -76,6 +83,40 @@ def reclassify_folder_dialog(controller: AppController, path: Path, current_kind
             ui.separator()
             ui.button("Clear classification", on_click=_clear).props(
                 "flat no-caps align=left").classes("w-full colophon-muted")
+    dialog.open()
+
+
+def combine_folder_dialog(controller: AppController, folder: Path, *, on_done=None) -> None:
+    """Confirm combining all of `folder`'s books into one multi-file book (files become ordered
+    chapters). Shows the resulting chapter list. `on_done` runs after (awaited if a coroutine)."""
+    books = controller.folder_books(folder)
+    names = sorted(
+        (sf.path.name for b in books for sf in b.source_files),
+        key=lambda n: [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", n)],
+    )
+
+    async def _combine() -> None:
+        controller.combine_folder(folder)
+        dialog.close()
+        ui.notify(f"Combined {len(books)} books into one", type="positive")
+        if on_done is not None:
+            result = on_done()
+            if asyncio.iscoroutine(result):
+                await result
+
+    with modal() as dialog, ui.card().classes("w-96"):
+        ui.label("Combine into one book").classes("text-subtitle1")
+        ui.label(
+            f"{folder.name}: {len(books)} books become one. The best-identified book's details "
+            "are kept; every file becomes a chapter, in order."
+        ).classes("text-caption colophon-muted")
+        with ui.column().classes("w-full gap-0 q-my-sm").style("max-height: 40vh; overflow:auto"):
+            for i, name in enumerate(names, start=1):
+                ui.label(f"{i}. {name}").classes("text-caption colophon-mono ellipsis")
+        with ui.row().classes("w-full justify-end q-gutter-sm"):
+            ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
+            ui.button("Combine", icon="merge", on_click=_combine).props(
+                "unelevated no-caps color=primary")
     dialog.open()
 
 

@@ -89,6 +89,7 @@ def _run_local(
     pattern: object,
     scheme: object,
     unit_files: list[Path] | None = None,
+    single_book_folders: frozenset[str] = frozenset(),
 ) -> None:
     """Execute one local phase's work for `book`.
 
@@ -114,7 +115,8 @@ def _run_local(
             for sf in book.source_files
         ]
         result = classify(book.source_folder, root, features,
-                          template_pattern=pattern, scheme_patterns=scheme)
+                          template_pattern=pattern, scheme_patterns=scheme,
+                          force_single=str(book.source_folder) in single_book_folders)
         book.content_kind = result.content_kind
         book.folder_kind = result.folder_kind
         book.classification_confidence = result.confidence
@@ -139,6 +141,7 @@ def run_local_phases(
     book: BookUnit, phases: frozenset[Phase], *, force: bool,
     root: Path, pattern: object, scheme: object,
     unit_files: list[Path] | None = None,
+    single_book_folders: frozenset[str] = frozenset(),
 ) -> None:
     """Run the requested LOCAL phases for `book`, in pipeline order. A phase runs when
     `force` or its state is STALE/PENDING (so non-force mirrors the old refresh_local).
@@ -156,7 +159,7 @@ def run_local_phases(
             continue
         try:
             _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
-                       unit_files=unit_files)
+                       unit_files=unit_files, single_book_folders=single_book_folders)
             mark(book, phase, PhaseState.FRESH)
         except Exception as e:  # a local phase must not crash the caller
             logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
@@ -185,7 +188,8 @@ def _scan_label(folder: Path, root: Path) -> str:
 
 def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
                    progress: Callable[[int, int, str], None] | None = None,
-                   fresh: bool = False) -> ScanPlan:
+                   fresh: bool = False,
+                   single_book_folders: frozenset[str] = frozenset()) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
@@ -207,7 +211,8 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
 
         # CATEGORIZE phase
         try:
-            _run_local(book, Phase.CATEGORIZE, root=root, pattern=pattern, scheme=scheme)
+            _run_local(book, Phase.CATEGORIZE, root=root, pattern=pattern, scheme=scheme,
+                       single_book_folders=single_book_folders)
             mark(book, Phase.CATEGORIZE, PhaseState.FRESH)
         except Exception as e:  # classification must never fail a scan
             logger.warning(f"classification failed for {unit.folder}: {e}")
@@ -232,28 +237,34 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
 def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
               options: ScanOptions | None = None, inference_root: Path | None = None,
               progress: Callable[[int, int, str], None] | None = None,
-              fresh: bool = False) -> ScanPlan:
+              fresh: bool = False,
+              single_book_folders: frozenset[str] = frozenset()) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything.
     `options is None` keeps the legacy behavior (all books, all local phases).
     `inference_root` (default `root`) is the scan path used for classify/dir-inference depth.
+    `single_book_folders` forces those folders' audio to one book (a user's Combine).
     `progress(done, total, label)` fires once per folder as it is processed."""
     if options is None:
         return _plan_scan_all(repo, root, template=template,
-                              directory_scheme=directory_scheme, progress=progress, fresh=fresh)
+                              directory_scheme=directory_scheme, progress=progress, fresh=fresh,
+                              single_book_folders=single_book_folders)
     if options.scope is ScanScope.NEW_ONLY:
         return _plan_scan_new_only(repo, root, options.phases, template=template,
                                    directory_scheme=directory_scheme,
-                                   inference_root=inference_root, progress=progress)
+                                   inference_root=inference_root, progress=progress,
+                                   single_book_folders=single_book_folders)
     return _plan_scan_reprocess(repo, root, options.phases,
                                 force=options.scope is ScanScope.REFRESH,
                                 template=template, directory_scheme=directory_scheme,
-                                inference_root=inference_root, progress=progress)
+                                inference_root=inference_root, progress=progress,
+                                single_book_folders=single_book_folders)
 
 
 def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
                         template: str, directory_scheme: str,
                         inference_root: Path | None = None,
-                        progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
+                        progress: Callable[[int, int, str], None] | None = None,
+                        single_book_folders: frozenset[str] = frozenset()) -> ScanPlan:
     """Ingest only books not already known; run the selected local phases on each.
     SEARCH is always run for a new book (probing is intrinsic to discovery)."""
     pattern = compile_template(template)
@@ -269,7 +280,8 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
             continue
         book = BookUnit.new(source_folder=unit.folder)
         run_local_phases(book, phases | {Phase.SEARCH}, force=False,
-                         root=inf_root, pattern=pattern, scheme=scheme, unit_files=unit.files)
+                         root=inf_root, pattern=pattern, scheme=scheme, unit_files=unit.files,
+                         single_book_folders=single_book_folders)
         plan.new_books += 1
         plan.files_added += len(book.source_files)
         plan.units.append(book)
@@ -279,7 +291,8 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
 def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
                          force: bool, template: str, directory_scheme: str,
                          inference_root: Path | None = None,
-                         progress: Callable[[int, int, str], None] | None = None) -> ScanPlan:
+                         progress: Callable[[int, int, str], None] | None = None,
+                         single_book_folders: frozenset[str] = frozenset()) -> ScanPlan:
     """UPDATE (force=False) / REFRESH (force=True): add new books and re-process known ones
     in `root`. New books run the selected phases (always incl. SEARCH); known books re-run
     the selected phases — only STALE/PENDING unless `force`."""
@@ -299,7 +312,8 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
         prior_paths = {sf.path for sf in book.source_files}
 
         run_local_phases(book, run_phases, force=force, root=inf_root,
-                         pattern=pattern, scheme=scheme, unit_files=unit.files)
+                         pattern=pattern, scheme=scheme, unit_files=unit.files,
+                         single_book_folders=single_book_folders)
 
         plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
         if existing is not None:
@@ -321,6 +335,7 @@ def plan_rescan_books(
     directory_scheme: str,
     root_for: Callable[[BookUnit], Path],
     progress: Callable[[int, int, str], None] | None = None,
+    single_book_folders: frozenset[str] = frozenset(),
 ) -> ScanPlan:
     """Re-process exactly `books` (selection-scoped).
 
@@ -342,6 +357,7 @@ def plan_rescan_books(
         run_local_phases(
             book, phases, force=force, root=root_for(book),
             pattern=pattern, scheme=scheme, unit_files=unit_files,
+            single_book_folders=single_book_folders,
         )
         plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
         plan.existing_books += 1
@@ -453,10 +469,12 @@ def plan_scan_graph(
     progress: Callable[[int, int, str], None] | None = None,
     node_overrides: dict[str, NodeOverride] | None = None,
     known_franchises: dict[str, str] | None = None,
+    single_book_folders: frozenset[str] = frozenset(),
 ) -> ScanPlan:
     """Graph-routed planner: persist `project(build_graph(...))` — single containers and
     multi-book leaves — with per-leaf IDENTIFY and state preservation. `reconciled_folders`
-    are the folders it fully recomputed, so commit can prune what their unit set replaced."""
+    are the folders it fully recomputed, so commit can prune what their unit set replaced.
+    `single_book_folders` forces those folders to one book (a user's Combine)."""
     # Lazy import: graph_build imports plan_scan from this module, so a module-scope
     # import of build_graph would create an import cycle.
     from collections import defaultdict
@@ -482,6 +500,7 @@ def plan_scan_graph(
     graph = build_graph(
         repo, root, template=template, directory_scheme=directory_scheme,
         options=options, inference_root=inference_root, progress=progress,
+        single_book_folders=single_book_folders,
     )
     _phase("build_graph")
 
