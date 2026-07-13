@@ -37,6 +37,21 @@ def _first[T](candidates: list[tuple[T, Provenance]]) -> tuple[T, str] | None:
     return None
 
 
+def _demote_numeric_author(filename_fields: dict[str, str]) -> dict[str, str]:
+    """A filename-parsed `$Author` that is purely numeric is never a person (files named
+    'YYYY - Title.mp3' under `$Author - $Title` mis-slot the year as the author). Drop such an
+    author; when it is a bare 4-digit year and no filename year is set, move it to the year so it
+    lands as the publish year. Returns a copy — the caller's dict is not mutated."""
+    author = (filename_fields.get("author") or "").strip()
+    if not author.isdigit():
+        return filename_fields
+    out = dict(filename_fields)
+    del out["author"]
+    if len(author) == 4 and not out.get("year"):
+        out["year"] = author
+    return out
+
+
 def reconcile(
     book: BookUnit,
     *,
@@ -49,6 +64,7 @@ def reconcile(
     """Populate `book`'s candidate fields and provenance in place."""
     df = datafile  # alias for brevity
     dirf = directory_fields or {}
+    filename_fields = _demote_numeric_author(filename_fields)
 
     # title: embedded.title -> embedded.album -> datafile -> directory -> filename
     if not book.title:
