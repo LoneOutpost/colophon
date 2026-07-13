@@ -466,13 +466,22 @@ class GraphStore:
         transaction (rolled back if any insert fails). With `commit=False` the caller owns
         the surrounding transaction and its commit/rollback — the statements join it."""
         r = str(root)
+        # `nodes.id` is a global primary key, but physical (directory/file/book) ids are not
+        # root-scoped: the same id can linger under a different root string — a stale/renamed scan
+        # path, or an overlapping config. Dedup the incoming batch (keep first) and reclaim any of
+        # its ids still owned by another root, so the insert below can't collide on `nodes.id`.
+        seen: set[str] = set()
+        unique_nodes = [n for n in nodes if not (n.id in seen or seen.add(n.id))]
 
         def _write() -> None:
             self.conn.execute("DELETE FROM nodes WHERE root = ?", (r,))
             self.conn.execute("DELETE FROM edges WHERE root = ?", (r,))
+            if seen:
+                self.conn.executemany(
+                    "DELETE FROM nodes WHERE id = ? AND root != ?", [(nid, r) for nid in seen])
             self.conn.executemany(
                 "INSERT INTO nodes (id, physical, semantic, root, attrs) VALUES (?, ?, ?, ?, ?)",
-                [(n.id, n.physical, n.semantic, n.root, json.dumps(n.attrs)) for n in nodes],
+                [(n.id, n.physical, n.semantic, n.root, json.dumps(n.attrs)) for n in unique_nodes],
             )
             self.conn.executemany(
                 "INSERT INTO edges (src, kind, dst, root, props) VALUES (?, ?, ?, ?, ?)",

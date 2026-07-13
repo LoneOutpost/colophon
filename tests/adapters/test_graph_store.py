@@ -44,6 +44,24 @@ def test_roots_are_independent(tmp_path):
     assert {n.id for n in s.nodes_for(r2)} == {"y"}
 
 
+def test_replace_reclaims_a_node_id_lingering_under_another_root(tmp_path):
+    # nodes.id is a global PK, but a physical id can linger under a stale/renamed root string. Writing
+    # the same id under a new root must reclaim it (move it), not raise UNIQUE constraint failed.
+    s = _store(tmp_path)
+    old, new = tmp_path / "old", tmp_path / "new"
+    s.replace_subgraph(old, [_n("shared", old)], [])
+    s.replace_subgraph(new, [_n("shared", new)], [])  # would collide before the reclaim fix
+    assert [n.root for n in s.nodes_for(new)] == [str(new)]  # now owned by the new root
+    assert s.nodes_for(old) == []                            # gone from the old root
+
+
+def test_replace_drops_duplicate_ids_within_one_batch(tmp_path):
+    s = _store(tmp_path)
+    root = tmp_path / "lib"
+    s.replace_subgraph(root, [_n("dup", root), _n("dup", root, physical="file")], [])
+    assert {n.id for n in s.nodes_for(root)} == {"dup"}  # deduped, no UNIQUE failure
+
+
 def test_node_attrs_facets_and_owns_edge_round_trip(tmp_path):
     s = _store(tmp_path)
     root = tmp_path / "lib"
