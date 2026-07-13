@@ -117,21 +117,22 @@ def structured_dests(
     paths: list[str], dest_dir: Path, torrent_name: str, *,
     pinned: Path | None = None, mode: AcquireMode = AcquireMode.INDEXED,
 ) -> tuple[Path, list[Path]]:
-    """Return (container, dests): reproduce each torrent-relative path faithfully under a
-    container in `dest_dir`. When every path shares a top-level folder (the torrent's own
-    root), that folder IS the container and files keep their full path below it. Bare files
-    or mixed tops wrap in a `torrent_name` container. `pinned` reuses an existing container
-    (resume). Result is 1:1 and order-preserving with `paths`; each component is sanitized."""
+    """Return (container, dests): reproduce each torrent-relative path faithfully under one
+    `torrent_name` container in `dest_dir`. Files keep their full torrent-relative path below the
+    container, so a picked subfolder is preserved. The single exception: when every path shares one
+    top-level folder AND that folder just duplicates the torrent name, drop it so we don't nest
+    name/name/…. `pinned` reuses an existing container (resume / a follow-up pick). Result is 1:1
+    and order-preserving with `paths`; each component is sanitized.
+
+    The strip decision depends only on the paths and the torrent name (never on `pinned`), so a
+    resume reproduces identical destinations. Naming the container after a shared top folder was the
+    old behavior; it flattened a subfolder pick into a pinned container's root, so it was removed."""
     comps = [list(PurePosixPath(p.strip("/")).parts) for p in paths]
+    container = pinned if pinned is not None else _container_for(dest_dir, torrent_name, mode)
     tops = {c[0] for c in comps if len(c) > 1}
     shared = next(iter(tops)) if len(tops) == 1 and all(len(c) > 1 for c in comps) else None
-    if pinned is not None:
-        container = pinned
-    elif shared is not None:
-        container = _container_for(dest_dir, shared, mode)
-    else:
-        container = _container_for(dest_dir, torrent_name, mode)
-    rels = [c[1:] if shared is not None else c for c in comps]
+    strip = shared is not None and sanitize_name(shared) == sanitize_name(torrent_name)
+    rels = [c[1:] if strip else c for c in comps]
     dests = [
         container.joinpath(*[sanitize_name(p) for p in rel]) if rel else container
         for rel in rels
