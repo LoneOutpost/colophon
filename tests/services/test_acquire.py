@@ -192,6 +192,35 @@ async def test_download_mismatch_subset_preserves_structure(tmp_path, monkeypatc
     assert not (result.folder / "A" / "one.mp3").exists()
 
 
+async def test_download_mismatch_duplicate_basename_disambiguated_by_size(tmp_path, monkeypatch):
+    # Two editions both contain '01_Night_Shift.mp3' in different subfolders. A count mismatch (a
+    # selected file with no link) forces the fallback; basename alone can't tell them apart, but
+    # (basename + filesize) can — each lands in its own subfolder, not flattened to the root.
+    torrent = RdTorrentInfo(
+        id="a", filename="SK", status="downloaded", links=["L1", "L2"],
+        files=[
+            RdTorrentFile(id=1, path="/SK/Night Shift (AFB)/01_Night_Shift.mp3", bytes=1000, selected=True),
+            RdTorrentFile(id=2, path="/SK/Night Shift (NLS)/01_Night_Shift.mp3", bytes=2000, selected=True),
+            RdTorrentFile(id=3, path="/SK/extra.mp3", bytes=50, selected=True),  # selected, no link
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01_Night_Shift.mp3", filesize=1000, download="http://dl/afb"),
+        "L2": RdUnrestrictedLink(filename="01_Night_Shift.mp3", filesize=2000, download="http://dl/nls"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    c = result.folder
+    assert (c / "Night Shift (AFB)" / "01_Night_Shift.mp3").exists()
+    assert (c / "Night Shift (NLS)" / "01_Night_Shift.mp3").exists()
+    assert not (c / "01_Night_Shift.mp3").exists()  # not flattened to the container root
+
+
 async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch):
     torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1", "L2"])
     links = {

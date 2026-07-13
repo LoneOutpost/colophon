@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections import Counter
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -258,23 +258,25 @@ def _fallback_dest_map(
     selected: list[RdTorrentFile], file_ids: set[int] | None,
     dest_root: Path, torrent_name: str, pinned: Path | None,
     *, mode: AcquireMode = AcquireMode.INDEXED,
-) -> tuple[Path, dict[str, Path], set[str]]:
+) -> tuple[Path, dict[tuple[str, int], deque[Path]], set[str]]:
     """For the count-mismatch path (RD returns fewer links than selected files): pick the target
-    files (by `file_ids`, else the audio+cover default), compute their structured destinations,
-    and index them by basename so each link can be matched to its real path via the unrestricted
-    filename. Returns (container, dest_by_name, target_names). A basename shared by more than one
-    target is omitted from `dest_by_name` — it can't be disambiguated by filename alone and the
-    caller writes it flat."""
+    files (by `file_ids`, else the audio+cover default), compute their structured destinations, and
+    index them by (basename, size) so a link maps to its real path via the unrestricted filename
+    AND filesize. That disambiguates a basename shared across subfolders (multi-edition/multi-disc)
+    which a filename alone cannot. Returns (container, dest_by_key, target_names); each key holds a
+    queue of destinations, so files with an identical name *and* size are still placed (in order —
+    either structured slot is as good as the other) rather than flattened."""
     if file_ids is not None:
         targets = [f for f in selected if f.id in file_ids]
     else:
         targets = [f for f in selected if _keep_file(f.path)]
     container, dests = structured_dests(
         [f.path for f in targets], dest_root, torrent_name, pinned=pinned, mode=mode)
-    names = [PurePosixPath(f.path).name for f in targets]
-    counts = Counter(names)
-    dest_by_name = {n: d for n, d in zip(names, dests, strict=True) if counts[n] == 1}
-    return container, dest_by_name, set(names)
+    dest_by_key: dict[tuple[str, int], deque[Path]] = defaultdict(deque)
+    for f, dest in zip(targets, dests, strict=True):
+        dest_by_key[(PurePosixPath(f.path).name, f.bytes)].append(dest)
+    target_names = {PurePosixPath(f.path).name for f in targets}
+    return container, dest_by_key, target_names
 
 
 async def download_torrent(
@@ -307,7 +309,7 @@ async def download_torrent(
         # RD returned a different number of links than selected files (a known quirk for large
         # torrents). Recover structure by matching each link's unrestricted filename to a selected
         # file's real path — not flattening.
-        container, dest_by_name, target_names = _fallback_dest_map(
+        container, dest_by_key, target_names = _fallback_dest_map(
             selected, file_ids, dest_root, torrent.filename, folder, mode=mode)
     else:
         container = folder or _container_for(dest_root, torrent.filename, mode)  # no file list: flat default
@@ -355,7 +357,8 @@ async def download_torrent(
             if not await _fetch(unr.download, dest, PurePosixPath(path).name):
                 break
     elif selected:
-        # Count mismatch: iterate links, mapping each to a target file's path by basename.
+        # Count mismatch: iterate links, mapping each to its target's structured path by
+        # (basename, filesize) — filesize disambiguates a basename shared across subfolders.
         links = list(torrent.links)
         total = len(links)
         for idx, link in enumerate(links, start=1):
@@ -365,9 +368,11 @@ async def download_torrent(
             name = PurePosixPath(unr.filename).name
             if name not in target_names:
                 continue  # this link isn't one of the picked/target files
-            dest = dest_by_name.get(name)
-            if dest is None:  # a basename shared by >1 target — can't place it safely, write flat
-                logger.warning(f"ambiguous basename {name!r} under count mismatch; writing flat")
+            queue = dest_by_key.get((name, unr.filesize))
+            if queue:
+                dest = queue.popleft()  # next structured slot for this (name, size)
+            else:  # no size match (RD size differs, or all slots consumed): last-resort flat
+                logger.warning(f"no structured slot for {name!r} ({unr.filesize}B); writing flat")
                 dest = container / sanitize_name(name)
             if progress is not None:
                 progress(idx, total, name)
