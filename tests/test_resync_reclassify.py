@@ -93,6 +93,56 @@ def test_recompute_is_idempotent(tmp_path):
     ctx.close()
 
 
+def test_reclassify_author_to_book_clears_graph_author(tmp_path):
+    """Reclassifying a folder from Author to Book must re-home its books: the graph-derived
+    author is cleared (nothing above is an author), dropping them to 'needs id'."""
+    ctx = _seed_author_library(tmp_path)
+    controller = AppController(ctx)
+    before = ctx.books.list_all()
+    assert all(b.authors == ["Brandon Sanderson"] for b in before)
+    assert all(b.provenance.get("authors") == "graphing" for b in before)
+
+    controller.set_node_classification(tmp_path / "ingest" / "Brandon Sanderson", "title")
+
+    after = ctx.books.list_all()
+    assert all(not b.authors for b in after)               # graph author cleared
+    assert all("authors" not in b.provenance for b in after)
+    node = ctx.library_graph.nodes[DirectoryNode.id_for(tmp_path / "ingest" / "Brandon Sanderson")]
+    assert node.attrs["kind"] == "title"                   # graph kind updated too
+    ctx.close()
+
+
+def test_reclassify_preserves_a_hard_author(tmp_path):
+    """A manual/tag/match author is authoritative and must survive a reclassify untouched."""
+    ctx = _seed_author_library(tmp_path)
+    controller = AppController(ctx)
+    book = ctx.books.list_all()[0]
+    book.authors = ["Real Name"]
+    book.provenance["authors"] = "manual"
+    ctx.books.upsert(book)
+
+    controller.set_node_classification(tmp_path / "ingest" / "Brandon Sanderson", "title")
+
+    reloaded = ctx.books.get(book.id)
+    assert reloaded.authors == ["Real Name"]
+    assert reloaded.provenance["authors"] == "manual"
+    ctx.close()
+
+
+def test_resync_keeps_graph_author_when_classification_unchanged(tmp_path):
+    """Steady state: a resync with no classification change re-derives the same author, so the
+    graph-derived author is preserved (no churn)."""
+    ctx = _seed_author_library(tmp_path)
+    controller = AppController(ctx)
+
+    controller._resync_roots({tmp_path / "ingest"})
+
+    after = ctx.books.list_all()
+    assert all(b.authors == ["Brandon Sanderson"] for b in after)
+    assert all(b.provenance.get("authors") == "graphing" for b in after)
+    ctx.close()
+
+
 def test_resync_does_not_persist_dangling_edges(tmp_path):
     """A book whose source paths have drifted from the skeleton (a match/organize changed them)
     must not leave the write-through with a dangling owns/contains edge — neither in memory nor

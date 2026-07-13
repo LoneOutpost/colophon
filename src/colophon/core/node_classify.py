@@ -660,8 +660,13 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             if node is not None:
                 if node.kind == "author" and node.author:
                     seen.append(node)
+                # The layout fallback names the author from the folder at the scheme's author depth,
+                # but never from a folder whose name is not an author: franchise/series/container, or
+                # one the user manually reclassified to a title/book (an auto title-leaf can still
+                # double as its author, e.g. a lone book in an "Author Name" folder).
+                manual_title = node.kind == "title" and node.kind_source == "manual"
                 if (author_depth is not None and _depth(cur, root) == author_depth
-                        and node.kind not in non_author):
+                        and node.kind not in non_author and not manual_title):
                     layout = node
             if cur == root or root not in cur.parents:
                 break
