@@ -47,8 +47,34 @@ def test_filename_is_last_resort():
     )
     assert book.authors == ["Andy Weir"]
     assert book.publish_year == 2021
+
+
+def test_year_filename_author_becomes_publish_year_not_author():
+    # 'YYYY - Title.mp3' under $Author - $Title puts the year in $Author; a bare year is never an
+    # author — capture it as the publish year instead.
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title="1981 - Cujo",
+              filename_fields={"author": "1981", "title": "Cujo"})
+    assert book.authors == []
+    assert "authors" not in book.provenance
+    assert book.publish_year == 1981
+    assert book.provenance.get("publish_year") == "filename"
+
+
+def test_non_year_numeric_filename_author_is_dropped():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title=None,
+              filename_fields={"author": "05", "title": "Chapter"})
+    assert book.authors == []
+    assert book.publish_year is None
+
+
+def test_real_filename_author_still_applies():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title=None,
+              filename_fields={"author": "Stephen King", "title": "Cujo"})
+    assert book.authors == ["Stephen King"]
     assert book.provenance["authors"] == "filename"
-    assert book.provenance["publish_year"] == "filename"
 
 
 def test_filename_decimal_sequence_is_preserved():

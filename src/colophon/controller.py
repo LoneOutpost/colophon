@@ -270,6 +270,28 @@ class OrganizePreviewRow:
     blocked: bool
 
 
+# Provenances that mean "auto-derived from the folder or filename" — the fields a re-identify
+# should clear so the chosen pattern re-derives them. Everything else (tags, datafile, a match, a
+# manual edit) is authoritative and left alone.
+_WEAK_IDENTITY_PROV = frozenset({Provenance.DIRECTORY.value, Provenance.FILENAME.value})
+_IDENTITY_LIST_FIELDS = frozenset({"authors", "narrators", "series", "genres", "tags"})
+
+
+def _clear_weak_identity(book: BookUnit) -> None:
+    """Reset every field whose current value came from the folder/filename (weak provenance) so a
+    re-identify re-derives it from the chosen pattern. Hard fields are untouched. In place."""
+    for field in list(book.provenance):
+        if book.provenance.get(field) not in _WEAK_IDENTITY_PROV or not hasattr(book, field):
+            continue
+        if field in _IDENTITY_LIST_FIELDS:
+            setattr(book, field, [])
+        elif field == "publish_year":
+            book.publish_year = None
+        else:
+            setattr(book, field, None)
+        book.provenance.pop(field, None)
+
+
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
@@ -730,16 +752,17 @@ class AppController:
         root = self._scan_root_for_path(book.source_folder)
         return root if root != book.source_folder else book.source_folder.parent
 
-    def invalidate(self, book: BookUnit, from_phase: Phase) -> None:
+    def invalidate(self, book: BookUnit, from_phase: Phase, *, template: str | None = None) -> None:
         """Invalidate `from_phase` forward, auto-rerun the local phases, persist.
-        Deferred phases are left stale for an explicit run."""
+        Deferred phases are left stale for an explicit run. `template` overrides the global
+        filename template for this run (a per-operation re-identify)."""
         if not book.phases:
             ensure_phases(book)
         invalidate_from(book, from_phase)
         refresh_local(
             book,
             root=self._root_for(book),
-            template=self.ctx.config.filename_template,
+            template=template or self.ctx.config.filename_template,
             directory_scheme=self.ctx.config.directory_scheme,
         )
         self.ctx.books.upsert(book)
@@ -791,6 +814,21 @@ class AppController:
         return RerunResult(
             ran=phase, book_count=len(books), staled=frozenset(staled), failed=failed,
         )
+
+    def reidentify(self, books: list[BookUnit], *, template: str | None = None) -> int:
+        """Re-identify `books` locally with `template` (default: the global filename template).
+        Clears each book's weak (folder/filename-derived) fields, then re-runs IDENTIFY so they
+        re-derive from the chosen pattern. Hard fields (tag/datafile/match/manual) are preserved.
+        A supplied `template` is added to the recent-template history; the global default is
+        unchanged. Returns the number of books re-identified."""
+        hydrated = self._hydrate(books)
+        for book in hydrated:
+            _clear_weak_identity(book)
+            self.invalidate(book, Phase.IDENTIFY, template=template)  # clears+re-derives+upserts
+        if template:
+            self.record_filename_template(template)
+        self._resync_roots({self._scan_root_for_path(b.source_folder) for b in hydrated})
+        return len(hydrated)
 
     # --- dashboard ---
     @timed("dashboard_stats")

@@ -192,6 +192,35 @@ async def test_download_mismatch_subset_preserves_structure(tmp_path, monkeypatc
     assert not (result.folder / "A" / "one.mp3").exists()
 
 
+async def test_download_mismatch_duplicate_basename_disambiguated_by_size(tmp_path, monkeypatch):
+    # Two editions both contain '01_Night_Shift.mp3' in different subfolders. A count mismatch (a
+    # selected file with no link) forces the fallback; basename alone can't tell them apart, but
+    # (basename + filesize) can — each lands in its own subfolder, not flattened to the root.
+    torrent = RdTorrentInfo(
+        id="a", filename="SK", status="downloaded", links=["L1", "L2"],
+        files=[
+            RdTorrentFile(id=1, path="/SK/Night Shift (AFB)/01_Night_Shift.mp3", bytes=1000, selected=True),
+            RdTorrentFile(id=2, path="/SK/Night Shift (NLS)/01_Night_Shift.mp3", bytes=2000, selected=True),
+            RdTorrentFile(id=3, path="/SK/extra.mp3", bytes=50, selected=True),  # selected, no link
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01_Night_Shift.mp3", filesize=1000, download="http://dl/afb"),
+        "L2": RdUnrestrictedLink(filename="01_Night_Shift.mp3", filesize=2000, download="http://dl/nls"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    c = result.folder
+    assert (c / "Night Shift (AFB)" / "01_Night_Shift.mp3").exists()
+    assert (c / "Night Shift (NLS)" / "01_Night_Shift.mp3").exists()
+    assert not (c / "01_Night_Shift.mp3").exists()  # not flattened to the container root
+
+
 async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch):
     torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1", "L2"])
     links = {
@@ -242,12 +271,26 @@ async def test_download_torrent_reuses_pinned_folder_for_resume(tmp_path, monkey
     assert (pinned / "01.mp3").exists()
 
 
-def test_structured_dests_names_container_after_torrent_top(tmp_path):
+def test_structured_dests_top_folder_differing_from_torrent_is_kept(tmp_path):
     from colophon.services.acquire import structured_dests
+    # The internal top folder differs from the torrent name, so it is real structure: keep it under
+    # the torrent-named container rather than stripping it (which used to flatten pinned picks).
     container, dests = structured_dests(
         ["Mistborn/Disc 1/01.mp3", "Mistborn/Disc 2/01.mp3"], tmp_path, "torrent-name")
-    assert container == tmp_path / "Mistborn"  # the torrent's own top folder, not torrent-name
-    assert dests == [container / "Disc 1" / "01.mp3", container / "Disc 2" / "01.mp3"]
+    assert container == tmp_path / "torrent-name"
+    assert dests == [
+        container / "Mistborn" / "Disc 1" / "01.mp3",
+        container / "Mistborn" / "Disc 2" / "01.mp3",
+    ]
+
+
+def test_structured_dests_strips_top_folder_that_duplicates_torrent_name(tmp_path):
+    from colophon.services.acquire import structured_dests
+    # When the single top folder IS the torrent name, drop it so we don't nest name/name/....
+    container, dests = structured_dests(
+        ["Bundle/Book A/01.mp3", "Bundle/Book A/02.mp3"], tmp_path, "Bundle")
+    assert container == tmp_path / "Bundle"
+    assert dests == [container / "Book A" / "01.mp3", container / "Book A" / "02.mp3"]
 
 
 def test_structured_dests_wraps_bare_files_in_torrent_name(tmp_path):
@@ -278,14 +321,29 @@ def test_structured_dests_honors_pinned_container(tmp_path):
     pinned = tmp_path / "already"
     container, dests = structured_dests(["Mistborn/Disc 1/01.mp3"], tmp_path, "n", pinned=pinned)
     assert container == pinned
-    assert dests == [pinned / "Disc 1" / "01.mp3"]
+    # The picked subfolder is preserved under the pinned container (not flattened away).
+    assert dests == [pinned / "Mistborn" / "Disc 1" / "01.mp3"]
+
+
+def test_structured_dests_pinned_single_folder_pick_keeps_subfolder(tmp_path):
+    # Regression: picking one subfolder of a big torrent into its pinned (torrent-named) container
+    # must keep that subfolder — not flatten depth-2 files into the container root.
+    from colophon.services.acquire import structured_dests
+    pinned = tmp_path / "TE_Audiobooks_S-2"
+    container, dests = structured_dests(
+        ["STEPHEN KING/1408.mp3", "STEPHEN KING/Blaze.mp3"],
+        tmp_path, "TE_Audiobooks_S", pinned=pinned)
+    assert container == pinned
+    assert dests == [pinned / "STEPHEN KING" / "1408.mp3", pinned / "STEPHEN KING" / "Blaze.mp3"]
 
 
 def test_structured_dests_sanitizes_components(tmp_path):
     from colophon.services.acquire import structured_dests
+    # Top folder "X" differs from torrent name "n", so it is kept under the "n" container; every
+    # path component is sanitized.
     container, dests = structured_dests(["/X/a:b.mp3", "/X/c?d.mp3"], tmp_path, "n")
-    assert container == tmp_path / "X"
-    assert dests == [container / "a_b.mp3", container / "c_d.mp3"]
+    assert container == tmp_path / "n"
+    assert dests == [container / "X" / "a_b.mp3", container / "X" / "c_d.mp3"]
 
 
 def test_plan_pairs_maps_links_to_selected_paths():
