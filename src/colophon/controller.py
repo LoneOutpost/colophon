@@ -109,6 +109,8 @@ from colophon.services.acquire import (
 )
 from colophon.services.catalog import apply_catalog_mapping
 from colophon.services.cleanup import CleanupReport, find_cleanup_candidates
+from colophon.services.combine import combine_books as _svc_combine
+from colophon.services.combine import uncombine_books as _svc_uncombine
 from colophon.services.cover import ensure_cached_cover, thumbnail_bytes
 from colophon.services.editing import (
     apply_fields,
@@ -348,7 +350,7 @@ class AppController:
                 self.ctx.books, books, options.phases,
                 force=options.scope is ScanScope.REFRESH,
                 template=template, directory_scheme=directory_scheme, root_for=self._root_for,
-                progress=progress,
+                progress=progress, single_book_folders=self.ctx.grouping.single_folders(),
             )
         roots = roots or self.ctx.config.scan_paths
         combined = ScanPlan()
@@ -358,6 +360,7 @@ class AppController:
                 options=options, inference_root=self._scan_root_for_path(root), progress=progress,
                 node_overrides=self.ctx.overrides.all(),
                 known_franchises=self.ctx.franchises.active(),
+                single_book_folders=self.ctx.grouping.single_folders(),
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -1837,6 +1840,7 @@ class AppController:
             template=self.ctx.config.filename_template,
             directory_scheme=self.ctx.config.directory_scheme,
             fresh=fresh, progress=progress,
+            single_book_folders=self.ctx.grouping.single_folders(),
         )
         classify_graph(graph, root=root)
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
@@ -1897,6 +1901,33 @@ class AppController:
         if node is None or node.physical != "directory":
             return None
         return Path(str(node.attrs["path"])), str(node.attrs.get("kind", ""))
+
+    def folder_books(self, folder: Path) -> list[BookUnit]:
+        """Every stored book whose files live directly in `folder` (a folder over-split into
+        several books has more than one)."""
+        return [b for b in self._hydrate(self.ctx.books.list_all()) if b.source_folder == folder]
+
+    def combine_folder(self, folder: Path) -> BookUnit:
+        """Combine all of `folder`'s books into one multi-file book (files become ordered
+        chapters), persisting a grouping override so it survives a rescan. Returns the merged
+        book."""
+        merged = _svc_combine(self.ctx.books, self.ctx.grouping, folder, self.folder_books(folder))
+        self._graph_cache.clear()
+        self.invalidate(merged, Phase.IDENTIFY)  # re-derive fields/chapters over the new file set
+        self._resync_roots({self._scan_root_for_path(folder)})
+        return self._hydrate([self.ctx.books.get(merged.id)])[0]
+
+    def uncombine_folder(self, folder: Path) -> list[BookUnit]:
+        """Reverse a combine on `folder`: clear the grouping override and restore the separate
+        books from the snapshot. Returns the restored books."""
+        restored = _svc_uncombine(self.ctx.books, self.ctx.grouping, folder)
+        self._graph_cache.clear()
+        self._resync_roots({self._scan_root_for_path(folder)})
+        return restored
+
+    def folder_is_combined(self, folder: Path) -> bool:
+        """Whether `folder` has a 'single book' grouping override (from a Combine)."""
+        return self.ctx.grouping.is_single(str(folder))
 
     def set_entity_alias(self, kind: str, source_name: str, canonical_name: str) -> None:
         """Merge or rename an author/series/franchise entity: alias `source_name` to

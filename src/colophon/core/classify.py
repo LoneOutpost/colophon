@@ -259,10 +259,16 @@ def classify(
     *,
     template_pattern: Pattern[str],
     scheme_patterns: list[Pattern[str]],
+    force_single: bool = False,
 ) -> ClassificationResult:
     """Classify one folder. `features` is non-empty (a folder with no audio is
-    never scanned). Pure: all signals are passed in."""
-    if len(features) == 1:
+    never scanned). Pure: all signals are passed in. `force_single` (a user's Combine)
+    overrides grouping so every file becomes one book's chapters, whatever the filenames."""
+    if force_single:
+        works = [_to_work(features)]
+        group_signals = []
+        content_kind = ContentKind.SINGLE
+    elif len(features) == 1:
         if _fully_untagged(features):
             cr = cluster([features[0].path])     # let cluster parse series/sequence
             works = cr.detected_works

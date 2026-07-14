@@ -116,6 +116,20 @@ def test_distinct_albums_are_multi():
     assert content_kind_for(works, signals) is CK.MULTI
 
 
+def test_force_single_collapses_distinct_works_into_one_book():
+    # distinct albums normally split into MULTI; a Combine (force_single) overrides that so every
+    # file is one book's chapter, keeping the grouping stuck across a rescan.
+    feats = [
+        _feat("/a/d/Legion.mp3", album="Legion", artist="Brandon Sanderson"),
+        _feat("/a/d/Elantris.mp3", album="Elantris", artist="Brandon Sanderson"),
+    ]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+                 force_single=True)
+    assert r.content_kind is CK.SINGLE
+    assert len(r.detected_works) == 1
+    assert len(r.detected_works[0].files) == 2
+
+
 def test_numbered_files_no_tags_are_one_sequence():
     feats = [_feat("/a/d/track 1.mp3"), _feat("/a/d/track 2.mp3"), _feat("/a/d/track 3.mp3")]
     works, signals = group_works(feats)

@@ -81,11 +81,14 @@ def build_graph(
     repo: BookUnitRepo, root: Path, *, template: str, directory_scheme: str = "",
     options: ScanOptions | None = None, inference_root: Path | None = None,
     progress: Callable[[int, int, str], None] | None = None, fresh: bool = False,
+    single_book_folders: frozenset[str] = frozenset(),
 ) -> Graph:
-    """Run a (non-persisting) scan and wrap each BookUnit in Directory/File/Book nodes."""
+    """Run a (non-persisting) scan and wrap each BookUnit in Directory/File/Book nodes.
+    `single_book_folders` forces those folders' audio to one book (a user's Combine)."""
     plan = plan_scan(
         repo, root, template=template, directory_scheme=directory_scheme,
         options=options, inference_root=inference_root, progress=progress, fresh=fresh,
+        single_book_folders=single_book_folders,
     )
     g = Graph()
     for book in plan.units:
