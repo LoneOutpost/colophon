@@ -32,6 +32,17 @@ from colophon.ui.scope import scope_selector
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_ui(fn: Callable[[], object]) -> None:
+    """Run a post-async UI update (a notify/refresh after an awaited action), swallowing the
+    RuntimeError NiceGUI raises when the dialog or browser client has been torn down while the
+    action ran (dialog closed, page navigated, or client disconnected). The action itself already
+    completed; there is simply nothing live left to update."""
+    try:
+        fn()
+    except RuntimeError:
+        logger.info("skipped a dialog UI update; the dialog/client context is gone")
+
 # Scan-dialog "depth" choice -> scan scope. UPDATE = add new + re-process changed/stale;
 # REFRESH = force a full re-derive of everything in scope (the heal path).
 _DEPTH_TO_SCOPE = {"new_changed": ScanScope.UPDATE, "rebuild": ScanScope.REFRESH}
@@ -999,8 +1010,10 @@ async def scan_dialog(
                 async def _apply() -> None:
                     dialog.close()
                     written = await asyncio.to_thread(controller.apply_scan, plan)
-                    refresh_all()
-                    ui.notify(f"Applied {written} books to the library")
+                    # The dialog's slot is gone after close(); guard the post-await UI updates so a
+                    # closed/navigated/disconnected client can't turn a committed scan into a crash.
+                    _safe_ui(refresh_all)
+                    _safe_ui(lambda: ui.notify(f"Applied {written} books to the library"))
 
                 with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                     ui.button("Back", on_click=show_options).props("flat")
@@ -1101,7 +1114,6 @@ async def match_dialog(
             async def _apply(plan) -> None:
                 dialog.close()
                 summary = await asyncio.to_thread(controller.apply_identify, plan)
-                refresh_all()
                 actions = (
                     [{
                         "label": "Undo", "color": "white",
@@ -1109,11 +1121,13 @@ async def match_dialog(
                     }]
                     if summary.batch_id else None
                 )
-                ui.notify(
+                # The dialog's slot is gone after close(); guard the post-await UI updates.
+                _safe_ui(refresh_all)
+                _safe_ui(lambda: ui.notify(
                     f"Matched {summary.auto_matched} book(s); "
                     f"{summary.routed_to_review} need review",
                     actions=actions,
-                )
+                ))
 
             async def _retry(plan, ids: list[str]) -> None:
                 new_plan = await controller.retry_identify(plan, ids, progress=_progress)
