@@ -77,12 +77,15 @@ def read_datafile_sidecar(folder: Path) -> DatafileSidecar | None:
 
 
 def is_container_datafile(
-    datafile: DatafileSidecar, folder: Path, content_kind: ContentKind
+    datafile: DatafileSidecar, folder: Path, content_kind: ContentKind,
+    *, multi_folder: bool = False,
 ) -> bool:
-    """True when the folder's metadata.json describes the container (a MULTI
-    folder) rather than a book: title == folder name and the sole author == the
-    parent (uploader) folder. Such a datafile must not seed a single BookUnit."""
-    if content_kind is not ContentKind.MULTI:
+    """True when the folder's metadata.json describes the container (a folder holding more than one
+    book) rather than a book: title == folder name and the sole author == the parent (uploader)
+    folder. Such a datafile must not seed a BookUnit. Applies both to the MULTI container itself and
+    to the single-book leaves it splits into (`multi_folder`): a leaf shares the folder with its
+    siblings, so the folder-level datafile is still container metadata, not that leaf's own."""
+    if content_kind is not ContentKind.MULTI and not multi_folder:
         return False
     parent = folder.parent
     if not parent.name:  # root-level: no uploader/parent folder to match

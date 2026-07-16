@@ -71,16 +71,18 @@ def drop_orphaned_datafile_fields(book: BookUnit, evidence: Evidence) -> None:
 
 
 def gather(
-    book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]]
+    book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
+    multi_folder: bool = False,
 ) -> Evidence:
     """Read all identity evidence for `book` and vet it: drop a datafile sidecar that
-    describes a container (a MULTI folder) rather than a book."""
+    describes a container rather than a book. `multi_folder` marks a book that is one of several
+    sharing its folder (a split leaf), so a folder-level container datafile is rejected for it too."""
     first_path = book.source_files[0].path if book.source_files else None
     embedded = read_audio_metadata(first_path)[1] if first_path else None  # cache hit from SEARCH
     filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
     datafile = read_datafile_sidecar(book.source_folder)
     if datafile is not None and is_container_datafile(
-        datafile, book.source_folder, book.content_kind
+        datafile, book.source_folder, book.content_kind, multi_folder=multi_folder
     ):
         logger.debug(
             f"scan {book.source_folder}: IDENTIFY ignored container datafile "
@@ -174,11 +176,13 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
 
 def run_identify(
     book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
+    multi_folder: bool = False,
 ) -> None:
     """Run the IDENTIFY pipeline for `book`, mutating it in place. Fields orphaned by a
     removed/vetted datafile are always dropped so they re-derive — the datafile sidecar being gone
-    is the trigger, not the scan mode, so this holds on every scan (not just Refresh)."""
-    evidence = gather(book, root=root, pattern=pattern, scheme=scheme)
+    is the trigger, not the scan mode, so this holds on every scan (not just Refresh). `multi_folder`
+    flags a split leaf so a folder-level container datafile is not adopted as its own."""
+    evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
     drop_orphaned_datafile_fields(book, evidence)
     seed_series(book)
     resolve(book, evidence)
