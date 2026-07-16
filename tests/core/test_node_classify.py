@@ -428,3 +428,46 @@ def test_non_franchise_folder_still_votes_author():
     ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
                book_like_children={}, direct_books={d.path: books}, known_franchises={"star wars": "Star Wars"})
     assert any(e.kind == "author" for e in ax_author_structure(d, ctx))
+
+
+def test_author_structure_vote_is_capped():
+    # A loose-books-span-series author vote grows 1.0 + 0.5*n; uncapped, many series would push it
+    # past the franchise tier. It must cap at W_AUTHOR_STRUCTURE_MAX and stay below a declared
+    # franchise, so a franchise folder is never mistaken for one prolific author.
+    from colophon.core.node_classify import (
+        W_AUTHOR_STRUCTURE_MAX,
+        W_FRANCHISE,
+        _Ctx,
+        ax_author_structure,
+    )
+
+    g = Graph()
+    root = Path("/lib")
+    node = _dir(g, "/lib/Prolific")
+    books = [_book("/lib/Prolific", series=f"Series {i}") for i in range(8)]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={}, direct_books={node.path: books})
+    votes = [e for e in ax_author_structure(node, ctx) if "spans" in e.reason]
+    assert votes and votes[0].weight == W_AUTHOR_STRUCTURE_MAX
+    assert W_AUTHOR_STRUCTURE_MAX < W_FRANCHISE
+
+
+def test_resolve_neutral_hard_source_is_blank():
+    # A hard vote that is neither a registered manual nor a matched kind settles the node but stamps
+    # no forged source — guards the anti-provenance-laundering branch in resolve().
+    got = resolve([Evidence("author", 10.0, "a future hard axiom", hard=True, value="X")],
+                  manual_kinds=set(), matched_kinds=set())
+    assert got.settled is True and got.kind == "author" and got.source == ""
+
+
+def test_tag_author_axioms_stack_but_stay_below_a_title_leaf():
+    # ax_artist_consensus and ax_tag_author_match deliberately stack on the same signal; even summed
+    # they must not outvote a single-book title-leaf, so a lone book in an author-named folder still
+    # resolves to its title rather than flipping the folder to an author.
+    from colophon.core.node_classify import W_CONSENSUS_MAX, W_TAG_AUTHOR_MATCH, W_TITLE_LEAF
+
+    stacked = W_CONSENSUS_MAX + W_TAG_AUTHOR_MATCH
+    assert stacked < W_TITLE_LEAF
+    ev = [Evidence("author", stacked, "consensus + folder-name match"),
+          Evidence("title", W_TITLE_LEAF, "single-book leaf")]
+    assert resolve(ev, fallback_value="Folder").kind == "title"

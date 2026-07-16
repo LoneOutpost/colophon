@@ -19,6 +19,37 @@ if TYPE_CHECKING:
 # specific (a book-identity leaf) so it wins ties.
 _KIND_ORDER = ("title", "author", "series", "franchise", "container")
 
+# --- Evidence weight ladder ------------------------------------------------------------------
+# Soft votes SUM; the highest-weighted kind wins. Hard votes (manual/match) settle outright.
+# Every axiom draws its weight from here so the precedence story lives in ONE ordered place — read
+# top-to-bottom to see what beats what. Relative order matters more than the absolute numbers; when
+# adding an axiom, slot its constant into the ladder rather than inventing a bare literal. Distinct
+# votes keep distinct names even when values coincide today, so any one can be tuned independently.
+W_MANUAL = 100.0            # hard: the user classified this folder
+W_MATCH = 10.0             # hard: a matched book's author == the folder name
+W_TITLE_LEAF = 5.0         # a single-book leaf folder is that book's title
+W_FRANCHISE = 4.0          # folder name == a declared franchise
+W_LEAF_SERIES = 4.0        # a lone book whose folder resembles its series
+W_SERIES_RAMP = 3.0        # all books one series with a sequence ramp + matching folder name
+W_CONSENSUS_MAX = 3.0      # tagged-author consensus, capped (grows 0.5 + 0.5*n up to this)
+W_MEMOIR_AUTHOR = 3.0      # a memoir/autobiography titled after its author
+W_AUTHOR_STRUCTURE_MAX = 3.0   # loose-books-span-series author vote, CAPPED (else unbounded in n)
+W_ROOT_PRIOR = 2.5         # the scan root is usually a library bucket, not one author
+W_LEAF_AUTHOR = 2.5        # a lone book sitting at the author depth names the author
+W_AUTHOR_GROUPING = 2.0    # a folder of title subfolders (an author/series grouping)
+W_BUCKET_WORD = 2.0        # a bucket/staging stop-word folder name
+W_NUMERIC_NAME = 1.5       # a numeric folder name is not a person
+W_TAG_AUTHOR_MATCH = 1.5   # a tagged author == the folder name (reinforces consensus)
+W_MIXED_LOOSE = 1.0        # loose audio beside subfolders
+W_NUMBERED_BASE = 1.0      # child names carry sequence numbers (series signal)
+W_NUMBERED_RAMP = 2.0      # ...and form a distinct-title numbered ramp
+W_NUMBERED_TAG = 1.0       # ...and a child independently asserts a series tag
+W_MODAL_DEPTH_NUDGE = 0.5  # sits at the library's typical author depth (tree-consistency nudge)
+# Container "bucket" vote grows with the folder-of-folders count: unlike the author vote, MORE
+# child book-folders genuinely means MORE bucket-like, so this one is intentionally unbounded.
+W_BUCKET_BASE = 1.0
+W_BUCKET_PER_CHILD = 0.5
+
 _BUCKET_WORDS = frozenset({
     "incoming", "downloads", "download", "audiobooks", "audiobook", "books", "misc",
     "unsorted", "new", "temp", "tmp", "media", "library", "import", "imports",
@@ -143,15 +174,17 @@ def ax_container_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     out: list[Evidence] = []
     m = ctx.book_like_children.get(node.id, 0)
     if m >= 2:
-        out.append(Evidence("container", 1.0 + 0.5 * m, f"{m} book-like child folders (a bucket)"))
+        out.append(Evidence("container", W_BUCKET_BASE + W_BUCKET_PER_CHILD * m,
+                            f"{m} book-like child folders (a bucket)"))
     if node.child_files and node.child_dirs:
-        out.append(Evidence("container", 1.0, f"loose audio beside {len(node.child_dirs)} subfolders"))
+        out.append(Evidence("container", W_MIXED_LOOSE,
+                            f"loose audio beside {len(node.child_dirs)} subfolders"))
     if node.path == ctx.root:
         # a strong (but soft) prior: the scan path is usually a library bucket, not one author's
         # folder. Enough to outweigh a lone structural-author vote so a bare root does not get
         # named after the upload folder — but still yields to real author evidence (a tag
         # consensus or a match), so a genuine single-author root can emerge.
-        out.append(Evidence("container", 2.5, "the scan root is usually a library bucket"))
+        out.append(Evidence("container", W_ROOT_PRIOR, "the scan root is usually a library bucket"))
     return out
 
 
@@ -161,9 +194,9 @@ def ax_bucket_word(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: un
     name = node.path.name
     low = name.strip().casefold()
     if low in _BUCKET_WORDS:
-        return [Evidence("container", 2.0, f"'{name}' is a bucket/staging folder name")]
+        return [Evidence("container", W_BUCKET_WORD, f"'{name}' is a bucket/staging folder name")]
     if low.replace(" ", "").isdigit():
-        return [Evidence("container", 1.5, f"'{name}' is numeric, not a person/author name")]
+        return [Evidence("container", W_NUMERIC_NAME, f"'{name}' is numeric, not a person/author name")]
     return []
 
 
@@ -207,9 +240,12 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
         if not single_matching:
             reason = (f"spans {len(by_series)} series across {len(books)} loose titles" if by_series
                       else f"{len(books)} loose books, no series information")
-            out.append(Evidence("author", 1.0 + 0.5 * max(len(by_series), 1), reason))
+            # Capped: 2 distinct series already proves a multi-book author; more series don't make it
+            # MORE an author, and an uncapped vote would swamp the franchise/root-prior tiers.
+            weight = min(W_AUTHOR_STRUCTURE_MAX, 1.0 + 0.5 * max(len(by_series), 1))
+            out.append(Evidence("author", weight, reason))
     if ctx.modal_author_depth is not None and _depth(node.path, ctx.root) == ctx.modal_author_depth:
-        out.append(Evidence("author", 0.5, "sits at the library's typical author depth"))
+        out.append(Evidence("author", W_MODAL_DEPTH_NUDGE, "sits at the library's typical author depth"))
     return out
 
 
@@ -259,7 +295,7 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     book = books[0] if books else None
     name = node.path.name
     if book is None:
-        return [Evidence("title", 5.0, "single-book leaf (a title folder)")]
+        return [Evidence("title", W_TITLE_LEAF, "single-book leaf (a title folder)")]
     # The title the FILE supplies: a file-sourced title (tag/datafile/filename), else the filename's
     # own cluster label. A directory/graphing title is only the folder-name echo — not the file's.
     real_title = (book.title if book.title
@@ -277,12 +313,12 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
         # its own — additive, never fires on a non-memoir and never demotes a real title.
         if (at_author_depth and not has_real_author
                 and _is_memoir_titled(file_title) and _name_is_proper_subset(name, file_title)):
-            return [Evidence("author", 3.0,
+            return [Evidence("author", W_MEMOIR_AUTHOR,
                              "memoir/autobiography title contains the author's name", value=name)]
-        return [Evidence("title", 5.0, "single-book leaf; folder name matches the title")]
+        return [Evidence("title", W_TITLE_LEAF, "single-book leaf; folder name matches the title")]
     label = _series_label(book)
     if label is not None and _resembles(name, label[1]):
-        return [Evidence("series", 4.0, f"single-book leaf; folder matches series '{label[1]}'",
+        return [Evidence("series", W_LEAF_SERIES, f"single-book leaf; folder matches series '{label[1]}'",
                          value=label[1])]
     low = name.strip().casefold()
     if _is_known_franchise(node, ctx) or low in _BUCKET_WORDS or low.replace(" ", "").isdigit():
@@ -295,9 +331,9 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     # stays the title). Otherwise it is a title folder; `_repair_leaf_titles` re-derives the book's
     # real title from the filename.
     if not has_real_author and at_author_depth and file_title is not None:
-        return [Evidence("author", 2.5,
+        return [Evidence("author", W_LEAF_AUTHOR,
                          "lone book at the author depth; folder names the author", value=name)]
-    return [Evidence("title", 5.0, "single-book leaf (a title folder)")]
+    return [Evidence("title", W_TITLE_LEAF, "single-book leaf (a title folder)")]
 
 
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
@@ -306,7 +342,7 @@ def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  
     and a known franchise (never an author) is suppressed."""
     from colophon.core.graph_classify import GROUPING
     if node.kind == GROUPING and not _is_known_franchise(node, ctx):
-        return [Evidence("author", 2.0, "a folder of title subfolders (author/series grouping)")]
+        return [Evidence("author", W_AUTHOR_GROUPING, "a folder of title subfolders (author/series grouping)")]
     return []
 
 
@@ -317,7 +353,7 @@ def ax_known_franchise(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     from colophon.core.graph_resolve import _name_key
     display = ctx.known_franchises.get(_name_key(node.path.name))
     if display:
-        return [Evidence("franchise", 4.0, f"declared franchise '{display}'", value=display)]
+        return [Evidence("franchise", W_FRANCHISE, f"declared franchise '{display}'", value=display)]
     return []
 
 
@@ -339,7 +375,7 @@ def ax_tag_author_match(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     key = _name_key(node.path.name)
     for author in _tag_authors(ctx.books_by_folder.get(node.path, [])):
         if _name_key(author) == key:
-            return [Evidence("author", 1.5, f"a tagged author matches the folder name '{author}'",
+            return [Evidence("author", W_TAG_AUTHOR_MATCH, f"a tagged author matches the folder name '{author}'",
                              value=author)]
     return []
 
@@ -359,7 +395,7 @@ def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     (top_key, top_n), = counts.most_common(1)
     if top_n == len(authors) or top_n >= 0.75 * len(authors):   # agreement, no rival tag author
         display = next(a for a in authors if _name_key(a) == top_key)
-        return [Evidence("author", min(3.0, 0.5 + 0.5 * top_n),
+        return [Evidence("author", min(W_CONSENSUS_MAX, 0.5 + 0.5 * top_n),
                          f"{top_n} book(s) tagged author '{display}'", value=display)]
     return []
 
@@ -384,7 +420,7 @@ def ax_series_ramp(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     ramp = sorted({s for s in seqs if s is not None})
     display = next(_series_label(b)[1] for b in books if _series_label(b))
     if len(ramp) >= 2 and _resembles(node.path.name, display):
-        return [Evidence("series", 3.0,
+        return [Evidence("series", W_SERIES_RAMP,
                          f"all books in series '{display}' (seq {ramp[0]:g}-{ramp[-1]:g}), folder matches",
                          value=display)]
     return []
@@ -426,7 +462,7 @@ def ax_numbered_siblings(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     if not parsed:
         return []
     value = node.path.name
-    evidence = [Evidence("series", 1.0, f"{len(parsed)} child name(s) carry a sequence number",
+    evidence = [Evidence("series", W_NUMBERED_BASE, f"{len(parsed)} child name(s) carry a sequence number",
                          value=value)]
     nums = {a.sequence for a in parsed.values()}
     titles = {a.cleaned.casefold() for a in parsed.values()}
@@ -434,11 +470,11 @@ def ax_numbered_siblings(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     corroborated = _series_tag_present(books)
     if len(parsed) >= 2 and len(nums) >= 2 and len(titles) >= 2 and (has_strong or corroborated):
         lo, hi = min(nums), max(nums)
-        evidence.append(Evidence("series", 2.0,
+        evidence.append(Evidence("series", W_NUMBERED_RAMP,
                                  f"numbered title ramp (seq {lo:g}-{hi:g}, distinct titles)",
                                  value=value))
     if corroborated:
-        evidence.append(Evidence("series", 1.0, "child books carry a series tag", value=value))
+        evidence.append(Evidence("series", W_NUMBERED_TAG, "child books carry a series tag", value=value))
     return evidence
 
 
@@ -453,7 +489,7 @@ def ax_matched_identity(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     ]
     for author in matched_authors:
         if _name_key(author) == key:
-            return [Evidence("author", 10.0, f"matched book(s) author '{author}' == folder name",
+            return [Evidence("author", W_MATCH, f"matched book(s) author '{author}' == folder name",
                              hard=True, value=author)]
     return []
 
@@ -463,7 +499,7 @@ def ax_manual_override(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     ov = ctx.overrides.get(str(node.path))
     if ov is None:
         return []
-    return [Evidence(ov.kind, 100.0, "you classified this folder", hard=True, value=ov.value)]
+    return [Evidence(ov.kind, W_MANUAL, "you classified this folder", hard=True, value=ov.value)]
 
 
 # The axioms are independent, pure, order-insensitive votes; resolve() sums them. Some are DESIGNED
