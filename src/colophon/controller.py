@@ -55,6 +55,7 @@ from colophon.core.models import (
     BookUnit,
     ConfidenceSignal,
     EditChange,
+    EmbeddedTags,
     Finding,
     FindingCode,
     FindingSeverity,
@@ -1300,6 +1301,21 @@ class AppController:
         if book.source_files:
             return book.source_files[0].path.name
         return book.source_folder.name
+
+    def embedded_tags(self, book: BookUnit) -> EmbeddedTags | None:
+        """The raw tags embedded in the book's first readable source file, so the UI can show
+        what the files actually carry alongside what we detected. Returns None when the book has
+        no source files on disk (identity then comes wholly from the folder/filename)."""
+        from colophon.adapters.audio import read_audio_metadata
+
+        for sf in book.source_files:
+            if sf.path.exists():
+                try:
+                    return read_audio_metadata(sf.path)[1]
+                except (OSError, ValueError) as exc:
+                    logger.warning(f"could not read embedded tags from {sf.path}: {exc}")
+                    return None
+        return None
 
     def preview_filename_parse(self, book: BookUnit, template: str) -> dict[str, str]:
         """Parse `book`'s filename with `template`. Raises ValueError when the
