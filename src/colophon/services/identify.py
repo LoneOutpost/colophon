@@ -26,6 +26,7 @@ from colophon.core.filename_parser import parse_filename
 from colophon.core.match import clean_match_title
 from colophon.core.models import (
     RESTRUCTURE_FINDINGS,
+    WEAK_PROV,
     BookUnit,
     ContentKind,
     EmbeddedTags,
@@ -127,15 +128,14 @@ def normalize(book: BookUnit) -> None:
     affix like '30-Day Heart Tune-Up' is left for the corroborated series-ramp path. Idempotent."""
     from colophon.core.normalize import proper_case_if_shouting
     from colophon.core.sequence_affix import parse_sequence_affix
-    weak = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
-    if book.provenance.get("title") in weak:
+    if book.provenance.get("title") in WEAK_PROV:
         cleaned = clean_match_title(book.title, strip_year=False)
         if cleaned and cleaned != book.title:
             book.title = cleaned  # provenance unchanged
         affix = parse_sequence_affix(book.title or "")
         if affix is not None and affix.confidence == "strong" and affix.cleaned != book.title:
             book.title = affix.cleaned  # provenance unchanged
-    if book.authors and book.provenance.get("authors") in weak:
+    if book.authors and book.provenance.get("authors") in WEAK_PROV:
         book.authors = [proper_case_if_shouting(a) for a in book.authors]  # provenance unchanged
 
 

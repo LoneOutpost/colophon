@@ -16,7 +16,7 @@ from pathlib import Path
 
 from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph
 from colophon.core.graph_resolve import _ancestor_paths, _name_key
-from colophon.core.models import BookUnit, _Base
+from colophon.core.models import WEAK_PROV, BookUnit, _Base
 
 
 def book_node_id(book_id: str) -> str:
@@ -51,8 +51,8 @@ def ancestor_franchise(graph: Graph, folder: Path, root: Path) -> str | None:
 
 
 # Franchise provenance weak enough to be overwritten by a fresh folder classification
-# (a manual assignment is stronger and is preserved).
-_WEAK_FRANCHISE_PROV = {"directory", "filename"}
+# (a manual assignment is stronger and is preserved). The same weak tier as everywhere else.
+_WEAK_FRANCHISE_PROV = WEAK_PROV
 
 
 def apply_franchise_fill(book: BookUnit, franchise_name: str | None) -> bool:

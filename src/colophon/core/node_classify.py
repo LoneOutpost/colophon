@@ -7,9 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import BookUnit
+from colophon.core.models import WEAK_PROV, BookUnit, NodeOverride
+
+if TYPE_CHECKING:
+    from colophon.core.sequence_affix import SequenceAffix
 
 # Fixed candidate order — used to break exact soft ties deterministically. `title` is the most
 # specific (a book-identity leaf) so it wins ties.
@@ -62,9 +66,10 @@ def resolve(
     matched_kinds: frozenset[str] | set[str] = frozenset(),
 ) -> Classification:
     """Tally `evidence` into a Classification. Hard evidence settles the node (manual > matched);
-    otherwise the highest summed-weight kind wins with a margin confidence. `manual_kinds`/
-    `matched_kinds` tell the resolver which hard votes came from a user override vs a match, so it
-    can apply manual-over-matched precedence and stamp `source`."""
+    otherwise the highest summed-weight kind wins, with confidence = that kind's SHARE of the total
+    evidence weight (not a margin over the runner-up, so a lone unopposed vote reads 1.0 however
+    weak). `manual_kinds`/`matched_kinds` tell the resolver which hard votes came from a user
+    override vs a match, so it can apply manual-over-matched precedence and stamp `source`."""
     hard = [e for e in evidence if e.hard]
     if hard:
         manual = [e for e in hard if e.kind in manual_kinds]
@@ -106,7 +111,7 @@ class _Ctx:
     modal_author_depth: int | None                # from the TITLE-depth mode (author = mode - 1)
     book_like_children: dict[str, int]            # node id -> count of content (container/grouping) child dirs
     direct_books: dict[Path, list[BookUnit]] = field(default_factory=dict)   # a folder's own loose books
-    overrides: dict[str, object] = field(default_factory=dict)               # path str -> NodeOverride
+    overrides: dict[str, NodeOverride] = field(default_factory=dict)         # path str -> NodeOverride
     known_franchises: dict[str, str] = field(default_factory=dict)   # name_key -> display
     author_depth: int | None = None   # scheme depth (1-based) whose folder is the author, or None
 
@@ -412,7 +417,7 @@ def ax_numbered_siblings(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     books = ctx.books_by_folder.get(node.path, [])
     if not books:
         return []
-    parsed: dict[str, object] = {}          # one entry per direct child name (SequenceAffix)
+    parsed: dict[str, SequenceAffix] = {}   # one entry per direct child name
     for b in books:
         name = _child_name(node.path, b)
         aff = parse_sequence_affix(name)
@@ -461,10 +466,13 @@ def ax_manual_override(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     return [Evidence(ov.kind, 100.0, "you classified this folder", hard=True, value=ov.value)]
 
 
-_WEAK = frozenset({"directory", "filename"})
+# The axioms are independent, pure, order-insensitive votes; resolve() sums them. Some are DESIGNED
+# to stack on the same signal: ax_artist_consensus (the tagged books agree on an author) and
+# ax_tag_author_match (a tagged author equals the folder name) both fire when a folder's tag authors
+# agree AND match its name — the folder-name agreement deliberately reinforces the consensus.
 _AXIOMS = (
     ax_manual_override, ax_matched_identity,          # hard
-    ax_artist_consensus, ax_tag_author_match,         # author (name-bearing)
+    ax_artist_consensus, ax_tag_author_match,         # author (name-bearing); may stack (see above)
     ax_leaf_title,                                     # title (book-identity leaf)
     ax_author_structure, ax_author_from_grouping, ax_known_franchise,
     ax_numbered_siblings, ax_series_ramp,                                                # author/series/franchise (structural)
@@ -472,7 +480,7 @@ _AXIOMS = (
 )
 
 
-def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object],
+def _build_ctx(graph: Graph, root: Path, overrides: dict[str, NodeOverride],
                known_franchises: dict[str, str], directory_scheme: str = "") -> _Ctx:
     from collections import Counter
 
@@ -497,11 +505,16 @@ def _build_ctx(graph: Graph, root: Path, overrides: dict[str, object],
 
 
 def classify_nodes(
-    graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, object],
+    graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, NodeOverride],
     known_franchises: dict[str, str] | None = None, directory_scheme: str = "",
 ) -> None:
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
-    then fill empty/weak-author books from the nearest author node (GRAPHING)."""
+    then fill empty/weak-author books from the nearest author node (GRAPHING).
+
+    Ordering contract: `books` must already be through IDENTIFY. Several axioms read book fields and
+    their provenance (e.g. ax_leaf_title inspects `book.title`/`book.provenance['title']`), so running
+    this before IDENTIFY would classify against un-derived identity. `plan_scan_graph` guarantees the
+    order (identify → classify_nodes)."""
     ctx = _build_ctx(graph, root, overrides, known_franchises or {}, directory_scheme)
     evidenced: dict[str, bool] = {}
     for node in graph.directories.values():
@@ -565,7 +578,7 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
     series or title."""
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
-    fillable = _WEAK | {Provenance.GRAPHING.value}
+    fillable = WEAK_PROV | {Provenance.GRAPHING.value}
     for book in books:
         node = _nearest_series(graph, book.source_folder, root)
         if node is None or not node.kind_value:
@@ -578,7 +591,7 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             book.provenance["series"] = Provenance.GRAPHING.value
         taff = parse_sequence_affix(book.title or "")
         if (taff is not None and taff.cleaned != book.title
-                and book.provenance.get("title") in _WEAK
+                and book.provenance.get("title") in WEAK_PROV
                 and (taff.confidence == "strong" or aff.confidence == "strong")):
             # a strong title affix, or a strong ramp position (aff) corroborating a weak title one —
             # so a manual/match series node with a weak compound title (e.g. '30-Day…') is left alone
@@ -650,7 +663,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     non_author = {"franchise", "series", "container"}
     for book in books:
         prov = book.provenance.get("authors")
-        if book.authors and prov not in _WEAK:
+        if book.authors and prov not in WEAK_PROV:
             continue
         seen: list[DirectoryNode] = []          # classified-author ancestors, nearest first
         layout: DirectoryNode | None = None     # the ancestor at the scheme's author depth

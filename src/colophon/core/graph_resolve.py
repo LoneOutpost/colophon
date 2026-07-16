@@ -14,10 +14,8 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import BookUnit, NodeOverride, Provenance, SeriesRef
+from colophon.core.models import WEAK_PROV, BookUnit, NodeOverride, Provenance, SeriesRef
 from colophon.core.normalize import normalize_key, normalize_name
-
-_WEAK = {Provenance.DIRECTORY.value, Provenance.FILENAME.value}
 
 
 def _name_key(name: str) -> str:
@@ -74,11 +72,11 @@ def _fill_confirmed(book: BookUnit, *, author: str | None, series: str | None) -
     (tag/datafile/match) is left untouched. Returns whether the book was changed. Shared
     by propagate_overrides (scan path) and apply_confirmed_overrides (match path)."""
     changed = False
-    if author and (not book.authors or book.provenance.get("authors") in _WEAK):
+    if author and (not book.authors or book.provenance.get("authors") in WEAK_PROV):
         book.authors = [author]
         book.provenance["authors"] = Provenance.MANUAL.value
         changed = True
-    if series and (not book.series or book.provenance.get("series") in _WEAK):
+    if series and (not book.series or book.provenance.get("series") in WEAK_PROV):
         book.series = [SeriesRef(name=series)]
         book.provenance["series"] = Provenance.MANUAL.value
         changed = True
