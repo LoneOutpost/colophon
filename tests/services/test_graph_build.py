@@ -12,6 +12,16 @@ def _repo(tmp_path: Path) -> BookUnitRepo:
     return BookUnitRepo(conn)
 
 
+def _write_tagged(path: Path, artist: str) -> None:
+    """Write a minimal mp3 with a TPE1 (artist) frame so IDENTIFY reads a tag author."""
+    from mutagen.id3 import ID3, TPE1
+
+    path.write_bytes(b"")
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=[artist]))
+    tags.save(path)
+
+
 def test_build_graph_makes_a_book_node_per_unit_owning_its_files(tmp_path):
     ingest = tmp_path / "ingest"
     dune = ingest / "Dune"
@@ -177,6 +187,26 @@ def test_leaf_inherits_container_author_when_work_has_none(tmp_path):
     for b in books:
         assert b.authors == ["Sarah Graves"]
         assert b.provenance["authors"] == Provenance.DIRECTORY.value
+
+
+def test_authorless_leaf_does_not_inherit_a_container_tag_author(tmp_path):
+    from colophon.services.graph_build import project
+
+    # A mixed-author dump folder (a franchise, not one author): the container reads its author
+    # from its FIRST file's artist tag. That tag names only that one book — it must NOT bleed onto
+    # a sibling work that carries its own, different artist tag. (Regression: "Voyage Home" got the
+    # first file's "Armin Shimmerman" instead of its own "Vonda N. McIntyre".)
+    ingest = tmp_path / "ingest"
+    trek = ingest / "Star Trek"
+    trek.mkdir(parents=True)
+    _write_tagged(trek / "34th Rule.mp3", "Armin Shimmerman")   # sorts first -> container author
+    _write_tagged(trek / "Voyage Home.mp3", "Vonda N. McIntyre")
+
+    books = project(build_graph(_repo(tmp_path), ingest, template="$Author - $Title"))
+
+    by_title = {b.title: b for b in books}
+    # The sibling with its own tag must not inherit the container's first-file author.
+    assert by_title["Voyage Home"].authors != ["Armin Shimmerman"]
 
 
 def test_build_graph_threads_new_only_scope(tmp_path):

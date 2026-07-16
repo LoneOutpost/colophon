@@ -21,6 +21,11 @@ from colophon.core.models import (
 )
 from colophon.services.ingest import ScanOptions, plan_scan
 
+# Author provenances read from a single representative FILE (the container's first). Not inherited
+# by fanned-out leaves: each leaf must read its OWN file's tags. Folder-level tiers (directory/
+# filename) do apply to every work and are inherited.
+_FILE_TAG_PROV = frozenset({Provenance.TAG.value, Provenance.DATAFILE.value})
+
 
 def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUnit:
     """Project one detected work into a SINGLE-book leaf BookUnit. Title/author/series
@@ -36,7 +41,11 @@ def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUni
     if work.author:                       # the work named its own author
         leaf.authors = [work.author]
         leaf.provenance["authors"] = Provenance.FILENAME.value
-    elif container.authors:               # else inherit the container's resolved author
+    elif container.authors and container.provenance.get("authors") not in _FILE_TAG_PROV:
+        # Inherit only a FOLDER-level author (directory/filename) that applies to every work here.
+        # A tag/datafile author was read from the container's FIRST file alone, so it names that one
+        # book, not its siblings — inheriting it would mask each leaf's own embedded artist. Leave
+        # such leaves authorless for per-file IDENTIFY (reads the leaf's own tags) + GRAPHING to fill.
         leaf.authors = list(container.authors)
         leaf.provenance["authors"] = container.provenance.get(
             "authors", Provenance.DIRECTORY.value
