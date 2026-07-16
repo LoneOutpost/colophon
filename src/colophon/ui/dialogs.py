@@ -1387,18 +1387,20 @@ async def persist_dialog(
                         f"⚠ {notready} of {len(books)} aren't marked Ready/confirmed — "
                         f"persisting may write unverified metadata."
                     ).classes("text-caption text-warning")
-                with ui.column().classes("w-full q-gutter-none").style(
-                    "max-height: 16rem; overflow-y: auto"
+                # The full destination path can be long; let the list scroll horizontally
+                # (and vertically) rather than truncate it, so the whole path is readable.
+                with ui.column().classes("q-gutter-none").style(
+                    "max-height: 16rem; max-width: 100%; overflow: auto"
                 ):
                     for r in rows[:_PREVIEW_CAP]:
-                        with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                        with ui.row().classes("items-center no-wrap q-gutter-sm").style(
+                            "white-space: nowrap"
+                        ):
                             ui.icon(
                                 "warning" if (r.collision or r.blocked) else "east", size="1rem"
                             ).classes("colophon-muted")
-                            ui.label(r.title).classes("col ellipsis")
-                            ui.label(str(r.target)).classes(
-                                "col ellipsis text-caption colophon-muted"
-                            )
+                            ui.label(r.title)
+                            ui.label(str(r.target)).classes("text-caption colophon-muted")
                     if len(rows) > _PREVIEW_CAP:
                         ui.label(f"…and {len(rows) - _PREVIEW_CAP} more").classes(
                             "text-caption colophon-muted"
