@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -311,43 +311,47 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
     return plan
 
 
-def plan_rescan_books(
+def _merge_plan(into: ScanPlan, other: ScanPlan) -> None:
+    """Accumulate `other` into `into` (units, counters, and graph records)."""
+    into.units.extend(other.units)
+    into.new_books += other.new_books
+    into.existing_books += other.existing_books
+    into.fields_filled += other.fields_filled
+    into.files_added += other.files_added
+    into.reconciled_folders |= other.reconciled_folders
+    into.graph_nodes.extend(other.graph_nodes)
+    into.graph_edges.extend(other.graph_edges)
+
+
+def plan_rescan_folders(
     repo: BookUnitRepo,
-    books: list[BookUnit],
-    phases: frozenset[Phase],
+    folders: Iterable[Path],
     *,
-    force: bool,
+    options: ScanOptions | None = None,
     template: str,
-    directory_scheme: str,
-    root_for: Callable[[BookUnit], Path],
+    directory_scheme: str = "",
+    inference_root_for: Callable[[Path], Path],
+    node_overrides: dict[str, NodeOverride] | None = None,
+    known_franchises: dict[str, str] | None = None,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> ScanPlan:
-    """Re-process exactly `books` (selection-scoped).
+    """Selection-scoped rebuild: re-scan each distinct `folder` through the full graph scan, so a
+    book that shares a multi-book folder is re-clustered, split, and identified IN CONTEXT rather
+    than re-probed to own its whole folder. (The old per-book path ballooned a single-file book into
+    the entire folder and mis-read its author from the first file's tag.)
 
-    `root_for(book) -> Path` gives the configured scan root for inference.
-    Known books only; never discovers new ones. Files for a forced/stale
-    SEARCH are re-probed from a cheap per-folder walk.
-    """
-    pattern = compile_template(template)
-    scheme = parse_scheme(directory_scheme)
-    plan = ScanPlan()
-    total = len(books)
-    for i, book in enumerate(books, start=1):
-        if progress is not None:
-            progress(i, total, book.title or book.source_folder.name)
-        units = group_book_units(book.source_folder)
-        unit_files = next((u.files for u in units if u.folder == book.source_folder), [])
-        before_empty = _empty_fields(book)
-        prior_paths = {sf.path for sf in book.source_files}
-        run_local_phases(
-            book, phases, force=force, root=root_for(book),
-            pattern=pattern, scheme=scheme, unit_files=unit_files,
+    Each folder is scanned as its own root with `inference_root_for(folder)` supplying the real scan
+    root for directory inference. The scan is non-destructive (fill-empty, manual edits/app state
+    preserved), so re-touching a folder's other books is safe."""
+    combined = ScanPlan()
+    for folder in dict.fromkeys(folders):   # de-dup, order-stable
+        plan = plan_scan_graph(
+            repo, folder, template=template, directory_scheme=directory_scheme,
+            options=options, inference_root=inference_root_for(folder),
+            node_overrides=node_overrides, known_franchises=known_franchises, progress=progress,
         )
-        plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
-        plan.existing_books += 1
-        plan.fields_filled += len(before_empty - _empty_fields(book))
-        plan.units.append(book)
-    return plan
+        _merge_plan(combined, plan)
+    return combined
 
 
 # Durable app state carried across an id churn: a re-associated book keeps these from

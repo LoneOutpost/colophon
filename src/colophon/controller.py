@@ -134,9 +134,8 @@ from colophon.services.graph_build import build_graph
 from colophon.services.ingest import (
     ScanOptions,
     ScanPlan,
-    ScanScope,
     commit_scan,
-    plan_rescan_books,
+    plan_rescan_folders,
     plan_scan_graph,
     refresh_local,
     scan_ingest,
@@ -343,11 +342,16 @@ class AppController:
             directory_scheme if directory_scheme is not None else self.ctx.config.directory_scheme
         )
         if options is not None and options.book_ids:
+            # A selection-scoped rebuild re-scans the distinct FOLDERS its books live in through the
+            # full graph scan, so a book in a multi-book folder is re-clustered and identified in
+            # context instead of ballooning to own its whole folder.
             books = [b for b in (self.get_book(i) for i in options.book_ids) if b is not None]
-            return plan_rescan_books(
-                self.ctx.books, books, options.phases,
-                force=options.scope is ScanScope.REFRESH,
-                template=template, directory_scheme=directory_scheme, root_for=self._root_for,
+            return plan_rescan_folders(
+                self.ctx.books, [b.source_folder for b in books],
+                options=options, template=template, directory_scheme=directory_scheme,
+                inference_root_for=self._scan_root_for_path,
+                node_overrides=self.ctx.overrides.all(),
+                known_franchises=self.ctx.franchises.active(),
                 progress=progress,
             )
         roots = roots or self.ctx.config.scan_paths
