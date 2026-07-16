@@ -15,7 +15,14 @@ from typing import NamedTuple
 from nicegui import ui
 
 from colophon.core.guidance import FixAction, finding_guidance, review_guidance
-from colophon.core.models import BookState, BookUnit, FindingCode, Phase, PhaseState
+from colophon.core.models import (
+    BookState,
+    BookUnit,
+    EmbeddedTags,
+    FindingCode,
+    Phase,
+    PhaseState,
+)
 from colophon.core.phases import LOCAL, state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.review import review_reasons
@@ -140,6 +147,50 @@ def _render_identification(book: BookUnit) -> None:
                         badge.tooltip(ptip)
 
 
+def _fmt_sequence(value: float) -> str:
+    """Render a series sequence without a needless `.0` (1.0 → "1", 1.5 → "1.5")."""
+    return str(int(value)) if value == int(value) else str(value)
+
+
+def embedded_tag_rows(tags: EmbeddedTags) -> list[tuple[str, str]]:
+    """The (label, value) pairs to display for a file's embedded tags, in a fixed order and
+    omitting any tag the file doesn't carry. Pure so it can be unit-tested."""
+    ordered: list[tuple[str, str | None]] = [
+        ("Title", tags.title),
+        ("Album", tags.album),
+        ("Artist", tags.artist),
+        ("Narrator", tags.narrator),
+        ("Series", tags.series),
+        ("Sequence", _fmt_sequence(tags.sequence) if tags.sequence is not None else None),
+        ("Year", str(tags.year) if tags.year is not None else None),
+        ("Genre", tags.genre),
+        ("ASIN", tags.asin),
+        ("ISBN", tags.isbn),
+        ("Track", str(tags.track) if tags.track is not None else None),
+        ("Description", tags.description),
+    ]
+    return [(label, value) for label, value in ordered if value]
+
+
+def _render_embedded_tags(controller, book: BookUnit) -> None:
+    """The raw tags the audio file itself carries — shown next to Identification so the user can
+    compare what the files claim against what we detected and chose."""
+    tags = controller.embedded_tags(book)
+    caption = "Embedded tags" + (" (first file)" if len(book.source_files) > 1 else "")
+    ui.label(caption).classes("colophon-seccap")
+    rows = embedded_tag_rows(tags) if tags is not None else []
+    if not rows:
+        ui.label(
+            "No embedded tags in this file — identity comes from the folder or filename."
+        ).classes("colophon-muted text-caption")
+        return
+    with ui.column().classes("w-full q-gutter-xs"):
+        for field, value in rows:
+            with ui.row().classes("items-start w-full no-wrap q-gutter-sm"):
+                ui.label(field).classes("colophon-muted text-caption").style("width: 4.5rem")
+                ui.label(value).classes("col")
+
+
 _ACTION_META: dict[FixAction, tuple[str, str]] = {
     FixAction.ACQUIRE: ("Go to Acquire", "cloud_download"),
     FixAction.REPROBE: ("Re-probe", "timer"),
@@ -199,6 +250,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
             with ui.row().classes("q-pl-lg q-gutter-xs q-mb-sm"):
                 _action_button(FixAction.MATCHES)
         _render_identification(book)
+        _render_embedded_tags(controller, book)
 
         ui.label("Pipeline").classes("colophon-seccap")
         with ui.column().classes("w-full q-gutter-none"):

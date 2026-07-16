@@ -1,12 +1,13 @@
 from pathlib import Path
 
-from colophon.core.models import BookUnit, Phase, PhaseState
+from colophon.core.models import BookUnit, EmbeddedTags, Phase, PhaseState
 from colophon.core.phases import LOCAL, mark
 from colophon.ui import state_panel
 from colophon.ui.state_panel import (
     _PHASE_ICONS,
     _PHASE_LABELS,
     _PHASE_STATE_COLOR,
+    embedded_tag_rows,
     phase_rows,
 )
 
@@ -50,3 +51,23 @@ def test_phase_rows_are_in_pipeline_order_and_reflect_state():
     match = next(r for r in rows if r.phase is Phase.MATCH)
     assert match.state is PhaseState.PENDING             # missing record reads PENDING
     assert match.updated_at is None
+
+
+def test_embedded_tag_rows_omits_absent_tags_and_keeps_order():
+    tags = EmbeddedTags(title="Cujo", artist="Stephen King", year=1981, track=1)
+    rows = embedded_tag_rows(tags)
+    assert rows == [
+        ("Title", "Cujo"),
+        ("Artist", "Stephen King"),
+        ("Year", "1981"),
+        ("Track", "1"),
+    ]
+
+
+def test_embedded_tag_rows_empty_when_no_tags():
+    assert embedded_tag_rows(EmbeddedTags()) == []
+
+
+def test_embedded_tag_rows_formats_whole_sequence_without_decimal():
+    assert ("Sequence", "1") in embedded_tag_rows(EmbeddedTags(sequence=1.0))
+    assert ("Sequence", "1.5") in embedded_tag_rows(EmbeddedTags(sequence=1.5))

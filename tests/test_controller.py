@@ -273,6 +273,34 @@ def test_book_filename_falls_back_to_folder_name(tmp_path):
     ctx.close()
 
 
+def test_embedded_tags_reads_first_source_file(tmp_path):
+    from mutagen.id3 import ID3, TIT2, TPE1
+
+    ctx = _ctx(tmp_path)
+    book = _book_named(ctx, tmp_path, "Cujo.mp3")
+    path = book.source_files[0].path
+    id3 = ID3()
+    id3.add(TIT2(encoding=3, text=["Cujo"]))
+    id3.add(TPE1(encoding=3, text=["Stephen King"]))
+    id3.save(path)
+
+    tags = AppController(ctx).embedded_tags(book)
+    assert tags is not None
+    assert tags.title == "Cujo"
+    assert tags.artist == "Stephen King"
+    ctx.close()
+
+
+def test_embedded_tags_none_when_no_source_files(tmp_path):
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "ingest" / "Empty"
+    folder.mkdir(parents=True)
+    book = BookUnit.new(source_folder=folder)
+    ctx.books.upsert(book)
+    assert AppController(ctx).embedded_tags(book) is None
+    ctx.close()
+
+
 def test_preview_filename_parse_returns_fields(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_named(ctx, tmp_path, "Brandon Sanderson - Mistborn.mp3")
