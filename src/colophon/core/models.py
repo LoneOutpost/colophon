@@ -46,6 +46,12 @@ class Provenance(StrEnum):
     MANUAL = "manual"
 
 
+# The "weak" provenance tier: a field sourced from the folder name or the filename is a guess that
+# fill-empty passes and graph fill-down (GRAPHING) are allowed to overwrite. A tag/datafile/match/
+# manual value never is. Single source of truth — imported anywhere that gates on "is this weak?".
+WEAK_PROV: frozenset[str] = frozenset({Provenance.DIRECTORY.value, Provenance.FILENAME.value})
+
+
 class ContentKind(StrEnum):
     """Axis 1 — how many distinct works a folder holds."""
 
