@@ -398,7 +398,7 @@ def _adopt_app_state(unit: BookUnit, matched: BookUnit) -> None:
 
 def _adopt_and_identify(
     unit: BookUnit, matched: BookUnit | None, *, root: Path, pattern: object,
-    scheme: object,
+    scheme: object, multi_folder: bool = False,
 ) -> BookUnit:
     """Return the unit to persist for one projected BookUnit, re-associated to its prior
     record (`matched`, found by owned-file overlap) so its durable id and app state
@@ -453,7 +453,7 @@ def _adopt_and_identify(
     mark(unit, Phase.SEARCH, PhaseState.FRESH)      # files were probed at container level
     mark(unit, Phase.CATEGORIZE, PhaseState.FRESH)  # being SINGLE is its categorization
     try:
-        run_identify(unit, root=root, pattern=pattern, scheme=scheme)
+        run_identify(unit, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
         mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
     except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
         logger.warning(f"leaf IDENTIFY failed for {unit.source_folder} [{unit.title!r}]: {e}")
@@ -514,13 +514,16 @@ def plan_scan_graph(
     identify_total = len(projected)
     plan = ScanPlan()
     for folder, units in by_folder.items():
+        # More than one book projected into this folder means it's a split multi-book folder, so a
+        # folder-level container datafile is not any single leaf's own identity.
+        multi_folder = len(units) > 1
         # `repo.get` reads fresh from the DB (not the cache), so mutating `matched` is safe.
         existing = [b for b in (repo.get(i) for i in repo.ids_in_folder(folder)) if b is not None]
         for unit, matched in reassociate(units, existing):
             before_empty = _empty_fields(matched) if matched is not None else set()
             prior_paths = {sf.path for sf in matched.source_files} if matched is not None else set()
             adopted = _adopt_and_identify(unit, matched, root=inf_root, pattern=pattern,
-                                          scheme=scheme)
+                                          scheme=scheme, multi_folder=multi_folder)
             if matched is not None:
                 plan.existing_books += 1
                 plan.fields_filled += len(before_empty - _empty_fields(adopted))

@@ -23,10 +23,17 @@ from colophon.services.ingest import ScanOptions, plan_scan
 
 
 def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUnit:
-    """Project one detected work into a SINGLE-book leaf BookUnit. Title/author/series
-    come from the work (FILENAME provenance); `source_files` is left for `project` to
-    reconstruct from the leaf's owned FileNodes. Folder-name author inheritance for
-    untagged works is Phase 3 (GRAPHING), so an untagged work's leaf has no authors."""
+    """Project one detected work into a SINGLE-book leaf BookUnit. Title/author/series come from
+    the work (FILENAME provenance); `source_files` is left for `project` to reconstruct from the
+    leaf's owned FileNodes.
+
+    An authorless work's leaf gets NO author here. The container's own author was resolved from its
+    FIRST file alone, so side-copying it would mis-attribute every sibling and mask each leaf's own
+    embedded tags. Author propagation is Phase 3's job: per-leaf IDENTIFY reads the leaf's own tags,
+    then GRAPHING (`_fill_down`) inherits an author only when a shared ANCESTOR node classifies as an
+    author — leaf up to the author node, then back down. A folder of loose books that reads as one
+    author still fills each leaf from that node (GRAPHING); a franchise/bucket with no author node
+    does not bleed a stray sibling's author across."""
     leaf = BookUnit.new(source_folder=container.source_folder)
     leaf.id = leaf_id
     leaf.content_kind = ContentKind.SINGLE
@@ -36,11 +43,6 @@ def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUni
     if work.author:                       # the work named its own author
         leaf.authors = [work.author]
         leaf.provenance["authors"] = Provenance.FILENAME.value
-    elif container.authors:               # else inherit the container's resolved author
-        leaf.authors = list(container.authors)
-        leaf.provenance["authors"] = container.provenance.get(
-            "authors", Provenance.DIRECTORY.value
-        )
     if work.series:
         leaf.series = [SeriesRef(name=work.series, sequence=work.sequence)]
         leaf.provenance["series"] = Provenance.FILENAME.value

@@ -213,11 +213,12 @@ def test_container_datafile_ignored_for_multi_folder(tmp_path):
 
     assert len(leaves) == 3
     assert all(u.content_kind is ContentKind.SINGLE for u in leaves)
-    # The uploader handle from the container datafile is rejected; the folder name (the
-    # real author) is carried onto every leaf.
+    # The uploader handle from the container datafile is rejected for the split leaves too, so it
+    # never becomes their author. The folder then classifies as an author node and each leaf gets
+    # that author via GRAPHING (up to the node, back down).
     for leaf in leaves:
         assert leaf.authors == ["Sarah Graves"]
-        assert leaf.provenance.get("authors") == "directory"
+        assert leaf.provenance.get("authors") == "graphing"
 
 
 def test_matching_name_datafile_kept_for_single_folder(tmp_path):
@@ -252,7 +253,9 @@ def test_foster_container_author_is_folder_name(tmp_path):
     assert len(leaves) == 3
     for leaf in leaves:
         assert leaf.authors == ["Sarah Graves"]
-        assert leaf.provenance["authors"] == "directory"
+        # The folder classifies as an author node; each leaf inherits it via GRAPHING (up to the
+        # node, back down), not a projection-time side-copy of the container's author.
+        assert leaf.provenance["authors"] == "graphing"
 
 
 def test_multibook_folder_split_gets_folder_name_author(tmp_path):
@@ -355,8 +358,8 @@ def test_plan_scan_graph_enriches_leaf_from_its_tags(tmp_path: Path):
     plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
     leaf = next(u for u in plan.units if u.title == "Dead Cat Bounce")
 
-    assert leaf.authors == ["Sarah Graves"]                 # cluster/container identity kept
-    assert leaf.provenance["authors"] == Provenance.DIRECTORY.value
+    assert leaf.authors == ["Sarah Graves"]                 # folder author, via the graph node
+    assert leaf.provenance["authors"] == Provenance.GRAPHING.value
     assert leaf.narrators == ["Read By Me"]                 # empty field enriched from the tag
     assert leaf.provenance["narrators"] == Provenance.TAG.value
     assert state_of(leaf, Phase.IDENTIFY) is PhaseState.FRESH

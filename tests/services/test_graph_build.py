@@ -12,6 +12,16 @@ def _repo(tmp_path: Path) -> BookUnitRepo:
     return BookUnitRepo(conn)
 
 
+def _write_tagged(path: Path, artist: str) -> None:
+    """Write a minimal mp3 with a TPE1 (artist) frame so IDENTIFY reads a tag author."""
+    from mutagen.id3 import ID3, TPE1
+
+    path.write_bytes(b"")
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=[artist]))
+    tags.save(path)
+
+
 def test_build_graph_makes_a_book_node_per_unit_owning_its_files(tmp_path):
     ingest = tmp_path / "ingest"
     dune = ingest / "Dune"
@@ -157,12 +167,12 @@ def test_single_book_folder_is_unchanged(tmp_path):
     assert {sf.path.name for sf in b.source_files} == {"01.mp3", "02.mp3"}
 
 
-def test_leaf_inherits_container_author_when_work_has_none(tmp_path):
-    from colophon.core.models import Provenance
+def test_authorless_leaf_has_no_author_at_projection(tmp_path):
     from colophon.services.graph_build import project
 
-    # An author folder of loose, untagged single-file works → MULTI container whose
-    # author IDENTIFY resolves to the folder name; leaves inherit it.
+    # A folder of loose, untagged single-file works → MULTI container. An authorless work's leaf
+    # gets NO author at projection: author propagation is GRAPHING's job (leaf up to an author node,
+    # then back down), not a sideways copy of the container's first-file author.
     ingest = tmp_path / "ingest"
     author = ingest / "Sarah Graves"
     author.mkdir(parents=True)
@@ -175,8 +185,50 @@ def test_leaf_inherits_container_author_when_work_has_none(tmp_path):
 
     assert len(books) == 3
     for b in books:
+        assert b.authors == []
+
+
+def test_folder_author_fills_each_leaf_via_graphing(tmp_path):
+    # End-to-end: the same untagged single-author folder classifies as an author node, so
+    # `_fill_down` gives every leaf that author — via GRAPHING (up to the node, back down), not a
+    # projection-time side-copy. This is the legitimate propagation the Star Trek bleed lacked.
+    from colophon.core.models import Provenance
+    from colophon.services.ingest import plan_scan_graph
+
+    ingest = tmp_path / "ingest"
+    author = ingest / "Sarah Graves"
+    author.mkdir(parents=True)
+    for n in ("Dead Cat Bounce (Home Repair is Homicide 1).mp3",
+              "A Face at the Window (Home Repair is Homicide 12).mp3",
+              "Death by Chocolate Malted Milkshake (Death by Chocolate 2).mp3"):
+        (author / n).write_bytes(b"")
+
+    plan = plan_scan_graph(_repo(tmp_path), ingest, template="$Author - $Title")
+
+    assert len(plan.units) == 3
+    for b in plan.units:
         assert b.authors == ["Sarah Graves"]
-        assert b.provenance["authors"] == Provenance.DIRECTORY.value
+        assert b.provenance["authors"] == Provenance.GRAPHING.value
+
+
+def test_authorless_leaf_does_not_inherit_a_container_tag_author(tmp_path):
+    from colophon.services.graph_build import project
+
+    # A mixed-author dump folder (a franchise, not one author): the container reads its author
+    # from its FIRST file's artist tag. That tag names only that one book — it must NOT bleed onto
+    # a sibling work that carries its own, different artist tag. (Regression: "Voyage Home" got the
+    # first file's "Armin Shimmerman" instead of its own "Vonda N. McIntyre".)
+    ingest = tmp_path / "ingest"
+    trek = ingest / "Star Trek"
+    trek.mkdir(parents=True)
+    _write_tagged(trek / "34th Rule.mp3", "Armin Shimmerman")   # sorts first -> container author
+    _write_tagged(trek / "Voyage Home.mp3", "Vonda N. McIntyre")
+
+    books = project(build_graph(_repo(tmp_path), ingest, template="$Author - $Title"))
+
+    by_title = {b.title: b for b in books}
+    # The sibling with its own tag must not inherit the container's first-file author.
+    assert by_title["Voyage Home"].authors != ["Armin Shimmerman"]
 
 
 def test_build_graph_threads_new_only_scope(tmp_path):
