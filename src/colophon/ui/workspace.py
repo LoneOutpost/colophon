@@ -388,6 +388,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     _nav_view: dict[str, object] = {"pending": [], "rendered": 0, "el": None}
     _list_footer: dict[str, object] = {"el": None}  # the "Showing X of Y" caption
     list_scroll = None                              # assigned at the layout site
+    detail_scroll = None                            # the detail pane's scroll area (layout site)
+    # The detail pane's tab and scroll offset persist across book navigation so cycling
+    # books (arrow keys or clicking) stays on the same tab and, on At a Glance, holds the
+    # scroll position instead of snapping back to Details at the top.
+    _detail_view = {"tab": "details", "scroll": 0.0}
 
     _VIEW_KEY = "workspace_view"
 
@@ -860,7 +865,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.tabs().props("dense no-caps").classes("w-full") as _tabs:
                 ui.tab("details", label="Details", icon="edit")
                 ui.tab("state", label="At a Glance", icon="visibility")
-            with ui.tab_panels(_tabs, value="details").classes("w-full"):
+            # Reopen on the tab the user last had, so navigating books doesn't yank them
+            # off At a Glance back to Details.
+            _tabs.on_value_change(lambda e: _detail_view.update(tab=e.value))
+            with ui.tab_panels(_tabs, value=_detail_view["tab"]).classes("w-full"):
                 with ui.tab_panel("details").classes("q-pa-none"):
                     _details_body()
                 with ui.tab_panel("state").classes("q-pa-none"):
@@ -898,6 +906,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         rerun_phase=_rerun_one,
                     )
                     state_panel.render(controller, book, actions=_attn)
+
+        # Cycling books on At a Glance holds the scroll offset; Details opens at the top.
+        if _detail_view["tab"] == "state" and _detail_view["scroll"] and detail_scroll is not None:
+            detail_scroll.scroll_to(pixels=_detail_view["scroll"])
 
     def _clear_selection() -> None:
         """Clear the ENTIRE selection across every view and collapse the bulk
@@ -1219,6 +1231,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     def _on_list_scroll(e) -> None:
         if e.vertical_percentage > 0.85 and _list_view["rendered"] < len(_list_view["books"]):
             _render_more()
+
+    def _on_detail_scroll(e) -> None:
+        # Remember where the detail pane is scrolled so book navigation can restore it.
+        _detail_view["scroll"] = e.vertical_position
 
     def _render_nav_more() -> None:
         pending = _nav_view["pending"]
@@ -2406,7 +2422,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             detail_actions = ui.row().classes(
                 "colophon-actionbar w-full no-wrap items-center q-gutter-sm"
             )
-            with ui.scroll_area().classes("col"):
+            detail_scroll = ui.scroll_area(on_scroll=_on_detail_scroll).classes("col")
+            with detail_scroll:
                 detail_container = ui.column().classes("w-full gap-1")
 
     with ui.footer().classes("q-px-md q-py-xs"):
