@@ -11,7 +11,7 @@ from colophon.controller import AppController
 from colophon.core.normalize import NORMALIZABLE_FIELDS
 from colophon.core.pathscheme import sample_target
 from colophon.core.tokens import TOKENS
-from colophon.ui.chrome import page_body, page_header, page_section
+from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,35 @@ def _opt_path(value: str) -> Path | None:
 def _opt_str(value: str) -> str | None:
     value = value.strip()
     return value or None
+
+
+def _secret_input(label: str, value: str, field: str) -> ui.input:
+    """A masked secret field (API tokens) with a reveal toggle. Deliberately NOT a
+    `type=password` input: Chrome ignores `autocomplete=off` on password fields and offers to save
+    the token as a browser login credential. Masking with CSS (`.colophon-secret`, see theme.py)
+    keeps the value hidden at rest without engaging the password manager, and the eye toggle reveals
+    it on demand."""
+    inp = (
+        ui.input(label, value=value)
+        .props(f"{field} autocomplete=off data-lpignore=true data-1p-ignore")
+        .classes("w-full colophon-secret")
+    )
+
+    shown = {"on": False}
+
+    def _toggle() -> None:
+        shown["on"] = not shown["on"]
+        if shown["on"]:
+            inp.classes(add="colophon-secret-shown")
+        else:
+            inp.classes(remove="colophon-secret-shown")
+        eye.props(f"icon={'visibility' if shown['on'] else 'visibility_off'}")
+
+    with inp.add_slot("append"):
+        eye = ui.button(icon="visibility_off", on_click=_toggle).props(
+            "flat dense round size=sm"
+        ).tooltip("Show / hide")
+    return inp
 
 
 def _token_reference() -> None:
@@ -63,6 +92,14 @@ def render_settings(controller: AppController) -> None:
 
     with page_header(controller, "settings"):
         pass
+
+    # Save is pinned in a sticky band just below the app bar (not at the foot of a long form), so
+    # it stays reachable without scrolling — the page-level mirror of the Details view's fixed
+    # action row. `do_save` is defined further down; the lambda resolves it at click time.
+    with page_toolbar(sticky=True), ui.row().classes("items-center w-full no-wrap"):
+        ui.label("Settings").classes("text-subtitle1 text-weight-medium")
+        ui.space()
+        ui.button("Save changes", icon="save", on_click=lambda: do_save()).props("unelevated")
 
     field = "outlined dense"
     with page_body("read"):
@@ -266,9 +303,7 @@ def render_settings(controller: AppController) -> None:
             abs_url = ui.input("Server URL", value=cfg.audiobookshelf_url or "").props(
                 field
             ).classes("w-full")
-            abs_token = ui.input(
-                "API token", value=cfg.audiobookshelf_token or "", password=True
-            ).props(f"{field} autocomplete=off").classes("w-full")
+            abs_token = _secret_input("API token", cfg.audiobookshelf_token or "", field)
             abs_lib = ui.input(
                 "Library id", value=cfg.audiobookshelf_library_id or ""
             ).props(field).classes("w-full")
@@ -287,9 +322,7 @@ def render_settings(controller: AppController) -> None:
             "Browse and download audiobooks from your Real-Debrid account on the "
             "Acquire page. Private API token, and where downloads land before ingest.",
         ):
-            rd_token = ui.input(
-                "API token", value=cfg.real_debrid_token or "", password=True
-            ).props(f"{field} autocomplete=off").classes("w-full")
+            rd_token = _secret_input("API token", cfg.real_debrid_token or "", field)
             rd_dir = ui.input(
                 "Download directory (blank = default)",
                 value=str(cfg.real_debrid_download_dir or ""),
@@ -442,6 +475,3 @@ def render_settings(controller: AppController) -> None:
             except Exception:
                 logger.exception("saving settings failed")
                 ui.notify("Could not save settings (see logs)", type="negative")
-
-        with ui.row().classes("w-full justify-end q-mt-sm"):
-            ui.button("Save changes", icon="save", on_click=do_save).props("unelevated")

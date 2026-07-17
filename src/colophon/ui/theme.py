@@ -210,16 +210,25 @@ body.body--dark { color: #ece4d8; }
    hairline rule separates the toolbar from the scrolling content below. */
 .colophon-actionbar { padding: 4px 0 10px; margin-bottom: 4px;
   border-bottom: 1px solid var(--colophon-line); }
+/* Masked secret field (API tokens). Deliberately not a type=password input — Chrome ignores
+   autocomplete=off on password fields and offers to save the token as a browser login credential.
+   -webkit-text-security masks the value visually (Chromium, WebKit, and Firefox 118+ all honor it);
+   the reveal toggle adds .colophon-secret-shown to un-mask on demand. */
+.colophon-secret input { -webkit-text-security: disc; }
+.colophon-secret.colophon-secret-shown input { -webkit-text-security: none; }
 /* Page sub-header band: a recessive surface zone with a hairline rule, separating a
    page's controls + state-of-play from its body (the page -> surface -> line tonal
    rule). Shared across pages via chrome.page_toolbar. */
 .colophon-toolbar { background: var(--colophon-surface); border-bottom: 1px solid var(--colophon-line);
   padding: 10px 16px; }
 .body--dark .colophon-toolbar { background: #262019; }
-/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins below the fixed 50px app
-   bar so the controls stay reachable while the body scrolls. The toolbar's own opaque
-   surface background keeps scrolled content from showing through. */
-.colophon-toolbar-sticky { position: sticky; top: 50px; z-index: 10; }
+/* Opt-in sticky toolbar (chrome.page_toolbar(sticky=True)): pins just below the fixed app bar so
+   the controls stay reachable while the body scrolls. The offset must clear the app bar's rendered
+   height (the brand mark plus its vertical padding, ~1.25rem taller than the bare header variable).
+   Keying off --colophon-header-h keeps the two scaling together; a bare 50px let the bar tuck a
+   couple dozen pixels under the taller header, clipping a pinned Save button. The toolbar's own
+   opaque surface background keeps scrolled content from showing through. */
+.colophon-toolbar-sticky { position: sticky; top: calc(var(--colophon-header-h) + 1.25rem); z-index: 10; }
 /* Sticky footer band (chrome.page_footer): the mirror of the sticky toolbar, pinned to the
    bottom of the scroll area so page-level state (e.g. the Acquire downloads list) stays in
    view without scrolling past a long body. Its own opaque surface keeps content from showing
