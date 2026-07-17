@@ -21,7 +21,7 @@ def test_skip_is_parse_only_no_field():
 def test_build_tokens_cover_renderer_keys():
     names = {t.name for t in BUILD_TOKENS}
     assert names == {
-        "Author", "SortAuthor", "Title", "SortTitle", "Series", "SerName",
+        "Author", "SortAuthor", "Title", "SortTitle", "Franchise", "Series", "SerName",
         "FmtName", "FmtNum", "Language", "SerNum", "PadNum", "PubYear",
         "Narrator", "Part", "Total", "Abridged",
     }
