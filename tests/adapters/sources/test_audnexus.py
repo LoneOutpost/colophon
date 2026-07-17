@@ -206,3 +206,31 @@ def test_to_result_parses_subtitle():
     r = src._to_result({"title": "Project Hail Mary", "subtitle": "A Novel"})
     assert r.subtitle == "A Novel"
     assert src._to_result({"title": "X"}).subtitle is None
+
+
+async def test_bad_asin_falls_back_to_title_search():
+    # A non-Audible ASIN (e.g. a physical/Kindle ASIN carried over from another source) fetches
+    # nothing from Audnexus; the search must fall back to title/author instead of dead-ending.
+    catalog = {"products": [{"asin": "B002V1A0WE"}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.audible.com":
+            return httpx.Response(200, json=catalog)
+        asin = request.url.path.rsplit("/", 1)[-1]
+        if asin == "0306406152":                      # an ISBN-10-style physical ASIN
+            return httpx.Response(404, json={"error": "not found"})
+        return httpx.Response(200, json=_BOOK)
+
+    src = _source(handler)
+    results = await src.search(
+        SourceQuery(asin="0306406152", title="Dune", author="Frank Herbert")
+    )
+    assert len(results) == 1 and results[0].asin == "B002V1A0WE"   # found via the title fallback
+
+
+async def test_bad_asin_without_a_title_returns_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "not found"})
+
+    src = _source(handler)
+    assert await src.search(SourceQuery(asin="0306406152")) == []   # nothing to fall back to

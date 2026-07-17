@@ -94,7 +94,13 @@ from colophon.core.quickmatch import (
     QuickMatchProposal,
     QuickMatchSummary,
 )
-from colophon.core.sources import MetadataSource, SourceQuery, SourceResult, arrange_sources
+from colophon.core.sources import (
+    AUDIOBOOK_ASIN_PROVIDERS,
+    MetadataSource,
+    SourceQuery,
+    SourceResult,
+    arrange_sources,
+)
 from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
@@ -2126,7 +2132,9 @@ class AppController:
             updates["sequence"] = str(result.series_sequence)
         if result.publish_year is not None:
             updates["year"] = str(result.publish_year)
-        if result.asin:
+        # Only take an ASIN from an audiobook source: a physical/Kindle ASIN (e.g. from Hardcover)
+        # is the wrong product for an audiobook and would dead-end the later Audible/Audnexus lookup.
+        if result.asin and result.provider in AUDIOBOOK_ASIN_PROVIDERS:
             updates["asin"] = result.asin
         if result.isbn:
             updates["isbn"] = result.isbn

@@ -3829,3 +3829,17 @@ def test_remap_embedded_none_when_tag_absent(tmp_path, make_audio):
     assert AppController(ctx).remap_embedded(book, tag="artist", dst="author") is None
     assert ctx.books.get(book.id).authors == []
     ctx.close()
+
+
+def test_match_field_values_keeps_asin_only_from_audiobook_sources():
+    # A physical/Kindle ASIN from a book source (Hardcover) must not become the book's asin — it's
+    # the wrong product for an audiobook and would dead-end the Audible lookup. An Audible source's
+    # asin is kept.
+    from colophon.core.sources import SourceResult
+
+    audible = SourceResult(provider="audnexus", title="X", asin="B0AUDIBLE0")
+    physical = SourceResult(provider="hardcover", title="X", asin="0306406152")
+    assert AppController.match_field_values(audible).get("asin") == "B0AUDIBLE0"
+    assert "asin" not in AppController.match_field_values(physical)
+    # the rest of the physical match still comes through
+    assert AppController.match_field_values(physical).get("title") == "X"

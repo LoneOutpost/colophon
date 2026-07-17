@@ -48,11 +48,18 @@ class AudnexusSource:
 
     async def search(self, query: SourceQuery) -> list[SourceResult]:
         if query.asin:
-            asins = [query.asin]
-        elif query.title:
-            asins = await self._search_asins(query)
-        else:
-            return []
+            results = await self._by_asins([query.asin])
+            # A non-Audible ASIN (e.g. a physical/Kindle ASIN carried over from another source)
+            # fetches nothing here — fall back to a title/author search so the audiobook is still
+            # found rather than the whole Audnexus lookup dead-ending on a wrong id.
+            if results or not query.title:
+                return results
+        if query.title:
+            return await self._by_asins(await self._search_asins(query))
+        return []
+
+    async def _by_asins(self, asins: list[str]) -> list[SourceResult]:
+        """Fetch each ASIN's book and return the ones that resolve (an unknown ASIN yields None)."""
         if not asins:
             return []
         books = await asyncio.gather(*(self._fetch_book(a) for a in asins))
