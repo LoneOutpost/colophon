@@ -6,6 +6,13 @@ from typing import Protocol, runtime_checkable
 
 from colophon.core.models import _Base
 
+# Providers whose ASIN is an AUDIOBOOK (Audible) ASIN. A physical/Kindle ASIN from a book source
+# (Hardcover, OpenLibrary, ...) must not be stored as the book's asin: it's the wrong product for an
+# audiobook app, and it dead-ends the Audnexus/Audible lookup (which fetches /books/{asin}). We gate
+# by SOURCE, not by parsing the ASIN — a Kindle ASIN and an Audible ASIN are indistinguishable as
+# strings (both `B0…`).
+AUDIOBOOK_ASIN_PROVIDERS: frozenset[str] = frozenset({"audnexus", "audible"})
+
 
 class SourceQuery(_Base):
     title: str | None = None
