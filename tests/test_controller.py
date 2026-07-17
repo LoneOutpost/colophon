@@ -3793,3 +3793,39 @@ def test_books_for_scope_ready_state_param(tmp_path):
     # scope_counts follows the same tier
     assert ctrl.scope_counts()["ready"] == 1
     assert ctrl.scope_counts(ready_state=BookState.IDENTIFIED)["ready"] == 1
+
+
+def test_remap_embedded_moves_a_file_tag_into_a_field(tmp_path, make_audio):
+    from mutagen.id3 import ID3, TPE1
+
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Book/01.mp3", seconds=1)
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=["Vonda N. McIntyre"]))   # artist tag
+    tags.save(a)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Placeholder"
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    batch = AppController(ctx).remap_embedded(book, tag="artist", dst="author")
+    assert batch is not None
+    persisted = ctx.books.get(book.id)
+    assert persisted.authors == ["Vonda N. McIntyre"]
+    ctx.close()
+
+
+def test_remap_embedded_none_when_tag_absent(tmp_path, make_audio):
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Book/01.mp3", seconds=1)   # no artist tag
+    book = BookUnit.new(source_folder=a.parent)
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    assert AppController(ctx).remap_embedded(book, tag="artist", dst="author") is None
+    assert ctx.books.get(book.id).authors == []
+    ctx.close()

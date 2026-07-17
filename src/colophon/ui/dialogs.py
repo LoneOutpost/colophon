@@ -26,6 +26,7 @@ from colophon.core.pathscheme import sample_target
 from colophon.core.phases import LOCAL
 from colophon.core.sources import SourceResult
 from colophon.core.triage import has_blocking_error, has_weak_identity, is_ready_to_persist
+from colophon.services.editing import EMBEDDED_SOURCE_FIELDS
 from colophon.services.ingest import ScanOptions, ScanScope
 from colophon.ui.batch_log import BatchItem, BatchLog
 from colophon.ui.scope import scope_selector
@@ -240,6 +241,20 @@ def _candidate_meta(result: SourceResult, book: BookUnit, *, source_label: str) 
 
 _MOVE_HINT = "Move a field's value into another field (fixes mis-tagging)."
 _SWAP_HINT = "Exchange the two fields' values."
+_EMBEDDED_HINT = "Copy what the file's own tags carry into this field (move only)."
+
+
+def _remap_from_options() -> dict[str, str]:
+    """The Remap 'From' choices: the editable book fields, plus each embedded-tag source
+    (namespaced 'embedded:<key>' so applying can tell them apart from a book field)."""
+    options = {f: f for f in EDITABLE_FIELDS}
+    options.update({f"embedded:{k}": f"embedded {k}" for k in EMBEDDED_SOURCE_FIELDS})
+    return options
+
+
+def _embedded_src(value: str) -> str | None:
+    """The embedded-tag key when `value` is an embedded source, else None (a book field)."""
+    return value.split(":", 1)[1] if value.startswith("embedded:") else None
 
 
 def remap_dialog(
@@ -249,27 +264,39 @@ def remap_dialog(
     refresh_list: Callable[[], None],
     show_detail: Callable[[str], None],
 ) -> None:
-    """Move one field's value into another field, or swap the two (fixes mis-tagging)."""
+    """Move one field's value into another field, or swap the two (fixes mis-tagging). An embedded
+    tag can be a move-only source (copy what the file carries into a field)."""
     with modal() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
         desc = ui.label(_MOVE_HINT).classes("text-caption colophon-muted")
         mode = ui.toggle({"move": "Move", "swap": "Swap"}, value="move").props("dense no-caps")
-        src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
+        src = ui.select(_remap_from_options(), label="From", value="title").props("dense").classes("w-full")
         dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
         clear = ui.checkbox("Clear the source field after moving", value=True)
 
-        def _on_mode() -> None:
+        def _sync() -> None:
+            embedded = _embedded_src(str(src.value)) is not None
+            if embedded:
+                mode.set_value("move")   # embedded is a one-way, move-only source
+            mode.set_visibility(not embedded)
             swapping = mode.value == "swap"
-            clear.set_visibility(not swapping)
-            desc.set_text(_SWAP_HINT if swapping else _MOVE_HINT)
+            clear.set_visibility(not embedded and not swapping)
+            desc.set_text(_EMBEDDED_HINT if embedded else (_SWAP_HINT if swapping else _MOVE_HINT))
 
-        mode.on_value_change(lambda _e: _on_mode())
+        mode.on_value_change(lambda _e: _sync())
+        src.on_value_change(lambda _e: _sync())
 
         def _apply() -> None:
-            if src.value == dst.value:
+            tag = _embedded_src(str(src.value))
+            if tag is not None:
+                if controller.remap_embedded(book, tag=tag, dst=dst.value) is None:
+                    ui.notify(f"This file has no embedded {tag}")
+                    return
+                ui.notify(f"Moved embedded {tag} to {dst.value}")
+            elif src.value == dst.value:
                 ui.notify("Pick two different fields")
                 return
-            if mode.value == "swap":
+            elif mode.value == "swap":
                 controller.swap(book, field_a=src.value, field_b=dst.value)
                 ui.notify(f"Swapped {src.value} and {dst.value}")
             else:
@@ -289,7 +316,8 @@ def bulk_remap_dialog(
     *,
     clear_selection: Callable[[], None],
 ) -> None:
-    """Move one field's value into another, or swap the two, across all selected books."""
+    """Move one field's value into another, or swap the two, across all selected books. An embedded
+    tag can be a move-only source (copy each book's own file tag into a field)."""
     n = len(books)
     with modal() as dialog, ui.card().classes("w-80"):
         ui.label("Remap a field").classes("text-subtitle1")
@@ -297,26 +325,36 @@ def bulk_remap_dialog(
             f"Move a field's value into another across {n} selected book(s)."
         ).classes("text-caption colophon-muted")
         mode = ui.toggle({"move": "Move", "swap": "Swap"}, value="move").props("dense no-caps")
-        src = ui.select(list(EDITABLE_FIELDS), label="From", value="title").props("dense").classes("w-full")
+        src = ui.select(_remap_from_options(), label="From", value="title").props("dense").classes("w-full")
         dst = ui.select(list(EDITABLE_FIELDS), label="To", value="subtitle").props("dense").classes("w-full")
         clear = ui.checkbox("Clear the source field after moving", value=True)
 
-        def _on_mode() -> None:
+        def _sync() -> None:
+            embedded = _embedded_src(str(src.value)) is not None
+            if embedded:
+                mode.set_value("move")
+            mode.set_visibility(not embedded)
             swapping = mode.value == "swap"
-            clear.set_visibility(not swapping)
-            desc.set_text(
-                f"Exchange the two fields' values across {n} selected book(s)."
-                if swapping
-                else f"Move a field's value into another across {n} selected book(s)."
-            )
+            clear.set_visibility(not embedded and not swapping)
+            if embedded:
+                desc.set_text(f"Copy each book's own embedded tag into a field, across {n} book(s).")
+            elif swapping:
+                desc.set_text(f"Exchange the two fields' values across {n} selected book(s).")
+            else:
+                desc.set_text(f"Move a field's value into another across {n} selected book(s).")
 
-        mode.on_value_change(lambda _e: _on_mode())
+        mode.on_value_change(lambda _e: _sync())
+        src.on_value_change(lambda _e: _sync())
 
         def _apply() -> None:
-            if src.value == dst.value:
+            tag = _embedded_src(str(src.value))
+            if tag is not None:
+                controller.bulk_remap_embedded(books, tag=tag, dst=dst.value)
+                ui.notify(f"Moved embedded {tag} to {dst.value} for {n} book(s)")
+            elif src.value == dst.value:
                 ui.notify("Pick two different fields")
                 return
-            if mode.value == "swap":
+            elif mode.value == "swap":
                 controller.bulk_swap(books, field_a=src.value, field_b=dst.value)
                 ui.notify(f"Swapped {src.value} and {dst.value} for {n} book(s)")
             else:

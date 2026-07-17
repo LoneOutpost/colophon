@@ -270,3 +270,39 @@ def test_bulk_apply_fields_undo_reverts_all(tmp_path):
     undo_batch(books, hist, batch)
     assert books.get(a.id).title == "old a"
     assert books.get(b.id).title == "old b"
+
+
+def test_embedded_value_formats_and_skips_empty():
+    from colophon.core.models import EmbeddedTags
+    from colophon.services.editing import embedded_value
+
+    tags = EmbeddedTags(artist="Vonda N. McIntyre", year=1995, sequence=1.0)
+    assert embedded_value(tags, "artist") == "Vonda N. McIntyre"
+    assert embedded_value(tags, "year") == "1995"
+    assert embedded_value(tags, "sequence") == "1"                 # whole seq, no trailing .0
+    assert embedded_value(EmbeddedTags(sequence=1.5), "sequence") == "1.5"
+    assert embedded_value(tags, "title") is None                  # absent tag -> None
+
+
+def test_embedded_value_rejects_unknown_key():
+    from colophon.core.models import EmbeddedTags
+    from colophon.services.editing import embedded_value
+
+    with pytest.raises(ValueError):
+        embedded_value(EmbeddedTags(), "bogus")
+
+
+def test_bulk_remap_embedded_field_sets_and_skips_empty(tmp_path):
+    from colophon.services.editing import bulk_remap_embedded_field
+
+    books, hist = _repos(tmp_path)
+    a = BookUnit.new(source_folder=Path("/ingest/a"))
+    b = BookUnit.new(source_folder=Path("/ingest/b"))
+    books.upsert(a)
+    books.upsert(b)
+    values = {a.id: "Vonda N. McIntyre", b.id: None}   # b's file carries no such tag -> skipped
+
+    bulk_remap_embedded_field(books, hist, [a, b], dst="author", value_for=lambda bk: values[bk.id])
+
+    assert books.get(a.id).authors == ["Vonda N. McIntyre"]
+    assert books.get(b.id).authors == []
