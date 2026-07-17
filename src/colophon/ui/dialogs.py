@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -72,13 +72,33 @@ def dialog_actions(
 
 @contextmanager
 def busy(button: ui.button) -> Iterator[None]:
-    """Show a button's spinner for the duration of an action, always clearing it
-    (replaces the hand-rolled props('loading=true') ... finally remove pattern)."""
-    button.props("loading=true")
+    """Show a button's spinner AND disable it for the duration of an action, always restoring it
+    (replaces the hand-rolled props('loading=true') ... finally remove pattern). Disabling — not
+    just the spinner — is what stops a second click landing while the action is in flight."""
+    button.props("loading=true").disable()
     try:
         yield
     finally:
-        button.props(remove="loading")
+        button.props(remove="loading").enable()
+
+
+def single_flight(handler: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
+    """Wrap an async click handler so it runs at most once at a time: a re-entrant click while a
+    prior run is still awaiting is ignored. Belt-and-suspenders with `busy` (which disables the
+    button): this closes the render-timing gap where a very fast second click is dispatched before
+    the browser has applied the disabled state, so an action like writing tags can't run twice."""
+    running = {"active": False}
+
+    async def _wrapped() -> None:
+        if running["active"]:
+            return
+        running["active"] = True
+        try:
+            await handler()
+        finally:
+            running["active"] = False
+
+    return _wrapped
 
 
 def attach_history_menu(
@@ -651,10 +671,12 @@ async def tag_dialog(
                             )
         actions = ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm")
         with actions:
+            status = ui.label().classes("text-caption colophon-muted q-mr-auto self-center")
             ui.button("Cancel", on_click=dialog.close).props("flat")
             commit_btn = ui.button("Write tags", icon="sell")
 
         async def _commit() -> None:
+            status.set_text("Writing tags…")
             with busy(commit_btn):
                 result = await controller.write_tags(book)
             actions.clear()
@@ -676,7 +698,7 @@ async def tag_dialog(
             refresh_list()
             refresh_status()
 
-        commit_btn.on_click(_commit)
+        commit_btn.on_click(single_flight(_commit))
     dialog.open()
 
 
@@ -719,6 +741,8 @@ async def bulk_tag_dialog(
             commit_btn = ui.button("Write tags", icon="sell")
 
         async def _commit() -> None:
+            progress_label.set_text(f"Writing tags… 0 / {len(books)} books")
+
             def _on_progress(done: int, book, result) -> None:
                 if has_blocking_error(book):
                     statuses[book.id].set_text("skipped — blocking error")
@@ -727,7 +751,7 @@ async def bulk_tag_dialog(
                         f"written ({result.written})" if not result.failed
                         else f"failed: {result.failed} file(s)"
                     )
-                progress_label.set_text(f"{done} / {len(books)} books")
+                progress_label.set_text(f"Writing tags… {done} / {len(books)} books")
 
             with busy(commit_btn):
                 results = await controller.write_tags_books(books, progress=_on_progress)
@@ -756,7 +780,7 @@ async def bulk_tag_dialog(
             # Selection is cleared when the results dialog is dismissed (above),
             # not here, so the per-book progress + summary stay visible meanwhile.
 
-        commit_btn.on_click(_commit)
+        commit_btn.on_click(single_flight(_commit))
     dialog.open()
 
 
