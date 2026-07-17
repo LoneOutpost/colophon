@@ -40,9 +40,9 @@ def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUni
     leaf.title = work.label
     leaf.provenance["title"] = Provenance.FILENAME.value
     leaf.detected_works = [work]
-    if work.author:                       # the work named its own author
+    if work.author:                       # the work named its own author, from its files' artist tag
         leaf.authors = [work.author]
-        leaf.provenance["authors"] = Provenance.FILENAME.value
+        leaf.provenance["authors"] = Provenance.TAG.value
     if work.series:
         leaf.series = [SeriesRef(name=work.series, sequence=work.sequence)]
         leaf.provenance["series"] = Provenance.FILENAME.value

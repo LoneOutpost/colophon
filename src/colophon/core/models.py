@@ -116,7 +116,9 @@ class Finding(_Base):
 
 class DetectedWork(_Base):
     """One distinct work the classifier found inside a folder; the unit a split
-    would foster into. `files` are the source files belonging to this work."""
+    would foster into. `files` are the source files belonging to this work. `author`, when set,
+    always comes from the files' embedded artist tag (see `classify._to_work`) — a trusted source,
+    so a leaf built from it records TAG provenance, not a weak filename guess."""
 
     label: str
     author: str | None = None

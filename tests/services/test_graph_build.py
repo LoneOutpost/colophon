@@ -12,13 +12,16 @@ def _repo(tmp_path: Path) -> BookUnitRepo:
     return BookUnitRepo(conn)
 
 
-def _write_tagged(path: Path, artist: str) -> None:
-    """Write a minimal mp3 with a TPE1 (artist) frame so IDENTIFY reads a tag author."""
-    from mutagen.id3 import ID3, TPE1
+def _write_tagged(path: Path, artist: str, album: str | None = None) -> None:
+    """Write a minimal mp3 with a TPE1 (artist) frame so IDENTIFY reads a tag author. An optional
+    TALB (album) frame gives the file a per-work identity key, so a dump folder groups by album."""
+    from mutagen.id3 import ID3, TALB, TPE1
 
     path.write_bytes(b"")
     tags = ID3()
     tags.add(TPE1(encoding=3, text=[artist]))
+    if album is not None:
+        tags.add(TALB(encoding=3, text=[album]))
     tags.save(path)
 
 
@@ -229,6 +232,27 @@ def test_authorless_leaf_does_not_inherit_a_container_tag_author(tmp_path):
     by_title = {b.title: b for b in books}
     # The sibling with its own tag must not inherit the container's first-file author.
     assert by_title["Voyage Home"].authors != ["Armin Shimmerman"]
+
+
+def test_leaf_author_from_own_tag_is_tag_provenance(tmp_path):
+    from colophon.core.models import Provenance
+    from colophon.services.graph_build import project
+
+    # A multi-book dump folder where each work carries its own artist tag. The work's author is
+    # read from that tag, so the leaf must record TAG provenance — not FILENAME. A tag author is a
+    # trusted assertion; mislabeling it FILENAME reads as a weak folder/filename guess and drops
+    # the book's identity confidence to 0.
+    ingest = tmp_path / "ingest"
+    trek = ingest / "Star Trek"
+    trek.mkdir(parents=True)
+    _write_tagged(trek / "34th Rule.mp3", "Armin Shimmerman", album="The 34th Rule")
+    _write_tagged(trek / "Voyage Home.mp3", "Vonda N. McIntyre", album="The Voyage Home")
+
+    books = project(build_graph(_repo(tmp_path), ingest, template="$Author - $Title"))
+
+    by_author = {b.authors[0] if b.authors else None: b for b in books}
+    vh = by_author["Vonda N. McIntyre"]
+    assert vh.provenance["authors"] == Provenance.TAG.value
 
 
 def test_build_graph_threads_new_only_scope(tmp_path):
