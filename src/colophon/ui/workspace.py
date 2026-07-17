@@ -136,6 +136,21 @@ _SEVERITY_BADGE: dict[FindingSeverity, tuple[str, str]] = {
     FindingSeverity.INFO: ("info", "info"),
 }
 
+# The State facet filter's options — one per BookState, in lifecycle order. Kept exhaustive: a
+# missing state silently hides those books from the filter (Encoded/Organized/Skipped were absent).
+# A test pins this to the full BookState enum so it can't drift again.
+_STATE_FILTER_OPTIONS: dict[str, str] = {
+    BookState.DETECTED.value: "Detected",
+    BookState.IDENTIFIED.value: "Identified",
+    BookState.NEEDS_REVIEW.value: "Needs review",
+    BookState.READY.value: "Ready",
+    BookState.ENCODING.value: "Encoding",
+    BookState.ENCODED.value: "Encoded",
+    BookState.ORGANIZED.value: "Organized",
+    BookState.FAILED.value: "Failed",
+    BookState.SKIPPED.value: "Skipped",
+}
+
 # Status-bar state badges: (BookState value, short label, color). Shown only when count > 0.
 _STATUS_BADGES = [
     ("detected", "Detected", "grey-6"),
@@ -1922,8 +1937,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             ui.label("Every book in the current scope.").classes("text-caption colophon-muted")
             with ui.row().classes("items-center w-full q-gutter-xs"):
                 ui.select(
-                    {"detected": "Detected", "identified": "Identified",
-                     "needs_review": "Needs review", "ready": "Ready", "failed": "Failed"},
+                    _STATE_FILTER_OPTIONS,
                     multiple=True, label="State", value=view["facets"]["state"],
                     on_change=lambda e: _set_facet("state", e.value),
                 ).props("dense outlined options-dense").classes("col").style("min-width: 8.5rem")
