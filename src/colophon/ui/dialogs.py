@@ -1433,6 +1433,9 @@ async def persist_dialog(
                 log = BatchLog([BatchItem(b.id, b.title or "(untitled)") for b in books])
             log.cancel_action(token.cancel)
 
+            def _retry(ids: list[str]) -> object:
+                return run_persist([b for b in books if b.id in ids], do_tag, opts, remove_after)
+
             # Live progress across both phases. Tag and encode/organize each contribute one
             # unit of work per book, so the total spans whichever operations were chosen.
             do_process = opts.encode or opts.organize
@@ -1444,49 +1447,54 @@ async def persist_dialog(
                 prog["fail"] += int(failed)
                 log.set_progress(prog["done"], total, failed=prog["fail"])
 
-            if do_tag:
-                def _on_tag(done, book, res) -> None:
-                    log.update(
-                        book.id,
-                        "tagged" if res.ok else f"tag failed: {res.failed} file(s)",
-                        kind="ok" if res.ok else "fail",
-                    )
-                    _tick(not res.ok)
+            try:
+                if do_tag:
+                    def _on_tag(done, book, res) -> None:
+                        log.update(
+                            book.id,
+                            "tagged" if res.ok else f"tag failed: {res.failed} file(s)",
+                            kind="ok" if res.ok else "fail",
+                        )
+                        _tick(not res.ok)
 
-                await controller.write_tags_books(books, progress=_on_tag)
-            if do_process:
-                def _on_process(bid, status) -> None:
-                    log.update(bid, status, kind=_KIND.get(status, "running"))
-                    if status in _TERMINAL:
-                        _tick(status == "failed")
+                    await controller.write_tags_books(books, progress=_on_tag)
+                if do_process:
+                    def _on_process(bid, status) -> None:
+                        log.update(bid, status, kind=_KIND.get(status, "running"))
+                        if status in _TERMINAL:
+                            _tick(status == "failed")
 
-                job = await controller.run_encode_job(books, opts, progress=_on_process, cancel=token)
-                # The progress callback only carries a status; the returned results carry the
-                # reason. Surface it on failed/skipped rows so it stays readable after the run.
-                for r in job.results:
-                    if r.status in {"failed", "skipped"} and r.detail:
-                        log.update(r.book_id, f"{r.status}: {r.detail}", kind=_KIND.get(r.status, "fail"))
-                if remove_after and opts.organize:
-                    removed_ids = [r.book_id for r in job.results if r.status == "done"]
-                    if removed_ids:
-                        n = await asyncio.to_thread(controller.remove_from_library, removed_ids)
-                        for bid in removed_ids:
-                            log.update(bid, "removed from library", kind="ok")
-                        logger.info(f"removed {n} organized book(s) from the library")
-            clear_selection()
-            await controller.trigger_abs_scan()  # best-effort library rescan
+                    job = await controller.run_encode_job(books, opts, progress=_on_process, cancel=token)
+                    # The progress callback only carries a status; the returned results carry the
+                    # reason. Surface it on failed/skipped rows so it stays readable after the run.
+                    for r in job.results:
+                        if r.status in {"failed", "skipped"} and r.detail:
+                            log.update(r.book_id, f"{r.status}: {r.detail}",
+                                       kind=_KIND.get(r.status, "fail"))
+                    if remove_after and opts.organize:
+                        removed_ids = [r.book_id for r in job.results if r.status == "done"]
+                        if removed_ids:
+                            n = await asyncio.to_thread(controller.remove_from_library, removed_ids)
+                            for bid in removed_ids:
+                                log.update(bid, "removed from library", kind="ok")
+                            logger.info(f"removed {n} organized book(s) from the library")
+                clear_selection()
+                await controller.trigger_abs_scan()  # best-effort library rescan
 
-            c = log.counts()
-            note = f"{c.get('ok', 0)} done"
-            if c.get("fail"):
-                note += f", {c['fail']} failed"
-            if c.get("skip"):
-                note += f", {c['skip']} skipped"
-
-            def _retry(ids: list[str]) -> object:
-                return run_persist([b for b in books if b.id in ids], do_tag, opts, remove_after)
-
-            log.finish(note, on_close=_close, on_retry=_retry)
+                c = log.counts()
+                note = f"{c.get('ok', 0)} done"
+                if c.get("fail"):
+                    note += f", {c['fail']} failed"
+                if c.get("skip"):
+                    note += f", {c['skip']} skipped"
+                log.finish(note, on_close=_close, on_retry=_retry)
+            except Exception as exc:
+                # Never leave the persist stopped with no explanation: an error mid-run (a store
+                # write, the ABS rescan, an unexpected raise) surfaces on the log with a reason and
+                # a retry, instead of a silently frozen dialog.
+                logger.exception("persist run failed")
+                log.finish(f"Persist error — {type(exc).__name__}: {exc}",
+                           on_close=_close, on_retry=_retry)
 
         dialog.open()
         show_options()
