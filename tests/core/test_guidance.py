@@ -17,10 +17,12 @@ def test_corrupt_audio_points_at_acquire_and_reprobe_not_acknowledge():
     assert "replace it" in g.suggestion.lower()
 
 
-def test_mixed_works_points_at_organize():
+def test_mixed_works_points_at_organize_and_can_be_dismissed():
+    # Organize is the remedy, but the user can also dismiss the note when the split already
+    # looks right (e.g. a franchise folder whose books are each their own file).
     for code in (FindingCode.MIXED_WORKS, FindingCode.MULTI_IN_AUTHOR,
                  FindingCode.MULTI_IN_UNDETERMINED):
-        assert finding_guidance(code).actions == (FixAction.ORGANIZE,)
+        assert finding_guidance(code).actions == (FixAction.ORGANIZE, FixAction.ACKNOWLEDGE)
 
 
 def test_duplicates_offer_files_and_acknowledge():

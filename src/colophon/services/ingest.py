@@ -442,6 +442,10 @@ def _adopt_and_identify(
         matched.source_files = unit.source_files
         matched.content_kind = unit.content_kind
         matched.detected_works = unit.detected_works
+        # Findings are structural (from the same CATEGORIZE as content_kind/detected_works), so
+        # refresh them too — else a stale container-level finding (e.g. "N distinct works in an
+        # author folder") sticks to a leaf that has since been split into a clean single book.
+        matched.findings = unit.findings
         if not matched.title and unit.title:
             matched.title = unit.title
             matched.provenance["title"] = unit.provenance.get("title", "")

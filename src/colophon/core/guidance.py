@@ -36,8 +36,9 @@ _CORRUPT = Guidance(
 )
 _MIXED = Guidance(
     "This folder holds more than one book. Persist, then Organize, files each one to its "
-    "own home. Organize stays blocked until any file error is fixed.",
-    (FixAction.ORGANIZE,),
+    "own home. Organize stays blocked until any file error is fixed. If the split already "
+    "looks right (each book is its own file), dismiss this note.",
+    (FixAction.ORGANIZE, FixAction.ACKNOWLEDGE),
 )
 _DUP = Guidance(
     "The same book is here more than once. Keep one and remove the extra from the Files "
