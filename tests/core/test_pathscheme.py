@@ -345,3 +345,13 @@ def test_build_reorg_targets_multipart_autoappends_missing_part():
         base / "The Way of Kings (01 of 02).m4a",
         base / "The Way of Kings (02 of 02).m4a",
     ]
+
+
+def test_franchise_token_renders_and_drops_like_series():
+    b = _book()
+    # No franchise: the optional [$Franchise/] group drops as a unit, like a missing series.
+    assert expand_pattern("[$Franchise/]$Author/$Title", b) == "Brandon Sanderson/The Way of Kings"
+    b.franchise = "Cosmere"
+    # With a franchise: the group renders the extra folder level.
+    assert expand_pattern("[$Franchise/]$Author/$Title", b) == "Cosmere/Brandon Sanderson/The Way of Kings"
+    assert expand_pattern("$Franchise", b) == "Cosmere"

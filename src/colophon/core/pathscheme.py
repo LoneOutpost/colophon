@@ -89,6 +89,7 @@ def _token_values(
         "SortAuthor": _sort_author(author),
         "Title": book.title or "",
         "SortTitle": _sort_title(book.title or ""),
+        "Franchise": book.franchise or "",
         "Series": series_label,
         "SerName": ser_name,
         "SerNum": sernum,

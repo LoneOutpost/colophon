@@ -33,6 +33,7 @@ TOKENS: list[Token] = [
     Token("Skip", None, True, False, "Parse only: match and discard a run of text."),
     Token("SortAuthor", None, False, True, "Build only: author as 'Last, First'."),
     Token("SortTitle", None, False, True, "Build only: title with a leading article dropped."),
+    Token("Franchise", None, False, True, "Build only: the franchise this book belongs to (e.g. 'Star Trek'). Wrap it in an optional group like [$Franchise/] so the folder drops when the book has no franchise."),
     Token("SerName", None, False, True, "Build only: raw series name."),
     Token("FmtName", None, False, True, "Build only: formatted series name (Series Name Pattern)."),
     Token("FmtNum", None, False, True, "Build only: formatted series number (Series Number Pattern), e.g. 'Book #3'."),
