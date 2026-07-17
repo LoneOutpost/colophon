@@ -22,6 +22,7 @@ from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
 from colophon.core.graph_records import EdgeRecord, NodeRecord, graph_records
 from colophon.core.models import (
+    WEAK_PROV,
     BookUnit,
     NodeOverride,
     Phase,
@@ -446,13 +447,21 @@ def _adopt_and_identify(
         # refresh them too — else a stale container-level finding (e.g. "N distinct works in an
         # author folder") sticks to a leaf that has since been split into a clean single book.
         matched.findings = unit.findings
-        if not matched.title and unit.title:
+        # Fill empty identity from the projection, and also REFRESH a weak (folder/filename-derived)
+        # value with the projection's fresher one. A leaf whose author was mislabeled from the
+        # filename must upgrade to the tag the fan-out now reads, instead of the stale weak value
+        # sticking across rescans (which forced its identity confidence to 0 until the book was
+        # removed and re-scanned). Hard identity (tag/datafile/match/manual) the user or a source set
+        # is never overwritten.
+        def _refreshable(field: str) -> bool:
+            return not getattr(matched, field) or matched.provenance.get(field) in WEAK_PROV
+        if unit.title and _refreshable("title"):
             matched.title = unit.title
             matched.provenance["title"] = unit.provenance.get("title", "")
-        if not matched.authors and unit.authors:
+        if unit.authors and _refreshable("authors"):
             matched.authors = list(unit.authors)
             matched.provenance["authors"] = unit.provenance.get("authors", "")
-        if not matched.series and unit.series:
+        if unit.series and _refreshable("series"):
             matched.series = list(unit.series)
             matched.provenance["series"] = unit.provenance.get("series", "")
         matched.missing = False  # re-seen -> clear any stale missing flag

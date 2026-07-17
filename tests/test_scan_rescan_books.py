@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from mutagen.id3 import ID3, TPE1
+from mutagen.id3 import ID3, TALB, TPE1
 
 from colophon.adapters.repository.store import BookUnitRepo, connect, migrate
-from colophon.services.ingest import plan_rescan_folders
+from colophon.services.ingest import plan_rescan_folders, scan_ingest
 
 
 def _repo(tmp_path):
@@ -12,10 +12,12 @@ def _repo(tmp_path):
     return BookUnitRepo(conn)
 
 
-def _tagged(path: Path, artist: str) -> None:
+def _tagged(path: Path, artist: str, album: str | None = None) -> None:
     path.write_bytes(b"")
     tags = ID3()
     tags.add(TPE1(encoding=3, text=[artist]))
+    if album is not None:
+        tags.add(TALB(encoding=3, text=[album]))
     tags.save(path)
 
 
@@ -56,3 +58,57 @@ def test_scoped_rebuild_touches_only_the_named_folders(tmp_path):
 
     assert [u.source_folder for u in plan.units] == [ingest / "Author A"]
     assert plan.new_books == 1
+
+
+def test_rescan_upgrades_a_stale_weak_leaf_author_to_the_tag(tmp_path):
+    # A leaf in a multi-book folder gets its author from its own artist tag (TAG provenance). A
+    # library scanned before that was fixed still carries the author mislabeled as a weak FILENAME
+    # guess, which forces its identity confidence to 0. A plain rescan (no removal) must upgrade the
+    # stale weak value to the tag and restore the confidence — previously only remove + re-scan did.
+    ingest = tmp_path / "ingest"
+    dump = ingest / "Star Trek"
+    dump.mkdir(parents=True)
+    _tagged(dump / "34th Rule.mp3", "Armin Shimmerman", album="The 34th Rule")
+    _tagged(dump / "Voyage Home.mp3", "Vonda N. McIntyre", album="The Voyage Home")
+
+    repo = _repo(tmp_path)
+    scan_ingest(repo, ingest, template="$Author - $Title")
+    vh = next(b for b in repo.list_all() if b.authors == ["Vonda N. McIntyre"])
+    assert vh.provenance["authors"] == "tag"          # baseline: a fresh scan gets it right
+    assert vh.identity_confidence >= 80
+
+    # Simulate a pre-fix library row: the tag author mislabeled as a weak filename guess, conf 0.
+    vh.provenance["authors"] = "filename"
+    vh.identity_confidence = 0.0
+    repo.upsert(vh)
+
+    scan_ingest(repo, ingest, template="$Author - $Title")   # plain rescan, book left in place
+
+    reloaded = repo.get(vh.id)
+    assert reloaded.authors == ["Vonda N. McIntyre"]
+    assert reloaded.provenance["authors"] == "tag"    # weak value upgraded back to the tag
+    assert reloaded.identity_confidence >= 80          # and confidence restored
+
+
+def test_rescan_keeps_a_manual_leaf_author(tmp_path):
+    # The refresh only touches weak (folder/filename) provenance; a manual edit the user made to a
+    # leaf's author must survive a rescan untouched.
+    ingest = tmp_path / "ingest"
+    dump = ingest / "Star Trek"
+    dump.mkdir(parents=True)
+    _tagged(dump / "34th Rule.mp3", "Armin Shimmerman", album="The 34th Rule")
+    _tagged(dump / "Voyage Home.mp3", "Vonda N. McIntyre", album="The Voyage Home")
+
+    repo = _repo(tmp_path)
+    scan_ingest(repo, ingest, template="$Author - $Title")
+    vh = next(b for b in repo.list_all() if b.authors == ["Vonda N. McIntyre"])
+
+    vh.authors = ["V. N. McIntyre"]                   # a deliberate manual correction
+    vh.provenance["authors"] = "manual"
+    repo.upsert(vh)
+
+    scan_ingest(repo, ingest, template="$Author - $Title")
+
+    reloaded = repo.get(vh.id)
+    assert reloaded.authors == ["V. N. McIntyre"]      # manual value preserved
+    assert reloaded.provenance["authors"] == "manual"
