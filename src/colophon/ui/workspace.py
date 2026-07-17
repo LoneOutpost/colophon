@@ -669,7 +669,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.space()
                     ready_btn = ui.button(
                         "Mark ready", icon="check",
-                        on_click=lambda b=book: (controller.mark_ready(b), ui.notify("Marked ready"), refresh_list()),
+                        # Rebuild the detail panel too (not just the list) so the state badge flips to
+                        # Ready right away — otherwise the panel looks unchanged and the action seems
+                        # to do nothing. Matches how applying a match refreshes.
+                        on_click=lambda b=book: (
+                            controller.mark_ready(b), ui.notify("Marked ready"),
+                            refresh_list(), show_detail(b.id),
+                        ),
                     ).props("flat")
                     ready_btn.set_enabled(not blocked)
                     if block_tip:
