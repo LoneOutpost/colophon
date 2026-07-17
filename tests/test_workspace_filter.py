@@ -56,3 +56,12 @@ def test_editor_text_joins_list_values():
     assert _editor_text(_W(["  ", "Epic"])) == "Epic"
     assert _editor_text(_W("plain")) == "plain"
     assert _editor_text(_W(None)) == ""
+
+
+def test_state_filter_options_cover_every_book_state():
+    # A missing state silently hides those books from the State filter (Organized/Encoded/Skipped
+    # were absent). Keep the filter's options exhaustive against the enum.
+    from colophon.core.models import BookState
+    from colophon.ui.workspace import _STATE_FILTER_OPTIONS
+
+    assert set(_STATE_FILTER_OPTIONS) == {s.value for s in BookState}
