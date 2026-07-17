@@ -668,3 +668,30 @@ def test_auto_scan_needs_confirmation_only_when_new_books():
     assert auto_scan_needs_confirmation(ScanPlan(new_books=0)) is False
     assert auto_scan_needs_confirmation(ScanPlan(new_books=3)) is True
     assert auto_scan_needs_confirmation(ScanPlan(new_books=0, existing_books=10)) is False
+
+
+def test_rescan_clears_a_stale_container_finding_on_a_split_leaf(tmp_path):
+    # A container-level finding ("N distinct works in an author folder") persisted on a book that
+    # was since split into a clean single-file leaf must not stick: a re-scan refreshes the leaf's
+    # findings (structural, like content_kind) so it clears.
+    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.services.ingest import commit_scan, plan_scan_graph
+
+    ingest = tmp_path / "ingest"
+    dump = ingest / "Star Trek"
+    dump.mkdir(parents=True)
+    (dump / "Doomsday World.mp3").write_bytes(b"")
+    (dump / "Federation.mp3").write_bytes(b"")
+
+    repo = _repo(tmp_path)
+    commit_scan(repo, plan_scan_graph(repo, ingest, template="$Author - $Title"))
+
+    book = next(b for b in repo.list_all() if b.title == "Doomsday World")
+    assert len(book.source_files) == 1
+    book.findings = [Finding(code=FindingCode.MULTI_IN_AUTHOR, severity=FindingSeverity.WARN,
+                             detail="2 distinct works in an author folder")]
+    repo.upsert(book)
+
+    plan = plan_scan_graph(repo, ingest, template="$Author - $Title")
+    leaf = next(u for u in plan.units if u.title == "Doomsday World")
+    assert leaf.findings == []
