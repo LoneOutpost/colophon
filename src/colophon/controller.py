@@ -116,6 +116,8 @@ from colophon.services.cover import ensure_cached_cover, thumbnail_bytes
 from colophon.services.editing import (
     apply_fields,
     bulk_apply_fields,
+    bulk_remap_embedded_field,
+    embedded_value,
     remap_field,
     set_field_value,
     swap_fields,
@@ -1533,6 +1535,31 @@ class AppController:
 
     def remap(self, book: BookUnit, *, src: str, dst: str, clear_source: bool) -> str:
         batch = remap_field(self.ctx.books, self.ctx.history, book, src=src, dst=dst, clear_source=clear_source)
+        return batch
+
+    def remap_embedded(self, book: BookUnit, *, tag: str, dst: str) -> str | None:
+        """Move the book's own embedded `tag` (e.g. 'artist') into the `dst` field. Returns the undo
+        batch id, or None when the file carries no such tag (nothing to move)."""
+        tags = self.embedded_tags(book)
+        value = embedded_value(tags, tag) if tags is not None else None
+        if value is None:
+            return None
+        batch = set_field_value(self.ctx.books, self.ctx.history, book, dst, value)
+        self.invalidate(book, Phase.TAG)
+        return batch
+
+    def bulk_remap_embedded(self, books: list[BookUnit], *, tag: str, dst: str) -> str:
+        """Move each book's own embedded `tag` into `dst`, one undoable batch. Books whose file
+        carries no such tag are skipped."""
+        def value_for(b: BookUnit) -> str | None:
+            tags = self.embedded_tags(b)
+            return embedded_value(tags, tag) if tags is not None else None
+
+        batch = bulk_remap_embedded_field(
+            self.ctx.books, self.ctx.history, books, dst=dst, value_for=value_for
+        )
+        for book in books:
+            self.invalidate(book, Phase.TAG)
         return batch
 
     def bulk_edit(self, books: list[BookUnit], field: str, value: str | None) -> str:

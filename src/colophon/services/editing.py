@@ -11,8 +11,29 @@ from collections.abc import Callable
 from colophon.adapters.repository.store import BookUnitRepo, HistoryRepo
 from colophon.core.fields import EDITABLE_TO_PROVENANCE, get_field, set_field
 from colophon.core.genre_policy import GenrePolicy
-from colophon.core.models import BookUnit, EditChange, Provenance, new_batch_id
+from colophon.core.models import BookUnit, EditChange, EmbeddedTags, Provenance, new_batch_id
 from colophon.core.normalize import FIELD_NORMALIZERS
+
+# Embedded-tag fields offered as a Remap source: a one-way copy of what the file itself carries
+# into a book field (move-only — you can't write back into or clear a file tag from here). Ordered
+# for the dropdown; each name is an EmbeddedTags attribute.
+EMBEDDED_SOURCE_FIELDS = (
+    "title", "album", "artist", "narrator", "series", "sequence",
+    "year", "genre", "description", "asin", "isbn", "track",
+)
+
+
+def embedded_value(tags: EmbeddedTags, key: str) -> str | None:
+    """The string value of one embedded-tag field, formatted for setting into a book field (numbers
+    stringified, a whole sequence without a trailing '.0'). None when the file carries no such tag."""
+    if key not in EMBEDDED_SOURCE_FIELDS:
+        raise ValueError(f"unknown embedded source field {key!r}")
+    raw = getattr(tags, key)
+    if raw is None or raw == "":
+        return None
+    if key == "sequence":
+        return str(int(raw)) if raw == int(raw) else str(raw)
+    return str(raw)
 
 
 def _apply(
@@ -86,6 +107,23 @@ def remap_field(
     if clear_source:
         changes.append(_apply(book, src, None))
     return _commit(books, hist, book, changes)
+
+
+def bulk_remap_embedded_field(
+    books: BookUnitRepo,
+    hist: HistoryRepo,
+    items: list[BookUnit],
+    *,
+    dst: str,
+    value_for: Callable[[BookUnit], str | None],
+) -> str:
+    """Set `dst` on each book from `value_for(book)` (its own embedded value) in one undoable batch.
+    A book whose embedded tag is empty yields no value and is skipped."""
+    def _changes(book: BookUnit) -> tuple[BookUnit, list[EditChange]]:
+        value = value_for(book)
+        return book, ([_apply(book, dst, value)] if value is not None else [])
+
+    return _bulk_commit(books, hist, items, _changes)
 
 
 def swap_fields(
