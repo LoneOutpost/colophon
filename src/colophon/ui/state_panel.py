@@ -312,9 +312,25 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                     f"• {sig.name.replace('_', ' ')} ({sign}{sig.points})"
                 ).classes("colophon-muted text-caption q-pl-sm")
 
+        # A failed persist step (Organize/Encode) is surfaced here, prominently, with its recorded
+        # reason and a way back to Persist to retry — not just as a muted caption in the timeline.
+        failed_steps = [
+            r for r in phase_rows(book)
+            if r.state is PhaseState.FAILED and r.phase in (Phase.ENCODE, Phase.ORGANIZE)
+        ]
         findings = controller._active_findings(book)
-        if findings:
+        if failed_steps or findings:
             ui.label("Attention").classes("colophon-seccap")
+            for r in failed_steps:
+                with ui.column().classes("w-full q-gutter-none q-mb-sm"):
+                    with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                        ui.icon("error", color="negative", size="1rem")
+                        ui.label(f"{r.label} failed").classes("col text-caption text-negative")
+                    ui.label(r.detail or "No reason was recorded.").classes(
+                        "colophon-muted text-caption q-pl-lg"
+                    )
+                    with ui.row().classes("q-pl-lg q-gutter-xs"):
+                        _action_button(FixAction.ORGANIZE)
             for f in findings:
                 fc = {"error": "negative", "warn": "warning", "info": "info"}.get(
                     f.severity.value, "grey-6"

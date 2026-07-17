@@ -145,7 +145,7 @@ from colophon.services.ingest import (
     sweep_missing,
 )
 from colophon.services.matching import gather_matches, query_for_book
-from colophon.services.organize import organize_book, organize_book_parts
+from colophon.services.organize import OrganizeResult, organize_book, organize_book_parts
 from colophon.services.tag_ops import (
     TagCommitResult,
     TagPlan,
@@ -165,6 +165,14 @@ _REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progr
 # a match, a manual edit, or the filename). Only these are re-derived when a folder is reclassified,
 # so a book tracks the current classification without ever clobbering authoritative author data.
 _GRAPH_AUTHOR_PROV = frozenset({Provenance.GRAPHING.value, Provenance.DIRECTORY.value})
+
+
+def _organize_fail_detail(org: OrganizeResult) -> str:
+    """A readable reason for a failed organize move: a collision names the destination that already
+    exists; otherwise the filesystem error (or a generic fallback)."""
+    if org.collision:
+        return f"a file already exists at the destination: {org.target_path}"
+    return org.error or "the move into the library failed"
 
 
 class CoverSetResult(_Base):
@@ -2285,6 +2293,29 @@ class AppController:
         return rows
 
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
+        """Persist one book, guaranteeing a readable reason on any failure. Wraps the worker so an
+        unexpected error (permissions, disk, a bad path, a tag-write blow-up) is caught and recorded
+        as a FAILED phase with its message — surfaced on At a Glance — instead of escaping the run
+        and leaving the persist with no explanation."""
+        try:
+            return self._persist_book(book, options)
+        except Exception as exc:  # persist must always report a reason, never crash the run
+            logger.exception(f"persist failed for book {book.id} [{book.title!r}]")
+            # Fail whichever phase was mid-flight (encode marks ENCODE running), else the organize
+            # umbrella, so the failed step and its reason show up on the book.
+            phase = Phase.ENCODE if state_of(book, Phase.ENCODE) is PhaseState.RUNNING else Phase.ORGANIZE
+            return self._fail_persist(book, phase, f"{type(exc).__name__}: {exc}")
+
+    def _fail_persist(self, book: BookUnit, phase: Phase, reason: str) -> BookProcessResult:
+        """Record a persist failure: mark `phase` FAILED with `reason`, persist it (so the failed
+        step + its reason show on At a Glance), and return the matching failed result."""
+        mark(book, phase, PhaseState.FAILED, detail=reason)
+        resync_state(book)
+        book.touch()
+        self.ctx.books.upsert(book)
+        return BookProcessResult(book_id=book.id, status="failed", detail=reason)
+
+    def _persist_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->
         organize (move) -> tag once at the resting path -> optional source delete."""
         # Backstop: a book with a blocking error (missing/corrupt files) can't be persisted — no
@@ -2304,11 +2335,9 @@ class AppController:
             tracks = [read_embedded_tags(sf.path).track for sf in book.source_files]
             ordered = resolve_part_order(book.source_files, tracks)
             if ordered is None:
-                mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail="couldn't determine part order")
-                resync_state(book)
-                book.touch()
-                self.ctx.books.upsert(book)
-                return BookProcessResult(book_id=book.id, status="failed", detail="couldn't determine part order")
+                reason = (f"couldn't order {len(book.source_files)} part(s) — track numbers are "
+                          "missing or duplicated, so the file order is ambiguous")
+                return self._fail_persist(book, Phase.ORGANIZE, reason)
             targets = build_reorg_targets(
                 library_root, options.patterns or self.ctx.patterns, cbook, ordered
             )
@@ -2318,14 +2347,7 @@ class AppController:
                 delete_sources=options.delete_sources or self.ctx.config.reorg_delete_sources,
             )
             if not org.moved or org.target_path is None:
-                mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail=(org.error or "collision"))
-                resync_state(book)
-                book.touch()
-                self.ctx.books.upsert(book)
-                return BookProcessResult(
-                    book_id=book.id, status="failed",
-                    detail=("collision" if org.collision else org.error),
-                )
+                return self._fail_persist(book, Phase.ORGANIZE, _organize_fail_detail(org))
             total = len(ordered)
             batch_id = new_batch_id()
             for idx, dst in enumerate(targets, start=1):
@@ -2343,7 +2365,9 @@ class AppController:
         # Encode path: transcode all source files into a single output, then organize + tag.
         target = self._encode_target(book)
         if target.exists() and target != book.output_path:
-            return BookProcessResult(book_id=book.id, status="failed", detail="output name collision")
+            return self._fail_persist(
+                book, Phase.ENCODE, f"an encoded file already exists at the output path: {target}"
+            )
         mark(book, Phase.ENCODE, PhaseState.RUNNING)
         resync_state(book)
         self.ctx.books.upsert(book)
@@ -2353,10 +2377,7 @@ class AppController:
             chapters=book.chapters or None,
         )
         if not enc.verified or enc.output_path is None:
-            mark(book, Phase.ENCODE, PhaseState.FAILED, detail=enc.error)
-            resync_state(book)
-            self.ctx.books.upsert(book)
-            return BookProcessResult(book_id=book.id, status="failed", detail=enc.error)
+            return self._fail_persist(book, Phase.ENCODE, f"encode failed: {enc.error or 'unknown error'}")
         book.output_path = enc.output_path
         mark(book, Phase.ENCODE, PhaseState.FRESH)
         resync_state(book)
@@ -2371,14 +2392,7 @@ class AppController:
             )
             org = organize_book(self.ctx.books, book, book.output_path, target=target)
             if not org.moved or org.target_path is None:
-                mark(book, Phase.ORGANIZE, PhaseState.FAILED, detail=(org.error or "collision"))
-                resync_state(book)
-                book.touch()
-                self.ctx.books.upsert(book)
-                return BookProcessResult(
-                    book_id=book.id, status="failed",
-                    detail=("collision" if org.collision else org.error),
-                )
+                return self._fail_persist(book, Phase.ORGANIZE, _organize_fail_detail(org))
 
         batch_id = new_batch_id()
         resting = book.output_path

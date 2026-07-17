@@ -144,7 +144,43 @@ def test_process_ready_collision_marks_failed_not_stuck_encoding(tmp_path, make_
     assert persisted.state == BookState.FAILED
     assert len(results) == 1
     assert results[0].organized is False
-    assert results[0].detail == "collision"
+    # The failure reason is detailed (names the colliding destination) and recorded on the
+    # ORGANIZE phase so At a Glance can surface it, not just returned transiently.
+    assert results[0].detail is not None and "already exists" in results[0].detail
+    from colophon.core.models import Phase, PhaseState
+    assert persisted.phases[Phase.ORGANIZE].state is PhaseState.FAILED
+    assert "already exists" in (persisted.phases[Phase.ORGANIZE].detail or "")
+    ctx.close()
+
+
+def test_process_book_catches_unexpected_error_and_records_reason(tmp_path, make_audio, monkeypatch):
+    # An unexpected failure inside the persist worker must not escape the run with no explanation:
+    # it lands as a FAILED phase carrying the reason, and a failed result — so At a Glance can show it.
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import Phase, PhaseState, SourceFile
+
+    ctx = _ctx(tmp_path)
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+
+    def _boom(_book, _opts):
+        raise PermissionError("disk is read-only")
+
+    monkeypatch.setattr(ctrl, "_persist_book", _boom)
+    res = ctrl._process_book(book, EncodeJobOptions(encode=False, organize=True))
+
+    assert res.status == "failed"
+    assert "disk is read-only" in (res.detail or "")
+    persisted = ctx.books.get(book.id)
+    assert persisted.phases[Phase.ORGANIZE].state is PhaseState.FAILED
+    assert "PermissionError" in (persisted.phases[Phase.ORGANIZE].detail or "")
+    assert "disk is read-only" in (persisted.phases[Phase.ORGANIZE].detail or "")
     ctx.close()
 
 
@@ -3718,7 +3754,7 @@ def test_process_book_no_encode_blocks_on_ambiguous_order(tmp_path):
     )
     result = ctrl._process_book(book, options)
     assert result.status == "failed"
-    assert result.detail is not None and "part order" in result.detail
+    assert result.detail is not None and "couldn't order" in result.detail
     ctx.close()
 
 
