@@ -1148,6 +1148,27 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         _after_select()
         _persist_view()
 
+    def _any_visible_selected() -> bool:
+        """Whether any currently-visible (filtered) book is selected. Uses the cached visible list
+        so it stays cheap on every selection toggle."""
+        return any(b.id in selected_ids for b in _list_view["books"])
+
+    def _deselect_smart() -> None:
+        # Cycle: clear what's visible first; once nothing visible is selected, clear the rest
+        # (books hidden by the current filter). So a user never has to leave the filter, go to All
+        # books, and Deselect all just to drop a stray hidden selection.
+        if _any_visible_selected():
+            _deselect_visible()
+        else:
+            _deselect_all()
+
+    def _sync_deselect_btn() -> None:
+        """Label the Books-header deselect button for what it will do next: 'Deselect visible' while
+        visible books are selected, else 'Deselect all' (clears the filtered-out remainder)."""
+        btn = refs.get("deselect_btn")
+        if btn is not None:
+            btn.set_text("Deselect visible" if _any_visible_selected() else "Deselect all")
+
     def _toggle_book(book_id: str, on: bool) -> None:
         if on:
             selected_ids.add(book_id)
@@ -1302,6 +1323,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         books = _visible_books()
         _list_view["books"] = books
         _list_view["rendered"] = 0
+        _sync_deselect_btn()   # the visible set changed -> re-label deselect (visible vs all)
         with list_container:
             if not books:
                 if book_filter["text"].strip():
@@ -1861,6 +1883,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     def _update_count() -> None:
         n = len(selected_ids)
         middle_count.text = f"{n} selected" if n else ""
+        _sync_deselect_btn()
 
     def _set_filter(value: str | None) -> None:
         book_filter["text"] = value or ""
@@ -2078,8 +2101,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                 ui.button("Select all", icon="done_all", on_click=_select_visible) \
                     .props("flat dense no-caps").tooltip("Select all books matching the filter")
-                ui.button("Deselect visible", icon="remove_done", on_click=_deselect_visible) \
-                    .props("flat dense no-caps").tooltip("Deselect only the books matching the current filter")
+                refs["deselect_btn"] = ui.button(
+                    "Deselect visible", icon="remove_done", on_click=_deselect_smart
+                ).props("flat dense no-caps").tooltip(
+                    "Deselect the books matching the filter; once none are visible, deselects all "
+                    "(including any hidden by the filter)"
+                )
+                _sync_deselect_btn()   # label for the current selection
                 ui.space()
                 ui.button("Parse", icon="data_object", on_click=_parse_dialog) \
                     .props("flat dense no-caps").tooltip(
