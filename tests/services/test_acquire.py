@@ -9,6 +9,7 @@ from colophon.adapters.realdebrid import (
 from colophon.services.acquire import (
     AcquireResult,
     align_links_to_files,
+    download_target_count,
     download_torrent,
     list_candidates,
     sanitize_name,
@@ -825,3 +826,33 @@ def test_align_exact_still_preferred_over_closer_position():
     files = [("01.mp3", 100), ("01.mp3", 900)]
     links = [("01.mp3", 900)]  # exact match to index 1
     assert align_links_to_files(files, links) == [1]
+
+
+def test_target_count_subset_is_pick_size():
+    info = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/T/a.mp3", selected=True),
+            RdTorrentFile(id=2, path="/T/b.mp3", selected=True),
+            RdTorrentFile(id=3, path="/T/notes.txt", selected=True),
+        ],
+    )
+    assert download_target_count(info, {1, 2}) == 2
+
+
+def test_target_count_all_is_audio_plus_cover_keepset():
+    info = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2", "L3", "L4"],
+        files=[
+            RdTorrentFile(id=1, path="/T/a.mp3", selected=True),
+            RdTorrentFile(id=2, path="/T/cover.jpg", selected=True),
+            RdTorrentFile(id=3, path="/T/notes.txt", selected=True),  # dropped by _keep_file
+            RdTorrentFile(id=4, path="/T/b.mp3", selected=False),      # not selected
+        ],
+    )
+    assert download_target_count(info, None) == 2  # a.mp3 + cover.jpg
+
+
+def test_target_count_no_file_list_falls_back_to_links():
+    info = RdTorrentInfo(id="a", filename="T", status="downloaded", links=["L1", "L2"], files=[])
+    assert download_target_count(info, None) == 2

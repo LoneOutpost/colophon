@@ -253,6 +253,21 @@ def plan_pairs(
     return None, keep
 
 
+def download_target_count(torrent: RdTorrent, file_ids: set[int] | None) -> int:
+    """The number of files a download will actually target (its progress denominator).
+
+    An explicit pick counts the chosen ids; download-all counts the selected files that
+    survive the audio+cover keep-filter; a torrent with no file list counts its links
+    (the only case where a link is the unit). Never counts raw links otherwise, so the
+    UI can't show '1638 files' for a handful of picked ones."""
+    selected = [f for f in getattr(torrent, "files", []) if f.selected]
+    if not selected:
+        return len(torrent.links)
+    if file_ids is not None:
+        return sum(1 for f in selected if f.id in file_ids)
+    return sum(1 for f in selected if _keep_file(f.path))
+
+
 def align_links_to_files(
     files: list[tuple[str, int]], links: list[tuple[str, int]]
 ) -> list[int | None]:
