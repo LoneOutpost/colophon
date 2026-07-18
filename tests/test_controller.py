@@ -2801,14 +2801,14 @@ def test_graph_for_fresh_ignores_persisted_state(tmp_path):
     ctrl.scan([ingest])
 
     book = ctx.books.list_all()[0]
-    book.title = "POISONED"
+    book.title = "Poisoned"
     book.provenance["title"] = "tag"  # a persisted embedded-tag title (survives a normal re-identify)
     ctx.books.upsert(book)
 
     normal = ctrl.graph_for(ingest)
     fresh = ctrl.graph_for(ingest, fresh=True)
 
-    assert [bn.book.title for bn in normal.books.values()] == ["POISONED"]
+    assert [bn.book.title for bn in normal.books.values()] == ["Poisoned"]
     assert [bn.book.title for bn in fresh.books.values()] == ["Dune"]  # disk-derived
     ctx.close()
 
