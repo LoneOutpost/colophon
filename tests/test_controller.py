@@ -3896,3 +3896,37 @@ def test_unchecked_match_fields_glue(tmp_path):
     assert ctrl.unchecked_match_fields(audio_r) == set()      # audiobook source: all trusted
     ctx.config.strict_source_fields = False
     assert ctrl.unchecked_match_fields(print_r) == set()      # setting off: old behavior
+def test_duplicate_destinations_reports_in_library_collisions(tmp_path):
+    ctx = _ctx(tmp_path)
+
+    def _mk(folder, title, author):
+        b = BookUnit.new(source_folder=tmp_path / folder)
+        b.title = title
+        b.authors = [author]
+        ctx.books.upsert(b)
+        return b
+
+    b1 = _mk("a", "Thrawn", "Timothy Zahn")
+    b2 = _mk("b", "Thrawn", "Timothy Zahn")   # same $Author/$Title target as b1
+    _mk("c", "Alliances", "Timothy Zahn")       # unique target
+
+    dups = AppController(ctx).duplicate_destinations()
+
+    assert len(dups) == 1
+    assert {cb.id for cb in dups[0].books} == {b1.id, b2.id}
+    assert dups[0].target.name == "Thrawn.m4b"
+
+
+def test_duplicate_destinations_ignores_titleless_books(tmp_path):
+    ctx = _ctx(tmp_path)
+
+    def _mk(folder, title):
+        b = BookUnit.new(source_folder=tmp_path / folder)
+        b.title = title
+        b.authors = ["Someone"]
+        ctx.books.upsert(b)
+
+    _mk("a", "")   # unidentified: no real target, would never be persisted
+    _mk("b", "")   # would collapse to the same degenerate path as "a"
+
+    assert AppController(ctx).duplicate_destinations() == []

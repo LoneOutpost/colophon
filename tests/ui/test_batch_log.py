@@ -14,11 +14,11 @@ def test_set_progress_shows_counts_and_failures():
     log = _log()
     log.set_progress(1, 2, failed=0)
     assert log._progress_row.visible is True
-    assert log._progress.text == "Processing 1 of 2"
+    assert log._progress.text == "Processing job 1 of 2"
     assert log._progress_fail.text == ""  # no failure suffix while none have failed
 
     log.set_progress(2, 2, failed=1)
-    assert log._progress.text == "Processing 2 of 2"
+    assert log._progress.text == "Processing job 2 of 2"
     assert "1 failed" in log._progress_fail.text
 
 
