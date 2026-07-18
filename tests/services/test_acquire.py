@@ -221,6 +221,51 @@ async def test_download_mismatch_duplicate_basename_disambiguated_by_size(tmp_pa
     assert not (c / "01_Night_Shift.mp3").exists()  # not flattened to the container root
 
 
+async def test_download_mismatch_recovers_structure_by_order_when_sizes_disagree(tmp_path, monkeypatch):
+    # The real-world failure: two editions share every track basename in different subfolders, and
+    # RD's unrestrict `filesize` does NOT equal the torrent-info `bytes` (two independent RD
+    # endpoints — sizes agree only intermittently). A count mismatch forces the fallback. Matching
+    # on (basename, size) then misses for every file, so the old code flattened them all to the
+    # container root and same-named tracks clobbered each other. RD returns links as a clean
+    # in-order subsequence of the selected files, so each link must be mapped to its file by
+    # POSITION — recovering the per-edition structure without trusting the sizes.
+    torrent = RdTorrentInfo(
+        id="a", filename="SK", status="downloaded", links=["L1", "L2", "L3", "L4"],
+        files=[
+            RdTorrentFile(id=1, path="/SK/Gunslinger (original)/1_ Gunslinger.mp3", bytes=100, selected=True),
+            RdTorrentFile(id=2, path="/SK/Gunslinger (original)/2_ Waystation.mp3", bytes=200, selected=True),
+            RdTorrentFile(id=3, path="/SK/Gunslinger (read by King)/1_ Gunslinger.mp3", bytes=300, selected=True),
+            RdTorrentFile(id=4, path="/SK/Gunslinger (read by King)/2_ Waystation.mp3", bytes=400, selected=True),
+            RdTorrentFile(id=5, path="/SK/extra.mp3", bytes=50, selected=True),  # selected, no link -> mismatch
+        ],
+    )
+    # unrestrict filesizes are all off-by-one from bytes, so (basename, size) can never match.
+    links = {
+        "L1": RdUnrestrictedLink(filename="1_ Gunslinger.mp3", filesize=101, download="http://dl/o1"),
+        "L2": RdUnrestrictedLink(filename="2_ Waystation.mp3", filesize=201, download="http://dl/o2"),
+        "L3": RdUnrestrictedLink(filename="1_ Gunslinger.mp3", filesize=301, download="http://dl/k1"),
+        "L4": RdUnrestrictedLink(filename="2_ Waystation.mp3", filesize=401, download="http://dl/k2"),
+    }
+    got = {}
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+        got[url] = Path(dest)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    c = result.folder
+    # Every track lands in its own edition's subfolder, mapped by link order — nothing flattened.
+    assert got["http://dl/o1"] == c / "Gunslinger (original)" / "1_ Gunslinger.mp3"
+    assert got["http://dl/o2"] == c / "Gunslinger (original)" / "2_ Waystation.mp3"
+    assert got["http://dl/k1"] == c / "Gunslinger (read by King)" / "1_ Gunslinger.mp3"
+    assert got["http://dl/k2"] == c / "Gunslinger (read by King)" / "2_ Waystation.mp3"
+    assert not (c / "1_ Gunslinger.mp3").exists()  # not flattened / clobbered at the root
+    assert not (c / "2_ Waystation.mp3").exists()
+    assert sum(1 for f in result.files if f.ok) == 4
+
+
 async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch):
     torrent = RdTorrent(id="a", filename="Bk", status="downloaded", links=["L1", "L2"])
     links = {

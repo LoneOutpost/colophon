@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -254,29 +253,42 @@ def plan_pairs(
     return None, keep
 
 
-def _fallback_dest_map(
-    selected: list[RdTorrentFile], file_ids: set[int] | None,
-    dest_root: Path, torrent_name: str, pinned: Path | None,
-    *, mode: AcquireMode = AcquireMode.INDEXED,
-) -> tuple[Path, dict[tuple[str, int], deque[Path]], set[str]]:
-    """For the count-mismatch path (RD returns fewer links than selected files): pick the target
-    files (by `file_ids`, else the audio+cover default), compute their structured destinations, and
-    index them by (basename, size) so a link maps to its real path via the unrestricted filename
-    AND filesize. That disambiguates a basename shared across subfolders (multi-edition/multi-disc)
-    which a filename alone cannot. Returns (container, dest_by_key, target_names); each key holds a
-    queue of destinations, so files with an identical name *and* size are still placed (in order —
-    either structured slot is as good as the other) rather than flattened."""
-    if file_ids is not None:
-        targets = [f for f in selected if f.id in file_ids]
-    else:
-        targets = [f for f in selected if _keep_file(f.path)]
-    container, dests = structured_dests(
-        [f.path for f in targets], dest_root, torrent_name, pinned=pinned, mode=mode)
-    dest_by_key: dict[tuple[str, int], deque[Path]] = defaultdict(deque)
-    for f, dest in zip(targets, dests, strict=True):
-        dest_by_key[(PurePosixPath(f.path).name, f.bytes)].append(dest)
-    target_names = {PurePosixPath(f.path).name for f in targets}
-    return container, dest_by_key, target_names
+def align_links_to_files(
+    files: list[tuple[str, int]], links: list[tuple[str, int]]
+) -> list[int | None]:
+    """Map each link to the index of its selected file for the count-mismatch path. Real-Debrid
+    returns download links as a clean in-order *subsequence* of the selected files (some selected
+    files simply get no link), so walk both in order with a single forward pointer: each link
+    claims the next not-yet-claimed file whose basename matches. A forward exact (basename, size)
+    match is preferred — it can only ever skip files that had no link of their own, so it corrects
+    for a missing earlier same-named file — otherwise the first forward basename match wins.
+
+    Position, not filesize, is what disambiguates a basename shared across editions/subfolders,
+    because each edition's tracks stay grouped in the torrent's file order. That is what makes this
+    robust when RD's unrestrict `filesize` disagrees with the torrent-info `bytes` (two independent
+    endpoints that only agree intermittently). `files` and `links` are (basename, size) pairs in
+    order; returns one index into `files` per link, or None when no forward basename match remains
+    (a true orphan, which the caller places without clobbering)."""
+    out: list[int | None] = []
+    n = len(files)
+    i = 0
+    for lname, lsize in links:
+        exact = name_only = -1
+        j = i
+        while j < n:
+            fname, fsize = files[j]
+            if fname == lname:
+                if fsize == lsize:
+                    exact = j
+                    break
+                if name_only == -1:
+                    name_only = j
+            j += 1
+        hit = exact if exact != -1 else name_only
+        out.append(None if hit == -1 else hit)
+        if hit != -1:
+            i = hit + 1
+    return out
 
 
 async def download_torrent(
@@ -301,20 +313,49 @@ async def download_torrent(
     granularity the acquire UI surfaces."""
     selected = [f for f in getattr(torrent, "files", []) if f.selected]
     pairs, _ = plan_pairs(torrent, file_ids)
+    # Recovered (file, unrestricted-link) pairs for the count-mismatch path (below).
+    fb_pairs: list[tuple[RdTorrentFile, RdUnrestrictedLink]] = []
+    fb_orphans = 0  # links that matched no selected file (archive/junk), dropped
+    fb_failed: list[str] = []
     if pairs is not None:
         # RD's contract held (links[i] <-> selected[i]): map by index, using the torrent path.
         container, dests = structured_dests(
             [p for p, _ in pairs], dest_root, torrent.filename, pinned=folder, mode=mode)
     elif selected:
         # RD returned a different number of links than selected files (a known quirk for large
-        # torrents). Recover structure by matching each link's unrestricted filename to a selected
-        # file's real path — not flattening.
-        container, dest_by_key, target_names = _fallback_dest_map(
-            selected, file_ids, dest_root, torrent.filename, folder, mode=mode)
+        # torrents). Unrestrict every link and recover each one's file by ORDER — RD returns links
+        # as a clean in-order subsequence of the selected files — then reuse the same structured
+        # pipeline. This never flattens, and it survives RD reporting an unrestrict `filesize` that
+        # disagrees with the torrent-info `bytes` (which silently clobbered same-named files before).
+        unrs: list[RdUnrestrictedLink] = []
+        for link in torrent.links:
+            try:
+                unrs.append(await client.unrestrict_link(link))
+            except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
+                logger.warning(f"unrestrict failed: {e}")
+                fb_failed.append(link)
+        idxs = align_links_to_files(
+            [(PurePosixPath(f.path).name, f.bytes) for f in selected],
+            [(PurePosixPath(u.filename).name, u.filesize) for u in unrs],
+        )
+        for u, hit in zip(unrs, idxs, strict=True):
+            if hit is None:
+                fb_orphans += 1  # matched no selected file (archive/junk): not a picked file, drop it
+                continue
+            f = selected[hit]
+            picked = f.id in file_ids if file_ids is not None else _keep_file(f.path)
+            if picked:
+                fb_pairs.append((f, u))
+        if fb_orphans:
+            logger.warning(f"{fb_orphans} link(s) matched no selected file; dropped")
+        container, dests = structured_dests(
+            [f.path for f, _ in fb_pairs], dest_root, torrent.filename, pinned=folder, mode=mode)
     else:
         container = folder or _container_for(dest_root, torrent.filename, mode)  # no file list: flat default
     container.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=container)
+    for link in fb_failed:
+        result.files.append(AcquiredFile(filename=link, path=None, ok=False, error="unrestrict failed"))
 
     async def _fetch(url: str, dest: Path, display: str) -> bool:
         """Stream one file; record the outcome. Returns False to stop the batch (cancel)."""
@@ -357,23 +398,12 @@ async def download_torrent(
             if not await _fetch(unr.download, dest, PurePosixPath(path).name):
                 break
     elif selected:
-        # Count mismatch: iterate links, mapping each to its target's structured path by
-        # (basename, filesize) — filesize disambiguates a basename shared across subfolders.
-        links = list(torrent.links)
-        total = len(links)
-        for idx, link in enumerate(links, start=1):
-            unr = await _unrestrict(link, link)
-            if unr is None:
-                continue
-            name = PurePosixPath(unr.filename).name
-            if name not in target_names:
-                continue  # this link isn't one of the picked/target files
-            queue = dest_by_key.get((name, unr.filesize))
-            if queue:
-                dest = queue.popleft()  # next structured slot for this (name, size)
-            else:  # no size match (RD size differs, or all slots consumed): last-resort flat
-                logger.warning(f"no structured slot for {name!r} ({unr.filesize}B); writing flat")
-                dest = container / sanitize_name(name)
+        # Count mismatch: stream the order-recovered (file, link) pairs into their structured
+        # destinations. Orphan links (matched no selected file — e.g. RD serving the whole torrent
+        # as one archive) were already dropped during recovery; they are not picked files.
+        total = len(fb_pairs)
+        for idx, ((f, unr), dest) in enumerate(zip(fb_pairs, dests, strict=True), start=1):
+            name = PurePosixPath(f.path).name
             if progress is not None:
                 progress(idx, total, name)
             if not await _fetch(unr.download, dest, name):
