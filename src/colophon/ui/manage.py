@@ -11,6 +11,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from colophon.controller import AppController
+from colophon.core.duplicate_check import DuplicateDestination
 from colophon.core.perf import span
 from colophon.services.cleanup import CleanupCandidate, CleanupReport
 from colophon.ui.chrome import page_body, page_header, page_section, page_toolbar
@@ -159,6 +160,53 @@ def _cleanup_dialog(controller: AppController, report: CleanupReport) -> None:
     dialog.open()
 
 
+_DUP_GROUP_CAP = 100  # collision groups shown before eliding, so a pathological run stays responsive
+
+
+def _duplicates_dialog(groups: list[DuplicateDestination]) -> None:
+    """Report modal: each destination that two or more books would organize to, with the colliding
+    books (title + source folder, since collisions usually share a title) and a jump to the library."""
+    with modal() as dialog, ui.card().classes("w-[34rem]"):
+        ui.label("Duplicate destinations").classes("text-subtitle1")
+        if not groups:
+            ui.label(
+                "No duplicates. Every book organizes to its own destination."
+            ).classes("text-caption colophon-muted")
+            with ui.row().classes("w-full justify-end q-mt-sm"):
+                ui.button("Close", on_click=dialog.close).props("flat")
+            dialog.open()
+            return
+
+        colliding = sum(len(g.books) for g in groups)
+        ui.label(
+            f"{len(groups)} destination(s) with {colliding} colliding books. Persisting these would "
+            "overwrite one book with another."
+        ).classes("text-caption colophon-muted q-mb-xs")
+
+        with ui.scroll_area().classes("w-full").style("max-height: 55vh"):
+            for g in groups[:_DUP_GROUP_CAP]:
+                ui.label(str(g.target)).classes("colophon-mono text-caption q-mt-sm")
+                for cb in g.books:
+                    with ui.row().classes("items-start w-full no-wrap q-gutter-xs q-ml-sm"):
+                        ui.icon("menu_book", size="1rem", color="primary").classes("q-mt-xs")
+                        with ui.column().classes("col gap-0"):
+                            ui.label(cb.title).classes("text-body2")
+                            ui.label(str(cb.source_folder)).classes("text-caption colophon-muted")
+                ui.button(
+                    "View in Library", icon="filter_alt",
+                    on_click=lambda t=g.target: (dialog.close(), ui.navigate.to(f"/?filter={quote(t.stem)}")),
+                ).props("flat dense no-caps").classes("q-ml-sm")
+                ui.separator().classes("q-my-xs")
+            if len(groups) > _DUP_GROUP_CAP:
+                ui.label(
+                    f"...and {len(groups) - _DUP_GROUP_CAP} more"
+                ).classes("text-caption colophon-muted")
+
+        with ui.row().classes("w-full justify-end q-mt-sm"):
+            ui.button("Close", on_click=dialog.close).props("flat")
+        dialog.open()
+
+
 def _render_utilities(controller: AppController) -> None:
     """Library-wide maintenance actions (the Utilities tab). One-off repairs run on demand — kept
     apart from the vocabulary editing so an action button never sits next to a form's Save."""
@@ -210,6 +258,28 @@ def _render_utilities(controller: AppController) -> None:
                 _cleanup_dialog(controller, report)
 
             cleanup_btn.on_click(_review_cleanup)
+
+        with page_section(
+            "Duplicate destinations",
+            "Find books that would organize to the same file under your current settings: two "
+            "books that, when persisted, would overwrite each other. Compares the previewed "
+            "destinations across the whole library, not what is already on disk.",
+        ):
+            dup_btn = ui.button("Check for duplicates", icon="content_copy").props("unelevated")
+
+            async def _check_duplicates() -> None:
+                dup_btn.props("loading")
+                try:
+                    groups = await asyncio.to_thread(controller.duplicate_destinations)
+                except Exception:
+                    logger.exception("duplicate destinations check failed")
+                    ui.notify("Could not run the duplicate check (see logs)", type="negative")
+                    return
+                finally:
+                    dup_btn.props(remove="loading")
+                _duplicates_dialog(groups)
+
+            dup_btn.on_click(_check_duplicates)
 
 
 def render_manage(controller: AppController, initial_kind: str | None = None,
