@@ -27,7 +27,7 @@ from colophon.core.models import (
     FolderKind,
     Provenance,
 )
-from colophon.core.normalize import normalize_key, normalize_text
+from colophon.core.normalize import normalize_key, normalize_text, proper_case_if_shouting
 
 
 @dataclass(frozen=True)
@@ -176,8 +176,9 @@ def _pick_single_title(
     filename's series or is a placeholder is rejected; a tag that is a near-duplicate typo of the
     filename title defers to the filename; otherwise the tag wins. A structured filename (one that
     named a series) is trusted for the title over a bare Album (usually the series or franchise)."""
+    series_key = _text_key(fw.series)
     def unusable(v: str) -> bool:              # a placeholder, or actually the filename's series
-        return _is_placeholder(v) or _text_key(v) == _text_key(fw.series)
+        return _is_placeholder(v) or _text_key(v) == series_key
 
     if title and not unusable(title):
         if _tag_is_typo_of(title, fw.label):   # rip typo of the filename title -> trust the filename
@@ -194,8 +195,6 @@ def _overlay_tags(sub_works: list[DetectedWork], group: list[FileFeatures]) -> l
     """Re-title each single-file work the clusterer produced, favoring that file's Title tag over the
     filename it parsed. The clusterer only reads filenames; this lets a shared-series shelf (X-Wing,
     Legacy of the Force) take each book's clean Title tag while keeping the filename-parsed series."""
-    from colophon.core.normalize import proper_case_if_shouting
-
     feat_by_path = {f.path: f for f in group}
     out: list[DetectedWork] = []
     for w in sub_works:
@@ -213,8 +212,6 @@ def _overlay_tags(sub_works: list[DetectedWork], group: list[FileFeatures]) -> l
 
 
 def _to_work(group: list[FileFeatures]) -> DetectedWork:
-    from colophon.core.normalize import proper_case_if_shouting
-
     title = _first(f.tags.title for f in group)
     album = _first(f.tags.album for f in group)
     author = _first(f.tags.artist for f in group)

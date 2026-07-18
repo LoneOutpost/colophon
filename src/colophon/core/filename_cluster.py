@@ -26,6 +26,7 @@ _SEP_SPACED = re.compile(rf"[()\[\]_]+|(?<=\s)-+|-+(?=\s)|{_DOTS}")
 # Kebab/delimited names (no whitespace) use the dash itself as a delimiter ("girlblue-01-cd01-01"),
 # so every dash splits.
 _SEP_KEBAB = re.compile(rf"[()\[\]_\-]+|{_DOTS}")
+_WHITESPACE = re.compile(r"\s")                # any whitespace: marks a spaced (vs kebab) filename
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")    # camelCase boundary
 _LETTER_DIGIT = re.compile(r"(?<=[A-Za-z])(?=\d)")  # letter->digit ONLY ("Part1"->"Part 1"; "7th" intact)
 _NUM = re.compile(r"^\d+(?:\.\d+)?$")          # integer or decimal token
@@ -48,7 +49,7 @@ def _chunks(stem: str) -> list[str]:
     """Split a filename stem into ordered chunks on separators; drop empties. A first pass picks the
     separator set by style: a spaced name delimits on whitespace (so intra-word hyphens like "X-Wing"
     survive), a spaceless kebab name ("girlblue-01-cd01-01") delimits on the dash itself."""
-    sep = _SEP_SPACED if re.search(r"\s", stem) else _SEP_KEBAB
+    sep = _SEP_SPACED if _WHITESPACE.search(stem) else _SEP_KEBAB
     return [c.strip() for c in sep.split(stem) if c.strip()]
 
 
