@@ -30,6 +30,33 @@ def _result_score(book: BookUnit, result: SourceResult) -> float:
     )
 
 
+def _runtime_bonus(book: BookUnit, result: SourceResult) -> float:
+    """A bounded ranking adjustment from how closely the candidate's runtime matches the book's
+    measured audio length: +0.10 for a tight match, sliding down to -0.15 for a gross mismatch (an
+    abridged or wrong edition), 0 when either side lacks a runtime. Scaled to the 0-1 title/author
+    score so it reorders near-ties and sinks wrong-length editions without overriding a clearly
+    better title. This is why Audible candidates (which carry a runtime) sort by duration too."""
+    if not (book.duration_ms > 0 and result.runtime_ms):
+        return 0.0
+    rel = abs(result.runtime_ms - book.duration_ms) / book.duration_ms
+    return max(-0.15, 0.10 - rel)
+
+
+def sort_by_runtime_closeness(book: BookUnit, results: list[SourceResult]) -> list[SourceResult]:
+    """Order a list of candidates so the ones whose runtime is closest to the book's measured audio
+    length come first. A manual source search (Audible especially) is usually browsing editions of a
+    single book, where the length is the quickest way to spot the right one, so here duration leads
+    outright rather than nudging near-ties as it does in `score_identification`. Candidates without a
+    runtime keep their incoming (score-ranked) order at the end; a stable sort keeps that order as the
+    tie-breaker between equally-close runtimes. Unchanged when the book has no measured duration."""
+    if book.duration_ms <= 0:
+        return results
+    return sorted(
+        results,
+        key=lambda r: (0, abs(r.runtime_ms - book.duration_ms)) if r.runtime_ms else (1, 0),
+    )
+
+
 def _author_consensus(book: BookUnit, results: list[SourceResult]) -> SourceResult | None:
     """For an authorless book, the representative of the single author-cluster that
     >=2 distinct providers agree on, among candidates whose cleaned title matches the
@@ -74,16 +101,18 @@ def score_identification(
     score_for = {id(r): _result_score(book, r) for r in results}
 
     def _rank_key(r: SourceResult) -> tuple[float, float]:
-        closeness = 0.0
-        if book.duration_ms > 0 and r.runtime_ms:
-            closeness = -abs(r.runtime_ms - book.duration_ms)
-        return (score_for[id(r)], closeness)
+        # Blend the title/author score with a bounded runtime bonus, then keep raw runtime closeness
+        # as a final tie-breaker for candidates that end up otherwise equal.
+        closeness = -abs(r.runtime_ms - book.duration_ms) if (book.duration_ms > 0 and r.runtime_ms) else 0.0
+        return (score_for[id(r)] + _runtime_bonus(book, r), closeness)
 
     ranked = sorted(results, key=_rank_key, reverse=True)
     best = ranked[0]
 
     if authority:
-        top = score_for[id(best)]
+        # Authority decides among the strongest *title/author* agreements, independent of the runtime
+        # re-ordering above, so `top` is the best title score rather than the runtime-ranked leader.
+        top = max(score_for.values())
         comparable = [
             r for r in results
             if score_for[id(r)] >= _AGREEMENT_THRESHOLD and score_for[id(r)] >= top - _AUTHORITY_MARGIN

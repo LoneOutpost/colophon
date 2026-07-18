@@ -176,6 +176,59 @@ def test_runtime_breaks_ranking_tie(tmp_path):
     assert out.best is near
 
 
+def test_close_runtime_outranks_slightly_worse_title(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)  # book "Dune" / Frank Herbert
+    # An exact-title candidate whose runtime is grossly wrong (abridged) should lose to a
+    # slightly-worse-title candidate whose runtime matches the audio — duration is a real ranking
+    # factor now, not just a tie-breaker for identical titles.
+    exact_abridged = SourceResult(provider="a", title="Dune", authors=["Frank Herbert"], runtime_ms=3_000_000)
+    close_full = SourceResult(provider="b", title="Dunes", authors=["Frank Herbert"], runtime_ms=8_000_000)
+    out = score_identification(b, [exact_abridged, close_full])
+    assert out.ranked[0] is close_full
+
+
+def test_sort_by_runtime_closeness_orders_closest_first(tmp_path):
+    from colophon.core.confidence import sort_by_runtime_closeness
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    far = SourceResult(provider="audnexus", title="A", runtime_ms=4_000_000)
+    mid = SourceResult(provider="audnexus", title="B", runtime_ms=6_500_000)
+    near = SourceResult(provider="audnexus", title="C", runtime_ms=8_100_000)
+    assert sort_by_runtime_closeness(b, [far, mid, near]) == [near, mid, far]
+
+
+def test_sort_by_runtime_closeness_puts_runtimeless_last(tmp_path):
+    from colophon.core.confidence import sort_by_runtime_closeness
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    no_rt = SourceResult(provider="openlibrary", title="A")
+    with_rt = SourceResult(provider="audnexus", title="B", runtime_ms=8_000_000)
+    assert sort_by_runtime_closeness(b, [no_rt, with_rt]) == [with_rt, no_rt]
+
+
+def test_sort_by_runtime_closeness_noop_without_book_duration(tmp_path):
+    from colophon.core.confidence import sort_by_runtime_closeness
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 0)
+    a = SourceResult(provider="audnexus", title="A", runtime_ms=4_000_000)
+    c = SourceResult(provider="audnexus", title="C", runtime_ms=8_000_000)
+    assert sort_by_runtime_closeness(b, [a, c]) == [a, c]  # order preserved
+
+
+def test_runtime_does_not_override_a_much_better_title(tmp_path):
+    from colophon.core.confidence import score_identification
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    # A perfect runtime on a clearly-wrong title must not beat the right title with a slightly-off
+    # runtime — the duration bonus is bounded so it only reorders near-ties.
+    right = SourceResult(provider="a", title="Dune", authors=["Frank Herbert"], runtime_ms=8_800_000)
+    wrong = SourceResult(provider="b", title="Dune Messiah", authors=["Frank Herbert"], runtime_ms=8_000_000)
+    out = score_identification(b, [right, wrong])
+    assert out.ranked[0] is right
+
+
 def test_abridged_mismatch_penalty(tmp_path):
     from colophon.core.confidence import score_identification
     from colophon.core.sources import SourceResult
