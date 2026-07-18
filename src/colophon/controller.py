@@ -104,11 +104,12 @@ from colophon.core.quickmatch import (
     QuickMatchSummary,
 )
 from colophon.core.sources import (
-    AUDIOBOOK_ASIN_PROVIDERS,
+    AUDIOBOOK_PROVIDERS,
     MetadataSource,
     SourceQuery,
     SourceResult,
     arrange_sources,
+    unchecked_edition_fields,
 )
 from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
@@ -1739,9 +1740,10 @@ class AppController:
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in plan.proposals:
             if p.best is not None and p.confidence >= plan.threshold and not p.author_inferred:
+                unchecked = self.unchecked_match_fields(p.best)
                 updates = {
                     k: v for k, v in self.match_field_values(p.best).items()
-                    if not get_field(p.book, k)
+                    if not get_field(p.book, k) and k not in unchecked
                 }
                 self._normalize_match_updates(updates)
                 self._capture_match_signals(p.book, p.best, fill_empty=True)
@@ -1801,6 +1803,8 @@ class AppController:
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in applicable:
             updates = self.match_field_values(p.best)
+            for field in self.unchecked_match_fields(p.best):  # don't auto-pull unchecked edition fields
+                updates.pop(field, None)
             self._merge_genre_tag_updates(p.book, p.best, updates)
             self._normalize_match_updates(updates)
             self._capture_match_signals(p.book, p.best, fill_empty=False)
@@ -2145,7 +2149,7 @@ class AppController:
             updates["year"] = str(result.publish_year)
         # Only take an ASIN from an audiobook source: a physical/Kindle ASIN (e.g. from Hardcover)
         # is the wrong product for an audiobook and would dead-end the later Audible/Audnexus lookup.
-        if result.asin and result.provider in AUDIOBOOK_ASIN_PROVIDERS:
+        if result.asin and result.provider in AUDIOBOOK_PROVIDERS:
             updates["asin"] = result.asin
         if result.isbn:
             updates["isbn"] = result.isbn
@@ -2160,6 +2164,15 @@ class AppController:
         if result.tags:
             updates["tag"] = "; ".join(result.tags)
         return updates
+
+    def unchecked_match_fields(self, result: SourceResult) -> set[str]:
+        """Fields the match picker should offer but leave UNCHECKED by default (and auto-apply
+        should skip): edition-specific fields (publisher, ISBN) from a non-audiobook source, per
+        `config.strict_source_fields`. Empty when the setting is off or the source is audiobook."""
+        return unchecked_edition_fields(
+            result.provider, self.match_field_values(result).keys(),
+            strict=self.ctx.config.strict_source_fields,
+        )
 
     def _merge_genre_tag_updates(
         self, book: BookUnit, result: SourceResult, updates: dict[str, str | None]

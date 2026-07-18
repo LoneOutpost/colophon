@@ -386,6 +386,15 @@ def render_settings(controller: AppController) -> None:
                 multiple=True,
                 label="Auto-normalize on match",
             ).props("use-chips dense").classes("w-full")
+            strict_source_fields = ui.switch(
+                "Only take edition fields (publisher, ISBN) from audiobook sources by default",
+                value=cfg.strict_source_fields,
+            )
+            ui.label(
+                "A print or general-book source (Hardcover, Google Books, Storytel) describes the "
+                "wrong edition, so its publisher and ISBN are offered but left unchecked. Turn off "
+                "to select them by default like any other field."
+            ).classes("text-caption colophon-muted")
 
         # --- Match sources (enable/disable + authority order) ---
         source_rows = [
@@ -465,6 +474,7 @@ def render_settings(controller: AppController) -> None:
                         if f.value and f.value.strip() and t.value and t.value.strip()
                     },
                     "normalize_on_match": [f for f in (normalize_on_match.value or []) if f],
+                    "strict_source_fields": bool(strict_source_fields.value),
                     "source_order": [r["name"] for r in source_rows],
                     "disabled_sources": [
                         r["name"] for r in source_rows if not r["enabled"]
