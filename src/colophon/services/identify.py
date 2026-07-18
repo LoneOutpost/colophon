@@ -123,8 +123,9 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
 def normalize(book: BookUnit) -> None:
     """Clean a scan-derived title of display noise (edition/format parentheticals) and a strong
     sequence-number affix ('05 - Phoenix' -> 'Phoenix'), and proper-case a shouting author name
-    ('SANDRA BROWN' -> 'Sandra Brown'). Only directory/filename-sourced fields; tag, datafile, and
-    manual values are kept verbatim (authoritative spellings). A leading year prefix is NOT stripped
+    ('SANDRA BROWN' -> 'Sandra Brown'). Title cleaning is gated to directory/filename provenance; the
+    author de-shout applies to any non-manual source (ALL CAPS is never an intentional name spelling,
+    though a lone acronym like 'BBC' is preserved). A leading year prefix is NOT stripped
     here (unlike the match-query path): a leading 4-digit number is ambiguous with a numeric title,
     so the persisted title keeps it rather than risk deleting real content. A weak (unspaced) title
     affix like '30-Day Heart Tune-Up' is left for the corroborated series-ramp path. Idempotent."""
@@ -137,8 +138,10 @@ def normalize(book: BookUnit) -> None:
         affix = parse_sequence_affix(book.title or "")
         if affix is not None and affix.confidence == "strong" and affix.cleaned != book.title:
             book.title = affix.cleaned  # provenance unchanged
-    if book.authors and book.provenance.get("authors") in WEAK_PROV:
-        book.authors = [proper_case_if_shouting(a) for a in book.authors]  # provenance unchanged
+    # De-shout a shouting author from any source except a manual edit: ALL CAPS is never an
+    # intentional spelling for a name. A single all-caps token is kept as a likely acronym (BBC).
+    if book.authors and book.provenance.get("authors") != Provenance.MANUAL.value:
+        book.authors = [proper_case_if_shouting(a, keep_acronyms=True) for a in book.authors]
 
 
 def attribute(book: BookUnit, evidence: Evidence) -> None:

@@ -296,9 +296,25 @@ def test_normalize_proper_cases_shouting_directory_author():
     assert b.authors == ["Sandra Brown"]
 
 
-def test_normalize_leaves_tag_author_verbatim():
+def test_normalize_keeps_single_token_acronym_author():
     b = BookUnit.new(source_folder=Path("/lib/x"))
     b.authors = ["BBC"]
     b.provenance["authors"] = Provenance.TAG.value
     normalize(b)
-    assert b.authors == ["BBC"]          # authoritative tag spelling kept
+    assert b.authors == ["BBC"]          # a single all-caps token is an initialism, kept
+
+
+def test_normalize_deshouts_shouting_multiword_tag_author():
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    b.authors = ["TIMOTHY ZAHN"]
+    b.provenance["authors"] = Provenance.TAG.value
+    normalize(b)
+    assert b.authors == ["Timothy Zahn"]  # a multi-word shouting name is de-shouted even from a tag
+
+
+def test_normalize_leaves_manual_author_verbatim():
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    b.authors = ["TIMOTHY ZAHN"]
+    b.provenance["authors"] = Provenance.MANUAL.value
+    normalize(b)
+    assert b.authors == ["TIMOTHY ZAHN"]  # the user typed it deliberately, kept

@@ -78,14 +78,17 @@ def normalize_name(value: str) -> str:
     return normalize_text(value, lowercase_small=False)
 
 
-def proper_case_if_shouting(name: str) -> str:
+def proper_case_if_shouting(name: str, *, keep_acronyms: bool = False) -> str:
     """Title-case an all-caps name for display ('SANDRA BROWN' -> 'Sandra Brown'). A name carrying
     any lowercase letter is left untouched, so intentional casing ('bell hooks', 'will.i.am',
     'MacDonald') survives. Deterministic and threshold-free: it only reshapes the unambiguous
-    shouting case. Callers gate this to weak (directory/filename) provenance — authoritative
-    tag/datafile/match spellings are kept verbatim."""
+    shouting case. With `keep_acronyms`, a single all-caps token ('BBC', 'NPR') is preserved as a
+    likely initialism while a multi-word all-caps string is still de-shouted — use it for author
+    names, where a lone acronym is common; titles leave it off so 'DARKSABER' -> 'Darksaber'."""
     letters = [c for c in name if c.isalpha()]
     if letters and all(c.isupper() for c in letters):
+        if keep_acronyms and " " not in name.strip():
+            return name
         return normalize_name(name)
     return name
 
