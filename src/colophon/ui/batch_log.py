@@ -59,9 +59,9 @@ class BatchLog:
         self._kinds[item_id] = kind
 
     def set_progress(self, done: int, total: int, *, failed: int = 0) -> None:
-        """Show a live 'Processing X of Y · Z failed' line while the run is in flight.
+        """Show a live 'Processing job X of Y · Z failed' line while the run is in flight.
         The caller drives this as items reach a terminal state; `finish` hides it."""
-        self._progress.set_text(f"Processing {done} of {total}")
+        self._progress.set_text(f"Processing job {done} of {total}")
         self._progress_fail.set_text(f"·  {failed} failed" if failed else "")
         self._progress_row.set_visibility(True)
 
