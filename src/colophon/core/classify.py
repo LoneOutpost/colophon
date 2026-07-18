@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 from re import Pattern
 
@@ -26,7 +27,7 @@ from colophon.core.models import (
     FolderKind,
     Provenance,
 )
-from colophon.core.normalize import normalize_key, normalize_text
+from colophon.core.normalize import normalize_key, normalize_text, proper_case_if_shouting
 
 
 @dataclass(frozen=True)
@@ -143,22 +144,46 @@ def _is_placeholder(value: str | None) -> bool:
     return bool(value) and bool(_PLACEHOLDER.match(value.strip()))
 
 
+_ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
+
+
+def _dearticled(value: str) -> str:
+    """`_text_key` with a leading article dropped, so "The Bacta War" and "Bacta War" compare equal."""
+    return _text_key(_ARTICLE.sub("", value.strip()))
+
+
+def _tag_is_typo_of(tag: str, filename_title: str) -> bool:
+    """True when the Title tag looks like a rip typo of the filename title: near-identical text that
+    differs by *more than* a leading article. Article-only differences ("The Bacta War" vs "Bacta
+    War") are real improvements and favor the tag; a stray character or spacing slip ("Issard's" vs
+    "Isard's", "Blood lines" vs "Bloodlines") is a typo and defers to the filename. This is the
+    weighted cross-check between the two sources — a first cut, tunable by the ratio threshold."""
+    if not filename_title or _dearticled(tag) == _dearticled(filename_title):
+        return False
+    return SequenceMatcher(None, _text_key(tag), _text_key(filename_title)).ratio() >= 0.85
+
+
 def _pick_single_title(
     title: str | None, album: str | None, fw: DetectedWork
 ) -> tuple[str, str]:
-    """The book title (and its provenance) for one file, with the filename as arbiter. `fw` is the
-    filename-parsed work: `fw.label` is the title portion, `fw.series` the `(Series N)` parenthetical.
+    """The book title (and its provenance) for one file, favoring the tag but cross-checking the
+    filename. `fw` is the filename-parsed work: `fw.label` is the title portion, `fw.series` the
+    `(Series N)` parenthetical.
 
     Tags are unreliably filed — the Title tag usually holds the book title, but some files put the
-    *series* there and the title in the Album (e.g. "Allies (Fate Of The Jedi 5)"), and some carry
-    only a junk placeholder ("Track 1"). So a tag value that equals the filename's series or is a
-    placeholder is rejected, and a structured filename (one that named a series) is trusted for the
-    title over a bare Album (which is usually the series or franchise)."""
+    *series* there and the title in the Album (e.g. "Allies (Fate Of The Jedi 5)"), some carry only a
+    junk placeholder ("Track 1"), and some carry a typo of the real title. So a tag that equals the
+    filename's series or is a placeholder is rejected; a tag that is a near-duplicate typo of the
+    filename title defers to the filename; otherwise the tag wins. A structured filename (one that
+    named a series) is trusted for the title over a bare Album (usually the series or franchise)."""
+    series_key = _text_key(fw.series)
     def unusable(v: str) -> bool:              # a placeholder, or actually the filename's series
-        return _is_placeholder(v) or _text_key(v) == _text_key(fw.series)
+        return _is_placeholder(v) or _text_key(v) == series_key
 
     if title and not unusable(title):
-        return title, Provenance.TAG.value
+        if _tag_is_typo_of(title, fw.label):   # rip typo of the filename title -> trust the filename
+            return fw.label, Provenance.FILENAME.value
+        return title, Provenance.TAG.value     # favor the tag (article restored, de-prefixed, cleaner)
     if fw.series and fw.label:                 # structured filename: its parsed title is reliable
         return fw.label, Provenance.FILENAME.value
     if album and not unusable(album):          # unstructured filename: the Album is the title
@@ -166,9 +191,27 @@ def _pick_single_title(
     return (fw.label or normalize_text(fw.files[0].stem)), Provenance.FILENAME.value
 
 
-def _to_work(group: list[FileFeatures]) -> DetectedWork:
-    from colophon.core.normalize import proper_case_if_shouting
+def _overlay_tags(sub_works: list[DetectedWork], group: list[FileFeatures]) -> list[DetectedWork]:
+    """Re-title each single-file work the clusterer produced, favoring that file's Title tag over the
+    filename it parsed. The clusterer only reads filenames; this lets a shared-series shelf (X-Wing,
+    Legacy of the Force) take each book's clean Title tag while keeping the filename-parsed series."""
+    feat_by_path = {f.path: f for f in group}
+    out: list[DetectedWork] = []
+    for w in sub_works:
+        f = feat_by_path.get(w.files[0]) if len(w.files) == 1 else None
+        if f is None:
+            out.append(w)
+            continue
+        label, prov = _pick_single_title(f.tags.title, f.tags.album, w)
+        out.append(w.model_copy(update={
+            "label": proper_case_if_shouting(label),
+            "label_prov": prov,
+            "author": f.tags.artist or w.author,
+        }))
+    return out
 
+
+def _to_work(group: list[FileFeatures]) -> DetectedWork:
     title = _first(f.tags.title for f in group)
     album = _first(f.tags.album for f in group)
     author = _first(f.tags.artist for f in group)
@@ -215,7 +258,7 @@ def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[
         if key.startswith("album:") and len(group) > 1:
             sub, sub_signals = _cluster_works(group)
             if len(sub) > 1:  # the album was a series name over several distinct-title books
-                works.extend(sub)
+                works.extend(_overlay_tags(sub, group))
                 signals.extend(sub_signals)
                 continue
         works.append(_to_work(group))
@@ -224,7 +267,7 @@ def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[
 
     if len(unkeyed) > 1:
         sub, sub_signals = _cluster_works(unkeyed)
-        works.extend(sub)
+        works.extend(_overlay_tags(sub, unkeyed))
         signals.extend(sub_signals)
     elif unkeyed:
         works.append(_to_work(unkeyed))

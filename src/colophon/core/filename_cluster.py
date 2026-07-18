@@ -15,10 +15,18 @@ from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
 
-# Top-level chunk separators: brackets, underscore, dash. Also a dot on a letter<->digit boundary
-# ("Series.01" -> "Series"|"01", "Vol.1" -> "Vol"|"1"), but NOT a dot between two digits (a decimal
-# like "1.5") or between two letters (initials like "J.R.R."), which stay whole.
-_SEP = re.compile(r"[()\[\]_\-]+|(?<=[A-Za-z])\.(?=\d)|(?<=\d)\.(?=[A-Za-z])")
+# Top-level chunk separators, in two flavours chosen by filename style (see `_chunks`). Both split
+# on brackets/underscores and a dot on a letter<->digit boundary ("Series.01" -> "Series"|"01",
+# "Vol.1" -> "Vol"|"1"), but NOT a dot between two digits (a decimal "1.5") or two letters (initials
+# "J.R.R."). They differ only on the dash:
+_DOTS = r"(?<=[A-Za-z])\.(?=\d)|(?<=\d)\.(?=[A-Za-z])"
+# Spaced names use whitespace as the delimiter, so a dash splits only with whitespace beside it
+# (" - "); an intra-word hyphen is preserved ("X-Wing", "Spider-Man", "30-Day" stay whole).
+_SEP_SPACED = re.compile(rf"[()\[\]_]+|(?<=\s)-+|-+(?=\s)|{_DOTS}")
+# Kebab/delimited names (no whitespace) use the dash itself as a delimiter ("girlblue-01-cd01-01"),
+# so every dash splits.
+_SEP_KEBAB = re.compile(rf"[()\[\]_\-]+|{_DOTS}")
+_WHITESPACE = re.compile(r"\s")                # any whitespace: marks a spaced (vs kebab) filename
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")    # camelCase boundary
 _LETTER_DIGIT = re.compile(r"(?<=[A-Za-z])(?=\d)")  # letter->digit ONLY ("Part1"->"Part 1"; "7th" intact)
 _NUM = re.compile(r"^\d+(?:\.\d+)?$")          # integer or decimal token
@@ -38,8 +46,11 @@ class ClusterResult:
 
 
 def _chunks(stem: str) -> list[str]:
-    """Split a filename stem into ordered chunks on separators; drop empties."""
-    return [c.strip() for c in _SEP.split(stem) if c.strip()]
+    """Split a filename stem into ordered chunks on separators; drop empties. A first pass picks the
+    separator set by style: a spaced name delimits on whitespace (so intra-word hyphens like "X-Wing"
+    survive), a spaceless kebab name ("girlblue-01-cd01-01") delimits on the dash itself."""
+    sep = _SEP_SPACED if _WHITESPACE.search(stem) else _SEP_KEBAB
+    return [c.strip() for c in sep.split(stem) if c.strip()]
 
 
 def _spaced(chunk: str) -> str:

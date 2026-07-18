@@ -17,6 +17,23 @@ def test_spaced_leading_number_is_still_dropped():
     assert cr.detected_works[0].label == "Jhereg"
 
 
+def test_intraword_hyphen_is_not_a_separator():
+    # "X-Wing" is one token: the hyphen has no whitespace around it, so it must not split into
+    # "X" | "Wing" and drop the "X". (Was parsing the series as "Wing".)
+    w = cluster([Path("/x/Rogue Squadron (X-Wing 1).mp3")]).detected_works[0]
+    assert w.label == "Rogue Squadron"
+    assert w.series == "X-Wing"
+    assert w.sequence == 1
+
+
+def test_spaced_dash_still_separates():
+    # A dash *with* whitespace around it is still a separator ("Author - Title").
+    cr = cluster([Path("/x/Ann Leckie - Ancillary Justice (Imperial Radch 1).mp3")])
+    w = cr.detected_works[0]
+    assert w.series == "Imperial Radch"
+    assert w.sequence == 1
+
+
 def test_dot_numbered_parts_cluster_as_one_book():
     # "Series.01"/"Series.02": the dot sits on a letter->digit boundary, so it splits into
     # "Series"|"01" and the two files read as parts of one book (differ only by number).

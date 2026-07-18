@@ -205,6 +205,25 @@ def test_placeholder_title_tag_falls_back_to_filename():
     assert works[0].label == "Vortex"
 
 
+def test_shared_album_split_favors_tag_title():
+    # Books that share a series album ("X WING") split into per-file works. Each work's title should
+    # now come from its Title tag ("The Krytos Trap"), not the barer filename ("Krytos Trap").
+    feats = [
+        _feat("/a/SW/Krytos Trap (X-Wing 3).mp3", title="The Krytos Trap", album="X WING", artist="M. Stackpole"),
+        _feat("/a/SW/Wedge's Gamble (X-Wing 2).mp3", title="Wedge's Gamble", album="X WING", artist="M. Stackpole"),
+    ]
+    works, _ = group_works(feats)
+    assert "The Krytos Trap" in {w.label for w in works}
+
+
+def test_single_file_tag_typo_defers_to_filename():
+    # A Title tag that is a near-duplicate of the filename but differs by more than a leading article
+    # is a rip typo ("Issard's" for the correct "Isard's") — the filename wins.
+    feats = [_feat("/a/SW/Isard's Revenge.mp3", title="Issard's Revenge", album="X WING", artist="M. Stackpole")]
+    works, _ = group_works(feats)
+    assert works[0].label == "Isard's Revenge"
+
+
 def test_asin_beats_album_for_grouping():
     feats = [
         _feat("/a/d/a.mp3", asin="B001", album="X"),
