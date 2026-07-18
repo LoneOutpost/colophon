@@ -9,7 +9,13 @@ import logging
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from colophon.core.models import _Base
 
@@ -20,6 +26,9 @@ DEFAULT_BASE_URL = "https://api.real-debrid.com/rest/1.0"
 # RD statuses worth retrying: rate-limit (429) and transient server/hoster errors (5xx).
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
+_RETRY_AFTER_CAP = 60.0  # never sleep longer than this even if the server asks for more
+_RD_BACKOFF = wait_exponential(min=0.5, max=8)
+
 
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.TransportError):
@@ -28,11 +37,11 @@ def _is_retryable(exc: BaseException) -> bool:
 
 
 def _retry_wait(retry_state: Any) -> float:
-    """Honor a server-provided Retry-After when present, else exponential backoff."""
+    """Honor a server-provided Retry-After when present (capped), else exponential backoff."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if isinstance(exc, RealDebridError) and exc.retry_after is not None:
-        return exc.retry_after
-    return wait_exponential(min=0.5, max=8)(retry_state)
+        return min(exc.retry_after, _RETRY_AFTER_CAP)
+    return _RD_BACKOFF(retry_state)
 
 
 # Retry transport errors + RD 429/5xx up to 5 attempts; reraise the last error.
@@ -41,6 +50,7 @@ RD_RETRY = retry(
     wait=_retry_wait,
     retry=retry_if_exception(_is_retryable),
     reraise=True,
+    before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 
 

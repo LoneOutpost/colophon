@@ -37,3 +37,17 @@ async def test_unrestrict_does_not_retry_on_404():
         await client.unrestrict_link("L1")
     assert ei.value.status_code == 404
     assert calls["n"] == 1  # not retried
+
+
+async def test_unrestrict_exhausts_retries_then_raises():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503, headers={"Retry-After": "0"}, json={"error": "unavailable"})
+
+    client = _client(handler)
+    with pytest.raises(RealDebridError) as ei:
+        await client.unrestrict_link("L1")
+    assert ei.value.status_code == 503
+    assert calls["n"] == 5  # stop_after_attempt(5): 5 tries then reraise
