@@ -56,6 +56,9 @@ class Config(BaseModel):
     normalize_on_match: list[str] = []
     source_order: list[str] = []  # provider names, highest authority first; [] = default order
     disabled_sources: list[str] = []  # provider names excluded from matching
+    # When True, edition-specific fields (publisher, ISBN) offered by a non-audiobook source are
+    # shown but unchecked by default (opt-in). False restores the old behavior (checked/auto-filled).
+    strict_source_fields: bool = True
 
 
 def default_config_path() -> Path:
