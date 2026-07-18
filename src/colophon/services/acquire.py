@@ -33,6 +33,7 @@ _READY_STATUSES = frozenset({"downloaded", "uploading"})
 _ERROR_STATUSES = frozenset({"error", "magnet_error", "dead", "virus"})
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
+_RESOLVE_CONCURRENCY = 8  # global cap on in-flight RD unrestrict calls (shared across downloads)
 
 
 class AcquireMode(StrEnum):
@@ -312,6 +313,42 @@ def align_links_to_files(
         if hit != -1:
             i = hit + 1
     return out
+
+
+async def _resolve_links(
+    client: RealDebridSource,
+    links: list[str],
+    *,
+    sem: asyncio.Semaphore | None,
+    cancel: CancelToken | None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[RdUnrestrictedLink | None]:
+    """Unrestrict every link, preserving order (result[i] <-> links[i]); a failed or
+    cancelled link becomes None. `sem` bounds concurrency globally (falls back to a
+    local cap). `on_progress(done, total)` fires as each link settles."""
+    gate = sem or asyncio.Semaphore(_RESOLVE_CONCURRENCY)
+    results: list[RdUnrestrictedLink | None] = [None] * len(links)
+    total = len(links)
+    done = 0
+
+    async def _one(i: int, link: str) -> None:
+        nonlocal done
+        async with gate:
+            if cancel is not None and cancel.cancelled:
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
+                return
+            try:
+                results[i] = await client.unrestrict_link(link)
+            except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
+                logger.warning(f"unrestrict failed: {e}")
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total)
+
+    await asyncio.gather(*(_one(i, link) for i, link in enumerate(links)))
+    return results
 
 
 async def download_torrent(

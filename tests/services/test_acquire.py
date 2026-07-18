@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from colophon.adapters.realdebrid import (
@@ -8,6 +9,7 @@ from colophon.adapters.realdebrid import (
 )
 from colophon.services.acquire import (
     AcquireResult,
+    _resolve_links,
     align_links_to_files,
     download_target_count,
     download_torrent,
@@ -856,3 +858,26 @@ def test_target_count_all_is_audio_plus_cover_keepset():
 def test_target_count_no_file_list_falls_back_to_links():
     info = RdTorrentInfo(id="a", filename="T", status="downloaded", links=["L1", "L2"], files=[])
     assert download_target_count(info, None) == 2
+
+
+async def test_resolve_links_preserves_order_and_reports_progress():
+    links = ["L1", "L2", "L3"]
+    resolved = {
+        "L1": RdUnrestrictedLink(filename="1.mp3", filesize=1, download="http://d/1"),
+        "L2": RdUnrestrictedLink(filename="2.mp3", filesize=2, download="http://d/2"),
+        "L3": RdUnrestrictedLink(filename="3.mp3", filesize=3, download="http://d/3"),
+    }
+
+    class Rd:
+        async def unrestrict_link(self, link):
+            if link == "L2":
+                raise RuntimeError("boom")  # isolated failure -> None slot
+            return resolved[link]
+
+    seen: list[tuple[int, int]] = []
+    out = await _resolve_links(
+        Rd(), links, sem=asyncio.Semaphore(2), cancel=None,
+        on_progress=lambda done, total: seen.append((done, total)),
+    )
+    assert [u.filename if u else None for u in out] == ["1.mp3", None, "3.mp3"]
+    assert seen[-1] == (3, 3)  # final progress reports all links accounted for
