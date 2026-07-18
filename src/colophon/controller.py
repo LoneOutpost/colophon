@@ -28,6 +28,11 @@ from colophon.core.confidence import (
     score_identification,
     sort_by_runtime_closeness,
 )
+from colophon.core.duplicate_check import (
+    CollidingBook,
+    DuplicateDestination,
+    duplicate_targets,
+)
 from colophon.core.entity_alias import canonical_book
 from colophon.core.entity_graph import entity_graph_from_records
 from colophon.core.fields import get_field
@@ -2302,6 +2307,28 @@ class AppController:
         pats = patterns or self.ctx.patterns
         root = self.ctx.config.library_root or (default_db_path().parent / "library")
         return [(b.id, build_target_path(root, pats, self._canonical_book(b))) for b in books]
+
+    def duplicate_destinations(
+        self, *, patterns: PathPatterns | None = None
+    ) -> list[DuplicateDestination]:
+        """Library books that would organize to the same destination under the saved settings —
+        the persist dry-run (`organize_targets`) over the whole library, grouped by colliding
+        target path so a human can resolve the clash before organizing. In-library only: it
+        compares previewed targets, not what already exists on disk."""
+        # A titleless book has no real target (it collapses to a degenerate "…/.m4b") and would never
+        # be persisted, so it can't be a genuine "when persisted" clash — exclude it from the compare.
+        books = [b for b in self._hydrate(self.ctx.books.list_all()) if (b.title or "").strip()]
+        by_id = {b.id: b for b in books}
+        return [
+            DuplicateDestination(
+                target=path,
+                books=[
+                    CollidingBook(bid, by_id[bid].title or "(untitled)", by_id[bid].source_folder)
+                    for bid in ids
+                ],
+            )
+            for path, ids in duplicate_targets(self.organize_targets(books, patterns=patterns))
+        ]
 
     def organize_preview(
         self, books: list[BookUnit], *, patterns: PathPatterns | None = None, encode: bool = True
