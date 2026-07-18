@@ -288,6 +288,20 @@ def test_normalize_leaves_tag_title_untouched():
     assert b.title == "02 - Yendi"                   # only directory/filename titles are cleaned
 
 
+def test_normalize_deshouts_shouting_tag_title():
+    b = _dir_titled("DARKSABER")
+    b.provenance["title"] = Provenance.TAG.value
+    normalize(b)
+    assert b.title == "Darksaber"                    # a shouting single-book tag title is de-shouted
+
+
+def test_normalize_leaves_manual_shouting_title_verbatim():
+    b = _dir_titled("DARKSABER")
+    b.provenance["title"] = Provenance.MANUAL.value
+    normalize(b)
+    assert b.title == "DARKSABER"                    # the user typed it deliberately, kept
+
+
 def test_normalize_proper_cases_shouting_directory_author():
     b = BookUnit.new(source_folder=Path("/lib/SANDRA BROWN"))
     b.authors = ["SANDRA BROWN"]

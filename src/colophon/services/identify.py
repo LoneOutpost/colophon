@@ -122,10 +122,11 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
 
 def normalize(book: BookUnit) -> None:
     """Clean a scan-derived title of display noise (edition/format parentheticals) and a strong
-    sequence-number affix ('05 - Phoenix' -> 'Phoenix'), and proper-case a shouting author name
-    ('SANDRA BROWN' -> 'Sandra Brown'). Title cleaning is gated to directory/filename provenance; the
-    author de-shout applies to any non-manual source (ALL CAPS is never an intentional name spelling,
-    though a lone acronym like 'BBC' is preserved). A leading year prefix is NOT stripped
+    sequence-number affix ('05 - Phoenix' -> 'Phoenix'), and de-shout a shouting title/author
+    ('DARKSABER' -> 'Darksaber', 'SANDRA BROWN' -> 'Sandra Brown'). Title *cleaning* is gated to
+    directory/filename provenance, but the title and author *de-shout* apply to any non-manual source
+    (ALL CAPS is never an intentional spelling; a lone-acronym author like 'BBC' is preserved, though
+    a lone-acronym title is not). A leading year prefix is NOT stripped
     here (unlike the match-query path): a leading 4-digit number is ambiguous with a numeric title,
     so the persisted title keeps it rather than risk deleting real content. A weak (unspaced) title
     affix like '30-Day Heart Tune-Up' is left for the corroborated series-ramp path. Idempotent."""
@@ -138,6 +139,11 @@ def normalize(book: BookUnit) -> None:
         affix = parse_sequence_affix(book.title or "")
         if affix is not None and affix.confidence == "strong" and affix.cleaned != book.title:
             book.title = affix.cleaned  # provenance unchanged
+    # De-shout a shouting title from any non-manual source (the multi-book path already does this in
+    # `classify._to_work`; this covers the single-book reconcile path). Single tokens are de-shouted
+    # too ('DARKSABER' -> 'Darksaber'): a lone-acronym title is far rarer than an acronym author.
+    if book.title and book.provenance.get("title") != Provenance.MANUAL.value:
+        book.title = proper_case_if_shouting(book.title)
     # De-shout a shouting author from any source except a manual edit: ALL CAPS is never an
     # intentional spelling for a name. A single all-caps token is kept as a likely acronym (BBC).
     if book.authors and book.provenance.get("authors") != Provenance.MANUAL.value:
