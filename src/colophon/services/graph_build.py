@@ -23,9 +23,10 @@ from colophon.services.ingest import ScanOptions, plan_scan
 
 
 def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUnit:
-    """Project one detected work into a SINGLE-book leaf BookUnit. Title/author/series come from
-    the work (FILENAME provenance); `source_files` is left for `project` to reconstruct from the
-    leaf's owned FileNodes.
+    """Project one detected work into a SINGLE-book leaf BookUnit. Title/author/series come from the
+    work, each carrying its own provenance (a tag-sourced title/author records TAG, not a weak
+    filename guess); `source_files` is left for `project` to reconstruct from the leaf's owned
+    FileNodes.
 
     An authorless work's leaf gets NO author here. The container's own author was resolved from its
     FIRST file alone, so side-copying it would mis-attribute every sibling and mask each leaf's own
@@ -38,7 +39,7 @@ def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUni
     leaf.id = leaf_id
     leaf.content_kind = ContentKind.SINGLE
     leaf.title = work.label
-    leaf.provenance["title"] = Provenance.FILENAME.value
+    leaf.provenance["title"] = work.label_prov   # tag when a Title/Album tag named it, else filename
     leaf.detected_works = [work]
     if work.author:                       # the work named its own author, from its files' artist tag
         leaf.authors = [work.author]

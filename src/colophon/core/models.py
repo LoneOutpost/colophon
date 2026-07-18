@@ -118,9 +118,12 @@ class DetectedWork(_Base):
     """One distinct work the classifier found inside a folder; the unit a split
     would foster into. `files` are the source files belonging to this work. `author`, when set,
     always comes from the files' embedded artist tag (see `classify._to_work`) — a trusted source,
-    so a leaf built from it records TAG provenance, not a weak filename guess."""
+    so a leaf built from it records TAG provenance, not a weak filename guess. `label_prov` records
+    where `label` came from (a Title/Album tag vs the filename) so the leaf's title provenance is
+    honest rather than always stamped `filename`."""
 
     label: str
+    label_prov: str = Provenance.FILENAME.value
     author: str | None = None
     series: str | None = None
     sequence: float | None = None

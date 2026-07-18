@@ -146,6 +146,65 @@ def test_untagged_distinct_files_are_multi():
     assert content_kind_for(works, signals) is CK.MULTI
 
 
+def test_single_file_prefers_title_tag_over_album_for_label():
+    # A single-file book where the Album tag holds the *series* ("Thrawn Ascendancy") and the Title
+    # tag holds the real book title ("Chaos Rising"). The work must be labeled from the Title tag,
+    # not the series-bearing Album, so the series name doesn't masquerade as the title.
+    feats = [_feat("/a/STAR WARS/Chaos Rising (Thrawn Ascendancy 1).mp3",
+                   title="Chaos Rising", album="Thrawn Ascendancy", artist="Timothy Zahn")]
+    works, _ = group_works(feats)
+    assert len(works) == 1
+    assert works[0].label == "Chaos Rising"
+
+
+def test_chaptered_book_keeps_album_as_label():
+    # Several files sharing one album with per-file *chapter* titles are one book: the Album tag is
+    # the book's title and the per-file Titles are chapters, so the label stays the Album. This
+    # guards the single-file title preference from leaking into the chaptered case.
+    feats = [
+        _feat("/a/d/01.mp3", album="The Way of Kings", title="Chapter 1"),
+        _feat("/a/d/02.mp3", album="The Way of Kings", title="Chapter 2"),
+    ]
+    works, _ = group_works(feats)
+    assert len(works) == 1
+    assert works[0].label == "The Way of Kings"
+
+
+def test_reversed_title_album_tags_use_filename_to_pick_title():
+    # Some files misfile the tags: the Title holds the *series* and the Album holds the book title.
+    # The filename ("Allies (Fate Of The Jedi 5)") arbitrates — its parenthetical is the series, so a
+    # Title tag equal to that series is rejected and the real title is used.
+    feats = [_feat("/a/SW/Allies (Fate Of The Jedi 5).mp3",
+                   title="Fate Of The Jedi", album="Allies", artist="Aaron Allston")]
+    works, _ = group_works(feats)
+    assert works[0].label == "Allies"
+
+
+def test_album_titles_a_single_file_when_filename_is_unstructured():
+    # No Title tag and a filename with no series parenthetical: the Album is the book's real title
+    # ("Darth Plagueis"), preferred over the mangled filename stem ("Darth Plague is").
+    feats = [_feat("/a/SW/Darth Plague is.mp3", album="Darth Plagueis", artist="James Luceno")]
+    works, _ = group_works(feats)
+    assert works[0].label == "Darth Plagueis"
+
+
+def test_shouting_tag_title_is_proper_cased():
+    # An all-caps Title tag is not an intentional spelling; de-shout it like any other weak title.
+    feats = [_feat("/a/SW/Heir to the Empire (Thrawn Trilogy 1).mp3",
+                   title="HEIR TO THE EMPIRE", album="volume 1", artist="Timothy Zahn")]
+    works, _ = group_works(feats)
+    assert works[0].label == "Heir To The Empire"   # de-shouted (proper_case_if_shouting)
+
+
+def test_placeholder_title_tag_falls_back_to_filename():
+    # Junk placeholder tags ("Track 1", "Unknown Album ...") are ignored so the real title comes
+    # from the filename ("Vortex"), not the useless tag.
+    feats = [_feat("/a/SW/Vortex (Fate Of The Jedi 6).mp3",
+                   title="Track 1", album="Unknown Album (11/30/2010)", artist="Troy Denning")]
+    works, _ = group_works(feats)
+    assert works[0].label == "Vortex"
+
+
 def test_asin_beats_album_for_grouping():
     feats = [
         _feat("/a/d/a.mp3", asin="B001", album="X"),

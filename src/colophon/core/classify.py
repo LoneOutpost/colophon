@@ -24,6 +24,7 @@ from colophon.core.models import (
     FindingCode,
     FindingSeverity,
     FolderKind,
+    Provenance,
 )
 from colophon.core.normalize import normalize_key, normalize_text
 
@@ -130,16 +131,66 @@ def _first(values) -> str | None:
     return None
 
 
+# Generic placeholder tag values that are not a real title (a rip left the default in): they must
+# never win over the filename. "Track 3", "Disc 1", "CD 2", "Chapter 5", "Volume 1", "Unknown
+# Album …", "Untitled".
+_PLACEHOLDER = re.compile(
+    r"^(?:(?:track|disc|cd|chapter|volume|vol)\s*\d+|unknown(?:\s.*)?|untitled)$", re.IGNORECASE
+)
+
+
+def _is_placeholder(value: str | None) -> bool:
+    return bool(value) and bool(_PLACEHOLDER.match(value.strip()))
+
+
+def _pick_single_title(
+    title: str | None, album: str | None, fw: DetectedWork
+) -> tuple[str, str]:
+    """The book title (and its provenance) for one file, with the filename as arbiter. `fw` is the
+    filename-parsed work: `fw.label` is the title portion, `fw.series` the `(Series N)` parenthetical.
+
+    Tags are unreliably filed — the Title tag usually holds the book title, but some files put the
+    *series* there and the title in the Album (e.g. "Allies (Fate Of The Jedi 5)"), and some carry
+    only a junk placeholder ("Track 1"). So a tag value that equals the filename's series or is a
+    placeholder is rejected, and a structured filename (one that named a series) is trusted for the
+    title over a bare Album (which is usually the series or franchise)."""
+    def unusable(v: str) -> bool:              # a placeholder, or actually the filename's series
+        return _is_placeholder(v) or _text_key(v) == _text_key(fw.series)
+
+    if title and not unusable(title):
+        return title, Provenance.TAG.value
+    if fw.series and fw.label:                 # structured filename: its parsed title is reliable
+        return fw.label, Provenance.FILENAME.value
+    if album and not unusable(album):          # unstructured filename: the Album is the title
+        return album, Provenance.TAG.value
+    return (fw.label or normalize_text(fw.files[0].stem)), Provenance.FILENAME.value
+
+
 def _to_work(group: list[FileFeatures]) -> DetectedWork:
-    label = (
-        _first(f.tags.album for f in group)
-        or _first(f.tags.title for f in group)
-        or normalize_text(group[0].path.stem)
-    )
+    from colophon.core.normalize import proper_case_if_shouting
+
+    title = _first(f.tags.title for f in group)
+    album = _first(f.tags.album for f in group)
+    author = _first(f.tags.artist for f in group)
+    if len(group) > 1:
+        # A multi-file group is one book's chapters: the Album is the book's title and each file's
+        # Title is a chapter, so the Album labels the work (ignoring a junk placeholder album).
+        tag_label = next((v for v in (album, title) if v and not _is_placeholder(v)), None)
+        label = tag_label or normalize_text(group[0].path.stem)
+        prov = Provenance.TAG.value if tag_label else Provenance.FILENAME.value
+        return DetectedWork(label=proper_case_if_shouting(label), label_prov=prov,
+                            author=author, files=[f.path for f in group])
+    # A single file is one whole book. Pick its title with the filename as arbiter; the series and
+    # its sequence number come from the filename (the clusterer already parses "Title (Series N)").
+    fw = cluster([group[0].path]).detected_works[0]
+    label, label_prov = _pick_single_title(title, album, fw)
     return DetectedWork(
-        label=label,
-        author=_first(f.tags.artist for f in group),
-        files=[f.path for f in group],
+        label=proper_case_if_shouting(label),
+        label_prov=label_prov,
+        author=author,
+        series=fw.series,
+        sequence=fw.sequence,
+        files=[group[0].path],
     )
 
 
