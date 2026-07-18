@@ -8,6 +8,7 @@ from colophon.adapters.realdebrid import (
 )
 from colophon.services.acquire import (
     AcquireResult,
+    align_links_to_files,
     download_torrent,
     list_candidates,
     sanitize_name,
@@ -803,3 +804,24 @@ def test_visible_candidates_hides_errored_by_default_shows_under_show_all():
     assert default == {"a", "c"}   # errored hidden; audiobook + in-progress shown
     everything = {c.torrent.id for c in visible_candidates([book, errored, inprogress], show_all=True)}
     assert everything == {"a", "b", "c"}   # Show all reveals errored too
+
+
+def test_align_closest_size_when_earlier_link_missing():
+    # Two same-name files; the FIRST has no link (a gap). The single link's size is
+    # closest to the SECOND, so closest-size must pick index 1, not position-0.
+    files = [("01.mp3", 100), ("01.mp3", 900)]
+    links = [("01.mp3", 905)]  # off-by-5 from the second file
+    assert align_links_to_files(files, links) == [1]
+
+
+def test_align_position_when_size_unusable():
+    # filesize 0 (unknown) => ignore size, fall back to first-by-position.
+    files = [("01.mp3", 100), ("01.mp3", 900)]
+    links = [("01.mp3", 0)]
+    assert align_links_to_files(files, links) == [0]
+
+
+def test_align_exact_still_preferred_over_closer_position():
+    files = [("01.mp3", 100), ("01.mp3", 900)]
+    links = [("01.mp3", 900)]  # exact match to index 1
+    assert align_links_to_files(files, links) == [1]

@@ -259,21 +259,25 @@ def align_links_to_files(
     """Map each link to the index of its selected file for the count-mismatch path. Real-Debrid
     returns download links as a clean in-order *subsequence* of the selected files (some selected
     files simply get no link), so walk both in order with a single forward pointer: each link
-    claims the next not-yet-claimed file whose basename matches. A forward exact (basename, size)
-    match is preferred — it can only ever skip files that had no link of their own, so it corrects
-    for a missing earlier same-named file — otherwise the first forward basename match wins.
+    claims the next not-yet-claimed file whose basename matches. Resolution priority:
 
-    Position, not filesize, is what disambiguates a basename shared across editions/subfolders,
-    because each edition's tracks stay grouped in the torrent's file order. That is what makes this
-    robust when RD's unrestrict `filesize` disagrees with the torrent-info `bytes` (two independent
-    endpoints that only agree intermittently). `files` and `links` are (basename, size) pairs in
-    order; returns one index into `files` per link, or None when no forward basename match remains
-    (a true orphan, which the caller places without clobbering)."""
+    1. Exact (basename, size) match — jumps past any gap files that had no link.
+    2. Closest-size match among all forward same-basename candidates — only used when the link's
+       size is usable (> 0); corrects for a missing earlier same-named file without trusting
+       position alone.
+    3. First forward basename match by position — always safe; used when size is 0/garbage.
+
+    `files` and `links` are (basename, size) pairs in order; returns one index into `files` per
+    link, or None when no forward basename match remains (a true orphan, placed without clobbering
+    by the caller)."""
     out: list[int | None] = []
     n = len(files)
     i = 0
     for lname, lsize in links:
-        exact = name_only = -1
+        exact = -1
+        first_name = -1        # first same-basename by position
+        closest = -1           # same-basename with size nearest lsize (when lsize usable)
+        closest_delta = -1
         j = i
         while j < n:
             fname, fsize = files[j]
@@ -281,10 +285,14 @@ def align_links_to_files(
                 if fsize == lsize:
                     exact = j
                     break
-                if name_only == -1:
-                    name_only = j
+                if first_name == -1:
+                    first_name = j
+                if lsize > 0:
+                    delta = abs(fsize - lsize)
+                    if closest == -1 or delta < closest_delta:
+                        closest, closest_delta = j, delta
             j += 1
-        hit = exact if exact != -1 else name_only
+        hit = exact if exact != -1 else (closest if closest != -1 else first_name)
         out.append(None if hit == -1 else hit)
         if hit != -1:
             i = hit + 1
