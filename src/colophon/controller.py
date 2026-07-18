@@ -23,7 +23,11 @@ from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
 from colophon.core.catalog import CatalogEntry, list_entries
 from colophon.core.chapters import Chapter, normalize_chapters, runtime_mismatch
-from colophon.core.confidence import IdentificationOutcome, score_identification
+from colophon.core.confidence import (
+    IdentificationOutcome,
+    score_identification,
+    sort_by_runtime_closeness,
+)
 from colophon.core.entity_alias import canonical_book
 from colophon.core.entity_graph import entity_graph_from_records
 from colophon.core.fields import get_field
@@ -2110,7 +2114,9 @@ class AppController:
         except Exception as e:  # a source failing must not crash the search (BLE001 intentional)
             logger.warning(f"source {source_name} failed in search_matches: {e}")
             return []
-        return self._score(book, results).ranked
+        # The browse list leads with the closest-runtime edition (Audible returns per-edition
+        # candidates); score still orders equally-close runtimes and any runtime-less results.
+        return sort_by_runtime_closeness(book, self._score(book, results).ranked)
 
     @staticmethod
     def match_field_values(result: SourceResult) -> dict[str, str | None]:

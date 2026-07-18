@@ -42,6 +42,21 @@ def _runtime_bonus(book: BookUnit, result: SourceResult) -> float:
     return max(-0.15, 0.10 - rel)
 
 
+def sort_by_runtime_closeness(book: BookUnit, results: list[SourceResult]) -> list[SourceResult]:
+    """Order a list of candidates so the ones whose runtime is closest to the book's measured audio
+    length come first. A manual source search (Audible especially) is usually browsing editions of a
+    single book, where the length is the quickest way to spot the right one, so here duration leads
+    outright rather than nudging near-ties as it does in `score_identification`. Candidates without a
+    runtime keep their incoming (score-ranked) order at the end; a stable sort keeps that order as the
+    tie-breaker between equally-close runtimes. Unchanged when the book has no measured duration."""
+    if book.duration_ms <= 0:
+        return results
+    return sorted(
+        results,
+        key=lambda r: (0, abs(r.runtime_ms - book.duration_ms)) if r.runtime_ms else (1, 0),
+    )
+
+
 def _author_consensus(book: BookUnit, results: list[SourceResult]) -> SourceResult | None:
     """For an authorless book, the representative of the single author-cluster that
     >=2 distinct providers agree on, among candidates whose cleaned title matches the

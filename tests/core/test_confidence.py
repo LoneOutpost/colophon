@@ -189,6 +189,34 @@ def test_close_runtime_outranks_slightly_worse_title(tmp_path):
     assert out.ranked[0] is close_full
 
 
+def test_sort_by_runtime_closeness_orders_closest_first(tmp_path):
+    from colophon.core.confidence import sort_by_runtime_closeness
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    far = SourceResult(provider="audnexus", title="A", runtime_ms=4_000_000)
+    mid = SourceResult(provider="audnexus", title="B", runtime_ms=6_500_000)
+    near = SourceResult(provider="audnexus", title="C", runtime_ms=8_100_000)
+    assert sort_by_runtime_closeness(b, [far, mid, near]) == [near, mid, far]
+
+
+def test_sort_by_runtime_closeness_puts_runtimeless_last(tmp_path):
+    from colophon.core.confidence import sort_by_runtime_closeness
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 8_000_000)
+    no_rt = SourceResult(provider="openlibrary", title="A")
+    with_rt = SourceResult(provider="audnexus", title="B", runtime_ms=8_000_000)
+    assert sort_by_runtime_closeness(b, [no_rt, with_rt]) == [with_rt, no_rt]
+
+
+def test_sort_by_runtime_closeness_noop_without_book_duration(tmp_path):
+    from colophon.core.confidence import sort_by_runtime_closeness
+    from colophon.core.sources import SourceResult
+    b = _book_with_duration(tmp_path, 0)
+    a = SourceResult(provider="audnexus", title="A", runtime_ms=4_000_000)
+    c = SourceResult(provider="audnexus", title="C", runtime_ms=8_000_000)
+    assert sort_by_runtime_closeness(b, [a, c]) == [a, c]  # order preserved
+
+
 def test_runtime_does_not_override_a_much_better_title(tmp_path):
     from colophon.core.confidence import score_identification
     from colophon.core.sources import SourceResult
