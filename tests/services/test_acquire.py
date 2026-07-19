@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from colophon.adapters.realdebrid import (
@@ -8,6 +9,9 @@ from colophon.adapters.realdebrid import (
 )
 from colophon.services.acquire import (
     AcquireResult,
+    _resolve_links,
+    align_links_to_files,
+    download_target_count,
     download_torrent,
     list_candidates,
     sanitize_name,
@@ -219,6 +223,51 @@ async def test_download_mismatch_duplicate_basename_disambiguated_by_size(tmp_pa
     assert (c / "Night Shift (AFB)" / "01_Night_Shift.mp3").exists()
     assert (c / "Night Shift (NLS)" / "01_Night_Shift.mp3").exists()
     assert not (c / "01_Night_Shift.mp3").exists()  # not flattened to the container root
+
+
+async def test_download_mismatch_recovers_structure_by_order_when_sizes_disagree(tmp_path, monkeypatch):
+    # The real-world failure: two editions share every track basename in different subfolders, and
+    # RD's unrestrict `filesize` does NOT equal the torrent-info `bytes` (two independent RD
+    # endpoints — sizes agree only intermittently). A count mismatch forces the fallback. Matching
+    # on (basename, size) then misses for every file, so the old code flattened them all to the
+    # container root and same-named tracks clobbered each other. RD returns links as a clean
+    # in-order subsequence of the selected files, so each link must be mapped to its file by
+    # POSITION — recovering the per-edition structure without trusting the sizes.
+    torrent = RdTorrentInfo(
+        id="a", filename="SK", status="downloaded", links=["L1", "L2", "L3", "L4"],
+        files=[
+            RdTorrentFile(id=1, path="/SK/Gunslinger (original)/1_ Gunslinger.mp3", bytes=100, selected=True),
+            RdTorrentFile(id=2, path="/SK/Gunslinger (original)/2_ Waystation.mp3", bytes=200, selected=True),
+            RdTorrentFile(id=3, path="/SK/Gunslinger (read by King)/1_ Gunslinger.mp3", bytes=300, selected=True),
+            RdTorrentFile(id=4, path="/SK/Gunslinger (read by King)/2_ Waystation.mp3", bytes=400, selected=True),
+            RdTorrentFile(id=5, path="/SK/extra.mp3", bytes=50, selected=True),  # selected, no link -> mismatch
+        ],
+    )
+    # unrestrict filesizes are all off-by-one from bytes, so (basename, size) can never match.
+    links = {
+        "L1": RdUnrestrictedLink(filename="1_ Gunslinger.mp3", filesize=101, download="http://dl/o1"),
+        "L2": RdUnrestrictedLink(filename="2_ Waystation.mp3", filesize=201, download="http://dl/o2"),
+        "L3": RdUnrestrictedLink(filename="1_ Gunslinger.mp3", filesize=301, download="http://dl/k1"),
+        "L4": RdUnrestrictedLink(filename="2_ Waystation.mp3", filesize=401, download="http://dl/k2"),
+    }
+    got = {}
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+        got[url] = Path(dest)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path)
+    c = result.folder
+    # Every track lands in its own edition's subfolder, mapped by link order — nothing flattened.
+    assert got["http://dl/o1"] == c / "Gunslinger (original)" / "1_ Gunslinger.mp3"
+    assert got["http://dl/o2"] == c / "Gunslinger (original)" / "2_ Waystation.mp3"
+    assert got["http://dl/k1"] == c / "Gunslinger (read by King)" / "1_ Gunslinger.mp3"
+    assert got["http://dl/k2"] == c / "Gunslinger (read by King)" / "2_ Waystation.mp3"
+    assert not (c / "1_ Gunslinger.mp3").exists()  # not flattened / clobbered at the root
+    assert not (c / "2_ Waystation.mp3").exists()
+    assert sum(1 for f in result.files if f.ok) == 4
 
 
 async def test_download_torrent_isolates_per_file_failure(tmp_path, monkeypatch):
@@ -758,3 +807,196 @@ def test_visible_candidates_hides_errored_by_default_shows_under_show_all():
     assert default == {"a", "c"}   # errored hidden; audiobook + in-progress shown
     everything = {c.torrent.id for c in visible_candidates([book, errored, inprogress], show_all=True)}
     assert everything == {"a", "b", "c"}   # Show all reveals errored too
+
+
+def test_align_closest_size_when_earlier_link_missing():
+    # Two same-name files; the FIRST has no link (a gap). The single link's size is
+    # closest to the SECOND, so closest-size must pick index 1, not position-0.
+    files = [("01.mp3", 100), ("01.mp3", 900)]
+    links = [("01.mp3", 905)]  # off-by-5 from the second file
+    assert align_links_to_files(files, links) == [1]
+
+
+def test_align_position_when_size_unusable():
+    # filesize 0 (unknown) => ignore size, fall back to first-by-position.
+    files = [("01.mp3", 100), ("01.mp3", 900)]
+    links = [("01.mp3", 0)]
+    assert align_links_to_files(files, links) == [0]
+
+
+def test_align_exact_still_preferred_over_closer_position():
+    files = [("01.mp3", 100), ("01.mp3", 900)]
+    links = [("01.mp3", 900)]  # exact match to index 1
+    assert align_links_to_files(files, links) == [1]
+
+
+def test_target_count_subset_is_pick_size():
+    info = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/T/a.mp3", selected=True),
+            RdTorrentFile(id=2, path="/T/b.mp3", selected=True),
+            RdTorrentFile(id=3, path="/T/notes.txt", selected=True),
+        ],
+    )
+    assert download_target_count(info, {1, 2}) == 2
+
+
+def test_target_count_all_is_audio_plus_cover_keepset():
+    info = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2", "L3", "L4"],
+        files=[
+            RdTorrentFile(id=1, path="/T/a.mp3", selected=True),
+            RdTorrentFile(id=2, path="/T/cover.jpg", selected=True),
+            RdTorrentFile(id=3, path="/T/notes.txt", selected=True),  # dropped by _keep_file
+            RdTorrentFile(id=4, path="/T/b.mp3", selected=False),      # not selected
+        ],
+    )
+    assert download_target_count(info, None) == 2  # a.mp3 + cover.jpg
+
+
+def test_target_count_no_file_list_falls_back_to_links():
+    info = RdTorrentInfo(id="a", filename="T", status="downloaded", links=["L1", "L2"], files=[])
+    assert download_target_count(info, None) == 2
+
+
+async def test_resolve_links_preserves_order_and_reports_progress():
+    links = ["L1", "L2", "L3"]
+    resolved = {
+        "L1": RdUnrestrictedLink(filename="1.mp3", filesize=1, download="http://d/1"),
+        "L2": RdUnrestrictedLink(filename="2.mp3", filesize=2, download="http://d/2"),
+        "L3": RdUnrestrictedLink(filename="3.mp3", filesize=3, download="http://d/3"),
+    }
+
+    class Rd:
+        async def unrestrict_link(self, link):
+            if link == "L2":
+                raise RuntimeError("boom")  # isolated failure -> None slot
+            return resolved[link]
+
+    seen: list[tuple[int, int]] = []
+    out = await _resolve_links(
+        Rd(), links, sem=asyncio.Semaphore(2), cancel=None,
+        on_progress=lambda done, total: seen.append((done, total)),
+    )
+    assert [u.filename if u else None for u in out] == ["1.mp3", None, "3.mp3"]
+    assert seen[-1] == (3, 3)  # final progress reports all links accounted for
+
+
+async def test_download_reports_resolve_then_download_phases(tmp_path, monkeypatch):
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2"],
+        files=[
+            RdTorrentFile(id=1, path="/T/Disc 1/01.mp3", bytes=10, selected=True),
+            RdTorrentFile(id=2, path="/T/Disc 2/01.mp3", bytes=20, selected=True),
+            RdTorrentFile(id=3, path="/T/extra.mp3", bytes=5, selected=True),  # no link -> mismatch
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="01.mp3", filesize=20, download="http://dl/2"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    phases: list[tuple[str, int, int]] = []
+    result = await download_torrent(
+        FakeRd(links=links), torrent, tmp_path,
+        progress=lambda phase, done, total, name: phases.append((phase, done, total)),
+    )
+    c = result.folder
+    assert (c / "Disc 1" / "01.mp3").exists()
+    assert (c / "Disc 2" / "01.mp3").exists()          # structured, not flattened
+    kinds = [p for p, _, _ in phases]
+    assert "resolving" in kinds and "downloading" in kinds
+    assert kinds.index("resolving") < kinds.index("downloading")  # resolve reported first
+    assert phases[-1][1] == phases[-1][2] == 2          # downloading ended 2/2 (Y = 2 picked)
+
+
+async def test_subset_pick_early_stops_resolving(tmp_path, monkeypatch):
+    # 100 selected files but only 99 links (mismatch forces the fallback). The user picks an
+    # EARLY file (id=3). Early-stop must resolve only a small prefix — nowhere near all 99 —
+    # while still placing the picked file. Concurrency is bounded, so a few extra links beyond
+    # the pick may resolve, but it must be far below the total.
+    files = [RdTorrentFile(id=i, path=f"/T/{i:03d}.mp3", bytes=i * 1000, selected=True)
+             for i in range(1, 101)]
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded",
+        links=[f"L{i}" for i in range(1, 100)], files=files)  # 99 links, 100 selected
+    unrestricted: list[str] = []
+
+    class Rd:
+        async def unrestrict_link(self, link):
+            unrestricted.append(link)
+            i = int(link[1:])
+            return RdUnrestrictedLink(filename=f"{i:03d}.mp3", filesize=i * 1000, download=f"http://d/{i}")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(Rd(), torrent, tmp_path, file_ids={3})
+    assert (result.folder / "003.mp3").exists()          # the picked file landed
+    assert len(unrestricted) < 30                          # stopped early (<< 99)
+
+
+async def test_download_all_still_resolves_every_link(tmp_path, monkeypatch):
+    # No file_ids => download-all => NO early stop; every link is resolved.
+    files = [RdTorrentFile(id=i, path=f"/T/{i:02d}.mp3", bytes=i * 1000, selected=True)
+             for i in range(1, 6)]
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded",
+        links=[f"L{i}" for i in range(1, 5)], files=files)  # 4 links, 5 selected
+    unrestricted: list[str] = []
+
+    class Rd:
+        async def unrestrict_link(self, link):
+            unrestricted.append(link)
+            i = int(link[1:])
+            return RdUnrestrictedLink(filename=f"{i:02d}.mp3", filesize=i * 1000, download=f"http://d/{i}")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    await download_torrent(Rd(), torrent, tmp_path, file_ids=None)
+    assert len(unrestricted) == 4  # all links resolved
+
+
+async def test_download_all_pairs_path_skips_non_audio_and_counts_match(tmp_path, monkeypatch):
+    # Contract-held pairs path (links == selected). download-all (file_ids=None) must keep only
+    # audio+cover, matching download_target_count, so the "Downloading a/Y" denominator is
+    # consistent (no "Downloading 3/2"). An explicit pick still downloads exactly what was chosen.
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/T/01.mp3", bytes=10, selected=True),
+            RdTorrentFile(id=2, path="/T/cover.jpg", bytes=5, selected=True),
+            RdTorrentFile(id=3, path="/T/info.nfo", bytes=1, selected=True),  # non-audio -> dropped
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="cover.jpg", filesize=5, download="http://dl/2"),
+        "L3": RdUnrestrictedLink(filename="info.nfo", filesize=1, download="http://dl/3"),
+    }
+    got = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+        got.append(Path(dest).name)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    phases: list[tuple[str, int, int]] = []
+    await download_torrent(FakeRd(links=links), torrent, tmp_path,
+                           progress=lambda ph, d, t, n: phases.append((ph, d, t)))
+    assert set(got) == {"01.mp3", "cover.jpg"}          # non-audio .nfo dropped on download-all
+    dl_totals = [t for ph, _, t in phases if ph == "downloading"]
+    assert dl_totals and all(t == 2 for t in dl_totals)  # denominator == keep-count
+    assert download_target_count(torrent, None) == 2      # and matches the metadata count

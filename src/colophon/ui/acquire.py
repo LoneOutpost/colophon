@@ -24,11 +24,34 @@ _FILTER_MIN_FILES = 12  # show the per-torrent file filter only once a list is l
 
 # status -> (Quasar colour, icon) for a download row
 _STATUS_META = {
+    "queued": ("grey-6", "schedule"),
     "active": ("primary", "downloading"),
     "paused": ("orange", "pause_circle"),
     "done": ("positive", "check_circle"),
+    "partial": ("warning", "error_outline"),
     "failed": ("negative", "error"),
 }
+
+
+def download_row_text(e) -> str:
+    """The caption line for one download row, derived from its status/phase/counts."""
+    if e.status == "active" and e.phase == "resolving":
+        return f"Resolving {e.links_done}/{e.links_total} links"
+    if e.status == "active":
+        return f"Downloading {e.files_done}/{e.files_total}"
+    if e.status == "queued":
+        return "Queued"
+    if e.status == "partial":
+        failed = max(0, e.files_total - e.files_done)
+        return f"Partial: {e.files_done} of {e.files_total} ({failed} failed)"
+    return e.status  # done / failed / paused
+
+
+def downloads_title_text(entries) -> str:
+    """Footer title: count files still to download across active downloads."""
+    remaining = sum(max(0, e.files_total - e.files_done)
+                    for e in entries if e.status == "active" and e.phase == "downloading")
+    return f"Downloads: {remaining} file(s) downloading" if remaining else "Downloads"
 
 
 def _fmt_size(num_bytes: int) -> str:
@@ -424,10 +447,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         downloads_footer.set_visibility(bool(entries))
         if not entries:
             return
-        queued = sum(max(0, e.files_total - e.files_done) for e in entries if e.status == "active")
-        downloads_title.set_text(
-            f"Downloads — {queued} file(s) downloading" if queued else "Downloads"
-        )
+        downloads_title.set_text(downloads_title_text(entries))
         with downloads_box:
             with ui.list().props("separator dense").classes("w-full"):
                 for entry in entries:
@@ -437,9 +457,8 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                             ui.icon(icon, color=color)
                         with ui.item_section():
                             ui.item_label(entry.name or "(unnamed)")
-                            detail = f"{entry.status} · {entry.detail}" if entry.detail else entry.status
-                            ui.item_label(detail).props("caption").classes("colophon-muted")
-                        if entry.status in ("active", "paused"):
+                            ui.item_label(download_row_text(entry)).props("caption").classes("colophon-muted")
+                        if entry.status in ("active", "paused", "queued"):
                             with ui.item_section().props("side"), \
                                     ui.row().classes("no-wrap q-gutter-xs"):
                                 if entry.status == "active":
@@ -447,7 +466,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                                         icon="pause",
                                         on_click=lambda _e, k=entry.key: _pause(k),
                                     ).props('flat dense round aria-label="Pause download"').tooltip("Pause")
-                                else:
+                                elif entry.status == "paused":
                                     ui.button(
                                         icon="play_arrow",
                                         on_click=lambda _e, k=entry.key: _resume(k),

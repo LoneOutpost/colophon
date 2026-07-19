@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -26,6 +25,9 @@ from colophon.core.cancel import CancelToken
 
 logger = logging.getLogger(__name__)
 
+# progress(phase, done, total, name); phase is "resolving" or "downloading".
+PhaseProgress = Callable[[str, int, int, str], None]
+
 # RD statuses whose torrents carry a usable file list + live links, so they are pickable now.
 # "uploading" is RD copying an already-finished torrent to its own hosts: the files and links
 # are populated and retrievable well before the status flips to "downloaded".
@@ -34,6 +36,7 @@ _READY_STATUSES = frozenset({"downloaded", "uploading"})
 _ERROR_STATUSES = frozenset({"error", "magnet_error", "dead", "virus"})
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
+RESOLVE_CONCURRENCY = 8  # global cap on in-flight RD unrestrict calls (shared across downloads)
 
 
 class AcquireMode(StrEnum):
@@ -254,29 +257,142 @@ def plan_pairs(
     return None, keep
 
 
-def _fallback_dest_map(
-    selected: list[RdTorrentFile], file_ids: set[int] | None,
-    dest_root: Path, torrent_name: str, pinned: Path | None,
-    *, mode: AcquireMode = AcquireMode.INDEXED,
-) -> tuple[Path, dict[tuple[str, int], deque[Path]], set[str]]:
-    """For the count-mismatch path (RD returns fewer links than selected files): pick the target
-    files (by `file_ids`, else the audio+cover default), compute their structured destinations, and
-    index them by (basename, size) so a link maps to its real path via the unrestricted filename
-    AND filesize. That disambiguates a basename shared across subfolders (multi-edition/multi-disc)
-    which a filename alone cannot. Returns (container, dest_by_key, target_names); each key holds a
-    queue of destinations, so files with an identical name *and* size are still placed (in order —
-    either structured slot is as good as the other) rather than flattened."""
+def download_target_count(torrent: RdTorrent, file_ids: set[int] | None) -> int:
+    """The number of files a download will actually target (its progress denominator).
+
+    An explicit pick counts the chosen ids; download-all counts the selected files that
+    survive the audio+cover keep-filter; a torrent with no file list counts its links
+    (the only case where a link is the unit). Never counts raw links otherwise, so the
+    UI can't show '1638 files' for a handful of picked ones."""
+    selected = [f for f in getattr(torrent, "files", []) if f.selected]
+    if not selected:
+        return len(torrent.links)
     if file_ids is not None:
-        targets = [f for f in selected if f.id in file_ids]
-    else:
-        targets = [f for f in selected if _keep_file(f.path)]
-    container, dests = structured_dests(
-        [f.path for f in targets], dest_root, torrent_name, pinned=pinned, mode=mode)
-    dest_by_key: dict[tuple[str, int], deque[Path]] = defaultdict(deque)
-    for f, dest in zip(targets, dests, strict=True):
-        dest_by_key[(PurePosixPath(f.path).name, f.bytes)].append(dest)
-    target_names = {PurePosixPath(f.path).name for f in targets}
-    return container, dest_by_key, target_names
+        return sum(1 for f in selected if f.id in file_ids)
+    return sum(1 for f in selected if _keep_file(f.path))
+
+
+def align_links_to_files(
+    files: list[tuple[str, int]], links: list[tuple[str, int]]
+) -> list[int | None]:
+    """Map each link to the index of its selected file for the count-mismatch path. Real-Debrid
+    returns download links as a clean in-order *subsequence* of the selected files (some selected
+    files simply get no link), so walk both in order with a single forward pointer: each link
+    claims the next not-yet-claimed file whose basename matches. Resolution priority:
+
+    1. Exact (basename, size) match — jumps past any gap files that had no link.
+    2. Closest-size match among all forward same-basename candidates — only used when the link's
+       size is usable (> 0); corrects for a missing earlier same-named file without trusting
+       position alone.
+    3. First forward basename match by position — always safe; used when size is 0/garbage.
+
+    `files` and `links` are (basename, size) pairs in order; returns one index into `files` per
+    link, or None when no forward basename match remains (a true orphan, placed without clobbering
+    by the caller)."""
+    out: list[int | None] = []
+    n = len(files)
+    i = 0
+    for lname, lsize in links:
+        exact = -1
+        first_name = -1        # first same-basename by position
+        closest = -1           # same-basename with size nearest lsize (when lsize usable)
+        closest_delta = -1
+        j = i
+        while j < n:
+            fname, fsize = files[j]
+            if fname == lname:
+                if fsize == lsize:
+                    exact = j
+                    break
+                if first_name == -1:
+                    first_name = j
+                if lsize > 0:
+                    delta = abs(fsize - lsize)
+                    if closest == -1 or delta < closest_delta:
+                        closest, closest_delta = j, delta
+            j += 1
+        hit = exact if exact != -1 else (closest if closest != -1 else first_name)
+        out.append(None if hit == -1 else hit)
+        if hit != -1:
+            i = hit + 1
+    return out
+
+
+def _all_picks_mapped(
+    selected: list[RdTorrentFile], file_ids: set[int],
+    resolved: list[RdUnrestrictedLink | None],
+) -> bool:
+    """True once every picked file id has been mapped by the links resolved so far. Used to
+    stop resolving early on a subset pick: aligns the resolved-so-far links to the selected
+    files and checks the picked ids are all covered (adding more links never changes an earlier
+    mapping, so a covered pick stays covered)."""
+    unrs = [u for u in resolved if u is not None]
+    idxs = align_links_to_files(
+        [(PurePosixPath(f.path).name, f.bytes) for f in selected],
+        [(PurePosixPath(u.filename).name, u.filesize) for u in unrs],
+    )
+    mapped = {selected[h].id for h in idxs if h is not None}
+    return file_ids.issubset(mapped)
+
+
+async def _resolve_links(
+    client: RealDebridSource,
+    links: list[str],
+    *,
+    sem: asyncio.Semaphore | None,
+    cancel: CancelToken | None,
+    on_progress: Callable[[int, int], None] | None = None,
+    early_stop: Callable[[list[RdUnrestrictedLink | None]], bool] | None = None,
+) -> list[RdUnrestrictedLink | None]:
+    """Unrestrict every link, preserving order (result[i] <-> links[i]); a failed or
+    cancelled link becomes None. `sem` bounds concurrency globally (falls back to a local
+    cap). `on_progress(done, total)` fires as each link settles. When `early_stop` is given
+    (subset picks), bounded workers pull links in order and stop launching new ones once
+    `early_stop(results)` is true — so an early/clustered pick doesn't resolve the whole tail,
+    while still running concurrently (a late pick stays fast)."""
+    gate = sem or asyncio.Semaphore(RESOLVE_CONCURRENCY)
+    results: list[RdUnrestrictedLink | None] = [None] * len(links)
+    total = len(links)
+    done = 0
+
+    async def _one(i: int, link: str) -> None:
+        nonlocal done
+        async with gate:
+            if cancel is not None and cancel.cancelled:
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
+                return
+            try:
+                results[i] = await client.unrestrict_link(link)
+            except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
+                logger.warning(f"unrestrict failed: {e}")
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total)
+
+    if early_stop is None:
+        await asyncio.gather(*(_one(i, link) for i, link in enumerate(links)))
+        return results
+
+    # Subset early-stop: bounded workers pull indices in order; stop when picks are covered.
+    stop = asyncio.Event()
+    next_i = 0
+
+    async def _worker() -> None:
+        nonlocal next_i
+        while not stop.is_set():
+            i = next_i
+            if i >= total:
+                return
+            next_i += 1  # single-threaded: safe, no await between read and increment
+            await _one(i, links[i])
+            if early_stop(results):
+                stop.set()
+                return
+
+    await asyncio.gather(*(_worker() for _ in range(min(RESOLVE_CONCURRENCY, total))))
+    return results
 
 
 async def download_torrent(
@@ -286,33 +402,83 @@ async def download_torrent(
     *,
     folder: Path | None = None,
     file_ids: set[int] | None = None,
-    progress: Callable[[int, int, str], None] | None = None,
+    progress: PhaseProgress | None = None,
     byte_progress: Callable[[int, int], None] | None = None,
     cancel: CancelToken | None = None,
     mode: AcquireMode = AcquireMode.INDEXED,
+    resolve_sem: asyncio.Semaphore | None = None,
 ) -> AcquireResult:
-    """Unrestrict each of `torrent`'s links and stream the audio/cover files into a
-    subfolder of `dest_root`. Per-file failures are isolated and reported.
-
-    `folder` pins the destination: pass the folder from an interrupted attempt to
-    resume into it (so `stream_download` finds the retained `.part`); when omitted a
-    fresh deduped subfolder is allocated. `progress(done, total, filename)` reports
-    per-file granularity (file index of total links), not per-byte; that is the
-    granularity the acquire UI surfaces."""
+    """Resolve `torrent`'s links then stream the picked audio/cover files into a
+    subfolder of `dest_root`, preserving the torrent's directory structure. Two phases
+    drive `progress(phase, done, total, name)`: 'resolving' (unrestricting links) then
+    'downloading' (streaming files); `total` in the download phase is the picked-file
+    count, never the raw link count. `folder` pins the destination for resume; `mode`
+    controls conflict handling; `resolve_sem` bounds unrestrict concurrency globally."""
     selected = [f for f in getattr(torrent, "files", []) if f.selected]
     pairs, _ = plan_pairs(torrent, file_ids)
+    if pairs is not None and file_ids is None:
+        # download-all keeps only audio+cover (an explicit pick downloads exactly what was chosen);
+        # this keeps the plan in step with download_target_count so the "a/Y" denominator is right.
+        pairs = [(path, link) for path, link in pairs if _keep_file(path)]
+
+    def _resolve_progress(done: int, total: int) -> None:
+        if progress is not None:
+            progress("resolving", done, total, "")
+
+    # --- PHASE 1: resolve links, recover (dest, url, name) to download ---
+    dl_plan: list[tuple[Path, str, str]] = []
     if pairs is not None:
-        # RD's contract held (links[i] <-> selected[i]): map by index, using the torrent path.
+        # RD contract held: links[i] <-> selected[i]. Resolve in order, map by index.
+        unrs = await _resolve_links(
+            client, [link for _, link in pairs], sem=resolve_sem, cancel=cancel,
+            on_progress=_resolve_progress)
+        kept = [(path, unr) for (path, _), unr in zip(pairs, unrs, strict=True) if unr is not None]
         container, dests = structured_dests(
-            [p for p, _ in pairs], dest_root, torrent.filename, pinned=folder, mode=mode)
+            [p for p, _ in kept], dest_root, torrent.filename, pinned=folder, mode=mode)
+        for (path, unr), dest in zip(kept, dests, strict=True):
+            dl_plan.append((dest, unr.download, PurePosixPath(path).name))
     elif selected:
-        # RD returned a different number of links than selected files (a known quirk for large
-        # torrents). Recover structure by matching each link's unrestricted filename to a selected
-        # file's real path — not flattening.
-        container, dest_by_key, target_names = _fallback_dest_map(
-            selected, file_ids, dest_root, torrent.filename, folder, mode=mode)
+        # Count mismatch: resolve links, then map each to its file by ORDER. For a subset pick,
+        # stop resolving once all picked files are mapped (no need to resolve the whole tail).
+        def _early_stop(res: list[RdUnrestrictedLink | None]) -> bool:
+            return _all_picks_mapped(selected, file_ids, res)
+
+        unrs = await _resolve_links(
+            client, list(torrent.links), sem=resolve_sem, cancel=cancel,
+            on_progress=_resolve_progress,
+            early_stop=_early_stop if file_ids is not None else None)
+        resolved = [u for u in unrs if u is not None]
+        idxs = align_links_to_files(
+            [(PurePosixPath(f.path).name, f.bytes) for f in selected],
+            [(PurePosixPath(u.filename).name, u.filesize) for u in resolved],
+        )
+        picked: list[tuple[RdTorrentFile, RdUnrestrictedLink]] = []
+        orphans = 0
+        for u, hit in zip(resolved, idxs, strict=True):
+            if hit is None:
+                orphans += 1
+                continue
+            f = selected[hit]
+            if (f.id in file_ids) if file_ids is not None else _keep_file(f.path):
+                picked.append((f, u))
+        if orphans:
+            logger.warning(f"{orphans} link(s) matched no selected file; dropped")
+        container, dests = structured_dests(
+            [f.path for f, _ in picked], dest_root, torrent.filename, pinned=folder, mode=mode)
+        for (f, unr), dest in zip(picked, dests, strict=True):
+            dl_plan.append((dest, unr.download, PurePosixPath(f.path).name))
     else:
-        container = folder or _container_for(dest_root, torrent.filename, mode)  # no file list: flat default
+        # No file list: resolve all links, keep audio+cover, flat by basename.
+        container = folder or _container_for(dest_root, torrent.filename, mode)
+        unrs = await _resolve_links(
+            client, list(torrent.links), sem=resolve_sem, cancel=cancel,
+            on_progress=_resolve_progress)
+        for unr in unrs:
+            if unr is None or not _keep_file(unr.filename):
+                continue
+            name = PurePosixPath(unr.filename).name
+            dl_plan.append((container / sanitize_name(name), unr.download, name))
+
     container.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=container)
 
@@ -320,90 +486,38 @@ async def download_torrent(
         """Stream one file; record the outcome. Returns False to stop the batch (cancel)."""
         part = dest.with_name(dest.name + ".part")
         if mode is AcquireMode.ADD and dest.exists():
-            result.files.append(
-                AcquiredFile(filename=display, path=dest, ok=True, skipped=True))
-            return True  # already present; keep it, don't re-fetch
+            result.files.append(AcquiredFile(filename=display, path=dest, ok=True, skipped=True))
+            return True
         if mode is AcquireMode.OVERWRITE:
             dest.unlink(missing_ok=True)
-            part.unlink(missing_ok=True)  # drop any stale partial so the re-fetch is clean
+            part.unlink(missing_ok=True)
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             await stream_download(url, dest, progress=byte_progress, cancel=cancel)
             result.files.append(AcquiredFile(filename=display, path=dest, ok=True))
         except DownloadCancelled:
             result.files.append(AcquiredFile(filename=display, path=None, ok=False, error="cancelled"))
-            return False  # stop the batch on cancel; the .part is retained for resume
+            return False
         except Exception as e:  # isolate a single failed download (BLE001 intentional)
             logger.warning(f"download failed for {display}: {e}")
             result.files.append(AcquiredFile(filename=display, path=None, ok=False, error=str(e)))
         return True
 
-    async def _unrestrict(link: str, label: str) -> RdUnrestrictedLink | None:
-        try:
-            return await client.unrestrict_link(link)
-        except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
-            logger.warning(f"unrestrict failed: {e}")
-            result.files.append(AcquiredFile(filename=label, path=None, ok=False, error=str(e)))
-            return None
+    # --- PHASE 2: download the picked files ---
+    total = len(dl_plan)
+    for idx, (dest, url, name) in enumerate(dl_plan, start=1):
+        if progress is not None:
+            progress("downloading", idx, total, name)
+        if not await _fetch(url, dest, name):
+            break
 
-    if pairs is not None:
-        total = len(pairs)
-        for idx, ((path, link), dest) in enumerate(zip(pairs, dests, strict=True), start=1):
-            unr = await _unrestrict(link, path)
-            if unr is None:
-                continue
-            if progress is not None:
-                progress(idx, total, PurePosixPath(path).name)
-            if not await _fetch(unr.download, dest, PurePosixPath(path).name):
-                break
-    elif selected:
-        # Count mismatch: iterate links, mapping each to its target's structured path by
-        # (basename, filesize) — filesize disambiguates a basename shared across subfolders.
-        links = list(torrent.links)
-        total = len(links)
-        for idx, link in enumerate(links, start=1):
-            unr = await _unrestrict(link, link)
-            if unr is None:
-                continue
-            name = PurePosixPath(unr.filename).name
-            if name not in target_names:
-                continue  # this link isn't one of the picked/target files
-            queue = dest_by_key.get((name, unr.filesize))
-            if queue:
-                dest = queue.popleft()  # next structured slot for this (name, size)
-            else:  # no size match (RD size differs, or all slots consumed): last-resort flat
-                logger.warning(f"no structured slot for {name!r} ({unr.filesize}B); writing flat")
-                dest = container / sanitize_name(name)
-            if progress is not None:
-                progress(idx, total, name)
-            if not await _fetch(unr.download, dest, name):
-                break
-    else:
-        # No file list at all: keep the audio+cover default, flat by basename.
-        links = list(torrent.links)
-        total = len(links)
-        for idx, link in enumerate(links, start=1):
-            unr = await _unrestrict(link, link)
-            if unr is None:
-                continue
-            if not _keep_file(unr.filename):
-                continue
-            if progress is not None:
-                progress(idx, total, unr.filename)
-            if not await _fetch(unr.download, container / sanitize_name(unr.filename), unr.filename):
-                break
     if not result.any_ok and len(torrent.links) == 1 and len(selected) > 1:
-        # Real-Debrid handed back a single link for a many-file torrent and it matched none
-        # of the picked files: RD is serving the whole torrent as one archive (its RAR quirk),
-        # so per-file picks can't be fulfilled. Say so plainly instead of a bare "failed".
         result.note = (
             f"Real-Debrid is serving this torrent as a single archive "
             f"({len(selected)} files bundled into one link), so individual files can't be "
             f"downloaded. Re-add it on Real-Debrid, or use a source that keeps files separate."
         )
     if not result.any_ok:
-        # Nothing landed; drop the staging dir if it is empty (leave it if .part
-        # remnants remain, so a retry/cleanup can still find them).
         try:
             container.rmdir()
         except OSError:
