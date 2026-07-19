@@ -109,11 +109,13 @@ from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
 from colophon.services.acquire import (
+    _RESOLVE_CONCURRENCY,
     AcquireCandidate,
     AcquireMode,
     AcquireResult,
     add_torrent,
     add_torrent_file,
+    download_target_count,
     download_torrent,
     list_candidates,
     sanitize_name,
@@ -243,11 +245,14 @@ class ProcessResult(_Base):
 class DownloadEntry(_Base):
     key: str
     name: str
-    status: str = "active"  # active / paused / done / failed
+    status: str = "queued"   # queued / active / paused / done / partial / failed
+    phase: str = ""          # while active: "resolving" | "downloading"
     detail: str = ""
     file_ids: list[int] | None = None  # chosen file subset (None = default audio+cover)
-    files_total: int = 0               # files in this download (for the queue count)
-    files_done: int = 0                # files completed so far
+    files_total: int = 0     # Y: picked-file target, set once (not overwritten)
+    files_done: int = 0      # files completed so far
+    links_total: int = 0     # N: links to resolve (resolve-phase denominator)
+    links_done: int = 0
 
 
 class EncodeJobOptions(_Base):
@@ -318,6 +323,7 @@ class AppController:
         self._downloads: dict[str, DownloadEntry] = {}
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
+        self._rd_resolve_sem = asyncio.Semaphore(_RESOLVE_CONCURRENCY)
         self.acquire_mode: AcquireMode = AcquireMode.INDEXED
         self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
         # Derived-view memos, valid while their input generations (books/aliases/graph) hold. Keyed
@@ -1183,7 +1189,7 @@ class AppController:
 
     def clear_finished_downloads(self) -> None:
         """Drop the done/failed entries (and their cancel tokens) from the registry."""
-        for key in [k for k, e in self._downloads.items() if e.status in ("done", "failed")]:
+        for key in [k for k, e in self._downloads.items() if e.status in ("done", "failed", "partial")]:
             self._downloads.pop(key, None)
             self._download_cancels.pop(key, None)
             self._download_folders.pop(key, None)
@@ -1217,17 +1223,18 @@ class AppController:
     async def _run_download(
         self, torrent_id: str, name: str,
         *, file_ids: list[int] | None = None,
-        progress: Callable[[int, int, str], None] | None = None,
+        progress: Callable[[str, int, int, str], None] | None = None,
         dest_dir: Path | None = None,
         mode: AcquireMode = AcquireMode.INDEXED,
     ) -> tuple[AcquireResult, list[str]]:
         """Download one torrent and ingest its folder, tracking progress/status in
         the registry. A pause leaves the entry 'paused' (its .part files retained
-        for resume); otherwise it ends 'done' or 'failed'. `file_ids` restricts the
-        download to a chosen file subset (stored on the entry so a resume re-applies
-        it); None keeps the default audio+cover set. `dest_dir` overrides the download
-        location (default: the configured downloads dir)."""
-        entry = DownloadEntry(key=torrent_id, name=name, status="active", file_ids=file_ids)
+        for resume); otherwise it ends 'done', 'partial', or 'failed'. `file_ids`
+        restricts the download to a chosen file subset (stored on the entry so a
+        resume re-applies it); None keeps the default audio+cover set. `dest_dir`
+        overrides the download location (default: the configured downloads dir)."""
+        entry = DownloadEntry(key=torrent_id, name=name, status="active", phase="resolving",
+                              file_ids=file_ids)
         self._downloads[torrent_id] = entry
         token = CancelToken()
         self._download_cancels[torrent_id] = token
@@ -1235,20 +1242,28 @@ class AppController:
         def _byte_progress(done: int, total: int) -> None:
             entry.detail = f"{done * 100 // total}%" if total else f"{done} bytes"
 
-        def _prog(idx: int, total: int, fname: str) -> None:
-            entry.files_done, entry.files_total = idx, total
+        def _prog(phase: str, done: int, total: int, fname: str) -> None:
+            entry.phase = phase
+            if phase == "resolving":
+                entry.links_done, entry.links_total = done, total
+            else:  # downloading
+                entry.files_done = done  # files_total is fixed below; don't overwrite
+                if fname:
+                    entry.detail = fname
             if progress is not None:
-                progress(idx, total, fname)
+                progress(phase, done, total, fname)
 
         client = self.rd_client()
         try:
             info = await client.torrent_info(torrent_id)
+            entry.files_total = download_target_count(
+                info, set(file_ids) if file_ids is not None else None)
             result = await download_torrent(
                 client, info, dest_dir or self._rd_download_dir(),
                 folder=self._download_folders.get(torrent_id),
                 file_ids=set(file_ids) if file_ids is not None else None,
                 progress=_prog, byte_progress=_byte_progress, cancel=token,
-                mode=mode,
+                mode=mode, resolve_sem=self._rd_resolve_sem,
             )
         finally:
             await client.aclose()
@@ -1264,7 +1279,17 @@ class AppController:
                 directory_scheme=self.ctx.config.directory_scheme,
             )
             book_ids = [b.id for b in books]
-        entry.status = "paused" if cancelled else ("done" if result.any_ok else "failed")
+        ok_count = sum(1 for f in result.files if f.ok)
+        if cancelled:
+            entry.status = "paused"
+        elif ok_count == 0:
+            entry.status = "failed"
+        elif ok_count < entry.files_total:
+            entry.status = "partial"
+        else:
+            entry.status = "done"
+        entry.phase = ""
+        entry.files_done = ok_count
         if not result.any_ok and result.note:
             entry.detail = result.note  # surface why nothing landed (e.g. a single-archive torrent)
         return result, book_ids
@@ -1272,7 +1297,7 @@ class AppController:
     async def rd_download(
         self, torrent_id: str, *, name: str | None = None,
         file_ids: list[int] | None = None,
-        progress: Callable[[int, int, str], None] | None = None,
+        progress: Callable[[str, int, int, str], None] | None = None,
         dest_dir: Path | None = None,
         mode: AcquireMode | None = None,
     ) -> tuple[AcquireResult, list[str]]:
@@ -1280,7 +1305,7 @@ class AppController:
         tracked in the registry. Returns the download result and the ids of any newly
         registered books. `name` is the display label for the Downloads section
         (defaults to the torrent id); `file_ids=None` keeps the default audio+cover
-        set; `progress(idx, total, filename)` is the existing per-file callback;
+        set; `progress(phase, done, total, filename)` is the per-file/resolve callback;
         `dest_dir` overrides the download location. `mode` overrides the session-sticky
         acquire mode for this download only; None falls back to `self.acquire_mode`."""
         return await self._run_download(
