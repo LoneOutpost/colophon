@@ -318,6 +318,23 @@ def align_links_to_files(
     return out
 
 
+def _all_picks_mapped(
+    selected: list[RdTorrentFile], file_ids: set[int],
+    resolved: list[RdUnrestrictedLink | None],
+) -> bool:
+    """True once every picked file id has been mapped by the links resolved so far. Used to
+    stop resolving early on a subset pick: aligns the resolved-so-far links to the selected
+    files and checks the picked ids are all covered (adding more links never changes an earlier
+    mapping, so a covered pick stays covered)."""
+    unrs = [u for u in resolved if u is not None]
+    idxs = align_links_to_files(
+        [(PurePosixPath(f.path).name, f.bytes) for f in selected],
+        [(PurePosixPath(u.filename).name, u.filesize) for u in unrs],
+    )
+    mapped = {selected[h].id for h in idxs if h is not None}
+    return file_ids.issubset(mapped)
+
+
 async def _resolve_links(
     client: RealDebridSource,
     links: list[str],
@@ -325,10 +342,14 @@ async def _resolve_links(
     sem: asyncio.Semaphore | None,
     cancel: CancelToken | None,
     on_progress: Callable[[int, int], None] | None = None,
+    early_stop: Callable[[list[RdUnrestrictedLink | None]], bool] | None = None,
 ) -> list[RdUnrestrictedLink | None]:
     """Unrestrict every link, preserving order (result[i] <-> links[i]); a failed or
-    cancelled link becomes None. `sem` bounds concurrency globally (falls back to a
-    local cap). `on_progress(done, total)` fires as each link settles."""
+    cancelled link becomes None. `sem` bounds concurrency globally (falls back to a local
+    cap). `on_progress(done, total)` fires as each link settles. When `early_stop` is given
+    (subset picks), bounded workers pull links in order and stop launching new ones once
+    `early_stop(results)` is true — so an early/clustered pick doesn't resolve the whole tail,
+    while still running concurrently (a late pick stays fast)."""
     gate = sem or asyncio.Semaphore(RESOLVE_CONCURRENCY)
     results: list[RdUnrestrictedLink | None] = [None] * len(links)
     total = len(links)
@@ -350,7 +371,27 @@ async def _resolve_links(
             if on_progress is not None:
                 on_progress(done, total)
 
-    await asyncio.gather(*(_one(i, link) for i, link in enumerate(links)))
+    if early_stop is None:
+        await asyncio.gather(*(_one(i, link) for i, link in enumerate(links)))
+        return results
+
+    # Subset early-stop: bounded workers pull indices in order; stop when picks are covered.
+    stop = asyncio.Event()
+    next_i = 0
+
+    async def _worker() -> None:
+        nonlocal next_i
+        while not stop.is_set():
+            i = next_i
+            if i >= total:
+                return
+            next_i += 1  # single-threaded: safe, no await between read and increment
+            await _one(i, links[i])
+            if early_stop(results):
+                stop.set()
+                return
+
+    await asyncio.gather(*(_worker() for _ in range(min(RESOLVE_CONCURRENCY, total))))
     return results
 
 
@@ -393,10 +434,15 @@ async def download_torrent(
         for (path, unr), dest in zip(kept, dests, strict=True):
             dl_plan.append((dest, unr.download, PurePosixPath(path).name))
     elif selected:
-        # Count mismatch: resolve all links, then map each to its file by ORDER.
+        # Count mismatch: resolve links, then map each to its file by ORDER. For a subset pick,
+        # stop resolving once all picked files are mapped (no need to resolve the whole tail).
+        def _early_stop(res: list[RdUnrestrictedLink | None]) -> bool:
+            return _all_picks_mapped(selected, file_ids, res)
+
         unrs = await _resolve_links(
             client, list(torrent.links), sem=resolve_sem, cancel=cancel,
-            on_progress=_resolve_progress)
+            on_progress=_resolve_progress,
+            early_stop=_early_stop if file_ids is not None else None)
         resolved = [u for u in unrs if u is not None]
         idxs = align_links_to_files(
             [(PurePosixPath(f.path).name, f.bytes) for f in selected],

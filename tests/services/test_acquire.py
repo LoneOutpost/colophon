@@ -914,3 +914,55 @@ async def test_download_reports_resolve_then_download_phases(tmp_path, monkeypat
     assert "resolving" in kinds and "downloading" in kinds
     assert kinds.index("resolving") < kinds.index("downloading")  # resolve reported first
     assert phases[-1][1] == phases[-1][2] == 2          # downloading ended 2/2 (Y = 2 picked)
+
+
+async def test_subset_pick_early_stops_resolving(tmp_path, monkeypatch):
+    # 100 selected files but only 99 links (mismatch forces the fallback). The user picks an
+    # EARLY file (id=3). Early-stop must resolve only a small prefix — nowhere near all 99 —
+    # while still placing the picked file. Concurrency is bounded, so a few extra links beyond
+    # the pick may resolve, but it must be far below the total.
+    files = [RdTorrentFile(id=i, path=f"/T/{i:03d}.mp3", bytes=i * 1000, selected=True)
+             for i in range(1, 101)]
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded",
+        links=[f"L{i}" for i in range(1, 100)], files=files)  # 99 links, 100 selected
+    unrestricted: list[str] = []
+
+    class Rd:
+        async def unrestrict_link(self, link):
+            unrestricted.append(link)
+            i = int(link[1:])
+            return RdUnrestrictedLink(filename=f"{i:03d}.mp3", filesize=i * 1000, download=f"http://d/{i}")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(Rd(), torrent, tmp_path, file_ids={3})
+    assert (result.folder / "003.mp3").exists()          # the picked file landed
+    assert len(unrestricted) < 30                          # stopped early (<< 99)
+
+
+async def test_download_all_still_resolves_every_link(tmp_path, monkeypatch):
+    # No file_ids => download-all => NO early stop; every link is resolved.
+    files = [RdTorrentFile(id=i, path=f"/T/{i:02d}.mp3", bytes=i * 1000, selected=True)
+             for i in range(1, 6)]
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded",
+        links=[f"L{i}" for i in range(1, 5)], files=files)  # 4 links, 5 selected
+    unrestricted: list[str] = []
+
+    class Rd:
+        async def unrestrict_link(self, link):
+            unrestricted.append(link)
+            i = int(link[1:])
+            return RdUnrestrictedLink(filename=f"{i:02d}.mp3", filesize=i * 1000, download=f"http://d/{i}")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    await download_torrent(Rd(), torrent, tmp_path, file_ids=None)
+    assert len(unrestricted) == 4  # all links resolved
