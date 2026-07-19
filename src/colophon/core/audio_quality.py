@@ -71,29 +71,33 @@ def _audio_with_quality(source_files: list[SourceFile]) -> list[SourceFile]:
     return [sf for sf in source_files if sf.bitrate > 0]
 
 
+def _is_uniform(known: list[SourceFile]) -> bool:
+    """True when every known-quality file shares one bitrate tier, codec, sample rate, and
+    channel count — i.e. they look like one edition. Assumes `known` is non-empty."""
+    first = known[0]
+    return all(
+        _bitrate_tier(sf.bitrate) == _bitrate_tier(first.bitrate)
+        and sf.codec == first.codec
+        and sf.sample_rate == first.sample_rate
+        and sf.channels == first.channels
+        for sf in known
+    )
+
+
 def mixed_quality_finding(source_files: list[SourceFile]) -> Finding | None:
     """WARN when a book's known-quality audio files disagree — spanning more than one bitrate
     tier, or differing in codec, sample rate, or channels. Files with unknown quality (bitrate 0,
     not yet re-scanned) are ignored so they never false-flag. Returns None when files agree or
     fewer than two carry known quality."""
     known = _audio_with_quality(source_files)
-    if len(known) < 2:
-        return None
-    first = known[0]
-    if all(
-        _bitrate_tier(sf.bitrate) == _bitrate_tier(first.bitrate)
-        and sf.codec == first.codec
-        and sf.sample_rate == first.sample_rate
-        and sf.channels == first.channels
-        for sf in known
-    ):
+    if len(known) < 2 or _is_uniform(known):
         return None
     codecs = sorted({sf.codec for sf in known if sf.codec})
     kbps = sorted({round(sf.bitrate / 1000) for sf in known})
     if len(codecs) > 1:
         detail = f"files mix formats ({' + '.join(codecs)})"
     else:
-        detail = f"files span {kbps[0]}-{kbps[-1]} kbps"
+        detail = f"files span {kbps[0]}–{kbps[-1]} kbps"  # en dash for the numeric range
     return Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN, detail=detail)
 
 
@@ -103,15 +107,8 @@ def book_quality_summary(source_files: list[SourceFile]) -> str | None:
     known = _audio_with_quality(source_files)
     if not known:
         return None
-    first = known[0]
-    uniform = all(
-        _bitrate_tier(sf.bitrate) == _bitrate_tier(first.bitrate)
-        and sf.codec == first.codec
-        and sf.sample_rate == first.sample_rate
-        and sf.channels == first.channels
-        for sf in known
-    )
-    if not uniform:
+    if not _is_uniform(known):
         return "Mixed quality"
+    first = known[0]
     kbps = round(first.bitrate / 1000)
     return f"{kbps} kbps {first.codec}".strip()
