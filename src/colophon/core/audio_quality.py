@@ -97,7 +97,7 @@ def mixed_quality_finding(source_files: list[SourceFile]) -> Finding | None:
     if len(codecs) > 1:
         detail = f"files mix formats ({' + '.join(codecs)})"
     else:
-        detail = f"files span {kbps[0]}–{kbps[-1]} kbps"  # en dash for the numeric range
+        detail = f"files span {kbps[0]}-{kbps[-1]} kbps"
     return Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN, detail=detail)
 
 
