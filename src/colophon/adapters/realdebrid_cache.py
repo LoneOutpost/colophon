@@ -53,7 +53,7 @@ class CachingRealDebridSource:
             cached = self.cache.get_link(link)
             if cached is not None:
                 return cached
-        unr = await self.inner.unrestrict_link(link)
+        unr = await self.inner.unrestrict_link(link, force=force)
         self.cache.put_link(link, unr)
         return unr
 
