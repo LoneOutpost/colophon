@@ -129,6 +129,19 @@ def test_ffprobe_skipped_for_zero_filled_file(tmp_path, monkeypatch):
     assert called["n"] == 0  # ffprobe was gated out
 
 
+def test_read_audio_metadata_captures_quality(make_audio):
+    from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+    clear_audio_metadata_cache()
+    path = make_audio("q.mp3", seconds=1)  # ffmpeg: 22050 Hz mono mp3
+    sf, _ = read_audio_metadata(path)
+    assert sf.sample_rate == 22050
+    assert sf.channels == 1
+    assert sf.codec == "MP3"
+    assert sf.bitrate > 0
+    clear_audio_metadata_cache()
+
+
 def test_ffprobe_still_runs_for_a_file_with_data(tmp_path, monkeypatch):
     # A file with real bytes that mutagen can't sync still gets the ffprobe fallback.
     from colophon.adapters import audio as audio_mod

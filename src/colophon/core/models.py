@@ -135,6 +135,10 @@ class SourceFile(_Base):
     size: int
     duration_seconds: float
     ext: str
+    bitrate: int = 0       # bits per second (0 = unknown)
+    sample_rate: int = 0   # Hz (0 = unknown)
+    channels: int = 0      # 1 mono, 2 stereo, ... (0 = unknown)
+    codec: str = ""        # friendly format label (MP3 / M4B / AAC / FLAC / Opus / OGG); "" = unknown
 
 
 class Chapter(_Base):
