@@ -43,7 +43,7 @@ def download_row_text(e) -> str:
         return "Queued"
     if e.status == "partial":
         failed = max(0, e.files_total - e.files_done)
-        return f"Partial — {e.files_done} of {e.files_total} ({failed} failed)"
+        return f"Partial: {e.files_done} of {e.files_total} ({failed} failed)"
     return e.status  # done / failed / paused
 
 
@@ -51,7 +51,7 @@ def downloads_title_text(entries) -> str:
     """Footer title: count files still to download across active downloads."""
     remaining = sum(max(0, e.files_total - e.files_done)
                     for e in entries if e.status == "active" and e.phase == "downloading")
-    return f"Downloads — {remaining} file(s) downloading" if remaining else "Downloads"
+    return f"Downloads: {remaining} file(s) downloading" if remaining else "Downloads"
 
 
 def _fmt_size(num_bytes: int) -> str:

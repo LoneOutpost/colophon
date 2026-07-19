@@ -21,7 +21,7 @@ def test_row_text_queued():
 
 def test_row_text_partial():
     e = DownloadEntry(key="k", name="Book", status="partial", files_done=3, files_total=4)
-    assert download_row_text(e) == "Partial — 3 of 4 (1 failed)"
+    assert download_row_text(e) == "Partial: 3 of 4 (1 failed)"
 
 
 def test_title_counts_active_downloading_files_remaining():
@@ -30,7 +30,7 @@ def test_title_counts_active_downloading_files_remaining():
                       files_done=1, files_total=4),
         DownloadEntry(key="b", name="B", status="queued", files_total=2),  # queued not counted
     ]
-    assert downloads_title_text(entries) == "Downloads — 3 file(s) downloading"
+    assert downloads_title_text(entries) == "Downloads: 3 file(s) downloading"
 
 
 def test_title_idle_when_no_active_downloading():
