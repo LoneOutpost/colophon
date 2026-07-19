@@ -41,3 +41,51 @@ async def test_rd_refresh_cache_forces_refetch(tmp_path, monkeypatch):
     assert calls["info"] == 1
     assert ctx.rd_cache.get_torrent_info("t1") is not None  # repopulated
     ctx.close()
+
+
+async def test_second_download_of_same_torrent_makes_zero_new_api_calls(tmp_path, monkeypatch):
+    # The whole point of the cache: pick a torrent's files once, and a later download of the
+    # same torrent resolves entirely from cache (no repeat /unrestrict/link calls to RD).
+    from pathlib import Path
+
+    from colophon.adapters.realdebrid import RdTorrentFile, RdTorrentInfo, RdUnrestrictedLink
+    from colophon.adapters.realdebrid_cache import CachingRealDebridSource
+    from colophon.adapters.repository import RdCacheRepo, connect, migrate
+    from colophon.services.acquire import download_torrent
+
+    conn = connect(tmp_path / "db.sqlite")
+    migrate(conn)
+    cache = RdCacheRepo(conn)
+    torrent = RdTorrentInfo(
+        id="t1", filename="Bk", status="downloaded", links=["L1", "L2"],
+        files=[RdTorrentFile(id=1, path="/Bk/01.mp3", bytes=10, selected=True),
+               RdTorrentFile(id=2, path="/Bk/02.mp3", bytes=20, selected=True)])
+
+    class Inner:
+        def __init__(self):
+            self.unrestrict_calls = 0
+
+        async def unrestrict_link(self, link, *, force=False):
+            self.unrestrict_calls += 1
+            i = link[-1]
+            return RdUnrestrictedLink(filename=f"0{i}.mp3", filesize=int(i) * 10, download=f"http://d/{link}")
+
+        async def aclose(self):
+            pass
+
+    inner = Inner()
+    client = CachingRealDebridSource(inner, cache)
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+
+    r1 = await download_torrent(client, torrent, tmp_path / "a")
+    assert sum(1 for f in r1.files if f.ok) == 2
+    assert inner.unrestrict_calls == 2          # first run resolves both links live
+
+    r2 = await download_torrent(client, torrent, tmp_path / "b")
+    assert sum(1 for f in r2.files if f.ok) == 2
+    assert inner.unrestrict_calls == 2          # second run: ZERO new API calls (all cache hits)
