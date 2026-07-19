@@ -1,7 +1,12 @@
 from pathlib import Path
 
-from colophon.core.audio_quality import book_quality_summary, codec_label, format_file_quality
-from colophon.core.models import SourceFile
+from colophon.core.audio_quality import (
+    book_quality_summary,
+    codec_label,
+    format_file_quality,
+    mixed_quality_finding,
+)
+from colophon.core.models import FindingCode, FindingSeverity, SourceFile
 
 
 def test_codec_label_maps_common_extensions():
@@ -48,3 +53,26 @@ def test_book_quality_summary_uniform_and_mixed_and_none():
              _sf("2.mp3", bitrate=128000, sample_rate=44100, channels=2, codec="MP3")]
     assert book_quality_summary(mixed) == "Mixed quality"
     assert book_quality_summary([_sf("1.mp3")]) is None  # no known quality
+
+
+def test_mixed_quality_finding_flags_a_bitrate_gap():
+    files = [_sf("1.mp3", bitrate=64000, sample_rate=44100, channels=2, codec="MP3"),
+             _sf("2.mp3", bitrate=128000, sample_rate=44100, channels=2, codec="MP3")]
+    f = mixed_quality_finding(files)
+    assert f is not None and f.code == FindingCode.MIXED_QUALITY
+    assert f.severity == FindingSeverity.WARN
+
+
+def test_mixed_quality_finding_tolerates_vbr_jitter_within_a_tier():
+    files = [_sf("1.mp3", bitrate=125000, sample_rate=44100, channels=2, codec="MP3"),
+             _sf("2.mp3", bitrate=130000, sample_rate=44100, channels=2, codec="MP3")]
+    assert mixed_quality_finding(files) is None
+
+
+def test_mixed_quality_finding_flags_format_mix_and_ignores_unknown():
+    files = [_sf("1.mp3", bitrate=128000, sample_rate=44100, channels=2, codec="MP3"),
+             _sf("2.m4b", bitrate=128000, sample_rate=44100, channels=2, codec="M4B")]
+    assert mixed_quality_finding(files) is not None
+    # a single known file + an unknown one does not flag
+    assert mixed_quality_finding([_sf("1.mp3", bitrate=128000, codec="MP3", sample_rate=44100, channels=2),
+                                  _sf("2.mp3")]) is None

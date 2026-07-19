@@ -83,6 +83,7 @@ class FindingCode(StrEnum):
     DUP_EDITION = "dup_edition"
     STRUCTURE_UNCLEAR = "structure_unclear"
     EMPTY_AUDIO = "empty_audio"  # a file with real size but no readable audio (corrupt/incomplete)
+    MIXED_QUALITY = "mixed_quality"  # a book's audio files disagree in bitrate/format (possible mis-grouping)
 
 
 # Findings whose remedy is fostering the folder into one subfolder per work.

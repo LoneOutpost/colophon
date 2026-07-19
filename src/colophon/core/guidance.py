@@ -49,6 +49,12 @@ _UNCLEAR = Guidance(
     "The folder layout could not be worked out. Check it manually, then dismiss this note.",
     (FixAction.ACKNOWLEDGE,),
 )
+_MIXED_QUALITY = Guidance(
+    "This book's files vary in audio quality (bitrate or format), which can mean two different "
+    "editions were grouped as one. Check the Files list, split it if these are separate editions, "
+    "or dismiss this note if the mix is intentional.",
+    (FixAction.FILES, FixAction.ACKNOWLEDGE),
+)
 
 _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.EMPTY_AUDIO: _CORRUPT,
@@ -59,6 +65,7 @@ _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.DUP_FORMAT: _DUP,
     FindingCode.DUP_EDITION: _DUP,
     FindingCode.STRUCTURE_UNCLEAR: _UNCLEAR,
+    FindingCode.MIXED_QUALITY: _MIXED_QUALITY,
 }
 
 

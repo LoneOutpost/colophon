@@ -4,7 +4,7 @@ readout, a per-book summary, and the mixed-quality finding. No I/O — callers p
 
 from __future__ import annotations
 
-from colophon.core.models import SourceFile
+from colophon.core.models import Finding, FindingCode, FindingSeverity, SourceFile
 
 # Friendly container/format labels by bare (lowercased, dotless) extension.
 _CODEC_LABELS = {
@@ -69,6 +69,32 @@ def format_file_quality(sf: SourceFile) -> str:
 def _audio_with_quality(source_files: list[SourceFile]) -> list[SourceFile]:
     """The source files that carry a known bitrate (0 = unknown / not yet re-scanned)."""
     return [sf for sf in source_files if sf.bitrate > 0]
+
+
+def mixed_quality_finding(source_files: list[SourceFile]) -> Finding | None:
+    """WARN when a book's known-quality audio files disagree — spanning more than one bitrate
+    tier, or differing in codec, sample rate, or channels. Files with unknown quality (bitrate 0,
+    not yet re-scanned) are ignored so they never false-flag. Returns None when files agree or
+    fewer than two carry known quality."""
+    known = _audio_with_quality(source_files)
+    if len(known) < 2:
+        return None
+    first = known[0]
+    if all(
+        _bitrate_tier(sf.bitrate) == _bitrate_tier(first.bitrate)
+        and sf.codec == first.codec
+        and sf.sample_rate == first.sample_rate
+        and sf.channels == first.channels
+        for sf in known
+    ):
+        return None
+    codecs = sorted({sf.codec for sf in known if sf.codec})
+    kbps = sorted({round(sf.bitrate / 1000) for sf in known})
+    if len(codecs) > 1:
+        detail = f"files mix formats ({' + '.join(codecs)})"
+    else:
+        detail = f"files span {kbps[0]}-{kbps[-1]} kbps"
+    return Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN, detail=detail)
 
 
 def book_quality_summary(source_files: list[SourceFile]) -> str | None:
