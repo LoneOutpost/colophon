@@ -7,6 +7,7 @@ In-progress torrents are never cached (their file lists still change)."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from colophon.adapters.realdebrid import (
@@ -17,6 +18,8 @@ from colophon.adapters.realdebrid import (
     RealDebridSource,
 )
 from colophon.adapters.repository import RdCacheRepo
+
+logger = logging.getLogger(__name__)
 
 # Statuses whose file list + links are final, so their torrent_info is safe to cache.
 _READY_STATUSES = frozenset({"downloaded", "uploading"})
@@ -67,3 +70,5 @@ class CachingRealDebridSource:
         aclose = getattr(self.inner, "aclose", None)
         if aclose is not None:
             await aclose()
+        else:
+            logger.debug("inner RD source has no aclose(); nothing to close")

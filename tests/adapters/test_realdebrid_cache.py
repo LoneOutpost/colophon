@@ -76,3 +76,21 @@ async def test_list_torrents_evicts_removed(tmp_path):
     inner.torrents = [RdTorrent(id="t2", filename="t2", status="downloaded")]  # t1 gone from RD
     await src.list_torrents()
     assert cache.get_torrent_info("t1") is None         # pruned
+
+
+async def test_force_recaches_torrent_info(tmp_path):
+    inner = FakeInner()
+    cache = _cache(tmp_path)
+    src = CachingRealDebridSource(inner, cache)
+    await src.torrent_info("t1")
+    cache.evict_torrent("t1")                       # cache emptied out-of-band
+    await src.torrent_info("t1", force=True)         # force fetch must re-populate
+    assert cache.get_torrent_info("t1") is not None
+
+
+async def test_unrestrict_force_bypasses_and_recaches(tmp_path):
+    inner = FakeInner()
+    src = CachingRealDebridSource(inner, _cache(tmp_path))
+    await src.unrestrict_link("L1")
+    await src.unrestrict_link("L1", force=True)       # force must bypass the cache read
+    assert inner.unrestrict_calls == 2
