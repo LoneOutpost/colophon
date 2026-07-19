@@ -1186,11 +1186,11 @@ class AppController:
             await client.aclose()
 
     def active_downloads(self) -> list[DownloadEntry]:
-        """Every tracked download (active / paused / done / failed)."""
+        """Every tracked download (queued / active / paused / done / partial / failed)."""
         return list(self._downloads.values())
 
     def clear_finished_downloads(self) -> None:
-        """Drop the done/failed entries (and their cancel tokens) from the registry."""
+        """Drop the finished (done / failed / partial) entries and their cancel tokens."""
         for key in [k for k, e in self._downloads.items() if e.status in ("done", "failed", "partial")]:
             self._downloads.pop(key, None)
             self._download_cancels.pop(key, None)
