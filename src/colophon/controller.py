@@ -324,6 +324,8 @@ class AppController:
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
         self._rd_resolve_sem = asyncio.Semaphore(RESOLVE_CONCURRENCY)
+        self._rd_download_sem = asyncio.Semaphore(
+            max(1, self.ctx.config.real_debrid_max_concurrent_downloads))
         self.acquire_mode: AcquireMode = AcquireMode.INDEXED
         self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
         # Derived-view memos, valid while their input generations (books/aliases/graph) hold. Keyed
@@ -1227,18 +1229,34 @@ class AppController:
         dest_dir: Path | None = None,
         mode: AcquireMode = AcquireMode.INDEXED,
     ) -> tuple[AcquireResult, list[str]]:
-        """Download one torrent and ingest its folder, tracking progress/status in
-        the registry. A pause leaves the entry 'paused' (its .part files retained
-        for resume); otherwise it ends 'done', 'partial', or 'failed'. `file_ids`
-        restricts the download to a chosen file subset (stored on the entry so a
-        resume re-applies it); None keeps the default audio+cover set. `dest_dir`
-        overrides the download location (default: the configured downloads dir)."""
-        entry = DownloadEntry(key=torrent_id, name=name, status="active", phase="resolving",
-                              file_ids=file_ids)
+        """Download one torrent and ingest its folder, tracking progress/status in the
+        registry. The entry is registered as 'queued' and starts 'active' once a
+        download slot frees (at most `real_debrid_max_concurrent_downloads` run at once).
+        A pause leaves it 'paused' (its .part files retained for resume); otherwise it
+        ends 'done', 'partial', or 'failed'. `file_ids` restricts to a chosen subset
+        (stored so a resume re-applies it); `dest_dir` overrides the download location."""
+        entry = DownloadEntry(key=torrent_id, name=name, status="queued", file_ids=file_ids)
         self._downloads[torrent_id] = entry
         token = CancelToken()
         self._download_cancels[torrent_id] = token
+        async with self._rd_download_sem:
+            if token.cancelled:  # cancelled while waiting in the queue
+                entry.status = "paused"
+                return AcquireResult(folder=dest_dir or self._rd_download_dir()), []
+            entry.status, entry.phase = "active", "resolving"
+            return await self._run_download_active(
+                entry, torrent_id, token, file_ids=file_ids, progress=progress,
+                dest_dir=dest_dir, mode=mode)
 
+    async def _run_download_active(
+        self, entry: DownloadEntry, torrent_id: str, token: CancelToken,
+        *, file_ids: list[int] | None,
+        progress: Callable[[str, int, int, str], None] | None,
+        dest_dir: Path | None,
+        mode: AcquireMode,
+    ) -> tuple[AcquireResult, list[str]]:
+        """Run one download that has acquired a slot: resolve + stream, ingest, and set
+        the terminal status. Assumes `entry`/`token` are already registered."""
         def _byte_progress(done: int, total: int) -> None:
             entry.detail = f"{done * 100 // total}%" if total else f"{done} bytes"
 
