@@ -1188,6 +1188,21 @@ class AppController:
         finally:
             await client.aclose()
 
+    async def rd_refresh_cache(self) -> None:
+        """Force-rescan Real-Debrid, repopulating the cache: a fresh torrent list (which
+        prunes removed torrents) plus a forced torrent_info for every ready torrent."""
+        client = self.rd_client()
+        try:
+            torrents = await client.list_torrents()
+            for t in torrents:
+                if t.status in ("downloaded", "uploading"):  # only ready torrents are cacheable
+                    try:
+                        await client.torrent_info(t.id, force=True)
+                    except Exception as e:  # one torrent failing must not abort the refresh (BLE001 intentional)
+                        logger.warning(f"refresh: torrent_info failed for {t.id}: {e}")
+        finally:
+            await client.aclose()
+
     def active_downloads(self) -> list[DownloadEntry]:
         """Every tracked download (queued / active / paused / done / partial / failed)."""
         return list(self._downloads.values())

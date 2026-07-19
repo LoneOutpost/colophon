@@ -43,7 +43,7 @@ class CachingRealDebridSource:
             cached = self.cache.get_torrent_info(torrent_id)
             if cached is not None:
                 return cached
-        info = await self.inner.torrent_info(torrent_id)
+        info = await self.inner.torrent_info(torrent_id, force=force)
         if info.status in _READY_STATUSES:
             self.cache.put_torrent_info(info)
         return info
