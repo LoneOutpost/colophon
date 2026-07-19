@@ -17,7 +17,8 @@ from colophon.adapters.downloader import (
     DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
 )
 from colophon.adapters.lazylibrarian import PathPatterns, read_audiobook_patterns
-from colophon.adapters.realdebrid import RdUser, RealDebridClient
+from colophon.adapters.realdebrid import RdUser, RealDebridClient, RealDebridSource
+from colophon.adapters.realdebrid_cache import CachingRealDebridSource
 from colophon.adapters.tags import read_embedded_tags
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
@@ -1140,11 +1141,13 @@ class AppController:
     def rd_configured(self) -> bool:
         return bool(self.ctx.config.real_debrid_token)
 
-    def rd_client(self) -> RealDebridClient:
+    def rd_client(self) -> RealDebridSource:
+        """The Real-Debrid source used for acquisition: the live client wrapped in the
+        persistent cache, so repeat picks and page loads reuse prior responses."""
         token = self.ctx.config.real_debrid_token
         if not token:
             raise ValueError("no Real-Debrid token configured")
-        return RealDebridClient(token)
+        return CachingRealDebridSource(RealDebridClient(token), self.ctx.rd_cache)
 
     def _rd_download_dir(self) -> Path:
         return self.ctx.config.real_debrid_download_dir or (default_db_path().parent / "downloads")
@@ -1182,6 +1185,21 @@ class AppController:
         client = self.rd_client()
         try:
             return await add_torrent_file(client, content, audio_only=audio_only)
+        finally:
+            await client.aclose()
+
+    async def rd_refresh_cache(self) -> None:
+        """Force-rescan Real-Debrid, repopulating the cache: a fresh torrent list (which
+        prunes removed torrents) plus a forced torrent_info for every ready torrent."""
+        client = self.rd_client()
+        try:
+            torrents = await client.list_torrents()
+            for t in torrents:
+                if t.status in ("downloaded", "uploading"):  # only ready torrents are cacheable
+                    try:
+                        await client.torrent_info(t.id, force=True)
+                    except Exception as e:  # one torrent failing must not abort the refresh (BLE001 intentional)
+                        logger.warning(f"refresh: torrent_info failed for {t.id}: {e}")
         finally:
             await client.aclose()
 

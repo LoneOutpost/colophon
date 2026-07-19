@@ -51,3 +51,17 @@ async def test_unrestrict_exhausts_retries_then_raises():
         await client.unrestrict_link("L1")
     assert ei.value.status_code == 503
     assert calls["n"] == 5  # stop_after_attempt(5): 5 tries then reraise
+
+
+async def test_torrent_info_and_unrestrict_accept_force_kwarg():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "unrestrict" in str(request.url):
+            return httpx.Response(200, json={"filename": "a.mp3", "filesize": 5, "download": "http://d/a"})
+        return httpx.Response(200, json={"id": "t1", "filename": "Bk", "status": "downloaded",
+                                         "links": [], "files": []})
+
+    client = _client(handler)
+    info = await client.torrent_info("t1", force=True)
+    assert info.id == "t1"
+    unr = await client.unrestrict_link("L1", force=True)
+    assert unr.filename == "a.mp3"

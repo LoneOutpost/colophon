@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from colophon.adapters.realdebrid import RdTorrentInfo, RdUnrestrictedLink
 from colophon.core.graph_records import EdgeRecord, NodeRecord
 from colophon.core.models import BookState, BookUnit, EditChange, NodeOverride, OperationRecord
 
@@ -576,6 +577,72 @@ class GraphStore:
             for r in edge_rows
         ]
         return nodes, edges
+
+
+@dataclass
+class RdCacheRepo:
+    """Persisted Real-Debrid responses: completed-torrent info and per-link unrestrict
+    results, so repeat picks and Acquire page loads don't re-hit the API. Freshness is
+    lazy — a value is refetched only on an explicit force or when a download fails and
+    re-resolves the one link. Link rows carry no torrent id; a torrent's links are read
+    from its own cached `links[]` at eviction time."""
+
+    conn: sqlite3.Connection
+
+    def get_torrent_info(self, tid: str) -> RdTorrentInfo | None:
+        row = self.conn.execute(
+            "SELECT info_json FROM rd_torrent_cache WHERE torrent_id = ?", (tid,)
+        ).fetchone()
+        return RdTorrentInfo.model_validate_json(row["info_json"]) if row else None
+
+    def put_torrent_info(self, info: RdTorrentInfo) -> None:
+        self.conn.execute(
+            "INSERT INTO rd_torrent_cache (torrent_id, filename, status, bytes, info_json, cached_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(torrent_id) DO UPDATE SET filename=excluded.filename, "
+            "status=excluded.status, bytes=excluded.bytes, info_json=excluded.info_json, "
+            "cached_at=excluded.cached_at",
+            (info.id, info.filename, info.status, info.bytes,
+             info.model_dump_json(), datetime.now(UTC).isoformat()),
+        )
+        self.conn.commit()
+
+    def get_link(self, link: str) -> RdUnrestrictedLink | None:
+        row = self.conn.execute(
+            "SELECT filename, filesize, mime_type, download_url FROM rd_link_cache WHERE link = ?",
+            (link,),
+        ).fetchone()
+        if row is None:
+            return None
+        return RdUnrestrictedLink(
+            filename=row["filename"], filesize=row["filesize"],
+            mime_type=row["mime_type"], download=row["download_url"])
+
+    def put_link(self, link: str, unr: RdUnrestrictedLink) -> None:
+        self.conn.execute(
+            "INSERT INTO rd_link_cache (link, filename, filesize, mime_type, download_url, cached_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(link) DO UPDATE SET filename=excluded.filename, filesize=excluded.filesize, "
+            "mime_type=excluded.mime_type, download_url=excluded.download_url, cached_at=excluded.cached_at",
+            (link, unr.filename, unr.filesize, unr.mime_type, unr.download,
+             datetime.now(UTC).isoformat()),
+        )
+        self.conn.commit()
+
+    def evict_torrent(self, tid: str) -> None:
+        info = self.get_torrent_info(tid)
+        if info is not None and info.links:
+            placeholders = ",".join("?" for _ in info.links)
+            self.conn.execute(
+                f"DELETE FROM rd_link_cache WHERE link IN ({placeholders})", tuple(info.links))
+        self.conn.execute("DELETE FROM rd_torrent_cache WHERE torrent_id = ?", (tid,))
+        self.conn.commit()
+
+    def evict_torrents(self, keep_ids: set[str]) -> None:
+        rows = self.conn.execute("SELECT torrent_id FROM rd_torrent_cache").fetchall()
+        for r in rows:
+            if r["torrent_id"] not in keep_ids:
+                self.evict_torrent(r["torrent_id"])
 
 
 def save_graph(store: GraphStore, graph: LibraryGraph) -> None:

@@ -30,7 +30,7 @@ class FakeRd:
     async def torrent_info(self, torrent_id):
         return self._infos[torrent_id]
 
-    async def unrestrict_link(self, link):
+    async def unrestrict_link(self, link, *, force: bool = False):
         return self._links[link]
 
 
@@ -822,6 +822,56 @@ def test_align_position_when_size_unusable():
     files = [("01.mp3", 100), ("01.mp3", 900)]
     links = [("01.mp3", 0)]
     assert align_links_to_files(files, links) == [0]
+
+
+async def test_download_self_heals_stale_link(tmp_path, monkeypatch):
+    # The cached URL's stream fails; the file self-heals by re-unrestricting (force=True)
+    # and streaming the fresh URL.
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1"],
+        files=[RdTorrentFile(id=1, path="/T/01.mp3", bytes=10, selected=True)])
+
+    class Rd:
+        def __init__(self):
+            self.forced = []
+
+        async def unrestrict_link(self, link, *, force=False):
+            if force:
+                self.forced.append(link)
+                return RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://fresh/1")
+            return RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://stale/1")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        if "stale" in url:
+            raise RuntimeError("410 gone")
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    rd = Rd()
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(rd, torrent, tmp_path)
+    assert rd.forced == ["L1"]                                  # re-unrestricted fresh
+    assert sum(1 for f in result.files if f.ok) == 1            # landed after self-heal
+    assert (result.folder / "01.mp3").exists()
+
+
+async def test_download_records_failure_when_self_heal_also_fails(tmp_path, monkeypatch):
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1"],
+        files=[RdTorrentFile(id=1, path="/T/01.mp3", bytes=10, selected=True)])
+
+    class Rd:
+        async def unrestrict_link(self, link, *, force=False):
+            return RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://x/1")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        raise RuntimeError("boom")  # both attempts fail
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(Rd(), torrent, tmp_path)
+    assert result.any_ok is False
+    bad = [f for f in result.files if not f.ok]
+    assert len(bad) == 1 and "boom" in (bad[0].error or "")
 
 
 def test_align_exact_still_preferred_over_closer_position():
