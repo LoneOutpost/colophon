@@ -425,18 +425,19 @@ async def download_torrent(
         if progress is not None:
             progress("resolving", done, total, "")
 
-    # --- PHASE 1: resolve links, recover (dest, url, name) to download ---
-    dl_plan: list[tuple[Path, str, str]] = []
+    # --- PHASE 1: resolve links, recover (dest, link, url, name) to download ---
+    dl_plan: list[tuple[Path, str, str, str]] = []
     if pairs is not None:
         # RD contract held: links[i] <-> selected[i]. Resolve in order, map by index.
         unrs = await _resolve_links(
             client, [link for _, link in pairs], sem=resolve_sem, cancel=cancel,
             on_progress=_resolve_progress)
-        kept = [(path, unr) for (path, _), unr in zip(pairs, unrs, strict=True) if unr is not None]
+        kept = [(path, link, unr)
+                for (path, link), unr in zip(pairs, unrs, strict=True) if unr is not None]
         container, dests = structured_dests(
-            [p for p, _ in kept], dest_root, torrent.filename, pinned=folder, mode=mode)
-        for (path, unr), dest in zip(kept, dests, strict=True):
-            dl_plan.append((dest, unr.download, PurePosixPath(path).name))
+            [p for p, _, _ in kept], dest_root, torrent.filename, pinned=folder, mode=mode)
+        for (path, link, unr), dest in zip(kept, dests, strict=True):
+            dl_plan.append((dest, link, unr.download, PurePosixPath(path).name))
     elif selected:
         # Count mismatch: resolve links, then map each to its file by ORDER. For a subset pick,
         # stop resolving once all picked files are mapped (no need to resolve the whole tail).
@@ -447,43 +448,45 @@ async def download_torrent(
             client, list(torrent.links), sem=resolve_sem, cancel=cancel,
             on_progress=_resolve_progress,
             early_stop=_early_stop if file_ids is not None else None)
-        resolved = [u for u in unrs if u is not None]
+        resolved_pairs = [(lnk, u) for lnk, u in zip(torrent.links, unrs, strict=True) if u is not None]
+        resolved = [u for _, u in resolved_pairs]
         idxs = align_links_to_files(
             [(PurePosixPath(f.path).name, f.bytes) for f in selected],
             [(PurePosixPath(u.filename).name, u.filesize) for u in resolved],
         )
-        picked: list[tuple[RdTorrentFile, RdUnrestrictedLink]] = []
+        picked: list[tuple[RdTorrentFile, str, RdUnrestrictedLink]] = []
         orphans = 0
-        for u, hit in zip(resolved, idxs, strict=True):
+        for (lnk, u), hit in zip(resolved_pairs, idxs, strict=True):
             if hit is None:
                 orphans += 1
                 continue
             f = selected[hit]
             if (f.id in file_ids) if file_ids is not None else _keep_file(f.path):
-                picked.append((f, u))
+                picked.append((f, lnk, u))
         if orphans:
             logger.warning(f"{orphans} link(s) matched no selected file; dropped")
         container, dests = structured_dests(
-            [f.path for f, _ in picked], dest_root, torrent.filename, pinned=folder, mode=mode)
-        for (f, unr), dest in zip(picked, dests, strict=True):
-            dl_plan.append((dest, unr.download, PurePosixPath(f.path).name))
+            [f.path for f, _, _ in picked], dest_root, torrent.filename, pinned=folder, mode=mode)
+        for (f, lnk, unr), dest in zip(picked, dests, strict=True):
+            dl_plan.append((dest, lnk, unr.download, PurePosixPath(f.path).name))
     else:
         # No file list: resolve all links, keep audio+cover, flat by basename.
         container = folder or _container_for(dest_root, torrent.filename, mode)
         unrs = await _resolve_links(
             client, list(torrent.links), sem=resolve_sem, cancel=cancel,
             on_progress=_resolve_progress)
-        for unr in unrs:
+        for i, unr in enumerate(unrs):
             if unr is None or not _keep_file(unr.filename):
                 continue
             name = PurePosixPath(unr.filename).name
-            dl_plan.append((container / sanitize_name(name), unr.download, name))
+            dl_plan.append((container / sanitize_name(name), torrent.links[i], unr.download, name))
 
     container.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=container)
 
-    async def _fetch(url: str, dest: Path, display: str) -> bool:
-        """Stream one file; record the outcome. Returns False to stop the batch (cancel)."""
+    async def _fetch(link: str, url: str, dest: Path, display: str) -> bool:
+        """Stream one file; on failure, re-resolve the (possibly stale) link fresh and retry
+        once. Returns False to stop the batch (cancel)."""
         part = dest.with_name(dest.name + ".part")
         if mode is AcquireMode.ADD and dest.exists():
             result.files.append(AcquiredFile(filename=display, path=dest, ok=True, skipped=True))
@@ -495,20 +498,31 @@ async def download_torrent(
             dest.parent.mkdir(parents=True, exist_ok=True)
             await stream_download(url, dest, progress=byte_progress, cancel=cancel)
             result.files.append(AcquiredFile(filename=display, path=dest, ok=True))
+            return True
         except DownloadCancelled:
             result.files.append(AcquiredFile(filename=display, path=None, ok=False, error="cancelled"))
             return False
-        except Exception as e:  # isolate a single failed download (BLE001 intentional)
-            logger.warning(f"download failed for {display}: {e}")
+        except Exception as e:  # cached URL may be stale — re-resolve fresh and retry once (BLE001 intentional)
+            logger.warning(f"download failed for {display}: {e}; re-resolving link")
+        part.unlink(missing_ok=True)  # fresh URL is a different endpoint; drop the stale partial
+        try:
+            fresh = await client.unrestrict_link(link, force=True)
+            await stream_download(fresh.download, dest, progress=byte_progress, cancel=cancel)
+            result.files.append(AcquiredFile(filename=display, path=dest, ok=True))
+        except DownloadCancelled:
+            result.files.append(AcquiredFile(filename=display, path=None, ok=False, error="cancelled"))
+            return False
+        except Exception as e:  # give up on this file (BLE001 intentional)
+            logger.warning(f"download failed for {display} after refresh: {e}")
             result.files.append(AcquiredFile(filename=display, path=None, ok=False, error=str(e)))
         return True
 
     # --- PHASE 2: download the picked files ---
     total = len(dl_plan)
-    for idx, (dest, url, name) in enumerate(dl_plan, start=1):
+    for idx, (dest, link, url, name) in enumerate(dl_plan, start=1):
         if progress is not None:
             progress("downloading", idx, total, name)
-        if not await _fetch(url, dest, name):
+        if not await _fetch(link, url, dest, name):
             break
 
     if not result.any_ok and len(torrent.links) == 1 and len(selected) > 1:
