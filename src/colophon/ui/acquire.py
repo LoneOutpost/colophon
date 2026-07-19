@@ -434,7 +434,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         _render_list()
 
     async def _refresh_from_rd() -> None:
-        refresh_btn.props("loading")
+        refresh_btn.props("loading=true")
         try:
             await controller.rd_refresh_cache()
             await _load()
