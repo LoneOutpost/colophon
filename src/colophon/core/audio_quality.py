@@ -36,7 +36,9 @@ _BITRATE_TIERS = (64, 96, 128, 192, 256)
 
 def _bitrate_tier(bitrate: int) -> int:
     """The tier index for a bitrate in bits/s; files in the same tier count as equal quality.
-    Snaps to the nearest 8 kbps first so VBR jitter (e.g. 125-130 kbps) lands in the same tier."""
+    Snaps to the nearest 8 kbps first so VBR jitter (e.g. a 128k file reporting ~124-132 kbps)
+    lands in the same tier. A rate that straddles a snap boundary can still tier apart, but that
+    only yields an advisory (acknowledgeable) mixed-quality note, so it's acceptable."""
     kbps = round(bitrate / 1000 / 8) * 8
     for i, ceiling in enumerate(_BITRATE_TIERS):
         if kbps <= ceiling:
@@ -59,7 +61,7 @@ def format_file_quality(sf: SourceFile) -> str:
         f"{round(sf.bitrate / 1000)} kbps" if sf.bitrate else "",
         _khz(sf.sample_rate),
         _channels_label(sf.channels),
-        sf.codec,
+        sf.codec,  # already a friendly label (the scanner sets it via codec_label at capture)
     ]
     return " · ".join(p for p in parts if p)
 
