@@ -881,3 +881,36 @@ async def test_resolve_links_preserves_order_and_reports_progress():
     )
     assert [u.filename if u else None for u in out] == ["1.mp3", None, "3.mp3"]
     assert seen[-1] == (3, 3)  # final progress reports all links accounted for
+
+
+async def test_download_reports_resolve_then_download_phases(tmp_path, monkeypatch):
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2"],
+        files=[
+            RdTorrentFile(id=1, path="/T/Disc 1/01.mp3", bytes=10, selected=True),
+            RdTorrentFile(id=2, path="/T/Disc 2/01.mp3", bytes=20, selected=True),
+            RdTorrentFile(id=3, path="/T/extra.mp3", bytes=5, selected=True),  # no link -> mismatch
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="01.mp3", filesize=20, download="http://dl/2"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    phases: list[tuple[str, int, int]] = []
+    result = await download_torrent(
+        FakeRd(links=links), torrent, tmp_path,
+        progress=lambda phase, done, total, name: phases.append((phase, done, total)),
+    )
+    c = result.folder
+    assert (c / "Disc 1" / "01.mp3").exists()
+    assert (c / "Disc 2" / "01.mp3").exists()          # structured, not flattened
+    kinds = [p for p, _, _ in phases]
+    assert "resolving" in kinds and "downloading" in kinds
+    assert kinds.index("resolving") < kinds.index("downloading")  # resolve reported first
+    assert phases[-1][1] == phases[-1][2] == 2          # downloading ended 2/2 (Y = 2 picked)
