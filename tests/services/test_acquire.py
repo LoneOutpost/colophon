@@ -966,3 +966,37 @@ async def test_download_all_still_resolves_every_link(tmp_path, monkeypatch):
     monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
     await download_torrent(Rd(), torrent, tmp_path, file_ids=None)
     assert len(unrestricted) == 4  # all links resolved
+
+
+async def test_download_all_pairs_path_skips_non_audio_and_counts_match(tmp_path, monkeypatch):
+    # Contract-held pairs path (links == selected). download-all (file_ids=None) must keep only
+    # audio+cover, matching download_target_count, so the "Downloading a/Y" denominator is
+    # consistent (no "Downloading 3/2"). An explicit pick still downloads exactly what was chosen.
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/T/01.mp3", bytes=10, selected=True),
+            RdTorrentFile(id=2, path="/T/cover.jpg", bytes=5, selected=True),
+            RdTorrentFile(id=3, path="/T/info.nfo", bytes=1, selected=True),  # non-audio -> dropped
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="cover.jpg", filesize=5, download="http://dl/2"),
+        "L3": RdUnrestrictedLink(filename="info.nfo", filesize=1, download="http://dl/3"),
+    }
+    got = []
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+        got.append(Path(dest).name)
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    phases: list[tuple[str, int, int]] = []
+    await download_torrent(FakeRd(links=links), torrent, tmp_path,
+                           progress=lambda ph, d, t, n: phases.append((ph, d, t)))
+    assert set(got) == {"01.mp3", "cover.jpg"}          # non-audio .nfo dropped on download-all
+    dl_totals = [t for ph, _, t in phases if ph == "downloading"]
+    assert dl_totals and all(t == 2 for t in dl_totals)  # denominator == keep-count
+    assert download_target_count(torrent, None) == 2      # and matches the metadata count

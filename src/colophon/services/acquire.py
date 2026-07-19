@@ -416,6 +416,10 @@ async def download_torrent(
     controls conflict handling; `resolve_sem` bounds unrestrict concurrency globally."""
     selected = [f for f in getattr(torrent, "files", []) if f.selected]
     pairs, _ = plan_pairs(torrent, file_ids)
+    if pairs is not None and file_ids is None:
+        # download-all keeps only audio+cover (an explicit pick downloads exactly what was chosen);
+        # this keeps the plan in step with download_target_count so the "a/Y" denominator is right.
+        pairs = [(path, link) for path, link in pairs if _keep_file(path)]
 
     def _resolve_progress(done: int, total: int) -> None:
         if progress is not None:
