@@ -83,6 +83,7 @@ class FindingCode(StrEnum):
     DUP_EDITION = "dup_edition"
     STRUCTURE_UNCLEAR = "structure_unclear"
     EMPTY_AUDIO = "empty_audio"  # a file with real size but no readable audio (corrupt/incomplete)
+    MIXED_QUALITY = "mixed_quality"  # a book's audio files disagree in bitrate/format (possible mis-grouping)
 
 
 # Findings whose remedy is fostering the folder into one subfolder per work.
@@ -135,6 +136,10 @@ class SourceFile(_Base):
     size: int
     duration_seconds: float
     ext: str
+    bitrate: int = 0       # bits per second (0 = unknown)
+    sample_rate: int = 0   # Hz (0 = unknown)
+    channels: int = 0      # 1 mono, 2 stereo, ... (0 = unknown)
+    codec: str = ""        # friendly format label (MP3 / M4B / AAC / FLAC / Opus / OGG); "" = unknown
 
 
 class Chapter(_Base):

@@ -17,6 +17,7 @@ from pathlib import Path
 from colophon.adapters.audio import read_audio_metadata
 from colophon.adapters.repository.store import BookUnitRepo, GraphStore
 from colophon.adapters.scan import group_book_units
+from colophon.core.audio_quality import mixed_quality_finding
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
@@ -73,6 +74,13 @@ class ScanOptions:
     book_ids: set[str] | None = None   # reserved for the selection-scoped follow-up
 
 
+def _with_quality_finding(book: BookUnit) -> None:
+    """Append the MIXED_QUALITY finding (if any) to a fully-scanned book, from its source files."""
+    mq = mixed_quality_finding(book.source_files)
+    if mq is not None:
+        book.findings = [*book.findings, mq]
+
+
 def _empty_fields(book: BookUnit) -> set[str]:
     out: set[str] = set()
     for name in _RECONCILED_FIELDS:
@@ -123,6 +131,7 @@ def _run_local(
         book.classification_confidence = result.confidence
         book.classification_signals = result.signals
         book.findings = result.findings
+        _with_quality_finding(book)
         book.detected_works = result.detected_works
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -447,6 +456,7 @@ def _adopt_and_identify(
         # refresh them too — else a stale container-level finding (e.g. "N distinct works in an
         # author folder") sticks to a leaf that has since been split into a clean single book.
         matched.findings = unit.findings
+        _with_quality_finding(matched)
         # Fill empty identity from the projection, and also REFRESH a weak (folder/filename-derived)
         # value with the projection's fresher one. A leaf whose author was mislabeled from the
         # filename must upgrade to the tag the fan-out now reads, instead of the stale weak value
