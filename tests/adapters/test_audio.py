@@ -139,7 +139,6 @@ def test_read_audio_metadata_captures_quality(make_audio):
     assert sf.channels == 1
     assert sf.codec == "MP3"
     assert sf.bitrate > 0
-    clear_audio_metadata_cache()
 
 
 def test_ffprobe_still_runs_for_a_file_with_data(tmp_path, monkeypatch):

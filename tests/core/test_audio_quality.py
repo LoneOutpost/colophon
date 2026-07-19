@@ -13,3 +13,8 @@ def test_codec_label_maps_common_extensions():
 def test_codec_label_unknown_extension_uppercases():
     assert codec_label("wma") == "WMA"
     assert codec_label("") == ""
+
+
+def test_codec_label_tolerates_leading_dot():
+    assert codec_label(".mp3") == "MP3"
+    assert codec_label(".") == ""

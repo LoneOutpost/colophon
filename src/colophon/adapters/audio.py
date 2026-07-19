@@ -28,8 +28,9 @@ def is_audio_file(path: Path) -> bool:
 
 
 def read_audio_metadata(path: Path) -> tuple[SourceFile, EmbeddedTags]:
-    """Open `path` exactly once and return both its SourceFile (size, duration, bare ext)
-    and its EmbeddedTags. Memoized on (path, st_mtime_ns, st_size): an unchanged file is
+    """Open `path` exactly once and return both its SourceFile (size, duration, bare ext,
+    and quality: bitrate/sample_rate/channels/codec) and its EmbeddedTags. Memoized on
+    (path, st_mtime_ns, st_size): an unchanged file is
     served from memory; a changed file (including one a tag-write just touched) is re-read.
 
     The returned value objects are treated as immutable (no caller mutates SourceFile /
@@ -113,6 +114,7 @@ def clear_audio_metadata_cache() -> None:
 
 
 def probe_audio_file(path: Path) -> SourceFile:
-    """Build a SourceFile for one audio file: size, duration, and bare extension.
-    Thin wrapper over the cached `read_audio_metadata` (kept for non-scan callers)."""
+    """Build a SourceFile for one audio file: size, duration, bare extension, and quality
+    (bitrate/sample_rate/channels/codec). Thin wrapper over the cached `read_audio_metadata`
+    (kept for non-scan callers)."""
     return read_audio_metadata(path)[0]
