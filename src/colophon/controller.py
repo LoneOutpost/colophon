@@ -109,7 +109,7 @@ from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
 from colophon.services.acquire import (
-    _RESOLVE_CONCURRENCY,
+    RESOLVE_CONCURRENCY,
     AcquireCandidate,
     AcquireMode,
     AcquireResult,
@@ -323,7 +323,7 @@ class AppController:
         self._downloads: dict[str, DownloadEntry] = {}
         self._download_cancels: dict[str, CancelToken] = {}
         self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
-        self._rd_resolve_sem = asyncio.Semaphore(_RESOLVE_CONCURRENCY)
+        self._rd_resolve_sem = asyncio.Semaphore(RESOLVE_CONCURRENCY)
         self.acquire_mode: AcquireMode = AcquireMode.INDEXED
         self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
         # Derived-view memos, valid while their input generations (books/aliases/graph) hold. Keyed

@@ -36,7 +36,7 @@ _READY_STATUSES = frozenset({"downloaded", "uploading"})
 _ERROR_STATUSES = frozenset({"error", "magnet_error", "dead", "virus"})
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
-_RESOLVE_CONCURRENCY = 8  # global cap on in-flight RD unrestrict calls (shared across downloads)
+RESOLVE_CONCURRENCY = 8  # global cap on in-flight RD unrestrict calls (shared across downloads)
 
 
 class AcquireMode(StrEnum):
@@ -329,7 +329,7 @@ async def _resolve_links(
     """Unrestrict every link, preserving order (result[i] <-> links[i]); a failed or
     cancelled link becomes None. `sem` bounds concurrency globally (falls back to a
     local cap). `on_progress(done, total)` fires as each link settles."""
-    gate = sem or asyncio.Semaphore(_RESOLVE_CONCURRENCY)
+    gate = sem or asyncio.Semaphore(RESOLVE_CONCURRENCY)
     results: list[RdUnrestrictedLink | None] = [None] * len(links)
     total = len(links)
     done = 0
