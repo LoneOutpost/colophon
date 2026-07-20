@@ -171,6 +171,8 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
 
         with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
             load_btn = ui.button("Load torrents", icon="refresh")
+            refresh_btn = ui.button("Refresh", icon="sync") \
+                .props("flat dense").tooltip("Re-scan Real-Debrid and rebuild the cache")
             ui.switch("Show all (not just audiobooks)", on_change=lambda e: _set_show_all(e.value))
             ui.space()
             download_btn = ui.button("Download selected", icon="download")
@@ -431,6 +433,18 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         download_btn.set_enabled(False)
         _render_list()
 
+    async def _refresh_from_rd() -> None:
+        refresh_btn.props("loading=true")
+        try:
+            await controller.rd_refresh_cache()
+            await _load()
+            ui.notify("Refreshed from Real-Debrid")
+        except Exception as e:  # surface, don't crash the page (BLE001 intentional)
+            logger.warning(f"RD refresh failed: {e}")
+            ui.notify("Refresh failed", type="negative")
+        finally:
+            refresh_btn.props(remove="loading")
+
     # --- downloads (registry-driven, polled) ---
     def _pause(key: str) -> None:
         controller.pause_download(key)
@@ -476,6 +490,14 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                                     on_click=lambda _e, k=entry.key: _cancel(k),
                                 ).props('flat dense round color=negative aria-label="Cancel download"').tooltip(
                                     "Cancel and discard"
+                                )
+                        elif entry.status in ("partial", "failed"):
+                            with ui.item_section().props("side"):
+                                ui.button(
+                                    icon="refresh",
+                                    on_click=lambda _e, k=entry.key: _resume(k),
+                                ).props('flat dense round aria-label="Retry download"').tooltip(
+                                    "Retry the files that failed"
                                 )
 
     def _clear_finished() -> None:
@@ -544,6 +566,7 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
     add_btn.on_click(_add_magnet)
     magnet_input.on("keydown.enter", _add_magnet)
     load_btn.on_click(_load)
+    refresh_btn.on_click(_refresh_from_rd)
     download_btn.on_click(_download)
     _render_list()
     _render_downloads()

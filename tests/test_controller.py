@@ -1441,6 +1441,43 @@ async def test_resume_download_reapplies_file_ids(tmp_path, monkeypatch):
     ctx.close()
 
 
+async def test_resume_download_uses_add_mode(tmp_path, monkeypatch):
+    # A resume/retry must use ADD mode: files already on disk are skipped and only the
+    # missing/failed ones are re-fetched, so a throttled link retries without redoing the rest.
+    from colophon.adapters.realdebrid import RdTorrentInfo
+    from colophon.services.acquire import AcquiredFile, AcquireMode, AcquireResult
+
+    ctx = _ctx(tmp_path)
+    ctx.config.real_debrid_token = "t"
+    ctx.config.real_debrid_download_dir = tmp_path / "dl"
+    ctrl = AppController(ctx)
+
+    class FakeClient:
+        async def torrent_info(self, tid):
+            return RdTorrentInfo(id=tid, filename="Bundle", status="downloaded", links=["L1"])
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(ctrl, "rd_client", lambda: FakeClient())
+    modes: list = []
+
+    async def fake_download(client, torrent, dest_root, *, folder=None, file_ids=None,
+                            progress=None, byte_progress=None, cancel=None, mode=None,
+                            resolve_sem=None):
+        modes.append(mode)
+        used = folder or (dest_root / "Bundle")
+        used.mkdir(parents=True, exist_ok=True)
+        (used / "01.mp3").write_bytes(b"")
+        return AcquireResult(folder=used, files=[AcquiredFile("01.mp3", used / "01.mp3", True)])
+
+    monkeypatch.setattr("colophon.controller.download_torrent", fake_download)
+
+    await ctrl.rd_download("tid", name="Bundle")
+    await ctrl.resume_download("tid")
+    assert modes[1] == AcquireMode.ADD  # the resume re-fetches with ADD, not OVERWRITE/INDEXED
+    ctx.close()
+
+
 async def test_quick_match_scan_picks_best_and_carries_confidence(tmp_path):
     src = _StubSource("audnexus", [
         SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"]),

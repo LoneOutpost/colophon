@@ -5,7 +5,10 @@ Only the read + unrestrict endpoints needed for acquisition are ported here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -22,6 +25,43 @@ from colophon.core.models import _Base
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.real-debrid.com/rest/1.0"
+
+# Real-Debrid's front rate limiter 429s on rapid bursts (a handful of requests in quick
+# succession), so we PROACTIVELY pace every request rather than only reacting with retries.
+# ~0.35s between request starts ≈ 3/sec, comfortably under the burst threshold.
+_RD_MIN_INTERVAL = 0.35
+
+
+class _Pacer:
+    """A shared leaky-bucket pacer. Each `wait()` returns no sooner than the previous one plus
+    `min_interval`, so concurrent callers issue requests spaced out instead of in a burst. Only
+    the bookkeeping is locked; the sleep is not, so already-scheduled requests still overlap in
+    flight. `now`/`sleep` are injectable for deterministic tests."""
+
+    def __init__(
+        self, min_interval: float, *,
+        now: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.min_interval = min_interval
+        self._now = now
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0  # monotonic time the next request may start
+
+    async def wait(self) -> None:
+        async with self._lock:
+            now = self._now()
+            start_at = max(now, self._next_at)
+            self._next_at = start_at + self.min_interval
+            delay = start_at - now
+        if delay > 0:
+            await self._sleep(delay)
+
+
+# Process-wide pacer shared across every RealDebridClient instance (a fresh client is built per
+# download), so total RD request rate stays bounded no matter how many downloads/workers run.
+_RD_PACER = _Pacer(_RD_MIN_INTERVAL)
 
 # RD statuses worth retrying: rate-limit (429) and transient server/hoster errors (5xx).
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -102,11 +142,12 @@ class RealDebridError(Exception):
 class RealDebridSource(Protocol):
     async def user(self) -> RdUser: ...
     async def list_torrents(self, limit: int = 100) -> list[RdTorrent]: ...
-    async def torrent_info(self, torrent_id: str) -> RdTorrentInfo: ...
-    async def unrestrict_link(self, link: str) -> RdUnrestrictedLink: ...
+    async def torrent_info(self, torrent_id: str, *, force: bool = False) -> RdTorrentInfo: ...
+    async def unrestrict_link(self, link: str, *, force: bool = False) -> RdUnrestrictedLink: ...
     async def add_magnet(self, magnet: str) -> str: ...
     async def add_torrent_file(self, content: bytes) -> str: ...
     async def select_files(self, torrent_id: str, file_ids: str) -> None: ...
+    async def aclose(self) -> None: ...
 
 
 class RealDebridClient:
@@ -144,6 +185,7 @@ class RealDebridClient:
         data: dict[str, str] | None = None,
         content: bytes | None = None,
     ) -> httpx.Response:
+        await _RD_PACER.wait()  # proactively pace to stay under RD's burst rate limit
         resp = await self._client.request(
             method, f"{self._base}{path}", params=params, data=data,
             content=content, headers=self._headers,
@@ -159,11 +201,13 @@ class RealDebridClient:
         resp = await self._request("GET", "/torrents", params={"limit": limit})
         return [RdTorrent.model_validate(x) for x in (resp.json() or [])]
 
-    async def torrent_info(self, torrent_id: str) -> RdTorrentInfo:
+    async def torrent_info(self, torrent_id: str, *, force: bool = False) -> RdTorrentInfo:
+        # force: accepted for Protocol parity; this client always fetches live.
         resp = await self._request("GET", f"/torrents/info/{torrent_id}")
         return RdTorrentInfo.model_validate(resp.json())
 
-    async def unrestrict_link(self, link: str) -> RdUnrestrictedLink:
+    async def unrestrict_link(self, link: str, *, force: bool = False) -> RdUnrestrictedLink:
+        # force: accepted for Protocol parity; this client always fetches live.
         resp = await self._request("POST", "/unrestrict/link", data={"link": link})
         return RdUnrestrictedLink.model_validate(resp.json())
 
