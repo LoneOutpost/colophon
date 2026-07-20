@@ -8,11 +8,15 @@ from colophon.adapters.realdebrid import (
     RdUnrestrictedLink,
 )
 from colophon.services.acquire import (
+    _REASON_NO_LINK,
+    _REASON_UNRESOLVED,
+    AcquiredFile,
     AcquireResult,
     _resolve_links,
     align_links_to_files,
     download_target_count,
     download_torrent,
+    failure_breakdown,
     list_candidates,
     sanitize_name,
 )
@@ -194,6 +198,56 @@ async def test_download_mismatch_subset_preserves_structure(tmp_path, monkeypatc
     assert got == ["http://dl/2"]                                  # only the picked file
     assert (result.folder / "B" / "two.mp3").exists()             # structure preserved
     assert not (result.folder / "A" / "one.mp3").exists()
+
+
+async def test_download_mismatch_records_picked_file_with_no_link_as_failed(tmp_path, monkeypatch):
+    # RD returned fewer links than selected files, and the user picked a file that has NO link at
+    # all (four.mp3). It must surface as a failure with the "not on Real-Debrid" reason, not
+    # silently vanish from the count.
+    torrent = RdTorrentInfo(
+        id="a", filename="Coll", status="downloaded", links=["L1", "L2", "L3"],
+        files=[
+            RdTorrentFile(id=1, path="/Coll/A/one.mp3", selected=True),
+            RdTorrentFile(id=2, path="/Coll/B/two.mp3", selected=True),
+            RdTorrentFile(id=3, path="/Coll/C/three.mp3", selected=True),
+            RdTorrentFile(id=4, path="/Coll/D/four.mp3", selected=True),  # selected but no link
+        ],
+    )
+    links = {
+        "L1": RdUnrestrictedLink(filename="one.mp3", download="http://dl/1"),
+        "L2": RdUnrestrictedLink(filename="two.mp3", download="http://dl/2"),
+        "L3": RdUnrestrictedLink(filename="three.mp3", download="http://dl/3"),
+    }
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(FakeRd(links=links), torrent, tmp_path, file_ids={2, 4})
+    ok = [f for f in result.files if f.ok]
+    bad = [f for f in result.files if not f.ok]
+    assert [f.filename for f in ok] == ["two.mp3"]                 # the one with a link landed
+    assert len(bad) == 1
+    assert bad[0].filename == "four.mp3"
+    assert bad[0].error == _REASON_NO_LINK                          # clear, non-retryable reason
+
+
+def test_failure_breakdown_groups_and_counts_reasons():
+    files = [
+        AcquiredFile("a.mp3", Path("a"), ok=True),
+        AcquiredFile("b.mp3", None, ok=False, error=_REASON_NO_LINK),
+        AcquiredFile("c.mp3", None, ok=False, error=_REASON_NO_LINK),
+        AcquiredFile("d.mp3", None, ok=False, error=_REASON_UNRESOLVED),
+        AcquiredFile("e.mp3", None, ok=False, error="read timed out"),
+        AcquiredFile("f.mp3", None, ok=False, error="cancelled"),  # not a real failure
+    ]
+    # ordered by count desc; cancellation excluded; unknown errors bucketed as "download error"
+    assert failure_breakdown(files) == "2 not on Real-Debrid, 1 couldn't resolve, 1 download error"
+
+
+def test_failure_breakdown_empty_when_all_ok():
+    assert failure_breakdown([AcquiredFile("a.mp3", Path("a"), ok=True)]) == ""
 
 
 async def test_download_mismatch_duplicate_basename_disambiguated_by_size(tmp_path, monkeypatch):

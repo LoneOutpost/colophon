@@ -39,6 +39,12 @@ _MAX_NAME = 200  # keep a single path component well under the common 255-byte l
 RESOLVE_CONCURRENCY = 4  # global cap on in-flight RD unrestrict calls (shared across downloads);
 # the RD client also paces requests (see realdebrid._RD_PACER), which is the primary rate control.
 
+# Distinct, human-readable reasons a picked file can fail to download, so the UI can say WHY
+# instead of a bare "failed". A throttled/exhausted unrestrict is retryable; a file the source
+# simply has no link for is not (it isn't on Real-Debrid), and no amount of retrying will help.
+_REASON_UNRESOLVED = "couldn't resolve link (throttled or unavailable); retry to try again"
+_REASON_NO_LINK = "not on Real-Debrid (the source has no download for this file)"
+
 
 class AcquireMode(StrEnum):
     """How a download resolves an existing target folder."""
@@ -96,6 +102,27 @@ class AcquireResult:
     @property
     def any_ok(self) -> bool:
         return any(f.ok for f in self.files)
+
+
+# Short labels for the compact UI breakdown, keyed by the full per-file reason above.
+_FAILURE_LABELS = {
+    _REASON_NO_LINK: "not on Real-Debrid",
+    _REASON_UNRESOLVED: "couldn't resolve",
+}
+
+
+def failure_breakdown(files: list[AcquiredFile]) -> str:
+    """A compact 'N reason, M reason' summary of why files failed, for the download row. Groups
+    the per-file errors by kind (cancellation aside) so the operator can see WHY a download is
+    partial — e.g. files the source has no link for vs. throttled resolves that a retry could
+    still recover. Empty when nothing failed."""
+    counts: dict[str, int] = {}
+    for f in files:
+        if f.ok or f.error is None or f.error == "cancelled":
+            continue
+        label = _FAILURE_LABELS.get(f.error, "download error")
+        counts[label] = counts.get(label, 0) + 1
+    return ", ".join(f"{n} {label}" for label, n in sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
 def _keep_file(name: str) -> bool:
@@ -434,7 +461,7 @@ async def download_torrent(
 
     # --- PHASE 1: resolve links, recover (dest, link, url, name) to download ---
     dl_plan: list[tuple[Path, str, str, str]] = []
-    fail_names: list[str] = []  # files/links whose unrestrict failed — recorded, not dropped
+    fail_records: list[tuple[str, str]] = []  # (name, reason) — recorded, not silently dropped
     if pairs is not None:
         # RD contract held: links[i] <-> selected[i]. Resolve in order, map by index.
         failed_idx: list[int] = []
@@ -443,14 +470,16 @@ async def download_torrent(
             on_progress=_resolve_progress, failed_out=failed_idx)
         kept = [(path, link, unr)
                 for (path, link), unr in zip(pairs, unrs, strict=True) if unr is not None]
-        fail_names = [PurePosixPath(pairs[i][0]).name for i in failed_idx]  # link i <-> pairs[i]
+        # link i <-> pairs[i], so a failed unrestrict names its exact file.
+        fail_records = [(PurePosixPath(pairs[i][0]).name, _REASON_UNRESOLVED) for i in failed_idx]
         container, dests = structured_dests(
             [p for p, _, _ in kept], dest_root, torrent.filename, pinned=folder, mode=mode)
         for (path, link, unr), dest in zip(kept, dests, strict=True):
             dl_plan.append((dest, link, unr.download, PurePosixPath(path).name))
     elif selected:
-        # Count mismatch: resolve links, then map each to its file by ORDER. For a subset pick,
-        # stop resolving once all picked files are mapped (no need to resolve the whole tail).
+        # Count mismatch: RD gave fewer links than selected files (some files simply have no link
+        # on RD). Resolve links, then map each to its file by ORDER. For a subset pick, stop
+        # resolving once all mappable picks are covered (no need to resolve the whole tail).
         def _early_stop(res: list[RdUnrestrictedLink | None]) -> bool:
             return _all_picks_mapped(selected, file_ids, res)
 
@@ -461,7 +490,7 @@ async def download_torrent(
             early_stop=_early_stop if file_ids is not None else None)
         # A failed link here can't be aligned to a specific file (no name/size), so record it
         # generically — enough to mark the download Partial and signal a retry.
-        fail_names = ["(unresolved link)"] * len(failed_idx)
+        fail_records = [("(unresolved link)", _REASON_UNRESOLVED)] * len(failed_idx)
         resolved_pairs = [(lnk, u) for lnk, u in zip(torrent.links, unrs, strict=True) if u is not None]
         resolved = [u for _, u in resolved_pairs]
         idxs = align_links_to_files(
@@ -479,6 +508,15 @@ async def download_torrent(
                 picked.append((f, lnk, u))
         if orphans:
             logger.warning(f"{orphans} link(s) matched no selected file; dropped")
+        # Picked files that never mapped to a link have no download on RD at all — record them
+        # explicitly (with their real name) so they show up as failures with a clear reason
+        # instead of silently vanishing from the count.
+        if file_ids is not None:
+            picked_ids = {f.id for f, _, _ in picked}
+            fail_records += [
+                (PurePosixPath(f.path).name, _REASON_NO_LINK)
+                for f in selected if f.id in file_ids and f.id not in picked_ids
+            ]
         container, dests = structured_dests(
             [f.path for f, _, _ in picked], dest_root, torrent.filename, pinned=folder, mode=mode)
         for (f, lnk, unr), dest in zip(picked, dests, strict=True):
@@ -490,7 +528,7 @@ async def download_torrent(
         unrs = await _resolve_links(
             client, list(torrent.links), sem=resolve_sem, cancel=cancel,
             on_progress=_resolve_progress, failed_out=failed_idx)
-        fail_names = ["(unresolved link)"] * len(failed_idx)
+        fail_records = [("(unresolved link)", _REASON_UNRESOLVED)] * len(failed_idx)
         for i, unr in enumerate(unrs):
             if unr is None or not _keep_file(unr.filename):
                 continue
@@ -499,12 +537,10 @@ async def download_torrent(
 
     container.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=container)
-    # A link that couldn't be unrestricted (throttle-exhausted or gone) is recorded as a failed
-    # file rather than silently dropped, so the download shows Partial and a resume can retry it.
-    for name in fail_names:
-        result.files.append(AcquiredFile(
-            filename=name, path=None, ok=False,
-            error="couldn't resolve link (throttled or unavailable); retry to try again"))
+    # A file we couldn't unrestrict (throttle-exhausted, or simply not on RD) is recorded as a
+    # failed file rather than silently dropped, so the download shows Partial with a real reason.
+    for name, reason in fail_records:
+        result.files.append(AcquiredFile(filename=name, path=None, ok=False, error=reason))
 
     async def _fetch(link: str, url: str, dest: Path, display: str) -> bool:
         """Stream one file; on failure, re-resolve the (possibly stale) link fresh and retry

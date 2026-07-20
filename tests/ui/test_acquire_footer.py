@@ -24,6 +24,23 @@ def test_row_text_partial():
     assert download_row_text(e) == "Partial: 3 of 4 (1 failed)"
 
 
+def test_row_text_partial_shows_reason_when_present():
+    e = DownloadEntry(key="k", name="Book", status="partial", files_done=3, files_total=4,
+                      detail="1 not on Real-Debrid")
+    assert download_row_text(e) == "Partial: 3 of 4 (1 failed) · 1 not on Real-Debrid"
+
+
+def test_row_text_failed_shows_reason_when_present():
+    e = DownloadEntry(key="k", name="Book", status="failed", files_total=4,
+                      detail="4 not on Real-Debrid")
+    assert download_row_text(e) == "Failed · 4 not on Real-Debrid"
+
+
+def test_row_text_failed_without_reason():
+    e = DownloadEntry(key="k", name="Book", status="failed", files_total=4)
+    assert download_row_text(e) == "Failed"
+
+
 def test_title_counts_active_downloading_files_remaining():
     entries = [
         DownloadEntry(key="a", name="A", status="active", phase="downloading",

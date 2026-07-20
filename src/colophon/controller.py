@@ -124,6 +124,7 @@ from colophon.services.acquire import (
     add_torrent_file,
     download_target_count,
     download_torrent,
+    failure_breakdown,
     list_candidates,
     sanitize_name,
 )
@@ -1332,8 +1333,14 @@ class AppController:
             entry.status = "done"
         entry.phase = ""
         entry.files_done = ok_count
+        # Surface WHY a download didn't fully land: a compact per-reason breakdown of the failures
+        # (e.g. "90 not on Real-Debrid, 74 couldn't resolve"), or the note when nothing landed for
+        # a structural reason (e.g. a single-archive torrent).
+        entry.detail = (
+            failure_breakdown(result.files) if entry.status in ("partial", "failed") else ""
+        )
         if not result.any_ok and result.note:
-            entry.detail = result.note  # surface why nothing landed (e.g. a single-archive torrent)
+            entry.detail = result.note
         return result, book_ids
 
     async def rd_download(
