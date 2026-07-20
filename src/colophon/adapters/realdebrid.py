@@ -5,7 +5,10 @@ Only the read + unrestrict endpoints needed for acquisition are ported here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -22,6 +25,43 @@ from colophon.core.models import _Base
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.real-debrid.com/rest/1.0"
+
+# Real-Debrid's front rate limiter 429s on rapid bursts (a handful of requests in quick
+# succession), so we PROACTIVELY pace every request rather than only reacting with retries.
+# ~0.35s between request starts ≈ 3/sec, comfortably under the burst threshold.
+_RD_MIN_INTERVAL = 0.35
+
+
+class _Pacer:
+    """A shared leaky-bucket pacer. Each `wait()` returns no sooner than the previous one plus
+    `min_interval`, so concurrent callers issue requests spaced out instead of in a burst. Only
+    the bookkeeping is locked; the sleep is not, so already-scheduled requests still overlap in
+    flight. `now`/`sleep` are injectable for deterministic tests."""
+
+    def __init__(
+        self, min_interval: float, *,
+        now: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.min_interval = min_interval
+        self._now = now
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0  # monotonic time the next request may start
+
+    async def wait(self) -> None:
+        async with self._lock:
+            now = self._now()
+            start_at = max(now, self._next_at)
+            self._next_at = start_at + self.min_interval
+            delay = start_at - now
+        if delay > 0:
+            await self._sleep(delay)
+
+
+# Process-wide pacer shared across every RealDebridClient instance (a fresh client is built per
+# download), so total RD request rate stays bounded no matter how many downloads/workers run.
+_RD_PACER = _Pacer(_RD_MIN_INTERVAL)
 
 # RD statuses worth retrying: rate-limit (429) and transient server/hoster errors (5xx).
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -145,6 +185,7 @@ class RealDebridClient:
         data: dict[str, str] | None = None,
         content: bytes | None = None,
     ) -> httpx.Response:
+        await _RD_PACER.wait()  # proactively pace to stay under RD's burst rate limit
         resp = await self._client.request(
             method, f"{self._base}{path}", params=params, data=data,
             content=content, headers=self._headers,

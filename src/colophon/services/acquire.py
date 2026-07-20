@@ -36,7 +36,8 @@ _READY_STATUSES = frozenset({"downloaded", "uploading"})
 _ERROR_STATUSES = frozenset({"error", "magnet_error", "dead", "virus"})
 _COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
-RESOLVE_CONCURRENCY = 8  # global cap on in-flight RD unrestrict calls (shared across downloads)
+RESOLVE_CONCURRENCY = 4  # global cap on in-flight RD unrestrict calls (shared across downloads);
+# the RD client also paces requests (see realdebrid._RD_PACER), which is the primary rate control.
 
 
 class AcquireMode(StrEnum):
