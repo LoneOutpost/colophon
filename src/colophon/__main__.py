@@ -22,6 +22,20 @@ from colophon.ui import create_app
 
 logger = logging.getLogger(__name__)
 
+# Acquiring a large torrent (hundreds of files) can make the browser build a single websocket
+# message larger than socket.io's default 1 MB cap. The client then refuses it ("Message too
+# long"), drops the connection, and the acquire page falls into a reconnect loop that looks like
+# a frozen, unresponsive UI. Raise the cap so those bursts get through — the client is trusted
+# (self-hosted), so the larger ceiling only costs memory when a message actually needs it.
+_WS_MESSAGE_CAP = 64 * 1024 * 1024
+
+
+def raise_ws_message_cap(cap: int = _WS_MESSAGE_CAP) -> None:
+    """Lift NiceGUI/socket.io's per-message size limit. No-op if the server isn't built yet."""
+    from nicegui import core
+    if core.sio is not None:
+        core.sio.eio.max_http_buffer_size = cap
+
 
 def configure_logging(level_name: str | None = None) -> int:
     """Set the application log level from the process environment.
@@ -100,6 +114,7 @@ def main() -> None:
     except Exception:
         logger.exception("cover dedupe failed; starting with cover references as loaded")
     create_app(controller)
+    raise_ws_message_cap()  # keep large-acquire websocket bursts from tripping the 1 MB cap
     run_kwargs: dict[str, object] = {}
     if ctx.config.root_path:
         run_kwargs["root_path"] = ctx.config.root_path
