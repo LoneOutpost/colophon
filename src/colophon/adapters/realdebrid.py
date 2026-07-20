@@ -26,37 +26,65 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.real-debrid.com/rest/1.0"
 
-# Real-Debrid's front rate limiter 429s on rapid bursts (a handful of requests in quick
-# succession), so we PROACTIVELY pace every request rather than only reacting with retries.
-# ~0.35s between request starts ≈ 3/sec, comfortably under the burst threshold.
-_RD_MIN_INTERVAL = 0.35
+# Real-Debrid's front rate limiter 429s on sustained request rates, and once tripped it stays
+# tripped for a cool-down window, so a fixed spacing that's even slightly too fast loses a large
+# fraction of a big batch. We PROACTIVELY pace every request AND adapt the rate the way TCP does:
+# multiplicatively back off the moment we see a 429 (and honor its Retry-After as a fleet-wide
+# pause), then additively ease back toward the floor as requests succeed. That lets the rate
+# settle at whatever RD is actually willing to serve instead of hammering at a constant rate.
+_RD_MIN_INTERVAL = 0.35   # floor: ~3/sec when RD is happy
+_RD_MAX_INTERVAL = 8.0    # ceiling: never crawl slower than this per request
+_RD_BACKOFF_FACTOR = 2.0  # multiply the interval on each 429
+_RD_RECOVERY_STEP = 0.15  # shave this off the interval per success (slow, so we don't re-trip)
 
 
 class _Pacer:
-    """A shared leaky-bucket pacer. Each `wait()` returns no sooner than the previous one plus
-    `min_interval`, so concurrent callers issue requests spaced out instead of in a burst. Only
-    the bookkeeping is locked; the sleep is not, so already-scheduled requests still overlap in
-    flight. `now`/`sleep` are injectable for deterministic tests."""
+    """A shared, self-adapting leaky-bucket pacer. Each `wait()` returns no sooner than the
+    previous one plus the CURRENT `interval`, so concurrent callers issue requests spaced out
+    instead of in a burst. The interval is not fixed: `on_throttle()` multiplies it (up to
+    `max_interval`) and records any Retry-After as a fleet-wide pause; `on_success()` eases it
+    back down toward `min_interval`. Only the spacing bookkeeping is locked; the interval math is
+    plain (asyncio is single-threaded, so the read-modify-writes are atomic). `now`/`sleep` are
+    injectable for deterministic tests."""
 
     def __init__(
         self, min_interval: float, *,
+        max_interval: float = _RD_MAX_INTERVAL,
+        backoff: float = _RD_BACKOFF_FACTOR,
+        recovery: float = _RD_RECOVERY_STEP,
         now: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.min_interval = min_interval
+        self.max_interval = max_interval
+        self.backoff = backoff
+        self.recovery = recovery
+        self.interval = min_interval  # current spacing; grows on throttle, shrinks on success
         self._now = now
         self._sleep = sleep
         self._lock = asyncio.Lock()
-        self._next_at = 0.0  # monotonic time the next request may start
+        self._next_at = 0.0      # monotonic time the next request may start
+        self._pause_until = 0.0  # a Retry-After cool-down that holds the whole fleet back
 
     async def wait(self) -> None:
         async with self._lock:
             now = self._now()
-            start_at = max(now, self._next_at)
-            self._next_at = start_at + self.min_interval
+            start_at = max(now, self._next_at, self._pause_until)
+            self._next_at = start_at + self.interval
             delay = start_at - now
         if delay > 0:
             await self._sleep(delay)
+
+    def on_throttle(self, retry_after: float | None = None) -> None:
+        """A 429 landed: slow the shared rate and, if RD gave a Retry-After, pause the fleet."""
+        self.interval = min(self.max_interval, self.interval * self.backoff)
+        if retry_after is not None:
+            pause = self._now() + min(retry_after, _RETRY_AFTER_CAP)
+            self._pause_until = max(self._pause_until, pause)
+
+    def on_success(self) -> None:
+        """A request got through: ease the rate back toward the floor a little."""
+        self.interval = max(self.min_interval, self.interval - self.recovery)
 
 
 # Process-wide pacer shared across every RealDebridClient instance (a fresh client is built per
@@ -84,9 +112,11 @@ def _retry_wait(retry_state: Any) -> float:
     return _RD_BACKOFF(retry_state)
 
 
-# Retry transport errors + RD 429/5xx up to 5 attempts; reraise the last error.
+# Retry transport errors + RD 429/5xx up to 8 attempts; reraise the last error. The extra
+# attempts (over the old 5) give a link a better chance to outlast a throttle cool-down window
+# before it's recorded as a retryable failure.
 RD_RETRY = retry(
-    stop=stop_after_attempt(5),
+    stop=stop_after_attempt(8),
     wait=_retry_wait,
     retry=retry_if_exception(_is_retryable),
     reraise=True,
@@ -166,17 +196,22 @@ class RealDebridClient:
         return {"Authorization": f"Bearer {self._token}"}
 
     @staticmethod
-    def _raise_for_status(resp: httpx.Response) -> None:
+    def _parse_retry_after(resp: httpx.Response) -> float | None:
+        """The Retry-After header as seconds, or None (absent, or an HTTP-date we don't parse)."""
+        raw = resp.headers.get("Retry-After")
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None  # HTTP-date form: fall back to exponential backoff
+
+    @classmethod
+    def _raise_for_status(cls, resp: httpx.Response) -> None:
         if resp.status_code < 400:
             return
-        retry_after: float | None = None
-        raw = resp.headers.get("Retry-After")
-        if raw is not None:
-            try:
-                retry_after = float(raw)
-            except ValueError:
-                retry_after = None  # HTTP-date form: fall back to exponential backoff
-        raise RealDebridError(resp.status_code, resp.text[:200], retry_after=retry_after)
+        raise RealDebridError(
+            resp.status_code, resp.text[:200], retry_after=cls._parse_retry_after(resp))
 
     @RD_RETRY
     async def _request(
@@ -185,11 +220,17 @@ class RealDebridClient:
         data: dict[str, str] | None = None,
         content: bytes | None = None,
     ) -> httpx.Response:
-        await _RD_PACER.wait()  # proactively pace to stay under RD's burst rate limit
+        await _RD_PACER.wait()  # proactively pace to stay under RD's adaptive rate limit
         resp = await self._client.request(
             method, f"{self._base}{path}", params=params, data=data,
             content=content, headers=self._headers,
         )
+        # Feed the outcome back so the shared pacer adapts: a 429 backs the whole fleet off (and
+        # honors its Retry-After); any success eases the rate back toward the floor.
+        if resp.status_code == 429:
+            _RD_PACER.on_throttle(self._parse_retry_after(resp))
+        elif resp.is_success:
+            _RD_PACER.on_success()
         self._raise_for_status(resp)  # raises inside the retried scope so 429/5xx retry
         return resp
 

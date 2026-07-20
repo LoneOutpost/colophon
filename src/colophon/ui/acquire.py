@@ -454,9 +454,18 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
         controller.cancel_download(key)
         _render_downloads()
 
+    _dl_sig: dict = {"v": None}  # last rendered download signature; None forces the first render
+
     def _render_downloads() -> None:
-        downloads_box.clear()
         entries = controller.active_downloads()
+        # The 1s poll would otherwise clear+rebuild the whole list every tick for the entire life
+        # of a download (minutes, for a large torrent), churning DOM + websocket traffic even when
+        # nothing changed. Re-render only when the visible state actually moves.
+        sig = tuple((e.key, e.status, e.name or "", download_row_text(e)) for e in entries)
+        if sig == _dl_sig["v"]:
+            return
+        _dl_sig["v"] = sig
+        downloads_box.clear()
         # The whole band hides when idle, so an empty page reclaims the footer space.
         downloads_footer.set_visibility(bool(entries))
         if not entries:
