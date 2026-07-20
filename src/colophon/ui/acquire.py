@@ -491,6 +491,14 @@ def render_acquire(controller: AppController, book_id: str = "") -> None:
                                 ).props('flat dense round color=negative aria-label="Cancel download"').tooltip(
                                     "Cancel and discard"
                                 )
+                        elif entry.status in ("partial", "failed"):
+                            with ui.item_section().props("side"):
+                                ui.button(
+                                    icon="refresh",
+                                    on_click=lambda _e, k=entry.key: _resume(k),
+                                ).props('flat dense round aria-label="Retry download"').tooltip(
+                                    "Retry the files that failed"
+                                )
 
     def _clear_finished() -> None:
         controller.clear_finished_downloads()

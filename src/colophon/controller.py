@@ -1350,12 +1350,15 @@ class AppController:
         )
 
     async def resume_download(self, key: str) -> tuple[AcquireResult, list[str]]:
-        """Re-run a tracked (e.g. paused) download from its retained .part files,
-        re-applying the file subset it was started with."""
+        """Re-run a tracked download (resume a paused one, or retry a partial/failed one) into
+        its retained folder. Uses ADD mode so files already on disk are skipped and only the
+        missing/incomplete ones are (re)fetched, re-applying the file subset it was started with.
+        The RD cache makes re-resolving already-fetched links free, and links that previously
+        failed to resolve (throttled) are re-tried."""
         entry = self._downloads.get(key)
         name = entry.name if entry else key
         file_ids = entry.file_ids if entry else None
-        return await self._run_download(key, name, file_ids=file_ids)
+        return await self._run_download(key, name, file_ids=file_ids, mode=AcquireMode.ADD)
 
     def _rd_download_dir_in_scan_paths(self) -> bool:
         return self._rd_download_dir() in self.ctx.config.scan_paths
