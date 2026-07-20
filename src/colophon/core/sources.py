@@ -2,16 +2,36 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
 from colophon.core.models import _Base
 
-# Providers whose ASIN is an AUDIOBOOK (Audible) ASIN. A physical/Kindle ASIN from a book source
-# (Hardcover, OpenLibrary, ...) must not be stored as the book's asin: it's the wrong product for an
-# audiobook app, and it dead-ends the Audnexus/Audible lookup (which fetches /books/{asin}). We gate
-# by SOURCE, not by parsing the ASIN — a Kindle ASIN and an Audible ASIN are indistinguishable as
-# strings (both `B0…`).
-AUDIOBOOK_ASIN_PROVIDERS: frozenset[str] = frozenset({"audnexus", "audible"})
+# Audiobook-exclusive sources: every field they return describes the audiobook, so all of it is
+# trusted by default (including the ASIN, which is the Audible product and feeds the Audnexus
+# /books/{asin} lookup). A non-audiobook or mixed source (Hardcover, Google Books, Storytel, ...)
+# describes the wrong product for the edition-specific fields below. Hardcoded and gated by SOURCE:
+# a Kindle ASIN and an Audible ASIN are indistinguishable as strings (both `B0…`). An unrecognized
+# provider is treated as non-audiobook (conservative). Keep in sync with the abs-agg provider ids.
+AUDIOBOOK_PROVIDERS: frozenset[str] = frozenset({
+    "audnexus", "audible",           # Audible (native)
+    "soundbooththeater", "audioteka", "librofm", "graphicaudio", "librivox",
+    "bigfinish", "dreifragezeichen",  # audiobook-exclusive abs-agg providers
+})
+
+# Fields that describe a specific edition/format, so they're only reliable from an audiobook source.
+# From a non-audiobook source they are offered but left unchecked by default (opt-in) when strict.
+EDITION_SPECIFIC_FIELDS: frozenset[str] = frozenset({"publisher", "isbn"})
+
+
+def unchecked_edition_fields(provider: str, offered: Iterable[str], *, strict: bool) -> set[str]:
+    """The offered fields that should be shown but left UNCHECKED by default: the edition-specific
+    fields (publisher, ISBN) from a source that is not audiobook-exclusive, when `strict` is on. An
+    audiobook source is trusted for every field; a print/mixed source's edition data describes the
+    wrong product. Empty when `strict` is off or the provider is an audiobook source."""
+    if not strict or provider in AUDIOBOOK_PROVIDERS:
+        return set()
+    return {f for f in offered if f in EDITION_SPECIFIC_FIELDS}
 
 
 class SourceQuery(_Base):

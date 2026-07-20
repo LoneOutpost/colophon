@@ -644,13 +644,18 @@ def compare_dialog(
                 ui.button("Back to matches", icon="arrow_back", on_click=show_candidates).props(
                     "flat dense no-caps"
                 )
+                # Edition-specific fields from a non-audiobook source describe the wrong product,
+                # so they're offered but unchecked by default (opt-in) per config.strict_source_fields.
+                unchecked = controller.unchecked_match_fields(result)
                 with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
                     with ui.list().props("dense").classes("w-full"):
                         for key, source in controller.match_field_values(result).items():
                             current = get_field(book, key)
                             with ui.item():
                                 with ui.item_section().props("avatar"):
-                                    checks[key] = ui.checkbox(value=(source != (current or None)))
+                                    checks[key] = ui.checkbox(
+                                        value=(source != (current or None) and key not in unchecked)
+                                    )
                                 with ui.item_section():
                                     ui.item_label(f"{field_labels.get(key, key)}: {source}")
                                     ui.item_label(f"current: {current or '(none)'}").props("caption")

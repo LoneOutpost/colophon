@@ -19,6 +19,7 @@ from urllib.parse import quote
 from nicegui import app, background_tasks, ui
 
 from colophon.controller import AppController, RerunResult
+from colophon.core.audio_quality import book_quality_summary, format_file_quality
 from colophon.core.book_search import (
     FIELDS,
     Condition,
@@ -861,7 +862,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             with ui.item():
                                 with ui.item_section():
                                     ui.item_label(sf.path.name)
-                                    ui.item_label(_fmt_duration(sf.duration_seconds)).props("caption")
+                                    quality = format_file_quality(sf)
+                                    dur = _fmt_duration(sf.duration_seconds)
+                                    caption = f"{dur} · {quality}" if quality else dur
+                                    ui.item_label(caption).props("caption")
                                 with ui.item_section().props("side"):
                                     with ui.row().classes("q-gutter-xs no-wrap"):
                                         ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
@@ -1215,6 +1219,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     if book.source_files:
                         ui.label(_fmt_duration(total)).classes(
                             "text-caption colophon-muted colophon-mono"
+                        )
+                    quality = book_quality_summary(book.source_files)
+                    if quality:
+                        _qcls = "text-warning" if quality == "Mixed quality" else "colophon-muted"
+                        ui.label(quality).classes(f"text-caption {_qcls} colophon-mono").tooltip(
+                            "Audio quality across this book's files"
                         )
                     _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
                     ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)

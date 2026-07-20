@@ -3890,3 +3890,90 @@ def test_match_field_values_keeps_asin_only_from_audiobook_sources():
     assert "asin" not in AppController.match_field_values(physical)
     # the rest of the physical match still comes through
     assert AppController.match_field_values(physical).get("title") == "X"
+
+
+async def test_quick_match_apply_skips_edition_fields_from_nonaudiobook_source(tmp_path):
+    # A non-audiobook source (Hardcover) offers publisher + ISBN, but those describe the print
+    # edition — with strict_source_fields (default on) auto-apply must NOT pull them in, while
+    # non-edition fields (title/author) still apply.
+    h = _StubSource("hardcover", [SourceResult(
+        provider="hardcover", title="Dune", authors=["Frank Herbert"],
+        publisher="Ace", isbn="9780441172719")])
+    ctx = _ctx(tmp_path, sources=[h])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "x")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["hardcover"])
+    ctrl.quick_match_apply(proposals)
+    p = ctx.books.get(book.id)
+    assert not p.publisher          # edition field skipped
+    assert not p.isbn               # edition field skipped
+    assert p.title == "Dune"        # non-edition field still applied
+
+
+async def test_quick_match_apply_takes_edition_fields_from_audiobook_source(tmp_path):
+    # Soundbooth Theater is audiobook-exclusive, so its publisher/ISBN describe the audiobook and
+    # ARE applied.
+    s = _StubSource("soundbooththeater", [SourceResult(
+        provider="soundbooththeater", title="Dune", authors=["Frank Herbert"],
+        publisher="Macmillan Audio", isbn="9781427283917")])
+    ctx = _ctx(tmp_path, sources=[s])
+    book = BookUnit.new(source_folder=tmp_path / "ingest" / "y")
+    book.source_folder.mkdir(parents=True)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    proposals = await ctrl.quick_match_scan([book], ["soundbooththeater"])
+    ctrl.quick_match_apply(proposals)
+    p = ctx.books.get(book.id)
+    assert p.publisher == "Macmillan Audio"
+    assert p.isbn == "9781427283917"
+
+
+def test_unchecked_match_fields_glue(tmp_path):
+    ctx = _ctx(tmp_path)  # strict_source_fields defaults True
+    print_r = SourceResult(provider="hardcover", title="Dune", publisher="Ace", isbn="9780441172719")
+    audio_r = SourceResult(provider="audnexus", title="Dune", publisher="Macmillan", isbn="9781427283917")
+    ctrl = AppController(ctx)
+    assert ctrl.unchecked_match_fields(print_r) == {"publisher", "isbn"}
+    assert ctrl.unchecked_match_fields(audio_r) == set()      # audiobook source: all trusted
+    ctx.config.strict_source_fields = False
+    assert ctrl.unchecked_match_fields(print_r) == set()      # setting off: old behavior
+def test_duplicate_destinations_reports_in_library_collisions(tmp_path):
+    ctx = _ctx(tmp_path)
+
+    def _mk(folder, title, author):
+        b = BookUnit.new(source_folder=tmp_path / folder)
+        b.title = title
+        b.authors = [author]
+        ctx.books.upsert(b)
+        return b
+
+    b1 = _mk("a", "Thrawn", "Timothy Zahn")
+    b2 = _mk("b", "Thrawn", "Timothy Zahn")   # same $Author/$Title target as b1
+    _mk("c", "Alliances", "Timothy Zahn")       # unique target
+
+    dups = AppController(ctx).duplicate_destinations()
+
+    assert len(dups) == 1
+    assert {cb.id for cb in dups[0].books} == {b1.id, b2.id}
+    assert dups[0].target.name == "Thrawn.m4b"
+
+
+def test_duplicate_destinations_ignores_titleless_books(tmp_path):
+    ctx = _ctx(tmp_path)
+
+    def _mk(folder, title):
+        b = BookUnit.new(source_folder=tmp_path / folder)
+        b.title = title
+        b.authors = ["Someone"]
+        ctx.books.upsert(b)
+
+    _mk("a", "")   # unidentified: no real target, would never be persisted
+    _mk("b", "")   # would collapse to the same degenerate path as "a"
+
+    assert AppController(ctx).duplicate_destinations() == []

@@ -36,3 +36,8 @@ def test_structure_unclear_is_acknowledge_only():
 
 def test_review_guidance_points_at_matches():
     assert review_guidance().actions == (FixAction.MATCHES,)
+
+
+def test_mixed_quality_has_guidance():
+    g = finding_guidance(FindingCode.MIXED_QUALITY)
+    assert g.suggestion and len(g.actions) >= 1

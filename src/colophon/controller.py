@@ -29,6 +29,11 @@ from colophon.core.confidence import (
     score_identification,
     sort_by_runtime_closeness,
 )
+from colophon.core.duplicate_check import (
+    CollidingBook,
+    DuplicateDestination,
+    duplicate_targets,
+)
 from colophon.core.entity_alias import canonical_book
 from colophon.core.entity_graph import entity_graph_from_records
 from colophon.core.fields import get_field
@@ -100,11 +105,12 @@ from colophon.core.quickmatch import (
     QuickMatchSummary,
 )
 from colophon.core.sources import (
-    AUDIOBOOK_ASIN_PROVIDERS,
+    AUDIOBOOK_PROVIDERS,
     MetadataSource,
     SourceQuery,
     SourceResult,
     arrange_sources,
+    unchecked_edition_fields,
 )
 from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
@@ -1798,9 +1804,10 @@ class AppController:
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in plan.proposals:
             if p.best is not None and p.confidence >= plan.threshold and not p.author_inferred:
+                unchecked = self.unchecked_match_fields(p.best)
                 updates = {
                     k: v for k, v in self.match_field_values(p.best).items()
-                    if not get_field(p.book, k)
+                    if not get_field(p.book, k) and k not in unchecked
                 }
                 self._normalize_match_updates(updates)
                 self._capture_match_signals(p.book, p.best, fill_empty=True)
@@ -1860,6 +1867,8 @@ class AppController:
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in applicable:
             updates = self.match_field_values(p.best)
+            for field in self.unchecked_match_fields(p.best):  # don't auto-pull unchecked edition fields
+                updates.pop(field, None)
             self._merge_genre_tag_updates(p.book, p.best, updates)
             self._normalize_match_updates(updates)
             self._capture_match_signals(p.book, p.best, fill_empty=False)
@@ -2204,7 +2213,7 @@ class AppController:
             updates["year"] = str(result.publish_year)
         # Only take an ASIN from an audiobook source: a physical/Kindle ASIN (e.g. from Hardcover)
         # is the wrong product for an audiobook and would dead-end the later Audible/Audnexus lookup.
-        if result.asin and result.provider in AUDIOBOOK_ASIN_PROVIDERS:
+        if result.asin and result.provider in AUDIOBOOK_PROVIDERS:
             updates["asin"] = result.asin
         if result.isbn:
             updates["isbn"] = result.isbn
@@ -2219,6 +2228,15 @@ class AppController:
         if result.tags:
             updates["tag"] = "; ".join(result.tags)
         return updates
+
+    def unchecked_match_fields(self, result: SourceResult) -> set[str]:
+        """Fields the match picker should offer but leave UNCHECKED by default (and auto-apply
+        should skip): edition-specific fields (publisher, ISBN) from a non-audiobook source, per
+        `config.strict_source_fields`. Empty when the setting is off or the source is audiobook."""
+        return unchecked_edition_fields(
+            result.provider, self.match_field_values(result).keys(),
+            strict=self.ctx.config.strict_source_fields,
+        )
 
     def _merge_genre_tag_updates(
         self, book: BookUnit, result: SourceResult, updates: dict[str, str | None]
@@ -2366,6 +2384,28 @@ class AppController:
         pats = patterns or self.ctx.patterns
         root = self.ctx.config.library_root or (default_db_path().parent / "library")
         return [(b.id, build_target_path(root, pats, self._canonical_book(b))) for b in books]
+
+    def duplicate_destinations(
+        self, *, patterns: PathPatterns | None = None
+    ) -> list[DuplicateDestination]:
+        """Library books that would organize to the same destination under the saved settings —
+        the persist dry-run (`organize_targets`) over the whole library, grouped by colliding
+        target path so a human can resolve the clash before organizing. In-library only: it
+        compares previewed targets, not what already exists on disk."""
+        # A titleless book has no real target (it collapses to a degenerate "…/.m4b") and would never
+        # be persisted, so it can't be a genuine "when persisted" clash — exclude it from the compare.
+        books = [b for b in self._hydrate(self.ctx.books.list_all()) if (b.title or "").strip()]
+        by_id = {b.id: b for b in books}
+        return [
+            DuplicateDestination(
+                target=path,
+                books=[
+                    CollidingBook(bid, by_id[bid].title or "(untitled)", by_id[bid].source_folder)
+                    for bid in ids
+                ],
+            )
+            for path, ids in duplicate_targets(self.organize_targets(books, patterns=patterns))
+        ]
 
     def organize_preview(
         self, books: list[BookUnit], *, patterns: PathPatterns | None = None, encode: bool = True
