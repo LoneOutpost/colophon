@@ -1050,3 +1050,31 @@ async def test_download_all_pairs_path_skips_non_audio_and_counts_match(tmp_path
     dl_totals = [t for ph, _, t in phases if ph == "downloading"]
     assert dl_totals and all(t == 2 for t in dl_totals)  # denominator == keep-count
     assert download_target_count(torrent, None) == 2      # and matches the metadata count
+
+
+async def test_download_records_unresolvable_link_as_retryable_failure(tmp_path, monkeypatch):
+    # A link that fails to unrestrict (e.g. throttle-exhausted after retries) must be RECORDED as a
+    # failed file, not silently dropped — so it's visible and a resume can try it again.
+    torrent = RdTorrentInfo(
+        id="a", filename="T", status="downloaded", links=["L1", "L2"],
+        files=[RdTorrentFile(id=1, path="/T/01.mp3", bytes=10, selected=True),
+               RdTorrentFile(id=2, path="/T/02.mp3", bytes=20, selected=True)])
+
+    class Rd:
+        async def unrestrict_link(self, link, *, force=False):
+            if link == "L2":
+                raise RuntimeError("429 exhausted")
+            return RdUnrestrictedLink(filename="01.mp3", filesize=10, download="http://d/1")
+
+    async def fake_stream(url, dest, *, progress=None, cancel=None, client=None):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"ok")
+
+    monkeypatch.setattr("colophon.services.acquire.stream_download", fake_stream)
+    result = await download_torrent(Rd(), torrent, tmp_path)
+    ok = [f for f in result.files if f.ok]
+    bad = [f for f in result.files if not f.ok]
+    assert len(ok) == 1                      # 01.mp3 landed
+    assert len(bad) == 1                     # 02.mp3's failed link is recorded, not dropped
+    assert bad[0].filename == "02.mp3"
+    assert "retry" in (bad[0].error or "").lower()

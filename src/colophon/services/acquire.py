@@ -344,10 +344,14 @@ async def _resolve_links(
     cancel: CancelToken | None,
     on_progress: Callable[[int, int], None] | None = None,
     early_stop: Callable[[list[RdUnrestrictedLink | None]], bool] | None = None,
+    failed_out: list[int] | None = None,
 ) -> list[RdUnrestrictedLink | None]:
     """Unrestrict every link, preserving order (result[i] <-> links[i]); a failed or
-    cancelled link becomes None. `sem` bounds concurrency globally (falls back to a local
-    cap). `on_progress(done, total)` fires as each link settles. When `early_stop` is given
+    cancelled link becomes None. A link that *raised* (its retries were exhausted — e.g. a
+    persistent throttle) has its index appended to `failed_out` (when given), so the caller can
+    record it as a retryable failure rather than silently dropping it. `sem` bounds concurrency
+    globally (falls back to a local cap). `on_progress(done, total)` fires as each link settles.
+    When `early_stop` is given
     (subset picks), bounded workers pull links in order and stop launching new ones once
     `early_stop(results)` is true — so an early/clustered pick doesn't resolve the whole tail,
     while still running concurrently (a late pick stays fast)."""
@@ -368,6 +372,8 @@ async def _resolve_links(
                 results[i] = await client.unrestrict_link(link)
             except Exception as e:  # one link failing must not abort the batch (BLE001 intentional)
                 logger.warning(f"unrestrict failed: {e}")
+                if failed_out is not None:
+                    failed_out.append(i)
             done += 1
             if on_progress is not None:
                 on_progress(done, total)
@@ -428,13 +434,16 @@ async def download_torrent(
 
     # --- PHASE 1: resolve links, recover (dest, link, url, name) to download ---
     dl_plan: list[tuple[Path, str, str, str]] = []
+    fail_names: list[str] = []  # files/links whose unrestrict failed — recorded, not dropped
     if pairs is not None:
         # RD contract held: links[i] <-> selected[i]. Resolve in order, map by index.
+        failed_idx: list[int] = []
         unrs = await _resolve_links(
             client, [link for _, link in pairs], sem=resolve_sem, cancel=cancel,
-            on_progress=_resolve_progress)
+            on_progress=_resolve_progress, failed_out=failed_idx)
         kept = [(path, link, unr)
                 for (path, link), unr in zip(pairs, unrs, strict=True) if unr is not None]
+        fail_names = [PurePosixPath(pairs[i][0]).name for i in failed_idx]  # link i <-> pairs[i]
         container, dests = structured_dests(
             [p for p, _, _ in kept], dest_root, torrent.filename, pinned=folder, mode=mode)
         for (path, link, unr), dest in zip(kept, dests, strict=True):
@@ -445,10 +454,14 @@ async def download_torrent(
         def _early_stop(res: list[RdUnrestrictedLink | None]) -> bool:
             return _all_picks_mapped(selected, file_ids, res)
 
+        failed_idx = []
         unrs = await _resolve_links(
             client, list(torrent.links), sem=resolve_sem, cancel=cancel,
-            on_progress=_resolve_progress,
+            on_progress=_resolve_progress, failed_out=failed_idx,
             early_stop=_early_stop if file_ids is not None else None)
+        # A failed link here can't be aligned to a specific file (no name/size), so record it
+        # generically — enough to mark the download Partial and signal a retry.
+        fail_names = ["(unresolved link)"] * len(failed_idx)
         resolved_pairs = [(lnk, u) for lnk, u in zip(torrent.links, unrs, strict=True) if u is not None]
         resolved = [u for _, u in resolved_pairs]
         idxs = align_links_to_files(
@@ -473,9 +486,11 @@ async def download_torrent(
     else:
         # No file list: resolve all links, keep audio+cover, flat by basename.
         container = folder or _container_for(dest_root, torrent.filename, mode)
+        failed_idx = []
         unrs = await _resolve_links(
             client, list(torrent.links), sem=resolve_sem, cancel=cancel,
-            on_progress=_resolve_progress)
+            on_progress=_resolve_progress, failed_out=failed_idx)
+        fail_names = ["(unresolved link)"] * len(failed_idx)
         for i, unr in enumerate(unrs):
             if unr is None or not _keep_file(unr.filename):
                 continue
@@ -484,6 +499,12 @@ async def download_torrent(
 
     container.mkdir(parents=True, exist_ok=True)
     result = AcquireResult(folder=container)
+    # A link that couldn't be unrestricted (throttle-exhausted or gone) is recorded as a failed
+    # file rather than silently dropped, so the download shows Partial and a resume can retry it.
+    for name in fail_names:
+        result.files.append(AcquiredFile(
+            filename=name, path=None, ok=False,
+            error="couldn't resolve link (throttled or unavailable); retry to try again"))
 
     async def _fetch(link: str, url: str, dest: Path, display: str) -> bool:
         """Stream one file; on failure, re-resolve the (possibly stale) link fresh and retry
