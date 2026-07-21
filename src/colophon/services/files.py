@@ -6,9 +6,12 @@ job (the controller upserts after each call)."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from colophon.core.models import BookUnit
+
+logger = logging.getLogger(__name__)
 
 
 def reorder(book: BookUnit, ordered_paths: list[Path]) -> None:
@@ -22,6 +25,22 @@ def reorder(book: BookUnit, ordered_paths: list[Path]) -> None:
 def exclude(book: BookUnit, path: Path) -> None:
     """Remove a file from the book's source list (does not delete it from disk)."""
     book.source_files = [sf for sf in book.source_files if sf.path != path]
+
+
+def delete_files_from_disk(paths: list[Path]) -> list[Path]:
+    """Permanently unlink each path that exists on disk. Returns the paths actually removed; a path
+    that is already gone is skipped (nothing to do), and one that fails to unlink (permissions) is
+    logged and omitted so the caller keeps it in the book and its finding stays truthful.
+    Irreversible: callers gate on a confirm dialog."""
+    removed: list[Path] = []
+    for p in paths:
+        try:
+            if p.exists():
+                p.unlink()
+                removed.append(p)
+        except OSError as e:
+            logger.warning(f"delete_files_from_disk: could not remove {p}: {e}")
+    return removed
 
 
 def rename(book: BookUnit, path: Path, new_name: str) -> Path:

@@ -68,3 +68,18 @@ def test_rename_with_separator_raises(tmp_path):
     b = _book(tmp_path)
     with pytest.raises(ValueError):
         files.rename(b, b.source_files[0].path, "sub/dir.mp3")
+
+
+def test_delete_files_from_disk_removes_and_reports(tmp_path):
+    from colophon.services.files import delete_files_from_disk
+
+    a = tmp_path / "a.mp3"
+    a.write_bytes(b"x")
+    b = tmp_path / "b.mp3"
+    b.write_bytes(b"y")
+    gone = tmp_path / "gone.mp3"  # never existed
+
+    removed = delete_files_from_disk([a, b, gone])
+
+    assert not a.exists() and not b.exists()
+    assert set(removed) == {a, b}  # only files actually unlinked are reported
