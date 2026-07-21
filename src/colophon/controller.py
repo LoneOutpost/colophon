@@ -306,7 +306,7 @@ class OrganizePreviewRow:
 class DeleteResult:
     files_deleted: int
     book_removed: bool
-    errors: list[str]
+    errors: tuple[str, ...]
 
 
 # Provenances that mean "auto-derived from the folder or filename" — the fields a re-identify
@@ -799,7 +799,7 @@ class AppController:
 
         if not book.source_files:
             self.cleanup_remove([book.id])
-            return DeleteResult(files_deleted=len(removed), book_removed=True, errors=errors)
+            return DeleteResult(files_deleted=len(removed), book_removed=True, errors=tuple(errors))
 
         finding = empty_audio_finding([(sf.size, sf.duration_seconds) for sf in book.source_files])
         others = [f for f in book.findings if f.code is not FindingCode.EMPTY_AUDIO]
@@ -808,7 +808,7 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
         self._resync_roots({self._scan_root_for_path(book.source_folder)})
-        return DeleteResult(files_deleted=len(removed), book_removed=False, errors=errors)
+        return DeleteResult(files_deleted=len(removed), book_removed=False, errors=tuple(errors))
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""

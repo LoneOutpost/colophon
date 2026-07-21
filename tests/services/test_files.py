@@ -77,9 +77,10 @@ def test_delete_files_from_disk_removes_and_reports(tmp_path):
     a.write_bytes(b"x")
     b = tmp_path / "b.mp3"
     b.write_bytes(b"y")
-    gone = tmp_path / "gone.mp3"  # never existed
+    gone = tmp_path / "gone.mp3"  # already absent
 
     removed = delete_files_from_disk([a, b, gone])
 
     assert not a.exists() and not b.exists()
-    assert set(removed) == {a, b}  # only files actually unlinked are reported
+    # an already-absent path counts as removed (goal achieved) so the caller drops it from the book too
+    assert set(removed) == {a, b, gone}

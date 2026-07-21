@@ -28,16 +28,15 @@ def exclude(book: BookUnit, path: Path) -> None:
 
 
 def delete_files_from_disk(paths: list[Path]) -> list[Path]:
-    """Permanently unlink each path that exists on disk. Returns the paths actually removed; a path
-    that is already gone is skipped (nothing to do), and one that fails to unlink (permissions) is
-    logged and omitted so the caller keeps it in the book and its finding stays truthful.
-    Irreversible: callers gate on a confirm dialog."""
+    """Permanently unlink each path from disk. Returns the paths now absent as a result — a path
+    already gone counts as removed (the goal is achieved), so the caller drops it from the book too;
+    a path that fails to unlink (permissions) is logged and omitted so the caller keeps it and its
+    finding stays truthful. Irreversible: callers gate on a confirm dialog."""
     removed: list[Path] = []
     for p in paths:
         try:
-            if p.exists():
-                p.unlink()
-                removed.append(p)
+            p.unlink(missing_ok=True)
+            removed.append(p)
         except OSError as e:
             logger.warning(f"delete_files_from_disk: could not remove {p}: {e}")
     return removed

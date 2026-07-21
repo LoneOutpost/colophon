@@ -323,7 +323,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
             if r.state is PhaseState.FAILED and r.phase in (Phase.ENCODE, Phase.ORGANIZE)
         ]
         findings = controller._active_findings(book)
-        if failed_steps or findings:
+        if failed_steps or findings or book.missing:
             ui.label("Attention").classes("colophon-seccap")
             for r in failed_steps:
                 with ui.column().classes("w-full q-gutter-none q-mb-sm"):

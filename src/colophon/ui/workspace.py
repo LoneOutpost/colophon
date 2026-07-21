@@ -750,7 +750,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
 
                         # Attention sits up top, right under the confidence read-out, so the score,
                         # the signals behind it, and the problems that need a human read as one story.
-                        if controller._active_findings(book):
+                        if controller._active_findings(book) or book.missing:
                             with ui.element("div").classes("colophon-attention w-full q-mb-sm"):
                                 with ui.row().classes("items-center q-gutter-xs q-mb-xs"):
                                     ui.icon("warning_amber", size="1.125rem").classes("text-warning")

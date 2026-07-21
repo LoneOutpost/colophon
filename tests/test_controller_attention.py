@@ -60,6 +60,34 @@ def test_delete_corrupt_files_removes_bad_file_keeps_book(tmp_path):
     assert all(f.code is not FindingCode.EMPTY_AUDIO for f in reloaded.findings)
 
 
+def test_delete_corrupt_files_keeps_file_and_reports_when_unlink_fails(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    import colophon.services.files as files_mod
+    from colophon.core.models import FindingCode
+
+    folder = tmp_path / "Author" / "Book"
+    folder.mkdir(parents=True)
+    bad = folder / "01.mp3"
+    bad.write_bytes(b"b")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [SourceFile(path=bad, size=5_000_000, duration_seconds=0.0, ext="mp3")]
+    book.findings = [Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")]
+    ctx.books.upsert(book)
+
+    monkeypatch.setattr(files_mod, "delete_files_from_disk", lambda paths: [])  # simulate unlink failure
+
+    result = ctrl.delete_corrupt_files(book)
+
+    assert result.files_deleted == 0
+    assert result.book_removed is False
+    assert result.errors  # a failure was reported
+    reloaded = ctx.books.get(book.id)
+    assert [sf.path for sf in reloaded.source_files] == [bad]  # file kept
+    assert any(f.code is FindingCode.EMPTY_AUDIO for f in reloaded.findings)  # finding retained
+
+
 def test_delete_corrupt_files_removes_book_when_all_bad(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
