@@ -107,6 +107,24 @@ def seed_series(book: BookUnit) -> None:
             book.provenance["series"] = Provenance.FILENAME.value
 
 
+def seed_title(book: BookUnit) -> None:
+    """Pre-resolve: a multi-file single book is one book's chapters — the shared Album is its title,
+    but each file's Title tag is a chapter. `gather` reads only the first file's tags and reconcile
+    ranks Title above Album, so without this the book would be titled after chapter one. The detected
+    work already read the Album (see `classify._to_work`), so seed its label when it is tag-sourced;
+    reconcile's `if not book.title` gate then keeps it."""
+    if (
+        book.content_kind is ContentKind.SINGLE
+        and len(book.source_files) > 1
+        and not book.title
+        and book.detected_works
+    ):
+        dw = book.detected_works[0]
+        if dw.label and dw.label_prov == Provenance.TAG.value:
+            book.title = dw.label
+            book.provenance["title"] = Provenance.TAG.value
+
+
 def resolve(book: BookUnit, evidence: Evidence) -> None:
     """Fill empty identity fields by precedence (embedded > datafile > directory >
     filename) via `reconcile`."""
@@ -194,6 +212,7 @@ def run_identify(
     evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
     drop_orphaned_datafile_fields(book, evidence)
     seed_series(book)
+    seed_title(book)
     resolve(book, evidence)
     attribute(book, evidence)
     normalize(book)
