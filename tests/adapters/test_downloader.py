@@ -1,12 +1,19 @@
 import httpx
 import pytest
 
-from colophon.adapters.downloader import DownloadCancelled, stream_download
+from colophon.adapters.downloader import _STREAM_TIMEOUT, DownloadCancelled, stream_download
 from colophon.core.cancel import CancelToken
 
 
 def _client(handler):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_default_stream_client_has_a_bounded_read_timeout():
+    # A stalled Real-Debrid CDN with no timeout wedges the download slot forever; the default
+    # stream client must cap connect + read so a stall raises instead of hanging.
+    assert _STREAM_TIMEOUT.read is not None and _STREAM_TIMEOUT.read > 0
+    assert _STREAM_TIMEOUT.connect is not None and _STREAM_TIMEOUT.connect > 0
 
 
 async def test_stream_download_writes_file_and_reports_progress(tmp_path):

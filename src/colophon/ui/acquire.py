@@ -43,8 +43,11 @@ def download_row_text(e) -> str:
         return "Queued"
     if e.status == "partial":
         failed = max(0, e.files_total - e.files_done)
-        return f"Partial: {e.files_done} of {e.files_total} ({failed} failed)"
-    return e.status  # done / failed / paused
+        base = f"Partial: {e.files_done} of {e.files_total} ({failed} failed)"
+        return f"{base} · {e.detail}" if e.detail else base
+    if e.status == "failed":
+        return f"Failed · {e.detail}" if e.detail else "Failed"
+    return e.status  # done / paused
 
 
 def downloads_title_text(entries) -> str:

@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 
 _CHUNK = 1 << 16
 
+# A download stream must not hang forever: Real-Debrid's CDN sometimes accepts the connection
+# then stalls, and with no timeout the read blocks indefinitely, wedging the download slot. Cap
+# connect/read so a stall raises promptly (the caller re-resolves + retries once, then records a
+# real error) instead of hanging. The read timeout is per-chunk, so it never caps a slow-but-
+# progressing transfer of a large file — only a genuine no-bytes stall.
+_STREAM_TIMEOUT = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
+
 
 class DownloadCancelled(Exception):
     """Raised when a download is cooperatively cancelled; the `.part` is retained
@@ -37,7 +44,7 @@ async def stream_download(
     `.part` is left in place, raising `DownloadCancelled`. `progress(done, total)`
     reports cumulative bytes (`total` is 0 when no length is known)."""
     owns = client is None
-    client = client or httpx.AsyncClient(timeout=None, follow_redirects=True)
+    client = client or httpx.AsyncClient(timeout=_STREAM_TIMEOUT, follow_redirects=True)
     tmp = dest.with_name(dest.name + ".part")
     resume_from = tmp.stat().st_size if tmp.exists() else 0
     headers = {"Range": f"bytes={resume_from}-"} if resume_from > 0 else {}
