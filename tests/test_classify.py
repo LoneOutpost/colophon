@@ -396,3 +396,14 @@ def test_real_duration_file_not_flagged(tmp_path):
     r = _classify(folder, tmp_path, [feat])
 
     assert not any(f.code is FC.EMPTY_AUDIO for f in r.findings)
+
+
+def test_corrupt_source_files_selects_sized_zero_duration():
+    from colophon.core.classify import corrupt_source_files
+    from colophon.core.models import SourceFile
+
+    good = SourceFile(path=Path("/a/01.mp3"), size=5_000_000, duration_seconds=1200.0, ext="mp3")
+    corrupt = SourceFile(path=Path("/a/02.mp3"), size=5_000_000, duration_seconds=0.0, ext="mp3")
+    tiny = SourceFile(path=Path("/a/03.mp3"), size=1000, duration_seconds=0.0, ext="mp3")  # stray
+
+    assert corrupt_source_files([good, corrupt, tiny]) == [Path("/a/02.mp3")]
