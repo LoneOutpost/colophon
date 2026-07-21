@@ -302,7 +302,7 @@ class OrganizePreviewRow:
     blocked: bool
 
 
-@dataclass
+@dataclass(frozen=True)
 class DeleteResult:
     files_deleted: int
     book_removed: bool
