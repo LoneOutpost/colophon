@@ -19,6 +19,7 @@ from urllib.parse import quote
 from nicegui import app, background_tasks, ui
 
 from colophon.controller import AppController, RerunResult
+from colophon.core.attention import attention_items
 from colophon.core.audio_quality import book_quality_summary, format_file_quality
 from colophon.core.book_search import (
     FIELDS,
@@ -33,6 +34,7 @@ from colophon.core.chapters import file_boundary_chapters
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
 from colophon.core.graph_resolve import _name_key
+from colophon.core.guidance import FixAction
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.perf import span
@@ -506,23 +508,53 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
 
     # --- attention pane (findings + guided actions) ---
     def render_attention_pane(book) -> None:
-        findings = controller._active_findings(book)
+        items = attention_items(book, controller._active_findings(book))
         with ui.column().classes("w-full gap-2"):
-            for f in findings:
-                icon, color = _SEVERITY_BADGE[f.severity]
+            for item in items:
+                icon, color = _SEVERITY_BADGE[item.severity]
                 with ui.row().classes("items-center gap-2"):
                     ui.icon(icon).props(f"color={color}")
-                    ui.label(f.detail)
-            for f in findings:
-                if f.code.value in ("dup_format", "dup_edition", "structure_unclear"):
-                    code = f.code
+                    ui.label(item.detail)
+                ui.label(item.suggestion).classes("colophon-muted text-caption")
+                with ui.row().classes("gap-2"):
+                    if FixAction.ACKNOWLEDGE in item.actions and item.code is not None:
+                        def _ack(c=item.code, b=book) -> None:
+                            controller.acknowledge_finding(b, c)
+                            ui.notify("Acknowledged", type="info")
+                            repaint(nav=True, middle=True)
+                        ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
+                    if FixAction.DELETE in item.actions:
+                        def _del(b=book) -> None:
+                            _delete_book_items(b)
+                        ui.button("Delete", icon="delete", on_click=_del).props("flat color=negative")
 
-                    def _ack(c=code, b=book) -> None:
-                        controller.acknowledge_finding(b, c)
-                        ui.notify("Acknowledged", type="info")
-                        repaint(nav=True, middle=True)
+    def _delete_book_items(book) -> None:
+        from colophon.core.classify import corrupt_source_files
+        from colophon.ui.dialogs import confirm_delete_dialog
 
-                    ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
+        if book.missing:
+            paths, book_removed = [], True
+        else:
+            paths = corrupt_source_files(book.source_files)
+            book_removed = bool(paths) and len(paths) == len(book.source_files)
+
+        def _run() -> None:
+            if book.missing:
+                controller.remove_missing(book)
+                removed = True
+            else:
+                result = controller.delete_corrupt_files(book)
+                removed = result.book_removed
+                if result.errors:
+                    ui.notify("; ".join(result.errors), type="warning")
+            ui.notify("Deleted", type="info")
+            refresh_list()
+            if removed:
+                _clear_selection()
+            else:
+                show_detail(book.id)
+
+        confirm_delete_dialog(paths, book_removed=book_removed, on_confirm=_run)
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
@@ -949,6 +981,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         acknowledge=lambda code, b=book: (
                             controller.acknowledge_finding(b, code), refresh_list(),
                             show_detail(b.id)),
+                        delete=lambda b=book: _delete_book_items(b),
                         rerun_phase=_rerun_one,
                     )
                     state_panel.render(controller, book, actions=_attn)
