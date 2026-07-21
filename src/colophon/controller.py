@@ -302,6 +302,13 @@ class OrganizePreviewRow:
     blocked: bool
 
 
+@dataclass
+class DeleteResult:
+    files_deleted: int
+    book_removed: bool
+    errors: list[str]
+
+
 # Provenances that mean "auto-derived from the folder or filename" — the fields a re-identify
 # should clear so the chosen pattern re-derives them. Everything else (tags, datafile, a match, a
 # manual edit) is authoritative and left alone.
@@ -774,6 +781,34 @@ class AppController:
         self.ctx.operations.delete_for_book(book.id, commit=False)
         self.ctx.books.delete(book.id)  # commits, flushing the two preceding deletes
         self._resync_roots({root})
+
+    def delete_corrupt_files(self, book: BookUnit) -> DeleteResult:
+        """Permanently delete this book's corrupt/incomplete files (real size, no readable audio),
+        drop them from the book, and re-derive its EMPTY_AUDIO finding. When nothing playable is
+        left the whole book is removed (record + satellites + graph). Irreversible; the UI gates it
+        behind a confirm dialog."""
+        from colophon.core.classify import corrupt_source_files, empty_audio_finding
+        from colophon.services.files import delete_files_from_disk, exclude
+
+        targets = corrupt_source_files(book.source_files)
+        removed = delete_files_from_disk(targets)
+        removed_set = set(removed)
+        errors = [f"could not delete {p.name}" for p in targets if p not in removed_set]
+        for p in removed:
+            exclude(book, p)
+
+        if not book.source_files:
+            self.cleanup_remove([book.id])
+            return DeleteResult(files_deleted=len(removed), book_removed=True, errors=errors)
+
+        finding = empty_audio_finding([(sf.size, sf.duration_seconds) for sf in book.source_files])
+        others = [f for f in book.findings if f.code is not FindingCode.EMPTY_AUDIO]
+        book.findings = others + ([finding] if finding is not None else [])
+        resync_state(book, ready_threshold=self.ctx.config.review_threshold)
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        return DeleteResult(files_deleted=len(removed), book_removed=False, errors=errors)
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""

@@ -1,5 +1,5 @@
 from colophon.controller import AppController
-from colophon.core.models import BookUnit, FindingCode
+from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity, SourceFile
 
 # Reuse the existing test context helper pattern from tests/test_controller.py.
 from tests.test_controller import _ctx
@@ -30,3 +30,51 @@ def test_books_needing_attention_sorts_errors_first(tmp_path):
     ctx.books.upsert(err)
     out = ctrl.books_needing_attention()
     assert [b.id for b in out][:2] == [err.id, warn.id]
+
+
+def test_delete_corrupt_files_removes_bad_file_keeps_book(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    folder = tmp_path / "Author" / "Book"
+    folder.mkdir(parents=True)
+    good = folder / "01.mp3"
+    good.write_bytes(b"g")
+    bad = folder / "02.mp3"
+    bad.write_bytes(b"b")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [
+        SourceFile(path=good, size=5_000_000, duration_seconds=1200.0, ext="mp3"),
+        SourceFile(path=bad, size=5_000_000, duration_seconds=0.0, ext="mp3"),
+    ]
+    book.findings = [Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")]
+    ctx.books.upsert(book)
+
+    result = ctrl.delete_corrupt_files(book)
+
+    assert result.files_deleted == 1 and result.book_removed is False
+    assert not bad.exists() and good.exists()
+    reloaded = ctx.books.get(book.id)
+    assert [sf.path for sf in reloaded.source_files] == [good]
+    assert all(f.code is not FindingCode.EMPTY_AUDIO for f in reloaded.findings)
+
+
+def test_delete_corrupt_files_removes_book_when_all_bad(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+
+    folder = tmp_path / "Author" / "Book"
+    folder.mkdir(parents=True)
+    bad = folder / "01.mp3"
+    bad.write_bytes(b"b")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [SourceFile(path=bad, size=5_000_000, duration_seconds=0.0, ext="mp3")]
+    book.findings = [Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")]
+    ctx.books.upsert(book)
+
+    result = ctrl.delete_corrupt_files(book)
+
+    assert result.book_removed is True and not bad.exists()
+    assert ctx.books.get(book.id) is None
