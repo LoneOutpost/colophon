@@ -1259,6 +1259,34 @@ def remove_from_library_dialog(
     dialog.open()
 
 
+def delete_summary(paths: list[Path], *, book_removed: bool) -> str:
+    """Plain-language description of an irreversible delete, for the confirm dialog."""
+    if book_removed and not paths:
+        return "This removes the book and its Colophon record. Its files are already missing from disk."
+    names = ", ".join(p.name for p in paths)
+    tail = " The book has no other audio, so it will be removed too." if book_removed else ""
+    return f"This permanently deletes {len(paths)} file(s) from disk: {names}.{tail}"
+
+
+def confirm_delete_dialog(paths: list[Path], *, book_removed: bool, on_confirm: Callable[[], None]) -> None:
+    """A persistent confirm for an irreversible delete. Names exactly what will go; the confirm
+    button runs `on_confirm` (which does the deletion) then closes."""
+    dialog = modal()
+    with dialog, ui.card().classes("q-pa-md").style("min-width: 22rem"):
+        ui.label("Delete permanently?").classes("text-subtitle1")
+        ui.label(delete_summary(paths, book_removed=book_removed)).classes("colophon-muted text-caption")
+
+        def _go(btn) -> None:
+            with busy(btn):
+                on_confirm()
+            dialog.close()
+
+        btn = dialog_actions(dialog, confirm_label="Delete", confirm_icon="delete",
+                             on_confirm=lambda: None, confirm_props="unelevated color=negative")
+        btn.on("click", lambda: _go(btn))
+    dialog.open()
+
+
 async def persist_dialog(
     controller: AppController,
     *,

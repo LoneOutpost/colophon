@@ -14,7 +14,8 @@ from typing import NamedTuple
 
 from nicegui import ui
 
-from colophon.core.guidance import FixAction, finding_guidance, review_guidance
+from colophon.core.attention import attention_items
+from colophon.core.guidance import FixAction, review_guidance
 from colophon.core.models import (
     BookState,
     BookUnit,
@@ -42,6 +43,7 @@ class AttentionActions:
     files: Callable[[], None]
     matches: Callable[[], None]
     acknowledge: Callable[[FindingCode], None]
+    delete: Callable[[], None]
     rerun_phase: Callable[[BookUnit, Phase], Awaitable[None]]
 
 
@@ -198,6 +200,7 @@ _ACTION_META: dict[FixAction, tuple[str, str]] = {
     FixAction.FILES: ("Files", "folder"),
     FixAction.MATCHES: ("Find matches", "travel_explore"),
     FixAction.ACKNOWLEDGE: ("Acknowledge", "check"),
+    FixAction.DELETE: ("Delete", "delete"),
 }
 
 
@@ -219,6 +222,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
             FixAction.FILES: actions.files,
             FixAction.MATCHES: actions.matches,
             FixAction.ACKNOWLEDGE: (lambda c=code: actions.acknowledge(c)) if code else (lambda: None),
+            FixAction.DELETE: actions.delete,
         }
         ui.button(text, icon=icon, on_click=handlers[action]).props("flat dense no-caps")
 
@@ -319,7 +323,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
             if r.state is PhaseState.FAILED and r.phase in (Phase.ENCODE, Phase.ORGANIZE)
         ]
         findings = controller._active_findings(book)
-        if failed_steps or findings:
+        if failed_steps or findings or book.missing:
             ui.label("Attention").classes("colophon-seccap")
             for r in failed_steps:
                 with ui.column().classes("w-full q-gutter-none q-mb-sm"):
@@ -331,16 +335,15 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                     )
                     with ui.row().classes("q-pl-lg q-gutter-xs"):
                         _action_button(FixAction.ORGANIZE)
-            for f in findings:
+            for item in attention_items(book, findings):
                 fc = {"error": "negative", "warn": "warning", "info": "info"}.get(
-                    f.severity.value, "grey-6"
+                    item.severity.value, "grey-6"
                 )
-                g = finding_guidance(f.code)
                 with ui.column().classes("w-full q-gutter-none q-mb-sm"):
                     with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
                         ui.icon("flag", color=fc, size="1rem")
-                        ui.label(f.detail).classes("col text-caption")
-                    ui.label(g.suggestion).classes("colophon-muted text-caption q-pl-lg")
+                        ui.label(item.detail).classes("col text-caption")
+                    ui.label(item.suggestion).classes("colophon-muted text-caption q-pl-lg")
                     with ui.row().classes("q-pl-lg q-gutter-xs"):
-                        for action in g.actions:
-                            _action_button(action, f.code)
+                        for action in item.actions:
+                            _action_button(action, item.code)

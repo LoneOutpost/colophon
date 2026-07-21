@@ -9,9 +9,9 @@ def test_every_finding_code_has_guidance():
         assert isinstance(g.actions, tuple)
 
 
-def test_corrupt_audio_points_at_acquire_and_reprobe_not_acknowledge():
+def test_corrupt_audio_points_at_acquire_reprobe_delete_not_acknowledge():
     g = finding_guidance(FindingCode.EMPTY_AUDIO)
-    assert g.actions == (FixAction.ACQUIRE, FixAction.REPROBE)
+    assert g.actions == (FixAction.ACQUIRE, FixAction.REPROBE, FixAction.DELETE)
     assert FixAction.ACKNOWLEDGE not in g.actions  # blocking findings aren't acknowledgeable
     # Acquire is a convenience, not the mandate: the real fix leads.
     assert "replace it" in g.suggestion.lower()
@@ -41,3 +41,21 @@ def test_review_guidance_points_at_matches():
 def test_mixed_quality_has_guidance():
     g = finding_guidance(FindingCode.MIXED_QUALITY)
     assert g.suggestion and len(g.actions) >= 1
+
+
+def test_empty_audio_offers_delete_not_acknowledge():
+    from colophon.core.guidance import FixAction, finding_guidance
+    from colophon.core.models import FindingCode
+
+    actions = finding_guidance(FindingCode.EMPTY_AUDIO).actions
+    assert FixAction.DELETE in actions
+    assert FixAction.ACKNOWLEDGE not in actions
+
+
+def test_advisory_findings_offer_acknowledge():
+    from colophon.core.guidance import FixAction, finding_guidance
+    from colophon.core.models import FindingCode
+
+    for code in (FindingCode.MULTI_IN_AUTHOR, FindingCode.MIXED_WORKS,
+                 FindingCode.DUP_FORMAT, FindingCode.MIXED_QUALITY):
+        assert FixAction.ACKNOWLEDGE in finding_guidance(code).actions

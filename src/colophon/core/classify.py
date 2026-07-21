@@ -26,6 +26,7 @@ from colophon.core.models import (
     FindingSeverity,
     FolderKind,
     Provenance,
+    SourceFile,
 )
 from colophon.core.normalize import normalize_key, normalize_text, proper_case_if_shouting
 
@@ -316,6 +317,13 @@ def _actionable_finding(
 
 
 _EMPTY_AUDIO_MIN_SIZE = 64 * 1024  # ignore sub-64KB stray files; a real audiobook is megabytes
+
+
+def corrupt_source_files(files: list[SourceFile]) -> list[Path]:
+    """The paths of a book's files that read as corrupt/incomplete: real size but no readable audio.
+    The same rule `empty_audio_finding` flags, exposed as paths so the delete op removes exactly the
+    files the EMPTY_AUDIO finding is about."""
+    return [f.path for f in files if f.duration_seconds <= 0 and f.size > _EMPTY_AUDIO_MIN_SIZE]
 
 
 def empty_audio_finding(sized_durations: list[tuple[int, float]]) -> Finding | None:

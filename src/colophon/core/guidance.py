@@ -19,6 +19,7 @@ class FixAction(StrEnum):
     FILES = "files"              # jump to the Files list to remove a duplicate
     MATCHES = "matches"          # find a source match to confirm identity
     ACKNOWLEDGE = "acknowledge"  # dismiss an advisory finding
+    DELETE = "delete"            # permanently delete corrupt files / a missing book
 
 
 class Guidance(NamedTuple):
@@ -31,8 +32,8 @@ class Guidance(NamedTuple):
 _CORRUPT = Guidance(
     "This file is corrupt or incomplete. The real fix is to replace it with a good copy "
     "of the file, from wherever you have it. If the file lives on a connected store, you "
-    "can browse for it in Acquire.",
-    (FixAction.ACQUIRE, FixAction.REPROBE),
+    "can browse for it in Acquire. If you just want it gone, delete it from disk.",
+    (FixAction.ACQUIRE, FixAction.REPROBE, FixAction.DELETE),
 )
 _MIXED = Guidance(
     "This folder holds more than one book. Persist, then Organize, files each one to its "
