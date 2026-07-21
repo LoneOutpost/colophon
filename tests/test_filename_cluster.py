@@ -146,6 +146,33 @@ def test_cluster_ragged_trailing_title_is_not_single():
     assert r.content_kind is not ContentKind.SINGLE  # must not silently merge two books
 
 
+def test_cluster_chaptered_single_book_is_single():
+    # One book split into chapter files: a shared leading title, a track number, then a chapter
+    # marker ("Chap NN"/"Epilogue") and a per-chapter description. The differing chapter text must
+    # NOT be read as distinct book titles.
+    r = cluster(_paths(
+        "The Fifth Agreement - 01 - Chap 01 - In the Beginning.mp3",
+        "The Fifth Agreement - 02 - Chap 02 - Symbols and Agreements.mp3",
+        "The Fifth Agreement - 03 - Chap 03 - The Story of You.mp3",
+        "The Fifth Agreement - 15 - Epilogue - Help Me to Change the World.mp3",
+    ))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+    assert r.detected_works[0].label == "The Fifth Agreement"
+
+
+def test_cluster_numbered_series_without_chapter_marker_stays_multi():
+    # Guard: a numbered series shelf has the same shape (identical leading name + number + differing
+    # trailing text) but NO chapter marker, so it must still split into separate books.
+    r = cluster(_paths(
+        "Discworld - 01 - The Colour of Magic.mp3",
+        "Discworld - 02 - The Light Fantastic.mp3",
+        "Discworld - 03 - Equal Rites.mp3",
+    ))
+    assert r.content_kind is ContentKind.MULTI
+    assert len(r.detected_works) == 3
+
+
 def test_title_chunks_drops_leading_number_chunks():
     from colophon.core.filename_cluster import _title_chunks
     assert _title_chunks(["1", "The Gunslinger"]) == ["The Gunslinger"]

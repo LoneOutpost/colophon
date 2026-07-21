@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from mutagen.id3 import ID3, TIT2
+from mutagen.id3 import ID3, TALB, TIT2
 
 from colophon.adapters.audio import probe_audio_file
 from colophon.adapters.sidecar import DatafileSidecar
@@ -196,6 +196,36 @@ def test_run_identify_rederive_refills_title_from_tag(tmp_path):
 
     assert book.title == "Real Title"
     assert book.provenance["title"] == Provenance.TAG.value
+
+
+def test_run_identify_titles_multifile_book_from_album_not_chapter(tmp_path):
+    # A single book split into chapter files: each file's Title tag is a chapter, the shared Album is
+    # the book. The book must be titled from the Album, not the first file's chapter Title tag.
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Don Miguel Ruiz" / "The Fifth Agreement"
+    folder.mkdir(parents=True)
+    files = []
+    for i, chap in enumerate(["Chap 01 - In the Beginning", "Chap 02 - Symbols", "Epilogue"], 1):
+        f = folder / f"The Fifth Agreement - {i:02d} - {chap}.mp3"
+        f.write_bytes(b"")
+        id3 = ID3()
+        id3.add(TIT2(encoding=3, text=[chap]))
+        id3.add(TALB(encoding=3, text=["The Fifth Agreement"]))
+        id3.save(f)
+        files.append(probe_audio_file(f))
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = files
+    book.content_kind = ContentKind.SINGLE
+    book.detected_works = [DetectedWork(
+        label="The Fifth Agreement", label_prov=Provenance.TAG.value,
+        files=[f.path for f in files])]
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""))
+
+    assert book.title == "The Fifth Agreement"
 
 
 def test_run_identify_rederive_clears_field_with_no_lower_tier(tmp_path):

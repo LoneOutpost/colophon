@@ -35,6 +35,14 @@ _NUM = re.compile(r"^\d+(?:\.\d+)?$")          # integer or decimal token
 # read as a sequence. (This chunk-local, space-separated form is why we can't just call
 # parse_sequence_affix, which needs a bracket or dash separator, not a bare space.)
 _TRAIL_NUM = re.compile(r"\s+\d{1,3}(?:\.\d{1,2})?\s*$")
+# An explicit chapter/part marker chunk: a structural word plus its index ("Chap 01", "Track 3",
+# "Disc 2", "Part 1"), or a bare front/back-matter label ("Epilogue", "Prologue"). This is the one
+# signal that tells a single book's chapters apart from a numbered series shelf: both share a leading
+# title followed by a number and differing trailing text, but only chapters carry this marker.
+_CHAPTER_MARKER = re.compile(
+    r"^(?:(?:chapter|chap|ch|track|trk|part|pt|disc|cd|side|vol|volume|section|sect)\s+\d+(?:\.\d+)?"
+    r"|epilogue|prologue|intro(?:duction)?|outro|preface|foreword|afterword|interlude|appendix)$"
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +77,12 @@ def _tokens(chunk: str) -> list[str]:
 
 def _is_num(tok: str) -> bool:
     return bool(_NUM.match(tok))
+
+
+def _is_chapter_marker(chunk: str) -> bool:
+    """True if a chunk is an explicit chapter/part index ("Chap 01") or front/back matter
+    ("Epilogue"). See `_CHAPTER_MARKER`."""
+    return bool(_CHAPTER_MARKER.match(_spaced(chunk).lower()))
 
 
 def _text_sig(tokens: list[str]) -> tuple[str, ...]:
@@ -192,7 +206,18 @@ def cluster(files: list[Path]) -> ClusterResult:
                    if same_count else
                    _signal("ragged_chunk_count", -1, "files split into differing parts"))
 
-    if has_diff:
+    # One book split into chapter files: every file shares an identical leading title and carries an
+    # explicit chapter marker ("Chap 01", "Epilogue"). The differing trailing text is chapter labels,
+    # not distinct book titles, so this must win over the `has_diff` split below. A numbered series
+    # shelf has the same leading-title-plus-number shape but no chapter marker, so it still splits.
+    leading_title = rels[0] is IDENTICAL and bool(_text_sig(_tokens(per_file[0][0])))
+    all_chaptered = all(any(_is_chapter_marker(c) for c in per_file[f]) for f in range(n))
+    if leading_title and all_chaptered:
+        signals.append(_signal("chaptered_single_book", 2,
+                               "shared title with per-chapter markers (one book's chapters)"))
+        works = [_parts_work(files, per_file)]
+        kind = ContentKind.SINGLE
+    elif has_diff:
         signals.append(_signal("distinct_titles", 2, "files have different title text"))
         works = [_multi_work(files[i], per_file[i]) for i in range(n)]
         kind = ContentKind.MULTI

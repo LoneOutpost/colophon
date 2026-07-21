@@ -170,6 +170,19 @@ def test_chaptered_book_keeps_album_as_label():
     assert works[0].label == "The Way of Kings"
 
 
+def test_chaptered_book_uses_uniform_title_when_album_varies():
+    # Files confirmed one book (shared ASIN) but the Album tag differs per file while the Title is
+    # identical: the tag that *matches across the files* names the book, so the shared Title wins over
+    # the varying per-file Album.
+    feats = [
+        _feat("/a/d/01.mp3", asin="B01", title="The Silmarillion", album="Ainulindale"),
+        _feat("/a/d/02.mp3", asin="B01", title="The Silmarillion", album="Valaquenta"),
+    ]
+    works, _ = group_works(feats)
+    assert len(works) == 1
+    assert works[0].label == "The Silmarillion"
+
+
 def test_reversed_title_album_tags_use_filename_to_pick_title():
     # Some files misfile the tags: the Title holds the *series* and the Album holds the book title.
     # The filename ("Allies (Fate Of The Jedi 5)") arbitrates — its parenthetical is the series, so a

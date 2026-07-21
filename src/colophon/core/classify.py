@@ -132,6 +132,17 @@ def _first(values) -> str | None:
     return None
 
 
+def _uniform_tag(values) -> str | None:
+    """The one value every file shares (case-insensitively, ignoring placeholders), or None if any
+    file lacks it or they disagree. A tag identical across a book's files is book-level; one that
+    varies is chapter-level. Returns the first file's original casing of the shared value."""
+    vals = [v for v in values]
+    usable = [v for v in vals if v and not _is_placeholder(v)]
+    if len(usable) == len(vals) and len({_text_key(v) for v in usable}) == 1:
+        return usable[0]
+    return None
+
+
 # Generic placeholder tag values that are not a real title (a rip left the default in): they must
 # never win over the filename. "Track 3", "Disc 1", "CD 2", "Chapter 5", "Volume 1", "Unknown
 # Album …", "Untitled".
@@ -216,9 +227,16 @@ def _to_work(group: list[FileFeatures]) -> DetectedWork:
     album = _first(f.tags.album for f in group)
     author = _first(f.tags.artist for f in group)
     if len(group) > 1:
-        # A multi-file group is one book's chapters: the Album is the book's title and each file's
-        # Title is a chapter, so the Album labels the work (ignoring a junk placeholder album).
-        tag_label = next((v for v in (album, title) if v and not _is_placeholder(v)), None)
+        # A multi-file group is one book. The tag that *matches across every file* names the book;
+        # the one that varies is per-chapter. Usually that is a shared Album over per-chapter Titles,
+        # but a book can instead carry a shared Title over per-file Albums (disc/part names), so pick
+        # by consistency rather than assuming Album. Fall back to the first non-placeholder tag when
+        # neither is uniform.
+        tag_label = (
+            _uniform_tag(f.tags.album for f in group)
+            or _uniform_tag(f.tags.title for f in group)
+            or next((v for v in (album, title) if v and not _is_placeholder(v)), None)
+        )
         label = tag_label or normalize_text(group[0].path.stem)
         prov = Provenance.TAG.value if tag_label else Provenance.FILENAME.value
         return DetectedWork(label=proper_case_if_shouting(label), label_prov=prov,
