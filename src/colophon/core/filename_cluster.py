@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
+from colophon.core.track_index import parse_track_index
 
 # Top-level chunk separators, in two flavours chosen by filename style (see `_chunks`). Both split
 # on brackets/underscores and a dot on a letter<->digit boundary ("Series.01" -> "Series"|"01",
@@ -177,6 +178,29 @@ def shares_token(a: str, b: str) -> bool:
     return bool(ta & tb)
 
 
+def _glued_sequence_residue(files: list[Path]) -> str | None:
+    """The shared title residue when every file is a distinct LEADING track index glued to the same
+    text ("01Cujo", "02Cujo" -> "Cujo"), else None. A series shelf (distinct residues), a non-leading
+    index ("Dreamcatcher01"), or a pure number (empty residue) returns None, so only a genuine
+    glued-number sequence is merged."""
+    indices: list[int] = []
+    residues: list[str] = []
+    for f in files:
+        ti = parse_track_index(f.stem)
+        if ti is None or len(ti.components) != 1:
+            return None
+        residue = re.sub(r"\d+", "", f.stem).strip()
+        if not residue:
+            return None
+        indices.append(ti.components[0])
+        residues.append(residue)
+    if len(set(indices)) != len(indices):
+        return None
+    if len({r.lower() for r in residues}) != 1:
+        return None
+    return residues[0]
+
+
 def cluster(files: list[Path]) -> ClusterResult:
     """Classify a folder's files into works by filename structure alone."""
     if not files:
@@ -216,6 +240,11 @@ def cluster(files: list[Path]) -> ClusterResult:
         signals.append(_signal("chaptered_single_book", 2,
                                "shared title with per-chapter markers (one book's chapters)"))
         works = [_parts_work(files, per_file)]
+        kind = ContentKind.SINGLE
+    elif (residue := _glued_sequence_residue(files)) is not None:
+        signals.append(_signal("glued_numbered_sequence", 2,
+                               "files are a number glued to one shared title (one book's parts)"))
+        works = [DetectedWork(label=_spaced(residue), series=None, sequence=None, files=list(files))]
         kind = ContentKind.SINGLE
     elif has_diff:
         signals.append(_signal("distinct_titles", 2, "files have different title text"))

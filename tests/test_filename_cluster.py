@@ -195,3 +195,40 @@ def test_single_file_leading_text_label_unchanged():
 def test_single_file_lone_number_label_degenerate():
     r = cluster([Path("01.mp3")])
     assert r.detected_works[0].label == "01"
+
+
+def test_glued_sequence_residue_merges_shared_residue():
+    from colophon.core.filename_cluster import _glued_sequence_residue
+    assert _glued_sequence_residue(
+        [Path("/a/01Cujo.mp3"), Path("/a/02Cujo.mp3"), Path("/a/83Cujo.mp3")]) == "Cujo"
+
+
+def test_glued_sequence_residue_none_for_distinct_residues():
+    from colophon.core.filename_cluster import _glued_sequence_residue
+    assert _glued_sequence_residue(
+        [Path("/a/01 - Betrayal.mp3"), Path("/a/02 - Bloodlines.mp3")]) is None
+
+
+def test_glued_sequence_residue_none_for_trailing_and_pure_numbers():
+    from colophon.core.filename_cluster import _glued_sequence_residue
+    assert _glued_sequence_residue(
+        [Path("/a/Dreamcatcher01.mp3"), Path("/a/Dreamcatcher02.mp3")]) is None
+    assert _glued_sequence_residue(
+        [Path("/a/01.mp3"), Path("/a/02.mp3")]) is None
+
+
+def test_glued_sequence_residue_none_for_duplicate_index():
+    from colophon.core.filename_cluster import _glued_sequence_residue
+    assert _glued_sequence_residue([Path("/a/07Cujo.mp3"), Path("/a/07Cujo.mp3")]) is None
+
+
+def test_cluster_glued_leading_number_is_single_titled_by_residue():
+    r = cluster(_paths("01Cujo.mp3", "02Cujo.mp3", "03Cujo.mp3"))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+    assert r.detected_works[0].label == "Cujo"
+
+
+def test_cluster_leading_number_shelf_with_distinct_titles_stays_multi():
+    r = cluster(_paths("01 - Betrayal.mp3", "02 - Bloodlines.mp3"))
+    assert r.content_kind is ContentKind.MULTI

@@ -504,3 +504,16 @@ def test_loose_numbered_chapters_stay_undetermined():
     r = classify(Path("/lib/Stephen King"), Path("/lib"), feats,
                  template_pattern=TEMPLATE, scheme_patterns=SCHEME)
     assert r.folder_kind is FolderKind.UNDETERMINED
+
+
+def test_glued_number_folder_classifies_as_single_titled_by_residue():
+    # `01Cujo`/`02Cujo` (a track number glued to the title, no separator) group as one book titled
+    # by the shared residue instead of fragmenting into one book per file.
+    feats = [_feat("/lib/Author/1981 - Cujo/01Cujo.mp3"),
+             _feat("/lib/Author/1981 - Cujo/02Cujo.mp3"),
+             _feat("/lib/Author/1981 - Cujo/03Cujo.mp3")]
+    r = classify(Path("/lib/Author/1981 - Cujo"), Path("/lib"), feats,
+                 template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert r.content_kind is CK.SINGLE
+    assert len(r.detected_works) == 1
+    assert r.detected_works[0].label == "Cujo"
