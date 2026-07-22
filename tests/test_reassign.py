@@ -86,6 +86,24 @@ def test_reassign_leaves_uninvolved_sibling_untouched(tmp_path):
     }
 
 
+def test_reassign_rederives_empty_audio_finding_over_new_files(tmp_path):
+    # A corrupt file (real size, zero duration) pulled into a book gets flagged now, not only on the
+    # next rescan.
+    from colophon.core.models import FindingCode
+    books, grouping = _repos(tmp_path)
+    folder = tmp_path / "Folder"
+    a = _book(folder, "01.mp3", title="A")
+    b = _book(folder, "02.mp3", title="B")
+    b.source_files[0].size = 5_000_000
+    b.source_files[0].duration_seconds = 0.0  # corrupt
+    books.upsert(a)
+    books.upsert(b)
+
+    target = reassign_file(books, grouping, folder, folder / "02.mp3", a.id)
+
+    assert any(f.code is FindingCode.EMPTY_AUDIO for f in target.findings)
+
+
 def test_reassign_noop_when_file_already_in_target(tmp_path):
     books, grouping = _repos(tmp_path)
     folder = tmp_path / "Folder"

@@ -918,9 +918,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(
                                             icon="playlist_add",
                                             on_click=lambda p=sib_path: (
-                                                controller.reassign_file(book, p),
+                                                # reassignment changes the book's id (its file set
+                                                # changed), so navigate to the returned book, not the
+                                                # now-deleted book.id.
+                                                show_detail(controller.reassign_file(book, p).id),
                                                 ui.notify("Added to this book"),
-                                                show_detail(book.id),
                                             ),
                                         ).props('flat dense round color=primary aria-label="Add to this book"').tooltip("Add this file to this book")
 

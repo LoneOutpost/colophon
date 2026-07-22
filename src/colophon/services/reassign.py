@@ -10,20 +10,26 @@ from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo, GroupingOverrideRepo
 from colophon.core.chapters import file_boundary_chapters
+from colophon.core.classify import empty_audio_finding
 from colophon.core.graph import leaf_id_for
-from colophon.core.models import BookUnit, ContentKind, DetectedWork, SourceFile
+from colophon.core.models import BookUnit, ContentKind, DetectedWork, FindingCode, SourceFile
 from colophon.services.combine import _natural_key
 
 
 def _rebuild(book: BookUnit, folder: Path, files: list[SourceFile]) -> BookUnit:
     """A copy of `book` owning exactly `files`: new file-derived id, refreshed chapters/detected work,
-    metadata preserved. `files` must be natural-sorted by the caller."""
+    metadata preserved. `files` must be natural-sorted by the caller. The EMPTY_AUDIO finding is
+    re-derived over the new file set (a corrupt file that joined or left is flagged/cleared now, not
+    only on the next rescan); other identity fields are deliberately kept so curation survives."""
     b = book.model_copy(deep=True)
     b.id = leaf_id_for(folder, [sf.path for sf in files])
     b.source_files = list(files)
     b.content_kind = ContentKind.SINGLE
     b.detected_works = [DetectedWork(label=(book.title or folder.name), files=[sf.path for sf in files])]
     b.chapters = file_boundary_chapters([(sf.path.name, sf.duration_seconds) for sf in files])
+    finding = empty_audio_finding([(sf.size, sf.duration_seconds) for sf in files])
+    others = [f for f in b.findings if f.code is not FindingCode.EMPTY_AUDIO]
+    b.findings = others + ([finding] if finding is not None else [])
     b.touch()
     return b
 
