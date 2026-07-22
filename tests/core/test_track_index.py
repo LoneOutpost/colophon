@@ -41,3 +41,27 @@ def test_ordering_subpart_after_bare_and_before_next():
     assert parse_track_index("1a") < parse_track_index("1b") < parse_track_index("2")
     assert parse_track_index("12") < parse_track_index("12.5") < parse_track_index("13")
     assert parse_track_index("1-02") < parse_track_index("2-01")
+
+
+def test_parse_track_indices_strips_shared_marker():
+    from colophon.core.track_index import parse_track_indices
+    assert parse_track_indices(["Chapter 01", "Chapter 02", "Chapter 03"]) == [
+        TrackIndex((1,)), TrackIndex((2,)), TrackIndex((3,)),
+    ]
+
+
+def test_parse_track_indices_keeps_unshared_marker_unparsed():
+    from colophon.core.track_index import parse_track_indices
+    assert parse_track_indices(["Chapter 01", "Epilogue"]) == [None, None]
+
+
+def test_parse_track_indices_marker_that_is_title_text_is_not_stripped():
+    from colophon.core.track_index import parse_track_indices
+    assert parse_track_indices(["Chapter of Secrets", "Part 2"]) == [None, None]
+
+
+def test_parse_track_indices_bare_numbers_pass_through():
+    from colophon.core.track_index import parse_track_indices
+    assert parse_track_indices(["01", "02", "03"]) == [
+        TrackIndex((1,)), TrackIndex((2,)), TrackIndex((3,)),
+    ]

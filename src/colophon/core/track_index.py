@@ -20,6 +20,11 @@ _DECIMAL = re.compile(r"\.(\d{1,2})")
 _LETTER_SUBPART = re.compile(r"([A-Za-z])(?![A-Za-z0-9])")     # a single letter at a boundary
 _MARKER_LED = re.compile(rf"{_MARK}\d", re.IGNORECASE)         # a glued next component (d2 -> t01)
 
+# A spaced marker WORD leading a value. Book-level only: a lone marker may be title text, so it is
+# stripped only when every file in the book shares the same one.
+_MARKER_WORD = re.compile(r"^\s*(chapter|chap|ch|part|track|disc|section|volume|vol)\b[\s._-]*",
+                          re.IGNORECASE)
+
 
 @dataclass(frozen=True, order=True)
 class TrackIndex:
@@ -59,3 +64,20 @@ def parse_track_index(value: str) -> TrackIndex | None:
     if not components:
         return None
     return TrackIndex(tuple(components), subpart)
+
+
+def parse_track_indices(values: list[str]) -> list[TrackIndex | None]:
+    """Parse a book's per-file index values. A spaced marker word (Chapter/Part/Track/Disc/...) is
+    stripped only when the SAME one leads every non-empty value (a lone marker may be title text);
+    then each value is parsed by `parse_track_index`. Order matches `values`."""
+    marks = [(_MARKER_WORD.match(v or "").group(1).lower() if _MARKER_WORD.match(v or "") else None)
+             for v in values]
+    present = [m for m, v in zip(marks, values, strict=True) if (v or "").strip()]
+    shared = bool(present) and all(m is not None and m == present[0] for m in present)
+    out: list[TrackIndex | None] = []
+    for v, m in zip(values, marks, strict=True):
+        s = v or ""
+        if shared and m is not None:
+            s = _MARKER_WORD.sub("", s, count=1)
+        out.append(parse_track_index(s))
+    return out
