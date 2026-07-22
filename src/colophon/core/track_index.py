@@ -70,8 +70,7 @@ def parse_track_indices(values: list[str]) -> list[TrackIndex | None]:
     """Parse a book's per-file index values. A spaced marker word (Chapter/Part/Track/Disc/...) is
     stripped only when the SAME one leads every non-empty value (a lone marker may be title text);
     then each value is parsed by `parse_track_index`. Order matches `values`."""
-    marks = [(_MARKER_WORD.match(v or "").group(1).lower() if _MARKER_WORD.match(v or "") else None)
-             for v in values]
+    marks = [(m.group(1).lower() if (m := _MARKER_WORD.match(v or "")) else None) for v in values]
     present = [m for m, v in zip(marks, values, strict=True) if (v or "").strip()]
     shared = bool(present) and all(m is not None and m == present[0] for m in present)
     out: list[TrackIndex | None] = []
