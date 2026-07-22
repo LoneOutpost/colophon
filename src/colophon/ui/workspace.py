@@ -905,6 +905,25 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"').tooltip("Rename file")
                                         ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
 
+                    siblings = controller.folder_sibling_files(book)
+                    if siblings:
+                        ui.label("Other files in this folder").classes("text-subtitle2 q-mt-sm")
+                        with ui.list().props("dense bordered").classes("w-full"):
+                            for sib_path, owner in siblings:
+                                with ui.item():
+                                    with ui.item_section():
+                                        ui.item_label(sib_path.name)
+                                        ui.item_label(f"in {owner.title or owner.source_folder.name}").props("caption")
+                                    with ui.item_section().props("side"):
+                                        ui.button(
+                                            icon="playlist_add",
+                                            on_click=lambda p=sib_path: (
+                                                controller.reassign_file(book, p),
+                                                ui.notify("Added to this book"),
+                                                show_detail(book.id),
+                                            ),
+                                        ).props('flat dense round color=primary aria-label="Add to this book"').tooltip("Add this file to this book")
+
                     # chapters: applied named chapters (book.chapters) or file-boundary default
                     applied = bool(book.chapters)
                     chapters = book.chapters if applied else file_boundary_chapters(
