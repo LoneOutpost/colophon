@@ -364,6 +364,23 @@ def test_normalize_leaves_manual_author_verbatim():
     assert b.authors == ["TIMOTHY ZAHN"]  # the user typed it deliberately, kept
 
 
+def test_title_folder_keeps_folder_name_over_filename_residue(tmp_path):
+    # Folder "Cujo" is classified TITLE; its glued file "01Cujo.mp3" produces a DetectedWork
+    # whose label "01Cujo" doesn't share a token with the folder name, so the old promotion
+    # block would misfire and overwrite book.title with the residue.
+    folder = tmp_path / "Cujo"
+    book = BookUnit.new(source_folder=folder)
+    book.content_kind = ContentKind.SINGLE
+    book.folder_kind = FolderKind.TITLE
+    book.title = "Cujo"                     # already set from the parsed folder name
+    book.detected_works = [DetectedWork(label="01Cujo", files=[folder / "01Cujo.mp3"])]
+
+    attribute(book, Evidence(first_path=folder / "01Cujo.mp3", embedded=None,
+                             filename_fields={}, directory_fields={}))
+
+    assert book.title == "Cujo"            # not promoted to the "01Cujo" residue
+
+
 def test_untagged_folder_title_year_and_narrator_from_folder_name(tmp_path):
     from colophon.core.dirinfer import parse_scheme
     from colophon.core.filename_parser import compile_template

@@ -180,7 +180,8 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
     """Post-resolve structural attribution from the folder/cluster context."""
     # Untagged single book whose folder is the author, not the title: promote the
     # filename label to title and the folder name to author. Conservative.
-    if book.content_kind is ContentKind.SINGLE and book.detected_works and evidence.first_path:
+    if (book.content_kind is ContentKind.SINGLE and book.detected_works and evidence.first_path
+            and book.folder_kind is not FolderKind.TITLE):
         dw = book.detected_works[0]
         folder_name = book.source_folder.name
         if (
