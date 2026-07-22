@@ -85,13 +85,16 @@ def build_graph(
     options: ScanOptions | None = None, inference_root: Path | None = None,
     progress: Callable[[int, int, str], None] | None = None, fresh: bool = False,
     single_book_folders: frozenset[str] = frozenset(),
+    partitioned_folders: dict[str, list[list[str]]] | None = None,
 ) -> Graph:
     """Run a (non-persisting) scan and wrap each BookUnit in Directory/File/Book nodes.
-    `single_book_folders` forces those folders' audio to one book (a user's Combine)."""
+    `single_book_folders` forces those folders' audio to one book (a user's Combine).
+    `partitioned_folders` applies a stored manual split to those folders during classify."""
     plan = plan_scan(
         repo, root, template=template, directory_scheme=directory_scheme,
         options=options, inference_root=inference_root, progress=progress, fresh=fresh,
         single_book_folders=single_book_folders,
+        partitioned_folders=partitioned_folders,
     )
     g = Graph()
     for book in plan.units:

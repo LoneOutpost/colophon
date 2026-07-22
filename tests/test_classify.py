@@ -411,6 +411,35 @@ def test_real_duration_file_not_flagged(tmp_path):
     assert not any(f.code is FC.EMPTY_AUDIO for f in r.findings)
 
 
+def test_partition_groups_files_into_named_books():
+    feats = [
+        _feat("/a/d/01.mp3", album="X"), _feat("/a/d/02.mp3", album="X"),
+        _feat("/a/d/03.mp3", album="Y"),
+    ]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+                 partition=[["01.mp3", "02.mp3"], ["03.mp3"]])
+    assert r.content_kind is CK.MULTI
+    assert len(r.detected_works) == 2
+    assert sorted(len(w.files) for w in r.detected_works) == [1, 2]
+
+
+def test_partition_unlisted_file_becomes_its_own_work():
+    feats = [_feat("/a/d/01.mp3"), _feat("/a/d/02.mp3"), _feat("/a/d/new.mp3")]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+                 partition=[["01.mp3", "02.mp3"]])
+    assert len(r.detected_works) == 2  # the group + the unlisted "new.mp3"
+    labels = {tuple(sorted(p.name for p in w.files)) for w in r.detected_works}
+    assert ("new.mp3",) in labels
+
+
+def test_partition_single_group_is_single():
+    feats = [_feat("/a/d/01.mp3"), _feat("/a/d/02.mp3")]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME,
+                 partition=[["01.mp3", "02.mp3"]])
+    assert r.content_kind is CK.SINGLE
+    assert len(r.detected_works) == 1
+
+
 def test_corrupt_source_files_selects_sized_zero_duration():
     from colophon.core.classify import corrupt_source_files
     from colophon.core.models import SourceFile

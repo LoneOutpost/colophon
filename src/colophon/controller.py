@@ -399,6 +399,7 @@ class AppController:
                 node_overrides=self.ctx.overrides.all(),
                 known_franchises=self.ctx.franchises.active(),
                 single_book_folders=self.ctx.grouping.single_folders(),
+                partitioned_folders=self.ctx.grouping.partitioned_folders(),
                 progress=progress,
             )
         roots = roots or self.ctx.config.scan_paths
@@ -410,6 +411,7 @@ class AppController:
                 node_overrides=self.ctx.overrides.all(),
                 known_franchises=self.ctx.franchises.active(),
                 single_book_folders=self.ctx.grouping.single_folders(),
+                partitioned_folders=self.ctx.grouping.partitioned_folders(),
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books
@@ -2022,6 +2024,7 @@ class AppController:
             directory_scheme=self.ctx.config.directory_scheme,
             fresh=fresh, progress=progress,
             single_book_folders=self.ctx.grouping.single_folders(),
+            partitioned_folders=self.ctx.grouping.partitioned_folders(),
         )
         classify_graph(graph, root=root)
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
@@ -2097,6 +2100,30 @@ class AppController:
         self.invalidate(merged, Phase.IDENTIFY)  # re-derive fields/chapters over the new file set
         self._resync_roots({self._scan_root_for_path(folder)})
         return self._hydrate([self.ctx.books.get(merged.id)])[0]
+
+    def reassign_file(self, book: BookUnit, path: Path) -> BookUnit:
+        """Move `path` into `book` from its current sibling owner in the same folder, persisting the
+        folder's partition so a rescan keeps it. Returns the refreshed target book."""
+        from colophon.services.reassign import reassign_file as _svc_reassign
+
+        target = _svc_reassign(self.ctx.books, self.ctx.grouping, book.source_folder, path, book.id)
+        self._graph_cache.clear()
+        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        return self._hydrate([self.ctx.books.get(target.id)])[0]
+
+    def folder_sibling_files(self, book: BookUnit) -> list[tuple[Path, BookUnit]]:
+        """The audio files in `book`'s folder owned by *other* books, each with its owning book —
+        the candidates a user can pull into `book`. Empty unless the folder holds sibling books."""
+        out: list[tuple[Path, BookUnit]] = []
+        for other_id in self.ctx.books.ids_in_folder(book.source_folder):
+            if other_id == book.id:
+                continue
+            other = self.ctx.books.get(other_id)
+            if other is None:
+                continue
+            for sf in other.source_files:
+                out.append((sf.path, other))
+        return out
 
     def uncombine_folder(self, folder: Path) -> list[BookUnit]:
         """Reverse a combine on `folder`: clear the grouping override and restore the separate

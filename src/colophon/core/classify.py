@@ -223,6 +223,23 @@ def _overlay_tags(sub_works: list[DetectedWork], group: list[FileFeatures]) -> l
     return out
 
 
+def _partition_works(features: list[FileFeatures], partition: list[list[str]]) -> list[DetectedWork]:
+    """Group `features` into works by a manual file->book partition (lists of file names). Files named
+    in a group form one book; any file present but not named in the partition becomes its own
+    single-file book (so a newly-dropped file surfaces rather than vanishing)."""
+    by_name = {f.path.name: f for f in features}
+    listed: set[str] = set()
+    works: list[DetectedWork] = []
+    for group in partition:
+        group_feats = [by_name[n] for n in group if n in by_name]
+        if not group_feats:
+            continue
+        listed.update(f.path.name for f in group_feats)
+        works.append(_to_work(group_feats))
+    works.extend(_to_work([f]) for f in features if f.path.name not in listed)
+    return works
+
+
 def _to_work(group: list[FileFeatures]) -> DetectedWork:
     title = _first(f.tags.title for f in group)
     album = _first(f.tags.album for f in group)
@@ -380,11 +397,18 @@ def classify(
     template_pattern: Pattern[str],
     scheme_patterns: list[Pattern[str]],
     force_single: bool = False,
+    partition: list[list[str]] | None = None,
 ) -> ClassificationResult:
     """Classify one folder. `features` is non-empty (a folder with no audio is
     never scanned). Pure: all signals are passed in. `force_single` (a user's Combine)
-    overrides grouping so every file becomes one book's chapters, whatever the filenames."""
-    if force_single:
+    overrides grouping so every file becomes one book's chapters, whatever the filenames.
+    `partition` (a manual file->book split) groups the folder's files into the named books
+    instead of clustering; a file not named in it becomes its own book."""
+    if partition is not None:
+        works = _partition_works(features, partition)
+        group_signals = []
+        content_kind = ContentKind.SINGLE if len(works) == 1 else ContentKind.MULTI
+    elif force_single:
         works = [_to_work(features)]
         group_signals = []
         content_kind = ContentKind.SINGLE
