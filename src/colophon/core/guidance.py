@@ -56,6 +56,11 @@ _MIXED_QUALITY = Guidance(
     "or dismiss this note if the mix is intentional.",
     (FixAction.FILES, FixAction.ACKNOWLEDGE),
 )
+_MISSING_TRACKS = Guidance(
+    "This book looks like it's missing one or more tracks from its sequence. Acquire the missing "
+    "files, or dismiss this note if the book is intentionally partial.",
+    (FixAction.ACQUIRE, FixAction.ACKNOWLEDGE),
+)
 
 _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.EMPTY_AUDIO: _CORRUPT,
@@ -67,6 +72,7 @@ _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.DUP_EDITION: _DUP,
     FindingCode.STRUCTURE_UNCLEAR: _UNCLEAR,
     FindingCode.MIXED_QUALITY: _MIXED_QUALITY,
+    FindingCode.MISSING_TRACKS: _MISSING_TRACKS,
 }
 
 
