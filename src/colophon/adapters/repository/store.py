@@ -406,6 +406,32 @@ class GroupingOverrideRepo:
         ).fetchall()
         return frozenset(r["path"] for r in rows)
 
+    def set_partition(self, path: str, groups: list[list[str]]) -> None:
+        """Force `path` to a fixed split: `groups` is the folder's file->book grouping (each inner
+        list is one book's file names). Stored as JSON in `snapshot` under mode='partition'. Replaces
+        any existing override on the folder (a folder has one override row), so this and `set_single`
+        are mutually exclusive."""
+        self.conn.execute(
+            "INSERT INTO grouping_overrides (path, mode, snapshot) VALUES (?, 'partition', ?) "
+            "ON CONFLICT(path) DO UPDATE SET mode = excluded.mode, snapshot = excluded.snapshot",
+            (path, json.dumps(groups)),
+        )
+        self.conn.commit()
+
+    def partition(self, path: str) -> list[list[str]] | None:
+        """The stored file->book grouping for `path`, or None if it is not partitioned."""
+        row = self.conn.execute(
+            "SELECT snapshot FROM grouping_overrides WHERE path = ? AND mode = 'partition'", (path,)
+        ).fetchone()
+        return json.loads(row["snapshot"]) if row and row["snapshot"] else None
+
+    def partitioned_folders(self) -> dict[str, list[list[str]]]:
+        """Every partitioned folder mapped to its file->book grouping."""
+        rows = self.conn.execute(
+            "SELECT path, snapshot FROM grouping_overrides WHERE mode = 'partition'"
+        ).fetchall()
+        return {r["path"]: json.loads(r["snapshot"]) for r in rows if r["snapshot"]}
+
 
 @dataclass
 class EntityAliasRepo:

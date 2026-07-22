@@ -58,6 +58,25 @@ def test_combine_merges_files_in_order_under_primary(tmp_path):
     assert grouping.is_single(str(folder))
 
 
+def test_partition_override_round_trip(tmp_path):
+    _, grouping = _repos(tmp_path)
+    groups = [["01.mp3", "02.mp3"], ["03.mp3"]]
+    grouping.set_partition("/lib/Folder", groups)
+    assert grouping.partition("/lib/Folder") == groups
+    assert grouping.partitioned_folders() == {"/lib/Folder": groups}
+
+
+def test_set_partition_and_set_single_are_mutually_exclusive(tmp_path):
+    _, grouping = _repos(tmp_path)
+    grouping.set_single("/lib/Folder", snapshot="[]")
+    grouping.set_partition("/lib/Folder", [["01.mp3"], ["02.mp3"]])
+    assert not grouping.is_single("/lib/Folder")            # single replaced
+    assert grouping.partition("/lib/Folder") == [["01.mp3"], ["02.mp3"]]
+    grouping.set_single("/lib/Folder", snapshot="[]")
+    assert grouping.partition("/lib/Folder") is None        # partition replaced
+    assert grouping.is_single("/lib/Folder")
+
+
 def test_uncombine_restores_the_separate_books(tmp_path):
     books, grouping = _repos(tmp_path)
     folder = tmp_path / "Split Me"
