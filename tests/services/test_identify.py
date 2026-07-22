@@ -362,3 +362,26 @@ def test_normalize_leaves_manual_author_verbatim():
     b.provenance["authors"] = Provenance.MANUAL.value
     normalize(b)
     assert b.authors == ["TIMOTHY ZAHN"]  # the user typed it deliberately, kept
+
+
+def test_untagged_folder_title_year_and_narrator_from_folder_name(tmp_path):
+    from colophon.core.dirinfer import parse_scheme
+    from colophon.core.filename_parser import compile_template
+    from colophon.core.models import BookUnit, ContentKind
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Author" / "1981 - Cujo (read by Lorna Raver)"
+    folder.mkdir(parents=True)
+    for i in (1, 2, 3):
+        (folder / f"0{i}Cujo.mp3").write_bytes(b"")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(folder / f"0{i}Cujo.mp3") for i in (1, 2, 3)]
+    book.content_kind = ContentKind.SINGLE
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""))
+
+    assert book.title == "Cujo"
+    assert book.publish_year == 1981
+    assert book.narrators == ["Lorna Raver"]

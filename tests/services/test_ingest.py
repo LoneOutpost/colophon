@@ -476,9 +476,10 @@ def test_scan_cleans_gunslinger_title_and_label(tmp_path: Path):
 
     assert len(units) == 1
     book = units[0]
-    # Edition parenthetical is cleaned from the folder-name title; the leading year is kept
-    # (a stored title never risks the ambiguous year-vs-numeric-title guess; that strip is query-only).
-    assert book.title == "1982 - The Gunslinger"
+    # parse_folder_title splits "1982 - The Gunslinger (DT1 - original edition)":
+    # the year goes to publish_year, the edition parenthetical is cleaned, and the title is clean.
+    assert book.title == "The Gunslinger"
+    assert book.publish_year == 1982
     assert book.detected_works[0].label == "The Gunslinger"     # single-file label fixed
 
 
