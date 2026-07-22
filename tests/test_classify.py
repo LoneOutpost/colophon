@@ -449,3 +449,26 @@ def test_corrupt_source_files_selects_sized_zero_duration():
     tiny = SourceFile(path=Path("/a/03.mp3"), size=1000, duration_seconds=0.0, ext="mp3")  # stray
 
     assert corrupt_source_files([good, corrupt, tiny]) == [Path("/a/02.mp3")]
+
+
+def test_missing_track_flagged_for_multifile_single_book():
+    feats = [
+        _feat("/a/d/01.mp3", album="B", track=1),
+        _feat("/a/d/02.mp3", album="B", track=2),
+        _feat("/a/d/04.mp3", album="B", track=4),
+    ]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert r.content_kind is CK.SINGLE
+    assert FC.MISSING_TRACKS in {f.code for f in r.findings}
+
+
+def test_complete_multifile_book_has_no_missing_tracks():
+    feats = [_feat(f"/a/d/0{i}.mp3", album="B", track=i) for i in (1, 2, 3)]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert not any(f.code is FC.MISSING_TRACKS for f in r.findings)
+
+
+def test_single_file_book_has_no_missing_tracks():
+    feats = [_feat("/a/d/05.mp3", album="B", track=5)]
+    r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert not any(f.code is FC.MISSING_TRACKS for f in r.findings)
