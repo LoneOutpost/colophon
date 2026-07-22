@@ -241,6 +241,11 @@ def cluster(files: list[Path]) -> ClusterResult:
                                "shared title with per-chapter markers (one book's chapters)"))
         works = [_parts_work(files, per_file)]
         kind = ContentKind.SINGLE
+    elif (residue := _glued_sequence_residue(files)) is not None:
+        signals.append(_signal("glued_numbered_sequence", 2,
+                               "files are a number glued to one shared title (one book's parts)"))
+        works = [DetectedWork(label=_spaced(residue), series=None, sequence=None, files=list(files))]
+        kind = ContentKind.SINGLE
     elif has_diff:
         signals.append(_signal("distinct_titles", 2, "files have different title text"))
         works = [_multi_work(files[i], per_file[i]) for i in range(n)]
