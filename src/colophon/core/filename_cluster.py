@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
+from colophon.core.track_index import parse_track_index
 
 # Top-level chunk separators, in two flavours chosen by filename style (see `_chunks`). Both split
 # on brackets/underscores and a dot on a letter<->digit boundary ("Series.01" -> "Series"|"01",
@@ -175,6 +176,29 @@ def shares_token(a: str, b: str) -> bool:
     ta = {t for t in _tokens(a) if not _is_num(t) and len(t) >= 2}
     tb = {t for t in _tokens(b) if not _is_num(t) and len(t) >= 2}
     return bool(ta & tb)
+
+
+def _glued_sequence_residue(files: list[Path]) -> str | None:
+    """The shared title residue when every file is a distinct LEADING track index glued to the same
+    text ("01Cujo", "02Cujo" -> "Cujo"), else None. A series shelf (distinct residues), a non-leading
+    index ("Dreamcatcher01"), or a pure number (empty residue) returns None, so only a genuine
+    glued-number sequence is merged."""
+    indices: list[int] = []
+    residues: list[str] = []
+    for f in files:
+        ti = parse_track_index(f.stem)
+        if ti is None or len(ti.components) != 1:
+            return None
+        residue = re.sub(r"\d+", "", f.stem).strip()
+        if not residue:
+            return None
+        indices.append(ti.components[0])
+        residues.append(residue)
+    if len(set(indices)) != len(indices):
+        return None
+    if len({r.lower() for r in residues}) != 1:
+        return None
+    return residues[0]
 
 
 def cluster(files: list[Path]) -> ClusterResult:
