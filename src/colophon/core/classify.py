@@ -14,7 +14,7 @@ from pathlib import Path
 from re import Pattern
 
 from colophon.core.dirinfer import infer_from_path
-from colophon.core.filename_cluster import cluster
+from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.models import (
     ConfidenceSignal,
@@ -390,6 +390,16 @@ def _duplicate_findings(
     return []
 
 
+def _folder_is_single_book_title(folder: Path, features: list[FileFeatures]) -> bool:
+    """A confirmed single book's folder is its title when the folder name carries a year prefix, or
+    shares a content token with the files (digits stripped, so a glued '01Cujo' still matches 'Cujo')."""
+    from colophon.core.folder_title import parse_folder_title
+    parsed = parse_folder_title(folder.name)
+    if parsed.year is not None:
+        return True
+    return any(shares_token(parsed.title, re.sub(r"\d+", "", f.path.stem)) for f in features)
+
+
 def classify(
     folder: Path,
     root: Path,
@@ -434,6 +444,12 @@ def classify(
     folder_kind, fk_signals = classify_folder_kind(
         folder, root, features, template_pattern=template_pattern, scheme_patterns=scheme_patterns
     )
+    if (content_kind is ContentKind.SINGLE and len(features) > 1
+            and folder_kind is FolderKind.UNDETERMINED
+            and _folder_is_single_book_title(folder, features)):
+        folder_kind = FolderKind.TITLE
+        fk_signals = [*fk_signals, _signal("foldername_is_single_book_title", 2,
+                                           "folder holds one book; its name is the title")]
 
     findings: list[Finding] = []
     empty = _empty_audio_finding(features)

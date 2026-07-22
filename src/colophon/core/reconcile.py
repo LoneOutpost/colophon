@@ -60,6 +60,7 @@ def reconcile(
     dir_title: str | None,
     filename_fields: dict[str, str],
     directory_fields: dict[str, str] | None = None,
+    dir_narrators: list[str] | None = None,
 ) -> None:
     """Populate `book`'s candidate fields and provenance in place."""
     df = datafile  # alias for brevity
@@ -103,6 +104,8 @@ def reconcile(
         elif dirf.get("narrator"):
             book.narrators = [dirf["narrator"]]
             book.provenance["narrators"] = Provenance.DIRECTORY.value
+        elif dir_narrators:
+            book.narrators, book.provenance["narrators"] = list(dir_narrators), Provenance.DIRECTORY.value
         elif filename_fields.get("narrator"):
             book.narrators = [filename_fields["narrator"]]
             book.provenance["narrators"] = Provenance.FILENAME.value

@@ -472,3 +472,35 @@ def test_single_file_book_has_no_missing_tracks():
     feats = [_feat("/a/d/05.mp3", album="B", track=5)]
     r = classify(Path("/a/d"), Path("/a"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
     assert not any(f.code is FC.MISSING_TRACKS for f in r.findings)
+
+
+def test_single_book_folder_with_year_is_a_title_folder():
+    # 3-level path so scheme inference ($Author/$Title) does not fire; only the new year-prefix
+    # heuristic promotes the folder from UNDETERMINED to TITLE.
+    feats = [_feat("/lib/Fantasy/Stephen King/2001 - Dreamcatcher/Dreamcatcher01.mp3"),
+             _feat("/lib/Fantasy/Stephen King/2001 - Dreamcatcher/Dreamcatcher02.mp3"),
+             _feat("/lib/Fantasy/Stephen King/2001 - Dreamcatcher/Dreamcatcher03.mp3")]
+    r = classify(Path("/lib/Fantasy/Stephen King/2001 - Dreamcatcher"), Path("/lib"), feats,
+                 template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert r.content_kind is CK.SINGLE
+    assert r.folder_kind is FolderKind.TITLE
+    assert any(s.name == "foldername_is_single_book_title" for s in r.signals)
+
+
+def test_single_book_folder_sharing_token_is_a_title_folder():
+    # 3-level path so scheme inference does not fire; token-overlap heuristic fires instead.
+    feats = [_feat("/lib/Fantasy/Stephen King/Dreamcatcher/Dreamcatcher01.mp3"),
+             _feat("/lib/Fantasy/Stephen King/Dreamcatcher/Dreamcatcher02.mp3"),
+             _feat("/lib/Fantasy/Stephen King/Dreamcatcher/Dreamcatcher03.mp3")]
+    r = classify(Path("/lib/Fantasy/Stephen King/Dreamcatcher"), Path("/lib"), feats,
+                 template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert r.content_kind is CK.SINGLE
+    assert r.folder_kind is FolderKind.TITLE
+
+
+def test_loose_numbered_chapters_stay_undetermined():
+    feats = [_feat("/lib/Stephen King/01.mp3"), _feat("/lib/Stephen King/02.mp3"),
+             _feat("/lib/Stephen King/03.mp3")]
+    r = classify(Path("/lib/Stephen King"), Path("/lib"), feats,
+                 template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert r.folder_kind is FolderKind.UNDETERMINED

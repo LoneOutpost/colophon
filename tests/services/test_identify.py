@@ -362,3 +362,77 @@ def test_normalize_leaves_manual_author_verbatim():
     b.provenance["authors"] = Provenance.MANUAL.value
     normalize(b)
     assert b.authors == ["TIMOTHY ZAHN"]  # the user typed it deliberately, kept
+
+
+def test_title_folder_keeps_folder_name_over_filename_residue(tmp_path):
+    # Folder "Cujo" is classified TITLE; its glued file "01Cujo.mp3" produces a DetectedWork
+    # whose label "01Cujo" doesn't share a token with the folder name, so the old promotion
+    # block would misfire and overwrite book.title with the residue.
+    folder = tmp_path / "Cujo"
+    book = BookUnit.new(source_folder=folder)
+    book.content_kind = ContentKind.SINGLE
+    book.folder_kind = FolderKind.TITLE
+    book.title = "Cujo"                     # already set from the parsed folder name
+    book.detected_works = [DetectedWork(label="01Cujo", files=[folder / "01Cujo.mp3"])]
+
+    attribute(book, Evidence(first_path=folder / "01Cujo.mp3", embedded=None,
+                             filename_fields={}, directory_fields={}))
+
+    assert book.title == "Cujo"            # not promoted to the "01Cujo" residue
+
+
+def test_untagged_folder_title_year_and_narrator_from_folder_name(tmp_path):
+    from colophon.core.dirinfer import parse_scheme
+    from colophon.core.filename_parser import compile_template
+    from colophon.core.models import BookUnit, ContentKind
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Author" / "1981 - Cujo (read by Lorna Raver)"
+    folder.mkdir(parents=True)
+    for i in (1, 2, 3):
+        (folder / f"0{i}Cujo.mp3").write_bytes(b"")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(folder / f"0{i}Cujo.mp3") for i in (1, 2, 3)]
+    book.content_kind = ContentKind.SINGLE
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""))
+
+    assert book.title == "Cujo"
+    assert book.publish_year == 1981
+    assert book.narrators == ["Lorna Raver"]
+
+
+def test_end_to_end_untagged_single_book_titled_from_its_folder(tmp_path):
+    # A whole-chain guard: an untagged multi-file book whose folder is `YEAR - Title (read by X)` is
+    # recognized as a title folder and identified from the folder name, not the filename residue.
+    from colophon.adapters.audio import read_audio_metadata
+    from colophon.core.classify import FileFeatures, classify
+    from colophon.core.dirinfer import parse_scheme
+    from colophon.core.filename_parser import compile_template
+    from colophon.core.models import BookUnit, FolderKind
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Fantasy" / "Stephen King" / "1981 - Cujo (read by Lorna Raver)"
+    folder.mkdir(parents=True)
+    names = ["Cujo01.mp3", "Cujo02.mp3", "Cujo03.mp3"]  # trailing-glued number -> groups as one book
+    for n in names:
+        (folder / n).write_bytes(b"")
+
+    feats = [FileFeatures(path=folder / n, ext=".mp3", duration_seconds=100.0,
+                          tags=read_audio_metadata(folder / n)[1]) for n in names]
+    r = classify(folder, tmp_path, feats,
+                 template_pattern=compile_template("$Title"), scheme_patterns=parse_scheme(""))
+    assert r.folder_kind is FolderKind.TITLE
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(folder / n) for n in names]
+    book.content_kind = r.content_kind
+    book.folder_kind = r.folder_kind
+    book.detected_works = r.detected_works
+    run_identify(book, root=tmp_path, pattern=compile_template("$Title"), scheme=parse_scheme(""))
+
+    assert book.title == "Cujo"
+    assert book.publish_year == 1981
+    assert book.narrators == ["Lorna Raver"]

@@ -127,14 +127,22 @@ def seed_title(book: BookUnit) -> None:
 
 def resolve(book: BookUnit, evidence: Evidence) -> None:
     """Fill empty identity fields by precedence (embedded > datafile > directory >
-    filename) via `reconcile`."""
+    filename) via `reconcile`. The folder name is parsed so a `YEAR -` prefix and a `read by …`
+    narrator fill their own fields, not the title."""
+    from colophon.core.folder_title import parse_folder_title
+
+    parsed = parse_folder_title(book.source_folder.name)
+    dirf = dict(evidence.directory_fields)
+    if parsed.year is not None:
+        dirf.setdefault("year", str(parsed.year))
     reconcile(
         book,
         embedded=evidence.embedded,
         datafile=evidence.datafile,
-        dir_title=book.source_folder.name,
+        dir_title=parsed.title,
         filename_fields=evidence.filename_fields,
-        directory_fields=evidence.directory_fields,
+        directory_fields=dirf,
+        dir_narrators=parsed.narrators,
     )
 
 
@@ -172,7 +180,8 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
     """Post-resolve structural attribution from the folder/cluster context."""
     # Untagged single book whose folder is the author, not the title: promote the
     # filename label to title and the folder name to author. Conservative.
-    if book.content_kind is ContentKind.SINGLE and book.detected_works and evidence.first_path:
+    if (book.content_kind is ContentKind.SINGLE and book.detected_works and evidence.first_path
+            and book.folder_kind is not FolderKind.TITLE):
         dw = book.detected_works[0]
         folder_name = book.source_folder.name
         if (
