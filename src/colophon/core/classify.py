@@ -29,6 +29,7 @@ from colophon.core.models import (
     SourceFile,
 )
 from colophon.core.normalize import normalize_key, normalize_text, proper_case_if_shouting
+from colophon.core.track_gaps import missing_tracks_finding
 
 
 @dataclass(frozen=True)
@@ -442,6 +443,11 @@ def classify(
     if actionable is not None:
         findings.append(actionable)
     findings.extend(_duplicate_findings(folder_kind, works, features))
+    if content_kind is ContentKind.SINGLE and len(features) > 1:
+        gaps = missing_tracks_finding([f.tags.track for f in features],
+                                      [f.path.stem for f in features])
+        if gaps is not None:
+            findings.append(gaps)
 
     # An UNKNOWN content folder with no other finding (conflicting/absent signals)
     # would otherwise stay invisible; surface it for a human look.

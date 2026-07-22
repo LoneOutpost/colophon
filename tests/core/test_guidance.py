@@ -59,3 +59,12 @@ def test_advisory_findings_offer_acknowledge():
     for code in (FindingCode.MULTI_IN_AUTHOR, FindingCode.MIXED_WORKS,
                  FindingCode.DUP_FORMAT, FindingCode.MIXED_QUALITY):
         assert FixAction.ACKNOWLEDGE in finding_guidance(code).actions
+
+
+def test_missing_tracks_offers_acquire_and_acknowledge():
+    from colophon.core.guidance import FixAction, finding_guidance
+    from colophon.core.models import FindingCode
+
+    actions = finding_guidance(FindingCode.MISSING_TRACKS).actions
+    assert FixAction.ACQUIRE in actions
+    assert FixAction.ACKNOWLEDGE in actions
