@@ -58,3 +58,42 @@ def test_reassign_emptying_source_removes_it(tmp_path):
     remaining = [books.get(i) for i in books.ids_in_folder(folder)]
     assert len(remaining) == 1
     assert {sf.path.name for sf in remaining[0].source_files} == {"01.mp3", "02.mp3"}
+
+
+def test_reassign_leaves_uninvolved_sibling_untouched(tmp_path):
+    # Three books share the folder; moving a file between two of them must leave the third book
+    # (its id and files) untouched and still present in the persisted partition.
+    books, grouping = _repos(tmp_path)
+    folder = tmp_path / "Folder"
+    a = _book(folder, "01.mp3", title="A")
+    b = _book(folder, "02.mp3", title="B")
+    c = _book(folder, "03.mp3", "04.mp3", title="C")
+    books.upsert(a)
+    books.upsert(b)
+    books.upsert(c)
+
+    reassign_file(books, grouping, folder, folder / "02.mp3", a.id)
+
+    assert books.get(c.id) is not None  # uninvolved sibling untouched (same id)
+    by_files = {
+        frozenset(sf.path.name for sf in books.get(i).source_files)
+        for i in books.ids_in_folder(folder)
+    }
+    assert by_files == {frozenset({"01.mp3", "02.mp3"}), frozenset({"03.mp3", "04.mp3"})}
+    part = grouping.partition(str(folder))
+    assert {frozenset(g) for g in part} == {
+        frozenset({"01.mp3", "02.mp3"}), frozenset({"03.mp3", "04.mp3"})
+    }
+
+
+def test_reassign_noop_when_file_already_in_target(tmp_path):
+    books, grouping = _repos(tmp_path)
+    folder = tmp_path / "Folder"
+    a = _book(folder, "01.mp3", "02.mp3", title="A")
+    books.upsert(a)
+
+    result = reassign_file(books, grouping, folder, folder / "01.mp3", a.id)
+
+    assert result.id == a.id
+    assert {sf.path.name for sf in result.source_files} == {"01.mp3", "02.mp3"}
+    assert grouping.partition(str(folder)) is None  # a no-op writes no override
