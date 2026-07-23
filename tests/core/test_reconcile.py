@@ -244,3 +244,16 @@ def test_directory_tier_supplies_series_sequence_and_narrator_and_year():
     assert book.series[0].sequence == 1.0   # was hardcoded None before
     assert book.narrators == ["Kramer"]     # new directory tier
     assert book.publish_year == 2010        # new directory tier
+
+
+def test_reconcile_hard_then_weak_split(tmp_path):
+    book = BookUnit.new(source_folder=tmp_path / "1979 - The Dead Zone")
+    # hard pass: neither directory nor filename applies -> title stays empty
+    reconcile(book, embedded=EmbeddedTags(), datafile=None, dir_title="The Dead Zone",
+              filename_fields={"title": "The Wheel of Fortune"}, tiers="hard")
+    assert not book.title
+    # weak pass: directory tier wins
+    reconcile(book, embedded=EmbeddedTags(), datafile=None, dir_title="The Dead Zone",
+              filename_fields={"title": "The Wheel of Fortune"}, tiers="weak")
+    assert book.title == "The Dead Zone"
+    assert book.provenance["title"] == "directory"
