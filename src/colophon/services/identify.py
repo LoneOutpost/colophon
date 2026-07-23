@@ -173,7 +173,8 @@ def identify_weak(book: BookUnit, evidence: Evidence, *, role: str | None = None
     identity from the weak tiers (directory decompose, filename), then attribute structural
     fields and normalize. `role` is a graph node.kind ("title", "author", "series", …) that
     drives role-specific attribution; role=None keeps the legacy folder_kind heuristic."""
-    seed_series(book)  # filename cluster series, weak
+    if role != "title":
+        seed_series(book)  # filename cluster series (weak); a title folder's files are parts, not a series
     _reconcile_from(book, evidence, tiers="weak")
     attribute(book, evidence, role=role)
     normalize(book)

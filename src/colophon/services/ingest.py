@@ -453,9 +453,9 @@ def _adopt_and_identify_hard(
 ) -> tuple[BookUnit, Evidence | None]:
     """Adopt one projected BookUnit onto its prior record and run only the HARD identity
     stage (embedded tags + datafile), returning `(unit, evidence)` so the caller can run the
-    WEAK stage after classification with the folder's classified role. The reassociation logic
-    (FRESH-container vs leaf branches, durable-state adoption) is identical to the single-pass
-    `_adopt_and_identify`; only the identify call is split into hard-now / weak-later.
+    WEAK stage after classification with the folder's classified role. Reassociation (FRESH-
+    container vs leaf branches, durable-state adoption) works exactly as a full identify would;
+    only the identify call is split into hard-now / weak-later.
 
     Two projection shapes are re-associated differently:
 
