@@ -1,11 +1,15 @@
 """IDENTIFY pipeline: resolve a book's identity from gathered evidence.
 
 Decomposed into named, single-purpose steps so each is testable in isolation and
-the IDENTIFY phase stays atomic: gather (read + vet) -> seed_series -> resolve
-(reconcile) -> attribute (structural) -> normalize (seam). `attribute` runs before
-`normalize` so its "title still equals the folder name" guard sees the un-normalized
-title; `normalize` then also cleans any label `attribute` promoted (it is idempotent).
-`_run_local` calls `run_identify`.
+the IDENTIFY phase stays atomic:
+  gather (read + vet)
+  -> identify_hard  (seed_title + reconcile hard tiers: embedded + datafile)
+  -> identify_weak  (seed_series + reconcile weak tiers: directory + filename, then attribute + normalize)
+
+`attribute` runs before `normalize` so its "title still equals the folder name" guard
+sees the un-normalized title; `normalize` then also cleans any label `attribute` promoted
+(it is idempotent). `run_identify` composes identify_hard + identify_weak for the
+non-scan path. `_run_local` calls `run_identify`.
 """
 
 from __future__ import annotations
@@ -125,10 +129,12 @@ def seed_title(book: BookUnit) -> None:
             book.provenance["title"] = Provenance.TAG.value
 
 
-def resolve(book: BookUnit, evidence: Evidence) -> None:
-    """Fill empty identity fields by precedence (embedded > datafile > directory >
-    filename) via `reconcile`. The folder name is parsed so a `YEAR -` prefix and a `read by …`
-    narrator fill their own fields, not the title."""
+def _reconcile_from(book: BookUnit, evidence: Evidence, *, tiers: str = "all") -> None:
+    """Fill empty identity fields by precedence via `reconcile`. The folder name is parsed
+    so a `YEAR -` prefix and a `read by …` narrator fill their own fields, not the title.
+    `tiers` is forwarded to `reconcile` to restrict which precedence tiers are consulted:
+    ``"hard"`` for embedded + datafile only; ``"weak"`` for directory + filename only;
+    ``"all"`` (default) for all tiers."""
     from colophon.core.folder_title import parse_folder_title
 
     parsed = parse_folder_title(book.source_folder.name)
@@ -143,7 +149,34 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
         filename_fields=evidence.filename_fields,
         directory_fields=dirf,
         dir_narrators=parsed.narrators,
+        tiers=tiers,
     )
+
+
+def identify_hard(
+    book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
+    multi_folder: bool = False,
+) -> Evidence:
+    """First IDENTIFY stage: gather evidence, drop orphaned datafile fields, seed the
+    album-as-title for multi-file books, then fill only the hard-sourced identity tiers
+    (embedded tags, datafile sidecar). Returns the gathered Evidence so the weak stage can
+    reuse it without re-reading files."""
+    evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
+    drop_orphaned_datafile_fields(book, evidence)
+    seed_title(book)  # album tag -> title, hard
+    _reconcile_from(book, evidence, tiers="hard")
+    return evidence
+
+
+def identify_weak(book: BookUnit, evidence: Evidence, *, role: str | None = None) -> None:
+    """Second IDENTIFY stage: seed series from the filename cluster, fill remaining empty
+    identity from the weak tiers (directory decompose, filename), then attribute structural
+    fields and normalize. `role` (a graph node.kind) is reserved for Task 6; it is accepted
+    here so callers can pass it without a breaking change when the time comes."""
+    seed_series(book)  # filename cluster series, weak
+    _reconcile_from(book, evidence, tiers="weak")
+    attribute(book, evidence)
+    normalize(book)
 
 
 def normalize(book: BookUnit) -> None:
@@ -214,17 +247,14 @@ def run_identify(
     book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
     multi_folder: bool = False,
 ) -> None:
-    """Run the IDENTIFY pipeline for `book`, mutating it in place. Fields orphaned by a
-    removed/vetted datafile are always dropped so they re-derive — the datafile sidecar being gone
-    is the trigger, not the scan mode, so this holds on every scan (not just Refresh). `multi_folder`
-    flags a split leaf so a folder-level container datafile is not adopted as its own."""
-    evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
-    drop_orphaned_datafile_fields(book, evidence)
-    seed_series(book)
-    seed_title(book)
-    resolve(book, evidence)
-    attribute(book, evidence)
-    normalize(book)
+    """Single-pass IDENTIFY for the non-scan path: hard then weak, no classification
+    between. Fields orphaned by a removed/vetted datafile are always dropped so they
+    re-derive — the datafile sidecar being gone is the trigger, not the scan mode.
+    `multi_folder` flags a split leaf so a folder-level container datafile is not adopted
+    as its own."""
+    evidence = identify_hard(book, root=root, pattern=pattern, scheme=scheme,
+                             multi_folder=multi_folder)
+    identify_weak(book, evidence, role=None)
     logger.debug(
         f"scan {book.source_folder}: IDENTIFY title={book.title!r}"
         f"({book.provenance.get('title')}) authors={book.authors}"
