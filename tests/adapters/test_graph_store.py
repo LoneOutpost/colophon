@@ -62,6 +62,27 @@ def test_replace_drops_duplicate_ids_within_one_batch(tmp_path):
     assert {n.id for n in s.nodes_for(root)} == {"dup"}  # deduped, no UNIQUE failure
 
 
+def test_replace_reclaims_an_edge_lingering_under_another_root(tmp_path):
+    # edges.(src, kind, dst) is a global UNIQUE key, but a partial rescan re-homes a folder's edges
+    # from the broad scan-root string to the folder string. Writing the same edge under a new root
+    # must reclaim it (move it), not raise UNIQUE constraint failed — the bug that made a
+    # selection-scoped rescan crash on any library first persisted by a full scan.
+    s = _store(tmp_path)
+    old, new = tmp_path / "old", tmp_path / "new"
+    s.replace_subgraph(old, [_n("a", old), _n("b", old)], [_e("a", "b", old)])
+    s.replace_subgraph(new, [_n("a", new), _n("b", new)], [_e("a", "b", new)])  # would collide before
+    assert [e.root for e in s.edges_for(new)] == [str(new)]  # now owned by the new root
+    assert s.edges_for(old) == []                            # gone from the old root
+
+
+def test_replace_drops_duplicate_edges_within_one_batch(tmp_path):
+    s = _store(tmp_path)
+    root = tmp_path / "lib"
+    s.replace_subgraph(
+        root, [_n("a", root), _n("b", root)], [_e("a", "b", root), _e("a", "b", root)])
+    assert {(e.src, e.kind, e.dst) for e in s.edges_for(root)} == {("a", "contains", "b")}  # deduped
+
+
 def test_node_attrs_facets_and_owns_edge_round_trip(tmp_path):
     s = _store(tmp_path)
     root = tmp_path / "lib"
