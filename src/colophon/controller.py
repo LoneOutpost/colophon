@@ -894,23 +894,42 @@ class AppController:
         return hydrated
 
     def rerun_phase(self, books: list[BookUnit], phase: Phase) -> RerunResult:
-        """Re-run `phase` for each book and report the cascade. Local phases
-        (Search/Categorize/Identify) cascade-invalidate and auto-rerun via invalidate();
-        downstream deferred phases are left stale for their own explicit re-run. Deferred
-        phases are not wired here — their homes live elsewhere — and raise
-        NotImplementedError. `RerunResult.staled` is the union of downstream phases left
-        stale across the selection."""
+        """Re-run `phase` for each book and report the cascade.
+
+        IDENTIFY re-applies the full folder-scoped resolving walk (grouping + graph
+        classification + node_overrides + identity) via the selection-scoped rebuild, so a manual
+        reclassify feeds identification and auto-derived fields re-derive; tag/datafile/match/manual
+        survive. It re-resolves the whole folder (siblings re-derive their auto fields).
+
+        SEARCH and CATEGORIZE take the shallow per-book path (cascade-invalidate + auto-rerun via
+        invalidate()); downstream deferred phases are left stale for their own explicit re-run.
+        Deferred phases are not wired here and raise NotImplementedError. `RerunResult.staled` is the
+        union of downstream phases left stale across the selection."""
         if phase not in LOCAL:
             raise NotImplementedError(f"re-run not yet wired for deferred phase {phase.value}")
-        staled: set[Phase] = set()
+        if phase is Phase.IDENTIFY:
+            hydrated = self._resolve_rebuild(books)
+            staled: set[Phase] = set()
+            failed = 0
+            for book in hydrated:
+                reloaded = self.get_book(book.id) or book
+                staled |= {p for p in phases_from(phase)[1:]
+                           if state_of(reloaded, p) is PhaseState.STALE}
+                if state_of(reloaded, phase) is PhaseState.FAILED:
+                    failed += 1
+            return RerunResult(
+                ran=phase, book_count=len(hydrated), staled=frozenset(staled), failed=failed,
+            )
+        shallow_staled: set[Phase] = set()
         failed = 0
         for book in books:
             self.invalidate(book, phase)
-            staled |= {p for p in phases_from(phase)[1:] if state_of(book, p) is PhaseState.STALE}
+            shallow_staled |= {p for p in phases_from(phase)[1:]
+                               if state_of(book, p) is PhaseState.STALE}
             if state_of(book, phase) is PhaseState.FAILED:
                 failed += 1
         return RerunResult(
-            ran=phase, book_count=len(books), staled=frozenset(staled), failed=failed,
+            ran=phase, book_count=len(books), staled=frozenset(shallow_staled), failed=failed,
         )
 
     def reidentify(self, books: list[BookUnit], *, template: str | None = None) -> int:
