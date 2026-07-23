@@ -883,8 +883,17 @@ class AppController:
         and refresh auto-derived (folder/filename) fields only — tag/datafile/match/manual survive
         (`_adopt_and_identify._refreshable`). `template` overrides the filename pattern for this
         run (None = the saved default). Returns the hydrated input books. Note: this re-resolves
-        the whole folder, so a sibling in a multi-book folder re-derives its auto fields too."""
+        the whole folder, so a sibling in a multi-book folder re-derives its auto fields too.
+
+        The selected books' auto-derived (weak folder/filename) identity is cleared first so the
+        walk re-derives it from scratch — "clear auto-derived only, then re-run", the deliberate
+        hard-rerun the At-a-Glance buttons ask for. Without it the rebuild's fill-empty refresh
+        would keep a stale-but-present weak name. Hard identity (tag/datafile/match/manual) and
+        every sibling are untouched."""
         hydrated = self._hydrate(books)
+        for book in hydrated:
+            _clear_weak_identity(book)
+            self.ctx.books.upsert(book)
         options = ScanOptions(
             scope=ScanScope.REFRESH,
             phases=frozenset(LOCAL),
@@ -950,11 +959,7 @@ class AppController:
         recent-template history; the global default is unchanged. Returns the number re-identified.
         Re-resolves the whole folder, so a sibling in a multi-book folder re-derives its auto
         fields too."""
-        hydrated = self._hydrate(books)
-        for book in hydrated:
-            _clear_weak_identity(book)
-            self.ctx.books.upsert(book)
-        hydrated = self._resolve_rebuild(hydrated, template=template)
+        hydrated = self._resolve_rebuild(books, template=template)
         if template:
             self.record_filename_template(template)
         return len(hydrated)
