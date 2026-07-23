@@ -541,6 +541,16 @@ class GraphStore:
         # its ids still owned by another root, so the insert below can't collide on `nodes.id`.
         seen: set[str] = set()
         unique_nodes = [n for n in nodes if not (n.id in seen or seen.add(n.id))]
+        # `edges` has the same hazard on its UNIQUE(src, kind, dst) key: a re-homed subgraph (a
+        # partial rescan roots a folder's edges under the folder string, while the original full
+        # scan stored them under the broader scan-root) leaves the same edge owned by another root,
+        # which a root-scoped DELETE won't clear. Dedup the incoming batch (keep first) and reclaim
+        # any of its keys still owned by another root, mirroring the node reclaim above.
+        edge_seen: set[tuple[str, str, str]] = set()
+        unique_edges = [
+            e for e in edges
+            if not ((e.src, e.kind, e.dst) in edge_seen or edge_seen.add((e.src, e.kind, e.dst)))
+        ]
 
         def _write() -> None:
             self.conn.execute("DELETE FROM nodes WHERE root = ?", (r,))
@@ -548,13 +558,17 @@ class GraphStore:
             if seen:
                 self.conn.executemany(
                     "DELETE FROM nodes WHERE id = ? AND root != ?", [(nid, r) for nid in seen])
+            if edge_seen:
+                self.conn.executemany(
+                    "DELETE FROM edges WHERE src = ? AND kind = ? AND dst = ? AND root != ?",
+                    [(s, k, d, r) for (s, k, d) in edge_seen])
             self.conn.executemany(
                 "INSERT INTO nodes (id, physical, semantic, root, attrs) VALUES (?, ?, ?, ?, ?)",
                 [(n.id, n.physical, n.semantic, n.root, json.dumps(n.attrs)) for n in unique_nodes],
             )
             self.conn.executemany(
                 "INSERT INTO edges (src, kind, dst, root, props) VALUES (?, ?, ?, ?, ?)",
-                [(e.src, e.kind, e.dst, e.root, json.dumps(e.props)) for e in edges],
+                [(e.src, e.kind, e.dst, e.root, json.dumps(e.props)) for e in unique_edges],
             )
 
         if commit:
