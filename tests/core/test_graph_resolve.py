@@ -531,10 +531,11 @@ def test_franchise_for_nearest_wins_over_farther(tmp_path):
     assert franchise_for(book, overrides, root=root) == "INNER"  # nearest ancestor wins
 
 
-def _book_with_series(folder, title, series, seq=None):
+def _book_with_series(folder, title, series, seq=None, series_prov=Provenance.TAG.value):
     b = BookUnit.new(source_folder=folder)
     b.title = title
     b.series = [SeriesRef(name=series, sequence=seq)]
+    b.provenance["series"] = series_prov  # a real (tag-sourced) series; classification only counts hard series
     return b
 
 
