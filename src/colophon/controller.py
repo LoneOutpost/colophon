@@ -933,18 +933,20 @@ class AppController:
         )
 
     def reidentify(self, books: list[BookUnit], *, template: str | None = None) -> int:
-        """Re-identify `books` locally with `template` (default: the global filename template).
-        Clears each book's weak (folder/filename-derived) fields, then re-runs IDENTIFY so they
-        re-derive from the chosen pattern. Hard fields (tag/datafile/match/manual) are preserved.
-        A supplied `template` is added to the recent-template history; the global default is
-        unchanged. Returns the number of books re-identified."""
+        """Re-identify `books` by re-applying the full folder-scoped resolving walk with `template`
+        (default: the global filename template) — grouping + graph classification + node_overrides +
+        identity. Auto-derived (folder/filename) fields re-derive from the chosen pattern; hard
+        fields (tag/datafile/match/manual) are preserved. A supplied `template` is added to the
+        recent-template history; the global default is unchanged. Returns the number re-identified.
+        Re-resolves the whole folder, so a sibling in a multi-book folder re-derives its auto
+        fields too."""
         hydrated = self._hydrate(books)
         for book in hydrated:
             _clear_weak_identity(book)
-            self.invalidate(book, Phase.IDENTIFY, template=template)  # clears+re-derives+upserts
+            self.ctx.books.upsert(book)
+        hydrated = self._resolve_rebuild(hydrated, template=template)
         if template:
             self.record_filename_template(template)
-        self._resync_roots({self._scan_root_for_path(b.source_folder) for b in hydrated})
         return len(hydrated)
 
     # --- dashboard ---

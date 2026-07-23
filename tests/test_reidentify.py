@@ -55,3 +55,14 @@ def test_reidentify_preserves_a_hard_author(tmp_path):
 
     assert ctx.books.get(book.id).authors == ["Stephen King"]  # manual value untouched
     ctx.close()
+
+
+def test_reidentify_applies_a_node_reclassification(tmp_path):
+    # reidentify now runs the resolving walk, so a manual reclassify of the folder feeds it too.
+    ctx, c, book = _scanned_book(tmp_path)
+    c.set_node_classification(book.source_folder.parent, "author", "Reclassified Author")
+
+    c.reidentify([book])
+
+    assert ctx.books.get(book.id).authors == ["Reclassified Author"]
+    ctx.close()
