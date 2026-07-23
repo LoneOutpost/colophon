@@ -611,28 +611,8 @@ def classify_nodes(
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
-    _repair_leaf_titles(graph, books)
     _fill_series_ramp(graph, books, root=root)
     _fill_identity_confidence(graph, books, root=root)
-
-
-def _repair_leaf_titles(graph: Graph, books: list[BookUnit]) -> None:
-    """A single book whose folder turned out to be the author still carries the folder name as its
-    title: IDENTIFY defaulted the title to the folder when the filename supplied none, and that echo
-    is what let the folder look like a title before ax_leaf_title eliminated it. Re-derive the book's
-    title from its filename so the author folder's book gets its real title, not the author's name."""
-    from colophon.core.filename_cluster import _spaced
-    from colophon.core.models import Provenance
-    for book in books:
-        if book.provenance.get("title") != Provenance.DIRECTORY.value or not book.source_files:
-            continue
-        node = graph.directories.get(DirectoryNode.id_for(book.source_folder))
-        if node is None or node.kind != "author":
-            continue
-        stem_title = _spaced(book.source_files[0].path.stem.replace("_", " "))
-        if stem_title and stem_title.casefold() != book.source_folder.name.casefold():
-            book.title = stem_title
-            book.provenance["title"] = Provenance.FILENAME.value
 
 
 def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
@@ -649,10 +629,10 @@ def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | N
 
 def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """For a book under a folder classified `series`, take its sequence from the child-name affix
-    (the reliable position number) and stamp series name + sequence when it has no stronger series;
-    separately clean the affix off the book's OWN title (so a good title isn't overwritten by a
-    misspelled folder). GRAPHING provenance; MATCH overrules. Never touch a tag/datafile/match/manual
-    series or title."""
+    (the reliable position number) and stamp series name + sequence when it has no stronger series.
+    GRAPHING provenance; MATCH overrules. Never touch a tag/datafile/match/manual series. Title
+    affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) runs after
+    classification and owns the book's title."""
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
     fillable = WEAK_PROV | {Provenance.GRAPHING.value}
@@ -666,13 +646,6 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
         if not book.series or book.provenance.get("series") in fillable:
             book.series = [SeriesRef(name=node.kind_value, sequence=aff.sequence)]
             book.provenance["series"] = Provenance.GRAPHING.value
-        taff = parse_sequence_affix(book.title or "")
-        if (taff is not None and taff.cleaned != book.title
-                and book.provenance.get("title") in WEAK_PROV
-                and (taff.confidence == "strong" or aff.confidence == "strong")):
-            # a strong title affix, or a strong ramp position (aff) corroborating a weak title one —
-            # so a manual/match series node with a weak compound title (e.g. '30-Day…') is left alone
-            book.title = taff.cleaned
 
 
 _STRONG_ID_PROV = frozenset({"manual", "match"})   # authoritative: a user or a source named it
@@ -748,15 +721,25 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
             if node is not None:
-                if node.kind == "author" and node.author:
+                # The scan root is a bucket path (e.g. "incoming"), so its name is never an author —
+                # a lone title folder directly beneath it is a standalone book, not an authored one.
+                # Only a hard-settled root author (a match/manual) may still name the author (a
+                # single-author library rooted at the author's name).
+                root_is_soft_author = cur == root and not node.kind_source
+                if node.kind == "author" and node.author and not root_is_soft_author:
                     seen.append(node)
                 # The layout fallback names the author from the folder at the scheme's author depth,
-                # but never from a folder whose name is not an author: franchise/series/container, or
-                # one the user manually reclassified to a title/book (an auto title-leaf can still
-                # double as its author, e.g. a lone book in an "Author Name" folder).
-                manual_title = node.kind == "title" and node.kind_source == "manual"
+                # but never from a folder whose name is not an author: franchise/series/container. A
+                # `title` folder is admitted only when its lone book has NO title of its own — a bare
+                # "Author Name" folder whose file is untitled, where the folder name doubles as the
+                # author (Root/Author/untitled.mp3). A title folder that decomposed into a real title
+                # (a year/narrator shape, a filename title) is a standalone book, not an author, so it
+                # is excluded — the role-driven weak stage owns its identity.
+                # A manual title (the user reclassified this folder) is authoritative and never an
+                # author; an auto title is admitted only when its book has no title of its own.
+                exclude_title = node.kind == "title" and (node.kind_source == "manual" or bool(book.title))
                 if (author_depth is not None and _depth(cur, root) == author_depth
-                        and node.kind not in non_author and not manual_title):
+                        and node.kind not in non_author and not exclude_title):
                     layout = node
             if cur == root or root not in cur.parents:
                 break

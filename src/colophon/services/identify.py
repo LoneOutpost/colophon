@@ -243,6 +243,27 @@ def _attribute_legacy(book: BookUnit, evidence: Evidence) -> None:
         book.provenance["authors"] = Provenance.DIRECTORY.value
 
 
+def _author_folder_title(book: BookUnit, label: str | None) -> str | None:
+    """The title for a lone book sitting in an author folder: its own filename, not the folder echo.
+    Prefer the cluster label; but when the current title is only the folder name echoed back by
+    directory inference (the template parser produced no title, so the label is a truncation artifact
+    like '$Author - $Title' on 'weird_name_no_delimiters' -> 'weird'), use the full spaced filename
+    stem — the whole filename is the title. Skips a stem that is just the folder name or a bare track
+    number (no real words identifies no title)."""
+    from colophon.core.filename_cluster import _spaced, _text_sig, _tokens
+    label = (label or "").strip()
+    folder_echo = book.provenance.get("title") == Provenance.DIRECTORY.value
+    if folder_echo:
+        chosen = _spaced(book.source_files[0].path.stem.replace("_", " "))
+    else:
+        chosen = label
+    if not chosen or not _text_sig(_tokens(chosen)):   # no real words (a bare "01")
+        return None
+    if chosen.casefold() == book.source_folder.name.casefold():
+        return None
+    return chosen
+
+
 def attribute(book: BookUnit, evidence: Evidence, *, role: str | None = None) -> None:
     """Post-classification structural attribution, driven by the folder's classified `role`
     (a graph node.kind). role=None keeps the legacy folder_kind heuristic for the non-scan path."""
@@ -252,11 +273,13 @@ def attribute(book: BookUnit, evidence: Evidence, *, role: str | None = None) ->
     if role == "title":
         return  # folder is the title; its decomposed name already filled title/year/narrator. No author.
     if role == "author":
-        # folder names the author; the book's own title comes from its filename label.
-        if book.content_kind is ContentKind.SINGLE and book.detected_works:
+        # folder names the author; the book's own title comes from its filename, not the folder echo.
+        if book.content_kind is ContentKind.SINGLE and book.detected_works and book.source_files:
             dw = book.detected_works[0]
-            if dw.label and (not book.title or book.provenance.get("title") in WEAK_PROV):
-                book.title, book.provenance["title"] = dw.label, Provenance.FILENAME.value
+            if not book.title or book.provenance.get("title") in WEAK_PROV:
+                new_title = _author_folder_title(book, dw.label)
+                if new_title:
+                    book.title, book.provenance["title"] = new_title, Provenance.FILENAME.value
         if not book.authors:
             book.authors, book.provenance["authors"] = [book.source_folder.name], Provenance.DIRECTORY.value
         return
