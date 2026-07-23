@@ -92,6 +92,7 @@ from colophon.core.phases import (
     LOCAL,
     ensure_phases,
     invalidate_from,
+    invalidates,
     mark,
     phases_from,
     resync_state,
@@ -913,6 +914,15 @@ class AppController:
             failed = 0
             for book in hydrated:
                 reloaded = self.get_book(book.id) or book
+                # The rebuild always re-runs IDENTIFY; cascade-stale the downstream deferred
+                # phases that depend on it (mirror what invalidate_from(book, IDENTIFY) did on
+                # the shallow path). Phases that are already STALE or PENDING stay as-is;
+                # only FRESH phases need staleing so a prior match/tag/organize is re-queued.
+                for p in phases_from(phase)[1:]:
+                    if state_of(reloaded, p) is PhaseState.FRESH and invalidates(phase, p):
+                        mark(reloaded, p, PhaseState.STALE)
+                        self.ctx.books.upsert(reloaded)
+                        staled.add(p)
                 staled |= {p for p in phases_from(phase)[1:]
                            if state_of(reloaded, p) is PhaseState.STALE}
                 if state_of(reloaded, phase) is PhaseState.FAILED:
