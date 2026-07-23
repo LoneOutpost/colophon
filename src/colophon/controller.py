@@ -980,6 +980,25 @@ class AppController:
         book = self.ctx.books.get(book_id)
         return self._hydrate([book])[0] if book is not None else None
 
+    def resolve_detail_target(self, original: BookUnit) -> str | None:
+        """Which book the detail pane should show after a re-run that may have re-resolved
+        `original`'s folder: `original` if its id survived (the common single-book case), else the
+        current book in its folder whose source files overlap `original`'s most (a multi-book
+        re-group that churned the id), else None (the book genuinely no longer exists)."""
+        if self.ctx.books.get(original.id) is not None:
+            return original.id
+        want = {sf.path for sf in original.source_files}
+        best_id: str | None = None
+        best_overlap = 0
+        for book_id in self.ctx.books.ids_in_folder(original.source_folder):
+            book = self.ctx.books.get(book_id)
+            if book is None:
+                continue
+            overlap = len({sf.path for sf in book.source_files} & want)
+            if overlap > best_overlap:
+                best_id, best_overlap = book_id, overlap
+        return best_id
+
     def graph_search(self, query: str) -> list[dict]:
         """Focal candidates for the explorer search box: [{id, label, kind}]."""
         return graph_inspect_svc.search(self.ctx.library_graph, self.ctx.books, query)
