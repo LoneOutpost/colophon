@@ -92,6 +92,7 @@ from colophon.core.phases import (
     LOCAL,
     ensure_phases,
     invalidate_from,
+    invalidates,
     mark,
     phases_from,
     resync_state,
@@ -159,6 +160,7 @@ from colophon.services.graph_build import build_graph
 from colophon.services.ingest import (
     ScanOptions,
     ScanPlan,
+    ScanScope,
     commit_scan,
     plan_rescan_folders,
     plan_scan_graph,
@@ -874,39 +876,95 @@ class AppController:
                     out[phase].append(book)
         return out
 
-    def rerun_phase(self, books: list[BookUnit], phase: Phase) -> RerunResult:
-        """Re-run `phase` for each book and report the cascade. Local phases
-        (Search/Categorize/Identify) cascade-invalidate and auto-rerun via invalidate();
-        downstream deferred phases are left stale for their own explicit re-run. Deferred
-        phases are not wired here — their homes live elsewhere — and raise
-        NotImplementedError. `RerunResult.staled` is the union of downstream phases left
-        stale across the selection."""
-        if phase not in LOCAL:
-            raise NotImplementedError(f"re-run not yet wired for deferred phase {phase.value}")
-        staled: set[Phase] = set()
-        failed = 0
-        for book in books:
-            self.invalidate(book, phase)
-            staled |= {p for p in phases_from(phase)[1:] if state_of(book, p) is PhaseState.STALE}
-            if state_of(book, phase) is PhaseState.FAILED:
-                failed += 1
-        return RerunResult(
-            ran=phase, book_count=len(books), staled=frozenset(staled), failed=failed,
-        )
+    def _resolve_rebuild(self, books: list[BookUnit], *, template: str | None = None) -> list[BookUnit]:
+        """Re-apply the full local resolving walk for `books`' folders via the selection-scoped
+        rebuild, then persist it. Reuses the exact path behind "Rescan selected": rebuild each
+        folder's graph (grouping + classify_nodes + propagate_overrides + fill-down), reconcile,
+        and refresh auto-derived (folder/filename) fields only — tag/datafile/match/manual survive
+        (`_adopt_and_identify._refreshable`). `template` overrides the filename pattern for this
+        run (None = the saved default). Returns the hydrated input books. Note: this re-resolves
+        the whole folder, so a sibling in a multi-book folder re-derives its auto fields too.
 
-    def reidentify(self, books: list[BookUnit], *, template: str | None = None) -> int:
-        """Re-identify `books` locally with `template` (default: the global filename template).
-        Clears each book's weak (folder/filename-derived) fields, then re-runs IDENTIFY so they
-        re-derive from the chosen pattern. Hard fields (tag/datafile/match/manual) are preserved.
-        A supplied `template` is added to the recent-template history; the global default is
-        unchanged. Returns the number of books re-identified."""
+        The selected books' auto-derived (weak folder/filename) identity is cleared first so the
+        walk re-derives it from scratch — "clear auto-derived only, then re-run", the deliberate
+        hard-rerun the At-a-Glance buttons ask for. Without it the rebuild's fill-empty refresh
+        would keep a stale-but-present weak name. Hard identity (tag/datafile/match/manual) and
+        every sibling are untouched."""
         hydrated = self._hydrate(books)
         for book in hydrated:
             _clear_weak_identity(book)
-            self.invalidate(book, Phase.IDENTIFY, template=template)  # clears+re-derives+upserts
+            self.ctx.books.upsert(book)
+        options = ScanOptions(
+            scope=ScanScope.REFRESH,
+            phases=frozenset(LOCAL),
+            book_ids={b.id for b in hydrated},
+        )
+        plan = self.scan_preview(options=options, template=template)
+        self.apply_scan(plan)
+        return hydrated
+
+    def rerun_phase(self, books: list[BookUnit], phase: Phase) -> RerunResult:
+        """Re-run `phase` for each book and report the cascade.
+
+        IDENTIFY re-applies the full folder-scoped resolving walk (grouping + graph
+        classification + node_overrides + identity) via the selection-scoped rebuild, so a manual
+        reclassify feeds identification and auto-derived fields re-derive; tag/datafile/match/manual
+        survive. It re-resolves the whole folder (siblings re-derive their auto fields).
+
+        SEARCH and CATEGORIZE take the shallow per-book path (cascade-invalidate + auto-rerun via
+        invalidate()); downstream deferred phases are left stale for their own explicit re-run.
+        Deferred phases are not wired here and raise NotImplementedError. `RerunResult.staled` is the
+        union of downstream phases left stale across the selection."""
+        if phase not in LOCAL:
+            raise NotImplementedError(f"re-run not yet wired for deferred phase {phase.value}")
+        if phase is Phase.IDENTIFY:
+            hydrated = self._resolve_rebuild(books)
+            staled: set[Phase] = set()
+            failed = 0
+            for book in hydrated:
+                reloaded = self.get_book(book.id) or book
+                # The rebuild re-ran IDENTIFY but left prior downstream deferred phases (match/tag/
+                # organize) as they were. Cascade-stale them exactly as the shallow path's
+                # invalidate_from does: every dependent phase that actually ran (not PENDING) is
+                # re-queued so a genuine identity change re-matches. resync_state then refreshes the
+                # derived BookState, and we upsert once per book.
+                book_staled = [p for p in phases_from(phase)[1:]
+                               if state_of(reloaded, p) is not PhaseState.PENDING
+                               and invalidates(phase, p)]
+                if book_staled:
+                    for p in book_staled:
+                        mark(reloaded, p, PhaseState.STALE)
+                    resync_state(reloaded, ready_threshold=self.ctx.config.review_threshold)
+                    self.ctx.books.upsert(reloaded)
+                    staled.update(book_staled)
+                if state_of(reloaded, phase) is PhaseState.FAILED:
+                    failed += 1
+            return RerunResult(
+                ran=phase, book_count=len(hydrated), staled=frozenset(staled), failed=failed,
+            )
+        shallow_staled: set[Phase] = set()
+        failed = 0
+        for book in books:
+            self.invalidate(book, phase)
+            shallow_staled |= {p for p in phases_from(phase)[1:]
+                               if state_of(book, p) is PhaseState.STALE}
+            if state_of(book, phase) is PhaseState.FAILED:
+                failed += 1
+        return RerunResult(
+            ran=phase, book_count=len(books), staled=frozenset(shallow_staled), failed=failed,
+        )
+
+    def reidentify(self, books: list[BookUnit], *, template: str | None = None) -> int:
+        """Re-identify `books` by re-applying the full folder-scoped resolving walk with `template`
+        (default: the global filename template) — grouping + graph classification + node_overrides +
+        identity. Auto-derived (folder/filename) fields re-derive from the chosen pattern; hard
+        fields (tag/datafile/match/manual) are preserved. A supplied `template` is added to the
+        recent-template history; the global default is unchanged. Returns the number re-identified.
+        Re-resolves the whole folder, so a sibling in a multi-book folder re-derives its auto
+        fields too."""
+        hydrated = self._resolve_rebuild(books, template=template)
         if template:
             self.record_filename_template(template)
-        self._resync_roots({self._scan_root_for_path(b.source_folder) for b in hydrated})
         return len(hydrated)
 
     # --- dashboard ---
@@ -921,6 +979,25 @@ class AppController:
     def get_book(self, book_id: str) -> BookUnit | None:
         book = self.ctx.books.get(book_id)
         return self._hydrate([book])[0] if book is not None else None
+
+    def resolve_detail_target(self, original: BookUnit) -> str | None:
+        """Which book the detail pane should show after a re-run that may have re-resolved
+        `original`'s folder: `original` if its id survived (the common single-book case), else the
+        current book in its folder whose source files overlap `original`'s most (a multi-book
+        re-group that churned the id), else None (the book genuinely no longer exists)."""
+        if self.ctx.books.get(original.id) is not None:
+            return original.id
+        want = {sf.path for sf in original.source_files}
+        best_id: str | None = None
+        best_overlap = 0
+        for book_id in self.ctx.books.ids_in_folder(original.source_folder):
+            book = self.ctx.books.get(book_id)
+            if book is None:
+                continue
+            overlap = len({sf.path for sf in book.source_files} & want)
+            if overlap > best_overlap:
+                best_id, best_overlap = book_id, overlap
+        return best_id
 
     def graph_search(self, query: str) -> list[dict]:
         """Focal candidates for the explorer search box: [{id, label, kind}]."""
