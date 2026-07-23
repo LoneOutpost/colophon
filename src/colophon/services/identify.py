@@ -1,11 +1,15 @@
 """IDENTIFY pipeline: resolve a book's identity from gathered evidence.
 
 Decomposed into named, single-purpose steps so each is testable in isolation and
-the IDENTIFY phase stays atomic: gather (read + vet) -> seed_series -> resolve
-(reconcile) -> attribute (structural) -> normalize (seam). `attribute` runs before
-`normalize` so its "title still equals the folder name" guard sees the un-normalized
-title; `normalize` then also cleans any label `attribute` promoted (it is idempotent).
-`_run_local` calls `run_identify`.
+the IDENTIFY phase stays atomic:
+  gather (read + vet)
+  -> identify_hard  (seed_title + reconcile hard tiers: embedded + datafile)
+  -> identify_weak  (seed_series + reconcile weak tiers: directory + filename, then attribute + normalize)
+
+`attribute` runs before `normalize` so its "title still equals the folder name" guard
+sees the un-normalized title; `normalize` then also cleans any label `attribute` promoted
+(it is idempotent). `run_identify` composes identify_hard + identify_weak for the
+non-scan path. `_run_local` calls `run_identify`.
 """
 
 from __future__ import annotations
@@ -125,10 +129,12 @@ def seed_title(book: BookUnit) -> None:
             book.provenance["title"] = Provenance.TAG.value
 
 
-def resolve(book: BookUnit, evidence: Evidence) -> None:
-    """Fill empty identity fields by precedence (embedded > datafile > directory >
-    filename) via `reconcile`. The folder name is parsed so a `YEAR -` prefix and a `read by …`
-    narrator fill their own fields, not the title."""
+def _reconcile_from(book: BookUnit, evidence: Evidence, *, tiers: str = "all") -> None:
+    """Fill empty identity fields by precedence via `reconcile`. The folder name is parsed
+    so a `YEAR -` prefix and a `read by …` narrator fill their own fields, not the title.
+    `tiers` is forwarded to `reconcile` to restrict which precedence tiers are consulted:
+    ``"hard"`` for embedded + datafile only; ``"weak"`` for directory + filename only;
+    ``"all"`` (default) for all tiers."""
     from colophon.core.folder_title import parse_folder_title
 
     parsed = parse_folder_title(book.source_folder.name)
@@ -143,7 +149,35 @@ def resolve(book: BookUnit, evidence: Evidence) -> None:
         filename_fields=evidence.filename_fields,
         directory_fields=dirf,
         dir_narrators=parsed.narrators,
+        tiers=tiers,
     )
+
+
+def identify_hard(
+    book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
+    multi_folder: bool = False,
+) -> Evidence:
+    """First IDENTIFY stage: gather evidence, drop orphaned datafile fields, seed the
+    album-as-title for multi-file books, then fill only the hard-sourced identity tiers
+    (embedded tags, datafile sidecar). Returns the gathered Evidence so the weak stage can
+    reuse it without re-reading files."""
+    evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
+    drop_orphaned_datafile_fields(book, evidence)
+    seed_title(book)  # album tag -> title, hard
+    _reconcile_from(book, evidence, tiers="hard")
+    return evidence
+
+
+def identify_weak(book: BookUnit, evidence: Evidence, *, role: str | None = None) -> None:
+    """Second IDENTIFY stage: seed series from the filename cluster, fill remaining empty
+    identity from the weak tiers (directory decompose, filename), then attribute structural
+    fields and normalize. `role` is a graph node.kind ("title", "author", "series", …) that
+    drives role-specific attribution; role=None keeps the legacy folder_kind heuristic."""
+    if role != "title":
+        seed_series(book)  # filename cluster series (weak); a title folder's files are parts, not a series
+    _reconcile_from(book, evidence, tiers="weak")
+    attribute(book, evidence, role=role)
+    normalize(book)
 
 
 def normalize(book: BookUnit) -> None:
@@ -176,7 +210,7 @@ def normalize(book: BookUnit) -> None:
         book.authors = [proper_case_if_shouting(a, keep_acronyms=True) for a in book.authors]
 
 
-def attribute(book: BookUnit, evidence: Evidence) -> None:
+def _attribute_legacy(book: BookUnit, evidence: Evidence) -> None:
     """Post-resolve structural attribution from the folder/cluster context."""
     # Untagged single book whose folder is the author, not the title: promote the
     # filename label to title and the folder name to author. Conservative.
@@ -210,21 +244,62 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
         book.provenance["authors"] = Provenance.DIRECTORY.value
 
 
+def _author_folder_title(book: BookUnit, label: str | None) -> str | None:
+    """The title for a lone book sitting in an author folder: its own filename, not the folder echo.
+    Prefer the cluster label; but when the current title is only the folder name echoed back by
+    directory inference (the template parser produced no title, so the label is a truncation artifact
+    like '$Author - $Title' on 'weird_name_no_delimiters' -> 'weird'), use the full spaced filename
+    stem — the whole filename is the title. Skips a stem that is just the folder name or a bare track
+    number (no real words identifies no title)."""
+    from colophon.core.filename_cluster import _spaced, _text_sig, _tokens
+    label = (label or "").strip()
+    folder_echo = book.provenance.get("title") == Provenance.DIRECTORY.value
+    if folder_echo:
+        chosen = _spaced(book.source_files[0].path.stem.replace("_", " "))
+    else:
+        chosen = label
+    if not chosen or not _text_sig(_tokens(chosen)):   # no real words (a bare "01")
+        return None
+    if chosen.casefold() == book.source_folder.name.casefold():
+        return None
+    return chosen
+
+
+def attribute(book: BookUnit, evidence: Evidence, *, role: str | None = None) -> None:
+    """Post-classification structural attribution, driven by the folder's classified `role`
+    (a graph node.kind). role=None keeps the legacy folder_kind heuristic for the non-scan path."""
+    if role is None:
+        _attribute_legacy(book, evidence)
+        return
+    if role == "title":
+        return  # folder is the title; its decomposed name already filled title/year/narrator. No author.
+    if role == "author":
+        # folder names the author; the book's own title comes from its filename, not the folder echo.
+        if book.content_kind is ContentKind.SINGLE and book.detected_works and book.source_files:
+            dw = book.detected_works[0]
+            if not book.title or book.provenance.get("title") in WEAK_PROV:
+                new_title = _author_folder_title(book, dw.label)
+                if new_title:
+                    book.title, book.provenance["title"] = new_title, Provenance.FILENAME.value
+        if not book.authors:
+            book.authors, book.provenance["authors"] = [book.source_folder.name], Provenance.DIRECTORY.value
+        return
+    # series / franchise / container: no name promotion here.
+    return
+
+
 def run_identify(
     book: BookUnit, *, root: Path, pattern: Pattern[str], scheme: list[Pattern[str]],
     multi_folder: bool = False,
 ) -> None:
-    """Run the IDENTIFY pipeline for `book`, mutating it in place. Fields orphaned by a
-    removed/vetted datafile are always dropped so they re-derive — the datafile sidecar being gone
-    is the trigger, not the scan mode, so this holds on every scan (not just Refresh). `multi_folder`
-    flags a split leaf so a folder-level container datafile is not adopted as its own."""
-    evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
-    drop_orphaned_datafile_fields(book, evidence)
-    seed_series(book)
-    seed_title(book)
-    resolve(book, evidence)
-    attribute(book, evidence)
-    normalize(book)
+    """Single-pass IDENTIFY for the non-scan path: hard then weak, no classification
+    between. Fields orphaned by a removed/vetted datafile are always dropped so they
+    re-derive — the datafile sidecar being gone is the trigger, not the scan mode.
+    `multi_folder` flags a split leaf so a folder-level container datafile is not adopted
+    as its own."""
+    evidence = identify_hard(book, root=root, pattern=pattern, scheme=scheme,
+                             multi_folder=multi_folder)
+    identify_weak(book, evidence, role=None)
     logger.debug(
         f"scan {book.source_folder}: IDENTIFY title={book.title!r}"
         f"({book.provenance.get('title')}) authors={book.authors}"

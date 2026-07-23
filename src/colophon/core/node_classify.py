@@ -283,9 +283,13 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
 
     Crucially, a title that is only the folder name echoed back by directory inference is NOT title
     evidence (that reasoning is circular): a folder whose book has no file-supplied title, series, or
-    franchise falls through to author, and `_repair_leaf_titles` then re-derives the book's title from
-    the filename. The author vote is deliberately weaker than a tagged-author consensus, so an
-    embedded tag still wins the node's author VALUE when folder name and tag disagree."""
+    franchise falls through to author, and the role-driven weak stage (`attribute(role="author")`)
+    then re-derives the book's title from the filename. On a MULTI-FILE book (more than one source
+    file) the cluster label is an internal
+    part/section, not a real title, so it is excluded from `file_title` and cannot trigger the author
+    fallback; only a single-file book's label still counts (the very common Author/OneBook.mp3 layout).
+    The author vote is deliberately weaker than a tagged-author consensus, so an embedded tag still
+    wins the node's author VALUE when folder name and tag disagree."""
     from colophon.core.filename_cluster import _text_sig, _tokens
     from colophon.core.graph_classify import TITLE, _series_label
     from colophon.core.graph_resolve import _resembles
@@ -296,14 +300,25 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     name = node.path.name
     if book is None:
         return [Evidence("title", W_TITLE_LEAF, "single-book leaf (a title folder)")]
-    # The title the FILE supplies: a file-sourced title (tag/datafile/filename), else the filename's
-    # own cluster label. A directory/graphing title is only the folder-name echo — not the file's.
+    # The title the FILE genuinely supplies: a hard-sourced (tag/datafile/match) title only. A
+    # directory/graphing title is a folder-name echo; a filename title is the cluster label. On a
+    # MULTI-FILE book the cluster label is an internal PART (a section/chapter), never a title, so it
+    # cannot make a title folder look like an author. On a lone SINGLE-FILE book the filename IS the
+    # title (Author/OneBook.mp3), so the label still counts and a real author folder stays author.
     real_title = (book.title if book.title
-                  and book.provenance.get("title") not in _CIRCULAR_TITLE_PROV else None)
-    file_label = book.detected_works[0].label if book.detected_works else None
+                  and book.provenance.get("title") in _HARD_IDENTITY_PROV else None)
+    # The cluster label from filename scanning: comes from detected_works when present; when the
+    # identifier stored the label directly on book.title with a non-echo provenance (e.g. "filename"
+    # or None), use that — same data, different storage path.
+    file_label = (book.detected_works[0].label if book.detected_works else
+                  (book.title if book.title and not real_title
+                   and book.provenance.get("title") not in _CIRCULAR_TITLE_PROV else None))
     label_has_text = bool(file_label) and bool(_text_sig(_tokens(file_label)))  # real words, not "01"
-    file_title = real_title or (file_label if label_has_text else None)
-    has_real_author = bool(book.authors) and book.provenance.get("authors") not in _CIRCULAR_TITLE_PROV
+    # A MULTI-FILE book's cluster label is an internal PART (section/chapter), not a real title, and
+    # must not flip a title folder to author. A single-file (or untracked) book's label IS its title.
+    multi_file = len(book.source_files) > 1
+    file_title = real_title or (file_label if label_has_text and not multi_file else None)
+    has_real_author = bool(book.authors) and book.provenance.get("authors") in _HARD_IDENTITY_PROV
     at_author_depth = ctx.author_depth is not None and _depth(node.path, ctx.root) == ctx.author_depth
     if file_title and _resembles(name, file_title):
         # A memoir/autobiography is often titled after its subject, so an author-named folder whose
@@ -328,12 +343,30 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     # author); the folder sits exactly at the library's author depth (a leaf nested BELOW the author
     # level is inside an author's own subtree, so it is a title); and the FILE supplies a real title
     # distinct from the folder (a bare track number like "01" identifies no title, so the folder name
-    # stays the title). Otherwise it is a title folder; `_repair_leaf_titles` re-derives the book's
-    # real title from the filename.
+    # stays the title). Otherwise it is a title folder; the role-driven weak stage
+    # (`attribute(role="author")`) re-derives the book's real title from the filename.
     if not has_real_author and at_author_depth and file_title is not None:
         return [Evidence("author", W_LEAF_AUTHOR,
                          "lone book at the author depth; folder names the author", value=name)]
     return [Evidence("title", W_TITLE_LEAF, "single-book leaf (a title folder)")]
+
+
+def ax_folder_title_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A single-book leaf whose folder name is a strong title shape — a leading `YEAR -` prefix or a
+    parsed `read by` narrator — is that book's title folder. Raw folder-name evidence only, so it
+    holds even when the filenames inside are internal parts/sections that disagree with the folder.
+    Weighted like a leaf title so it beats the lone-book->author fallback (W_LEAF_AUTHOR)."""
+    from colophon.core.folder_title import parse_folder_title
+    from colophon.core.graph_classify import TITLE
+    if node.kind != TITLE:                       # coarse-type gate: single-book leaves only
+        return []
+    if len(ctx.direct_books.get(node.path, [])) != 1:
+        return []
+    parsed = parse_folder_title(node.path.name)
+    if parsed.year is not None or parsed.narrators:
+        return [Evidence("title", W_TITLE_LEAF,
+                         "folder name is a year/narrator title shape")]
+    return []
 
 
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
@@ -403,19 +436,28 @@ def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 _MATCH_SOURCES = frozenset({"audnexus", "audible", "hardcover", "openlibrary"})
 _SERIES_COVERAGE = 0.6
 
+# A value may vote in classification only when it is hard-sourced — a real tag, datafile, or match.
+# A directory/filename/graphing value is a folder-name echo or a filename part-label (a chapter/
+# section), which is exactly what classification is here to decide — so it must never vote.
+_HARD_IDENTITY_PROV = frozenset(
+    {"tag", "datafile", "audnexus", "audible", "hardcover", "openlibrary", "googlebooks", "manual"})
+
 
 def ax_series_ramp(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """All/most books one series with a sequence ramp AND the folder name resembles it -> series."""
+    """All/most books one HARD-sourced series with a sequence ramp AND the folder name resembles it
+    -> series. A filename/directory series (e.g. a 'Chapter' part-label) is internal structure, not
+    a real series, and casts no vote."""
     from colophon.core.graph_classify import _series_label
     from colophon.core.graph_resolve import _resembles
-    books = ctx.books_by_folder.get(node.path, [])
-    if not books:
+    all_books = ctx.books_by_folder.get(node.path, [])
+    if not all_books:
         return []
+    books = [b for b in all_books if b.provenance.get("series") in _HARD_IDENTITY_PROV]
     by_series = _distinct_series(books)
     if len(by_series) != 1:
         return []
     (_key, seqs), = by_series.items()
-    if len(seqs) / len(books) < _SERIES_COVERAGE:
+    if len(seqs) / len(all_books) < _SERIES_COVERAGE:
         return []
     ramp = sorted({s for s in seqs if s is not None})
     display = next(_series_label(b)[1] for b in books if _series_label(b))
@@ -509,7 +551,7 @@ def ax_manual_override(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 _AXIOMS = (
     ax_manual_override, ax_matched_identity,          # hard
     ax_artist_consensus, ax_tag_author_match,         # author (name-bearing); may stack (see above)
-    ax_leaf_title,                                     # title (book-identity leaf)
+    ax_leaf_title, ax_folder_title_shape,             # title (book-identity leaf)
     ax_author_structure, ax_author_from_grouping, ax_known_franchise,
     ax_numbered_siblings, ax_series_ramp,                                                # author/series/franchise (structural)
     ax_container_shape, ax_bucket_word,               # container
@@ -570,28 +612,8 @@ def classify_nodes(
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
-    _repair_leaf_titles(graph, books)
     _fill_series_ramp(graph, books, root=root)
     _fill_identity_confidence(graph, books, root=root)
-
-
-def _repair_leaf_titles(graph: Graph, books: list[BookUnit]) -> None:
-    """A single book whose folder turned out to be the author still carries the folder name as its
-    title: IDENTIFY defaulted the title to the folder when the filename supplied none, and that echo
-    is what let the folder look like a title before ax_leaf_title eliminated it. Re-derive the book's
-    title from its filename so the author folder's book gets its real title, not the author's name."""
-    from colophon.core.filename_cluster import _spaced
-    from colophon.core.models import Provenance
-    for book in books:
-        if book.provenance.get("title") != Provenance.DIRECTORY.value or not book.source_files:
-            continue
-        node = graph.directories.get(DirectoryNode.id_for(book.source_folder))
-        if node is None or node.kind != "author":
-            continue
-        stem_title = _spaced(book.source_files[0].path.stem.replace("_", " "))
-        if stem_title and stem_title.casefold() != book.source_folder.name.casefold():
-            book.title = stem_title
-            book.provenance["title"] = Provenance.FILENAME.value
 
 
 def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
@@ -608,10 +630,10 @@ def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | N
 
 def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """For a book under a folder classified `series`, take its sequence from the child-name affix
-    (the reliable position number) and stamp series name + sequence when it has no stronger series;
-    separately clean the affix off the book's OWN title (so a good title isn't overwritten by a
-    misspelled folder). GRAPHING provenance; MATCH overrules. Never touch a tag/datafile/match/manual
-    series or title."""
+    (the reliable position number) and stamp series name + sequence when it has no stronger series.
+    GRAPHING provenance; MATCH overrules. Never touch a tag/datafile/match/manual series. Title
+    affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) runs after
+    classification and owns the book's title."""
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
     fillable = WEAK_PROV | {Provenance.GRAPHING.value}
@@ -625,13 +647,6 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
         if not book.series or book.provenance.get("series") in fillable:
             book.series = [SeriesRef(name=node.kind_value, sequence=aff.sequence)]
             book.provenance["series"] = Provenance.GRAPHING.value
-        taff = parse_sequence_affix(book.title or "")
-        if (taff is not None and taff.cleaned != book.title
-                and book.provenance.get("title") in WEAK_PROV
-                and (taff.confidence == "strong" or aff.confidence == "strong")):
-            # a strong title affix, or a strong ramp position (aff) corroborating a weak title one —
-            # so a manual/match series node with a weak compound title (e.g. '30-Day…') is left alone
-            book.title = taff.cleaned
 
 
 _STRONG_ID_PROV = frozenset({"manual", "match"})   # authoritative: a user or a source named it
@@ -701,21 +716,39 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         prov = book.provenance.get("authors")
         if book.authors and prov not in WEAK_PROV:
             continue
+        # NOTE (load-bearing, temporary): the two guards below (`root_is_soft_author`, the `title`
+        # exclusion via `bool(book.title)`) are what keep a standalone title folder from being named
+        # an author. They compensate for the fact that `build_graph`'s internal `plan_scan` still
+        # commits the weak (directory/filename) identity BEFORE classification, so a book already
+        # carries its decomposed title here. Once that identity is deferred (build_graph runs only
+        # the hard stage), classification would see no weak title and these guards can be simplified
+        # or removed. Safe today: this loop only runs for books with an empty/weak author (the
+        # early-continue above skips any hard/manual-authored book), so a tagged book is untouched.
         seen: list[DirectoryNode] = []          # classified-author ancestors, nearest first
         layout: DirectoryNode | None = None     # the ancestor at the scheme's author depth
         cur = book.source_folder
         while True:
             node = graph.directories.get(DirectoryNode.id_for(cur))
             if node is not None:
-                if node.kind == "author" and node.author:
+                # The scan root is a bucket path (e.g. "incoming"), so its name is never an author —
+                # a lone title folder directly beneath it is a standalone book, not an authored one.
+                # Only a hard-settled root author (a match/manual) may still name the author (a
+                # single-author library rooted at the author's name).
+                root_is_soft_author = cur == root and not node.kind_source
+                if node.kind == "author" and node.author and not root_is_soft_author:
                     seen.append(node)
                 # The layout fallback names the author from the folder at the scheme's author depth,
-                # but never from a folder whose name is not an author: franchise/series/container, or
-                # one the user manually reclassified to a title/book (an auto title-leaf can still
-                # double as its author, e.g. a lone book in an "Author Name" folder).
-                manual_title = node.kind == "title" and node.kind_source == "manual"
+                # but never from a folder whose name is not an author: franchise/series/container. A
+                # `title` folder is admitted only when its lone book has NO title of its own — a bare
+                # "Author Name" folder whose file is untitled, where the folder name doubles as the
+                # author (Root/Author/untitled.mp3). A title folder that decomposed into a real title
+                # (a year/narrator shape, a filename title) is a standalone book, not an author, so it
+                # is excluded — the role-driven weak stage owns its identity.
+                # A manual title (the user reclassified this folder) is authoritative and never an
+                # author; an auto title is admitted only when its book has no title of its own.
+                exclude_title = node.kind == "title" and (node.kind_source == "manual" or bool(book.title))
                 if (author_depth is not None and _depth(cur, root) == author_depth
-                        and node.kind not in non_author and not manual_title):
+                        and node.kind not in non_author and not exclude_title):
                     layout = node
             if cur == root or root not in cur.parents:
                 break

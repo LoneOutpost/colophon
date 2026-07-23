@@ -21,6 +21,7 @@ from colophon.core.audio_quality import mixed_quality_finding
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import parse_scheme
 from colophon.core.filename_parser import compile_template
+from colophon.core.graph import DirectoryNode
 from colophon.core.graph_records import EdgeRecord, NodeRecord, graph_records
 from colophon.core.models import (
     WEAK_PROV,
@@ -32,7 +33,13 @@ from colophon.core.models import (
 )
 from colophon.core.phases import LOCAL, mark, resync_state, state_of
 from colophon.core.reassociate import is_missing, reassociate
-from colophon.services.identify import run_identify
+from colophon.services.identify import (
+    Evidence,
+    gather,
+    identify_hard,
+    identify_weak,
+    run_identify,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -427,27 +434,45 @@ def _adopt_app_state(unit: BookUnit, matched: BookUnit) -> None:
             unit.provenance[key] = src
 
 
-def _adopt_and_identify(
+def _gather_for_weak(
+    unit: BookUnit, *, root: Path, pattern: object, scheme: object, multi_folder: bool,
+) -> Evidence | None:
+    """Gather (read-only) Evidence for a FRESH container so the deferred weak pass can re-attribute
+    it from its classified role. Never mutates identity; returns None if reading its files fails so
+    the container simply keeps the identity build_graph already gave it."""
+    try:
+        return gather(unit, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)  # type: ignore[arg-type]
+    except Exception as e:  # a container must persist even if its files can't be re-read
+        logger.warning(f"container evidence gather failed for {unit.source_folder}: {e}")
+        return None
+
+
+def _adopt_and_identify_hard(
     unit: BookUnit, matched: BookUnit | None, *, root: Path, pattern: object,
     scheme: object, multi_folder: bool = False,
-) -> BookUnit:
-    """Return the unit to persist for one projected BookUnit, re-associated to its prior
-    record (`matched`, found by owned-file overlap) so its durable id and app state
-    survive a file-set churn.
+) -> tuple[BookUnit, Evidence | None]:
+    """Adopt one projected BookUnit onto its prior record and run only the HARD identity
+    stage (embedded tags + datafile), returning `(unit, evidence)` so the caller can run the
+    WEAK stage after classification with the folder's classified role. Reassociation (FRESH-
+    container vs leaf branches, durable-state adoption) works exactly as a full identify would;
+    only the identify call is split into hard-now / weak-later.
 
     Two projection shapes are re-associated differently:
 
     - A FRESH container (plan_scan already identified it, and — for a stable same-id
-      folder — already merged its prior state onto it) is authoritative on identity.
+      folder — already merged its prior state onto it) is authoritative on hard identity.
       When `matched` is the same record plan_scan loaded (`matched.id == unit.id`) the
-      projection IS the merged record, so we keep it untouched (idempotent: no second
-      merge that could re-introduce a rederived-away field). When `matched` is a
-      different prior record (a true id churn, e.g. a single book that restructured into
-      MULTI and back), we transplant `matched`'s durable id and app state onto the
-      freshly-derived container so the durable record follows the content.
+      projection IS the merged record, so we keep it untouched. When `matched` is a
+      different prior record (a true id churn), we transplant `matched`'s durable id and
+      app state onto the freshly-derived container. Either way we still gather its Evidence
+      and hand it to the deferred weak pass: build_graph's plan_scan ran the LEGACY (role=
+      None) weak attribution, so a folder-echo title/author it produced must be re-attributed
+      from the folder's now-classified role. `identify_weak` only fills empty/weak fields, so
+      re-running it never disturbs a hard-sourced field.
     - A leaf (IDENTIFY not FRESH) is not yet identified at projection time, so `matched`
       is the base: keep its state and filled identity, refresh structural fields, fill
-      empty identity, then run IDENTIFY on its own file subset.
+      empty identity, then run only the HARD IDENTIFY stage on its own file subset. The
+      returned Evidence feeds the deferred weak pass.
     """
     if matched is not None and state_of(unit, Phase.IDENTIFY) is PhaseState.FRESH:
         if matched.id != unit.id:
@@ -455,12 +480,14 @@ def _adopt_and_identify(
         unit.missing = False  # re-seen -> clear any stale missing flag
         resync_state(unit)
         unit.touch()
-        return unit
+        return unit, _gather_for_weak(unit, root=root, pattern=pattern, scheme=scheme,
+                                      multi_folder=multi_folder)
 
     if state_of(unit, Phase.IDENTIFY) is PhaseState.FRESH:
         resync_state(unit)
         unit.touch()
-        return unit
+        return unit, _gather_for_weak(unit, root=root, pattern=pattern, scheme=scheme,
+                                      multi_folder=multi_folder)
 
     if matched is not None:
         # Leaf: `matched` is the base — keep its durable id, cover/confidence/state/manual
@@ -497,14 +524,30 @@ def _adopt_and_identify(
     mark(unit, Phase.SEARCH, PhaseState.FRESH)      # files were probed at container level
     mark(unit, Phase.CATEGORIZE, PhaseState.FRESH)  # being SINGLE is its categorization
     try:
-        run_identify(unit, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
+        evidence = identify_hard(unit, root=root, pattern=pattern, scheme=scheme,
+                                 multi_folder=multi_folder)
+    except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
+        logger.warning(f"leaf IDENTIFY(hard) failed for {unit.source_folder} [{unit.title!r}]: {e}")
+        mark(unit, Phase.IDENTIFY, PhaseState.FAILED, detail=str(e))
+        resync_state(unit)
+        unit.touch()
+        return unit, None
+    return unit, evidence
+
+
+def _finish_identify_weak(unit: BookUnit, evidence: Evidence, *, role: str | None) -> None:
+    """Run the deferred WEAK identity stage for a leaf whose hard stage ran in
+    `_adopt_and_identify_hard`, driven by its folder's classified `role`. Marks IDENTIFY
+    FRESH and resyncs. A leaf whose hard stage failed carries no evidence and never reaches
+    here (see the caller's `evidence is not None` guard)."""
+    try:
+        identify_weak(unit, evidence, role=role)
         mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
     except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
-        logger.warning(f"leaf IDENTIFY failed for {unit.source_folder} [{unit.title!r}]: {e}")
+        logger.warning(f"leaf IDENTIFY(weak) failed for {unit.source_folder} [{unit.title!r}]: {e}")
         mark(unit, Phase.IDENTIFY, PhaseState.FAILED, detail=str(e))
     resync_state(unit)
     unit.touch()
-    return unit
 
 
 def plan_scan_graph(
@@ -560,6 +603,14 @@ def plan_scan_graph(
     # so keep the bar moving through it — otherwise it sits at N/N folders for the whole identify.
     identify_total = len(projected)
     plan = ScanPlan()
+    # Per-adopted-unit bookkeeping captured at hard-adopt time so the weak pass (which runs after
+    # classification) sees the final field set before fields_filled/files_added are counted.
+    evidence_by_id: dict[str, Evidence] = {}
+    before_empty_by_id: dict[str, set[str]] = {}
+    prior_paths_by_id: dict[str, set[Path]] = {}
+    matched_ids: set[str] = set()
+    # HARD identity stage (embedded tags + datafile) per projected book, keeping the gathered
+    # Evidence so the WEAK stage can run after classification with the folder's classified role.
     for folder, units in by_folder.items():
         # More than one book projected into this folder means it's a split multi-book folder, so a
         # folder-level container datafile is not any single leaf's own identity.
@@ -569,20 +620,21 @@ def plan_scan_graph(
         for unit, matched in reassociate(units, existing):
             before_empty = _empty_fields(matched) if matched is not None else set()
             prior_paths = {sf.path for sf in matched.source_files} if matched is not None else set()
-            adopted = _adopt_and_identify(unit, matched, root=inf_root, pattern=pattern,
-                                          scheme=scheme, multi_folder=multi_folder)
+            adopted, evidence = _adopt_and_identify_hard(
+                unit, matched, root=inf_root, pattern=pattern, scheme=scheme,
+                multi_folder=multi_folder)
+            before_empty_by_id[adopted.id] = before_empty
+            prior_paths_by_id[adopted.id] = prior_paths
+            if evidence is not None:
+                evidence_by_id[adopted.id] = evidence
             if matched is not None:
-                plan.existing_books += 1
-                plan.fields_filled += len(before_empty - _empty_fields(adopted))
-            else:
-                plan.new_books += 1
-            plan.files_added += len({sf.path for sf in adopted.source_files} - prior_paths)
+                matched_ids.add(adopted.id)
             plan.units.append(adopted)
             plan.reconciled_folders.add(folder)
             if progress is not None:
                 progress(len(plan.units), identify_total,
                          f"Identifying: {adopted.title or adopted.source_folder.name}")
-    _phase(f"adopt+identify ({len(plan.units)} units)")
+    _phase(f"adopt+identify(hard) ({len(plan.units)} units)")
     classify_graph(graph, root=root)
     _phase("classify_graph")
     classify_nodes(graph, plan.units, root=root, overrides=node_overrides or {},
@@ -591,13 +643,31 @@ def plan_scan_graph(
     if node_overrides:
         propagate_overrides(graph, plan.units, root=root)
         _phase("propagate_overrides")
+    # WEAK identity stage, deferred until AFTER classification so it commits identity's echo tiers
+    # (directory decompose, filename) driven by the folder node's classified role. Only leaves that
+    # ran the hard stage carry Evidence; a FRESH container was fully identified by build_graph.
+    for unit in plan.units:
+        evidence = evidence_by_id.get(unit.id)
+        if evidence is None:
+            continue
+        node = graph.directories.get(DirectoryNode.id_for(unit.source_folder))
+        role = node.kind if node is not None else None
+        _finish_identify_weak(unit, evidence, role=role)
+    _phase("identify(weak)")
     for _b in plan.units:
         fill_book_franchise(graph, _b, root)
-    # classify_nodes just stamped each unit's local-identification confidence; the state derived
-    # back in _adopt_and_identify predates it, so re-derive now that identity_confidence is known
+    # classify_nodes stamped each unit's local-identification confidence; the identity finished by
+    # the weak stage may have moved fields, so re-derive state now that identity is complete
     # (else a locally-confident book would persist as NEEDS_REVIEW instead of IDENTIFIED).
     for unit in plan.units:
         resync_state(unit)
+        if unit.id in matched_ids:
+            plan.existing_books += 1
+            plan.fields_filled += len(before_empty_by_id.get(unit.id, set()) - _empty_fields(unit))
+        else:
+            plan.new_books += 1
+        plan.files_added += len(
+            {sf.path for sf in unit.source_files} - prior_paths_by_id.get(unit.id, set()))
     plan.graph_nodes, plan.graph_edges = graph_records(graph, plan.units, root=root)
     _phase(f"graph_records ({len(plan.graph_nodes)} nodes, {len(plan.graph_edges)} edges)")
     return plan

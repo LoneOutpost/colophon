@@ -72,7 +72,7 @@ def test_container_axioms():
     assert ax_bucket_word(_dir(g, "/lib/Sidney Sheldon"), ctx) == []
 
 
-def _book(folder, *, authors=(), prov=None, series=None, seq=None):
+def _book(folder, *, authors=(), prov=None, series=None, seq=None, series_prov=None):
     from colophon.core.models import BookUnit, SeriesRef
     b = BookUnit.new(source_folder=Path(folder))
     if authors:
@@ -81,6 +81,8 @@ def _book(folder, *, authors=(), prov=None, series=None, seq=None):
             b.provenance["authors"] = prov
     if series:
         b.series = [SeriesRef(name=series, sequence=seq)]
+        if series_prov:
+            b.provenance["series"] = series_prov
     return b
 
 
@@ -136,7 +138,7 @@ def test_series_and_hard_axioms():
     g = Graph()
     root = Path("/lib")
     mist = _dir(g, "/lib/Mistborn")
-    books = [_book("/lib/Mistborn", series="Mistborn", seq=float(i)) for i in (1, 2, 3)]
+    books = [_book("/lib/Mistborn", series="Mistborn", seq=float(i), series_prov="tag") for i in (1, 2, 3)]
     ctx = _Ctx(graph=g, root=root, books_by_folder={mist.path: books},
                modal_author_depth=None, book_like_children={})
     sev = ax_series_ramp(mist, ctx)
@@ -152,6 +154,32 @@ def test_series_and_hard_axioms():
                   book_like_children={}, overrides={"/lib/Anything": NodeOverride(kind="series", value="The Expanse")})
     oev = ax_manual_override(node, ctx_ov)
     assert oev and oev[0].hard is True and oev[0].kind == "series" and oev[0].value == "The Expanse"
+
+
+def test_filename_provenance_series_does_not_vote_series(tmp_path):
+    """A folder whose books carry only a FILENAME-provenance series (e.g. a 'Chapter' part-label)
+    must not be classified as a series folder — filename series are internal structure, not real
+    series, and ax_series_ramp must ignore them."""
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Chapter")
+    books = [
+        _book(folder, series="Chapter", seq=1.0, series_prov="filename"),
+        _book(folder, series="Chapter", seq=2.0, series_prov="filename"),
+    ]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={})
+
+    node_kind = g.directories[DirectoryNode.id_for(root / "Chapter")].kind
+    assert node_kind != "series", (
+        f"Expected a FILENAME-provenance 'Chapter' series not to classify the folder as 'series', "
+        f"got '{node_kind}'"
+    )
 
 
 def _graph_with(paths_books, root):
@@ -176,7 +204,7 @@ def test_classify_nodes_worked_cases(tmp_path):
 
     root = tmp_path
     st = [_book(str(root / "star trek"), series=s) for s in ("TOS", "TNG", "DS9", "VOY")]
-    mist = [_book(str(root / "Mistborn"), series="Mistborn", seq=float(i)) for i in (1, 2, 3)]
+    mist = [_book(str(root / "Mistborn"), series="Mistborn", seq=float(i), series_prov="tag") for i in (1, 2, 3)]
     ss = [_book(str(root / "Sidney Sheldon")) for _ in range(4)]
     poison = [_book(str(root / "Sylvia Plath"), authors=[root.name], prov="datafile")]
     g = _graph_with({
@@ -327,7 +355,10 @@ def test_depth_flexible_author_fallback(tmp_path):
     assert all(b.provenance["authors"] == "tag" for b in tagged)
 
 
-def test_fill_series_ramp_stamps_sequence_and_cleans_title():
+def test_fill_series_ramp_stamps_sequence_from_folder_name():
+    # `_fill_series_ramp` stamps series name + sequence from the child-name affix; it no longer touches
+    # the book's title. Title affix-cleaning moved to the role-driven weak stage (identify_weak), which
+    # runs after classification and owns the book's title.
     from colophon.core.graph import BookNode
     from colophon.core.models import Provenance
     from colophon.core.node_classify import _fill_series_ramp
@@ -337,7 +368,6 @@ def test_fill_series_ramp_stamps_sequence_and_cleans_title():
     _dir(g, "/lib")
     _dir(g, "/lib/Steven Brust")
     _dir(g, "/lib/Steven Brust/Vlad Taltos", kind="series", kind_value="Vlad Taltos")
-    # a book sub-folder whose title is dirty, and one whose title is already clean
     yendi = _titled_book("/lib/Steven Brust/Vlad Taltos/02 - Yendi", "02 - Yendi")
     jereg = _titled_book("/lib/Steven Brust/Vlad Taltos/01 - Jereg", "Jhereg")  # already clean from file
     for b in (yendi, jereg):
@@ -349,12 +379,11 @@ def test_fill_series_ramp_stamps_sequence_and_cleans_title():
 
     _fill_series_ramp(g, [yendi, jereg], root=root)
 
-    assert yendi.title == "Yendi"                                  # dirty title cleaned
     assert yendi.series and yendi.series[0].name == "Vlad Taltos" and yendi.series[0].sequence == 2.0
-    assert jereg.title == "Jhereg"                                 # good title left intact
     assert jereg.series and jereg.series[0].sequence == 1.0        # sequence still from folder name
     assert yendi.provenance["series"] == Provenance.GRAPHING.value
-    assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title cleaned, provenance unchanged
+    assert jereg.title == "Jhereg"                                 # a good file title is untouched
+    assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title left untouched by the ramp fill
 
 
 def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
@@ -471,3 +500,102 @@ def test_tag_author_axioms_stack_but_stay_below_a_title_leaf():
     ev = [Evidence("author", stacked, "consensus + folder-name match"),
           Evidence("title", W_TITLE_LEAF, "single-book leaf")]
     assert resolve(ev, fallback_value="Folder").kind == "title"
+
+
+def _titled_book_with_prov(folder, title, title_prov="filename"):
+    """A book whose title comes from its filename (not a tag/datafile), as happens when internal
+    part/section filenames disagree with the enclosing year-stamped folder name."""
+    b = _book(folder)
+    b.title = title
+    b.provenance["title"] = title_prov
+    return b
+
+
+def test_year_prefix_folder_classifies_title(tmp_path):
+    """A single-book leaf whose folder is `1979 - The Dead Zone` (year prefix) must classify
+    as `title`, not author — even when the filename-derived title (`Stephen King`) does not
+    resemble the folder, which would otherwise trigger the lone-book->author fallback in
+    ax_leaf_title (author depth 1, no real author tag, file supplies a distinct title)."""
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "1979 - The Dead Zone")
+    # filename-derived title that disagrees with the folder -> ax_leaf_title's author fallback fires
+    # without ax_folder_title_shape to override it
+    books = [_titled_book_with_prov(folder, "Stephen King")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={})
+
+    node_kind = g.directories[DirectoryNode.id_for(root / "1979 - The Dead Zone")].kind
+    assert node_kind == "title", (
+        f"Expected year-prefix folder '1979 - The Dead Zone' to classify as 'title', got '{node_kind}'"
+    )
+
+
+def _book_with_files_and_works(folder, *, n_files, work_label):
+    """A book with n_files SourceFile entries and one DetectedWork whose label is work_label.
+    No title, author, or series — only the cluster label supplied by the file scanner."""
+    from colophon.core.models import DetectedWork, SourceFile
+    b = _book(folder)
+    b.source_files = [
+        SourceFile(path=Path(folder) / f"{i}.mp3", size=1, duration_seconds=60.0, ext=".mp3")
+        for i in range(n_files)
+    ]
+    b.detected_works = [DetectedWork(label=work_label)]
+    return b
+
+
+def test_leaf_title_multifile_part_label_does_not_flip_to_author(tmp_path):
+    """A multi-file single book whose files are titled by section/part ("The Wheel of Fortune")
+    carries that section name as its cluster label. That label is an INTERNAL PART, not the book's
+    real title, so it must not make a genuine title folder ("The Dead Zone") look like an author.
+    Without a hard title and without a real-word label that counts as file_title, the folder must
+    fall through to the title vote (not the author fallback).
+    """
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "The Dead Zone")
+    # 3-file book: the cluster label is a section name that differs from the folder
+    books = [_book_with_files_and_works(folder, n_files=3, work_label="The Wheel of Fortune")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={})
+
+    node = g.directories[DirectoryNode.id_for(root / "The Dead Zone")]
+    assert node.kind == "title", (
+        f"Expected multi-file book's part-label NOT to flip 'The Dead Zone' to author, got '{node.kind}'"
+    )
+
+
+def test_leaf_title_singlefile_author_folder_preserved(tmp_path):
+    """A lone single-file book named by its filename (e.g. Cujo.mp3) in an author-named folder
+    at the author depth must still classify the folder as author. This is the guard that must NOT
+    regress: on a single-file book the cluster label IS the real title (Author/OneBook.mp3 layout),
+    so the author fallback in ax_leaf_title still fires."""
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    # depth-1 below the root so the folder sits at the author depth (scheme "")
+    root = tmp_path / "lib"
+    root.mkdir()
+    folder = str(root / "Stephen King")
+    # 1-file book: label is the actual title, distinct from the folder name
+    books = [_book_with_files_and_works(folder, n_files=1, work_label="Cujo")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={}, directory_scheme="")
+
+    node = g.directories[DirectoryNode.id_for(root / "Stephen King")]
+    assert node.kind == "author", (
+        f"Expected single-file book with title label to keep 'Stephen King' as author, got '{node.kind}'"
+    )
