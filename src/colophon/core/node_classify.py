@@ -336,6 +336,24 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     return [Evidence("title", W_TITLE_LEAF, "single-book leaf (a title folder)")]
 
 
+def ax_folder_title_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
+    """A single-book leaf whose folder name is a strong title shape — a leading `YEAR -` prefix or a
+    parsed `read by` narrator — is that book's title folder. Raw folder-name evidence only, so it
+    holds even when the filenames inside are internal parts/sections that disagree with the folder.
+    Weighted like a leaf title so it beats the lone-book->author fallback (W_LEAF_AUTHOR)."""
+    from colophon.core.folder_title import parse_folder_title
+    from colophon.core.graph_classify import TITLE
+    if node.kind != TITLE:                       # coarse-type gate: single-book leaves only
+        return []
+    if len(ctx.direct_books.get(node.path, [])) != 1:
+        return []
+    parsed = parse_folder_title(node.path.name)
+    if parsed.year is not None or parsed.narrators:
+        return [Evidence("title", W_TITLE_LEAF,
+                         "folder name is a year/narrator title shape")]
+    return []
+
+
 def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uniform signature
     """A GROUPING (classify_graph found its children are mostly title folders) is an author/series
     folder — vote author; a genuine single-series grouping is pulled to series by ax_series_ramp,
@@ -518,7 +536,7 @@ def ax_manual_override(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 _AXIOMS = (
     ax_manual_override, ax_matched_identity,          # hard
     ax_artist_consensus, ax_tag_author_match,         # author (name-bearing); may stack (see above)
-    ax_leaf_title,                                     # title (book-identity leaf)
+    ax_leaf_title, ax_folder_title_shape,             # title (book-identity leaf)
     ax_author_structure, ax_author_from_grouping, ax_known_franchise,
     ax_numbered_siblings, ax_series_ramp,                                                # author/series/franchise (structural)
     ax_container_shape, ax_bucket_word,               # container

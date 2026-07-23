@@ -499,3 +499,37 @@ def test_tag_author_axioms_stack_but_stay_below_a_title_leaf():
     ev = [Evidence("author", stacked, "consensus + folder-name match"),
           Evidence("title", W_TITLE_LEAF, "single-book leaf")]
     assert resolve(ev, fallback_value="Folder").kind == "title"
+
+
+def _titled_book_with_prov(folder, title, title_prov="filename"):
+    """A book whose title comes from its filename (not a tag/datafile), as happens when internal
+    part/section filenames disagree with the enclosing year-stamped folder name."""
+    b = _book(folder)
+    b.title = title
+    b.provenance["title"] = title_prov
+    return b
+
+
+def test_year_prefix_folder_classifies_title(tmp_path):
+    """A single-book leaf whose folder is `1979 - The Dead Zone` (year prefix) must classify
+    as `title`, not author — even when the filename-derived title (`Stephen King`) does not
+    resemble the folder, which would otherwise trigger the lone-book->author fallback in
+    ax_leaf_title (author depth 1, no real author tag, file supplies a distinct title)."""
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "1979 - The Dead Zone")
+    # filename-derived title that disagrees with the folder -> ax_leaf_title's author fallback fires
+    # without ax_folder_title_shape to override it
+    books = [_titled_book_with_prov(folder, "Stephen King")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={})
+
+    node_kind = g.directories[DirectoryNode.id_for(root / "1979 - The Dead Zone")].kind
+    assert node_kind == "title", (
+        f"Expected year-prefix folder '1979 - The Dead Zone' to classify as 'title', got '{node_kind}'"
+    )
