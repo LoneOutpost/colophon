@@ -403,19 +403,28 @@ def ax_artist_consensus(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
 _MATCH_SOURCES = frozenset({"audnexus", "audible", "hardcover", "openlibrary"})
 _SERIES_COVERAGE = 0.6
 
+# A value may vote in classification only when it is hard-sourced — a real tag, datafile, or match.
+# A directory/filename/graphing value is a folder-name echo or a filename part-label (a chapter/
+# section), which is exactly what classification is here to decide — so it must never vote.
+_HARD_IDENTITY_PROV = frozenset(
+    {"tag", "datafile", "audnexus", "audible", "hardcover", "openlibrary", "googlebooks", "manual"})
+
 
 def ax_series_ramp(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """All/most books one series with a sequence ramp AND the folder name resembles it -> series."""
+    """All/most books one HARD-sourced series with a sequence ramp AND the folder name resembles it
+    -> series. A filename/directory series (e.g. a 'Chapter' part-label) is internal structure, not
+    a real series, and casts no vote."""
     from colophon.core.graph_classify import _series_label
     from colophon.core.graph_resolve import _resembles
-    books = ctx.books_by_folder.get(node.path, [])
-    if not books:
+    all_books = ctx.books_by_folder.get(node.path, [])
+    if not all_books:
         return []
+    books = [b for b in all_books if b.provenance.get("series") in _HARD_IDENTITY_PROV]
     by_series = _distinct_series(books)
     if len(by_series) != 1:
         return []
     (_key, seqs), = by_series.items()
-    if len(seqs) / len(books) < _SERIES_COVERAGE:
+    if len(seqs) / len(all_books) < _SERIES_COVERAGE:
         return []
     ramp = sorted({s for s in seqs if s is not None})
     display = next(_series_label(b)[1] for b in books if _series_label(b))

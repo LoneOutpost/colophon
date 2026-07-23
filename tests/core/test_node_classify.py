@@ -72,7 +72,7 @@ def test_container_axioms():
     assert ax_bucket_word(_dir(g, "/lib/Sidney Sheldon"), ctx) == []
 
 
-def _book(folder, *, authors=(), prov=None, series=None, seq=None):
+def _book(folder, *, authors=(), prov=None, series=None, seq=None, series_prov=None):
     from colophon.core.models import BookUnit, SeriesRef
     b = BookUnit.new(source_folder=Path(folder))
     if authors:
@@ -81,6 +81,8 @@ def _book(folder, *, authors=(), prov=None, series=None, seq=None):
             b.provenance["authors"] = prov
     if series:
         b.series = [SeriesRef(name=series, sequence=seq)]
+        if series_prov:
+            b.provenance["series"] = series_prov
     return b
 
 
@@ -136,7 +138,7 @@ def test_series_and_hard_axioms():
     g = Graph()
     root = Path("/lib")
     mist = _dir(g, "/lib/Mistborn")
-    books = [_book("/lib/Mistborn", series="Mistborn", seq=float(i)) for i in (1, 2, 3)]
+    books = [_book("/lib/Mistborn", series="Mistborn", seq=float(i), series_prov="tag") for i in (1, 2, 3)]
     ctx = _Ctx(graph=g, root=root, books_by_folder={mist.path: books},
                modal_author_depth=None, book_like_children={})
     sev = ax_series_ramp(mist, ctx)
@@ -152,6 +154,32 @@ def test_series_and_hard_axioms():
                   book_like_children={}, overrides={"/lib/Anything": NodeOverride(kind="series", value="The Expanse")})
     oev = ax_manual_override(node, ctx_ov)
     assert oev and oev[0].hard is True and oev[0].kind == "series" and oev[0].value == "The Expanse"
+
+
+def test_filename_provenance_series_does_not_vote_series(tmp_path):
+    """A folder whose books carry only a FILENAME-provenance series (e.g. a 'Chapter' part-label)
+    must not be classified as a series folder — filename series are internal structure, not real
+    series, and ax_series_ramp must ignore them."""
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Chapter")
+    books = [
+        _book(folder, series="Chapter", seq=1.0, series_prov="filename"),
+        _book(folder, series="Chapter", seq=2.0, series_prov="filename"),
+    ]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={})
+
+    node_kind = g.directories[DirectoryNode.id_for(root / "Chapter")].kind
+    assert node_kind != "series", (
+        f"Expected a FILENAME-provenance 'Chapter' series not to classify the folder as 'series', "
+        f"got '{node_kind}'"
+    )
 
 
 def _graph_with(paths_books, root):
@@ -176,7 +204,7 @@ def test_classify_nodes_worked_cases(tmp_path):
 
     root = tmp_path
     st = [_book(str(root / "star trek"), series=s) for s in ("TOS", "TNG", "DS9", "VOY")]
-    mist = [_book(str(root / "Mistborn"), series="Mistborn", seq=float(i)) for i in (1, 2, 3)]
+    mist = [_book(str(root / "Mistborn"), series="Mistborn", seq=float(i), series_prov="tag") for i in (1, 2, 3)]
     ss = [_book(str(root / "Sidney Sheldon")) for _ in range(4)]
     poison = [_book(str(root / "Sylvia Plath"), authors=[root.name], prov="datafile")]
     g = _graph_with({
