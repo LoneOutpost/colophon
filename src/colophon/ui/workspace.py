@@ -305,7 +305,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     ui.run_javascript(
         "(function(){"
         "if(window.__colophonResizerReady)return;window.__colophonResizerReady=true;"
-        "var MIN={nav:200,mid:340},MAX={nav:460,mid:600},DET_MIN=460,GAP=18;"
+        "var MIN={nav:200,mid:340},MAX={nav:460,mid:Infinity},DET_MIN=380,GAP=18;"
         "var VAR={nav:'--colophon-nav-w',mid:'--colophon-mid-w'},DEF={nav:260,mid:460};"
         "var KEY={nav:'colophon.navW',mid:'colophon.midW'};"
         "function setW(key,px){document.documentElement.style.setProperty(VAR[key],px+'px');}"
