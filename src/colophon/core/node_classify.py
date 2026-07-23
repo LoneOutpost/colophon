@@ -283,8 +283,9 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
 
     Crucially, a title that is only the folder name echoed back by directory inference is NOT title
     evidence (that reasoning is circular): a folder whose book has no file-supplied title, series, or
-    franchise falls through to author, and `_repair_leaf_titles` then re-derives the book's title from
-    the filename. On a MULTI-FILE book (more than one source file) the cluster label is an internal
+    franchise falls through to author, and the role-driven weak stage (`attribute(role="author")`)
+    then re-derives the book's title from the filename. On a MULTI-FILE book (more than one source
+    file) the cluster label is an internal
     part/section, not a real title, so it is excluded from `file_title` and cannot trigger the author
     fallback; only a single-file book's label still counts (the very common Author/OneBook.mp3 layout).
     The author vote is deliberately weaker than a tagged-author consensus, so an embedded tag still
@@ -342,8 +343,8 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     # author); the folder sits exactly at the library's author depth (a leaf nested BELOW the author
     # level is inside an author's own subtree, so it is a title); and the FILE supplies a real title
     # distinct from the folder (a bare track number like "01" identifies no title, so the folder name
-    # stays the title). Otherwise it is a title folder; `_repair_leaf_titles` re-derives the book's
-    # real title from the filename.
+    # stays the title). Otherwise it is a title folder; the role-driven weak stage
+    # (`attribute(role="author")`) re-derives the book's real title from the filename.
     if not has_real_author and at_author_depth and file_title is not None:
         return [Evidence("author", W_LEAF_AUTHOR,
                          "lone book at the author depth; folder names the author", value=name)]
@@ -715,6 +716,14 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         prov = book.provenance.get("authors")
         if book.authors and prov not in WEAK_PROV:
             continue
+        # NOTE (load-bearing, temporary): the two guards below (`root_is_soft_author`, the `title`
+        # exclusion via `bool(book.title)`) are what keep a standalone title folder from being named
+        # an author. They compensate for the fact that `build_graph`'s internal `plan_scan` still
+        # commits the weak (directory/filename) identity BEFORE classification, so a book already
+        # carries its decomposed title here. Once that identity is deferred (build_graph runs only
+        # the hard stage), classification would see no weak title and these guards can be simplified
+        # or removed. Safe today: this loop only runs for books with an empty/weak author (the
+        # early-continue above skips any hard/manual-authored book), so a tagged book is untouched.
         seen: list[DirectoryNode] = []          # classified-author ancestors, nearest first
         layout: DirectoryNode | None = None     # the ancestor at the scheme's author depth
         cur = book.source_folder

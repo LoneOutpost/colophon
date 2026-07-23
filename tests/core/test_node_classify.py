@@ -383,7 +383,7 @@ def test_fill_series_ramp_stamps_sequence_from_folder_name():
     assert jereg.series and jereg.series[0].sequence == 1.0        # sequence still from folder name
     assert yendi.provenance["series"] == Provenance.GRAPHING.value
     assert jereg.title == "Jhereg"                                 # a good file title is untouched
-    assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title cleaned, provenance unchanged
+    assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title left untouched by the ramp fill
 
 
 def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
