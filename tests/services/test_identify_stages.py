@@ -4,10 +4,15 @@ Verifies that the split of run_identify into two stages preserves the
 end-to-end result: a folder named '1981 - Cujo (read by Lorna Raver)'
 with one untagged MP3 must identify as title=Cujo, year=1981,
 narrators=["Lorna Raver"].
+
+Also covers role-driven attribute() behaviour (Task 6):
+- role="title"  → folder is the title; no author adopted from the folder name
+- role="author" → folder names the author; title comes from the filename label
 """
 
 from colophon.adapters.audio import probe_audio_file
 from colophon.core.dirinfer import parse_scheme
+from colophon.core.filename_cluster import cluster
 from colophon.core.filename_parser import compile_template
 from colophon.core.models import BookUnit, ContentKind
 from colophon.services.identify import identify_hard, identify_weak, run_identify
@@ -70,4 +75,45 @@ def test_identify_hard_returns_evidence(tmp_path):
     assert isinstance(evidence, Evidence)
 
     identify_weak(book, evidence)
+    assert book.title == "Cujo"
+
+
+def test_attribute_title_role_takes_no_author_from_the_folder(tmp_path):
+    """A title-role folder never adopts its own name as an author (the ingest/folder-as-author bug)."""
+    root = tmp_path / "lib"
+    folder = root / "1981 - Danse Macabre (read by William Dufris)"
+    folder.mkdir(parents=True)
+    mp3 = folder / "danse_macabre.mp3"
+    mp3.write_bytes(b"")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(mp3)]
+    book.content_kind = ContentKind.SINGLE
+
+    pattern, scheme = _pattern_and_scheme()
+    ev = identify_hard(book, root=root, pattern=pattern, scheme=scheme)
+    identify_weak(book, ev, role="title")
+
+    assert book.authors == []
+
+
+def test_attribute_author_role_sets_author_and_filename_title(tmp_path):
+    """An author-role folder: author = folder name, title from the filename label."""
+    root = tmp_path / "lib"
+    folder = root / "Stephen King"
+    folder.mkdir(parents=True)
+    mp3 = folder / "Cujo.mp3"
+    mp3.write_bytes(b"")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(mp3)]
+    book.content_kind = ContentKind.SINGLE
+    # Populate detected_works the way the classify phase does in the real pipeline.
+    book.detected_works = cluster([mp3]).detected_works
+
+    pattern, scheme = _pattern_and_scheme()
+    ev = identify_hard(book, root=root, pattern=pattern, scheme=scheme)
+    identify_weak(book, ev, role="author")
+
+    assert book.authors == ["Stephen King"]
     assert book.title == "Cujo"

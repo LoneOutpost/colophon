@@ -171,11 +171,11 @@ def identify_hard(
 def identify_weak(book: BookUnit, evidence: Evidence, *, role: str | None = None) -> None:
     """Second IDENTIFY stage: seed series from the filename cluster, fill remaining empty
     identity from the weak tiers (directory decompose, filename), then attribute structural
-    fields and normalize. `role` (a graph node.kind) is reserved for Task 6; it is accepted
-    here so callers can pass it without a breaking change when the time comes."""
+    fields and normalize. `role` is a graph node.kind ("title", "author", "series", …) that
+    drives role-specific attribution; role=None keeps the legacy folder_kind heuristic."""
     seed_series(book)  # filename cluster series, weak
     _reconcile_from(book, evidence, tiers="weak")
-    attribute(book, evidence)
+    attribute(book, evidence, role=role)
     normalize(book)
 
 
@@ -209,7 +209,7 @@ def normalize(book: BookUnit) -> None:
         book.authors = [proper_case_if_shouting(a, keep_acronyms=True) for a in book.authors]
 
 
-def attribute(book: BookUnit, evidence: Evidence) -> None:
+def _attribute_legacy(book: BookUnit, evidence: Evidence) -> None:
     """Post-resolve structural attribution from the folder/cluster context."""
     # Untagged single book whose folder is the author, not the title: promote the
     # filename label to title and the folder name to author. Conservative.
@@ -241,6 +241,27 @@ def attribute(book: BookUnit, evidence: Evidence) -> None:
     ):
         book.authors = [book.source_folder.name]
         book.provenance["authors"] = Provenance.DIRECTORY.value
+
+
+def attribute(book: BookUnit, evidence: Evidence, *, role: str | None = None) -> None:
+    """Post-classification structural attribution, driven by the folder's classified `role`
+    (a graph node.kind). role=None keeps the legacy folder_kind heuristic for the non-scan path."""
+    if role is None:
+        _attribute_legacy(book, evidence)
+        return
+    if role == "title":
+        return  # folder is the title; its decomposed name already filled title/year/narrator. No author.
+    if role == "author":
+        # folder names the author; the book's own title comes from its filename label.
+        if book.content_kind is ContentKind.SINGLE and book.detected_works:
+            dw = book.detected_works[0]
+            if dw.label and (not book.title or book.provenance.get("title") in WEAK_PROV):
+                book.title, book.provenance["title"] = dw.label, Provenance.FILENAME.value
+        if not book.authors:
+            book.authors, book.provenance["authors"] = [book.source_folder.name], Provenance.DIRECTORY.value
+        return
+    # series / franchise / container: no name promotion here.
+    return
 
 
 def run_identify(
