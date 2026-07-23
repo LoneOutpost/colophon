@@ -533,3 +533,68 @@ def test_year_prefix_folder_classifies_title(tmp_path):
     assert node_kind == "title", (
         f"Expected year-prefix folder '1979 - The Dead Zone' to classify as 'title', got '{node_kind}'"
     )
+
+
+def _book_with_files_and_works(folder, *, n_files, work_label):
+    """A book with n_files SourceFile entries and one DetectedWork whose label is work_label.
+    No title, author, or series — only the cluster label supplied by the file scanner."""
+    from colophon.core.models import DetectedWork, SourceFile
+    b = _book(folder)
+    b.source_files = [
+        SourceFile(path=Path(folder) / f"{i}.mp3", size=1, duration_seconds=60.0, ext=".mp3")
+        for i in range(n_files)
+    ]
+    b.detected_works = [DetectedWork(label=work_label)]
+    return b
+
+
+def test_leaf_title_multifile_part_label_does_not_flip_to_author(tmp_path):
+    """A multi-file single book whose files are titled by section/part ("The Wheel of Fortune")
+    carries that section name as its cluster label. That label is an INTERNAL PART, not the book's
+    real title, so it must not make a genuine title folder ("The Dead Zone") look like an author.
+    Without a hard title and without a real-word label that counts as file_title, the folder must
+    fall through to the title vote (not the author fallback).
+    """
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "The Dead Zone")
+    # 3-file book: the cluster label is a section name that differs from the folder
+    books = [_book_with_files_and_works(folder, n_files=3, work_label="The Wheel of Fortune")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={})
+
+    node = g.directories[DirectoryNode.id_for(root / "The Dead Zone")]
+    assert node.kind == "title", (
+        f"Expected multi-file book's part-label NOT to flip 'The Dead Zone' to author, got '{node.kind}'"
+    )
+
+
+def test_leaf_title_singlefile_author_folder_preserved(tmp_path):
+    """A lone single-file book named by its filename (e.g. Cujo.mp3) in an author-named folder
+    at the author depth must still classify the folder as author. This is the guard that must NOT
+    regress: on a single-file book the cluster label IS the real title (Author/OneBook.mp3 layout),
+    so the author fallback in ax_leaf_title still fires."""
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+
+    # depth-1 below the root so the folder sits at the author depth (scheme "")
+    root = tmp_path / "lib"
+    root.mkdir()
+    folder = str(root / "Stephen King")
+    # 1-file book: label is the actual title, distinct from the folder name
+    books = [_book_with_files_and_works(folder, n_files=1, work_label="Cujo")]
+    g = _graph_with({folder: books}, root)
+    allbooks = [bn.book for bn in g.books.values()]
+
+    classify_graph(g, root=root)
+    classify_nodes(g, allbooks, root=root, overrides={}, directory_scheme="")
+
+    node = g.directories[DirectoryNode.id_for(root / "Stephen King")]
+    assert node.kind == "author", (
+        f"Expected single-file book with title label to keep 'Stephen King' as author, got '{node.kind}'"
+    )

@@ -284,8 +284,11 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     Crucially, a title that is only the folder name echoed back by directory inference is NOT title
     evidence (that reasoning is circular): a folder whose book has no file-supplied title, series, or
     franchise falls through to author, and `_repair_leaf_titles` then re-derives the book's title from
-    the filename. The author vote is deliberately weaker than a tagged-author consensus, so an
-    embedded tag still wins the node's author VALUE when folder name and tag disagree."""
+    the filename. On a MULTI-FILE book (more than one source file) the cluster label is an internal
+    part/section, not a real title, so it is excluded from `file_title` and cannot trigger the author
+    fallback; only a single-file book's label still counts (the very common Author/OneBook.mp3 layout).
+    The author vote is deliberately weaker than a tagged-author consensus, so an embedded tag still
+    wins the node's author VALUE when folder name and tag disagree."""
     from colophon.core.filename_cluster import _text_sig, _tokens
     from colophon.core.graph_classify import TITLE, _series_label
     from colophon.core.graph_resolve import _resembles
@@ -296,14 +299,25 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
     name = node.path.name
     if book is None:
         return [Evidence("title", W_TITLE_LEAF, "single-book leaf (a title folder)")]
-    # The title the FILE supplies: a file-sourced title (tag/datafile/filename), else the filename's
-    # own cluster label. A directory/graphing title is only the folder-name echo — not the file's.
+    # The title the FILE genuinely supplies: a hard-sourced (tag/datafile/match) title only. A
+    # directory/graphing title is a folder-name echo; a filename title is the cluster label. On a
+    # MULTI-FILE book the cluster label is an internal PART (a section/chapter), never a title, so it
+    # cannot make a title folder look like an author. On a lone SINGLE-FILE book the filename IS the
+    # title (Author/OneBook.mp3), so the label still counts and a real author folder stays author.
     real_title = (book.title if book.title
-                  and book.provenance.get("title") not in _CIRCULAR_TITLE_PROV else None)
-    file_label = book.detected_works[0].label if book.detected_works else None
+                  and book.provenance.get("title") in _HARD_IDENTITY_PROV else None)
+    # The cluster label from filename scanning: comes from detected_works when present; when the
+    # identifier stored the label directly on book.title with a non-echo provenance (e.g. "filename"
+    # or None), use that — same data, different storage path.
+    file_label = (book.detected_works[0].label if book.detected_works else
+                  (book.title if book.title and not real_title
+                   and book.provenance.get("title") not in _CIRCULAR_TITLE_PROV else None))
     label_has_text = bool(file_label) and bool(_text_sig(_tokens(file_label)))  # real words, not "01"
-    file_title = real_title or (file_label if label_has_text else None)
-    has_real_author = bool(book.authors) and book.provenance.get("authors") not in _CIRCULAR_TITLE_PROV
+    # A MULTI-FILE book's cluster label is an internal PART (section/chapter), not a real title, and
+    # must not flip a title folder to author. A single-file (or untracked) book's label IS its title.
+    multi_file = len(book.source_files) > 1
+    file_title = real_title or (file_label if label_has_text and not multi_file else None)
+    has_real_author = bool(book.authors) and book.provenance.get("authors") in _HARD_IDENTITY_PROV
     at_author_depth = ctx.author_depth is not None and _depth(node.path, ctx.root) == ctx.author_depth
     if file_title and _resembles(name, file_title):
         # A memoir/autobiography is often titled after its subject, so an author-named folder whose
