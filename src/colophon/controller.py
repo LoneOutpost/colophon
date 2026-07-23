@@ -159,6 +159,7 @@ from colophon.services.graph_build import build_graph
 from colophon.services.ingest import (
     ScanOptions,
     ScanPlan,
+    ScanScope,
     commit_scan,
     plan_rescan_folders,
     plan_scan_graph,
@@ -873,6 +874,24 @@ class AppController:
                 if state_of(book, phase) is PhaseState.FRESH:
                     out[phase].append(book)
         return out
+
+    def _resolve_rebuild(self, books: list[BookUnit], *, template: str | None = None) -> list[BookUnit]:
+        """Re-apply the full local resolving walk for `books`' folders via the selection-scoped
+        rebuild, then persist it. Reuses the exact path behind "Rescan selected": rebuild each
+        folder's graph (grouping + classify_nodes + propagate_overrides + fill-down), reconcile,
+        and refresh auto-derived (folder/filename) fields only — tag/datafile/match/manual survive
+        (`_adopt_and_identify._refreshable`). `template` overrides the filename pattern for this
+        run (None = the saved default). Returns the hydrated input books. Note: this re-resolves
+        the whole folder, so a sibling in a multi-book folder re-derives its auto fields too."""
+        hydrated = self._hydrate(books)
+        options = ScanOptions(
+            scope=ScanScope.REFRESH,
+            phases=frozenset(LOCAL),
+            book_ids={b.id for b in hydrated},
+        )
+        plan = self.scan_preview(options=options, template=template)
+        self.apply_scan(plan)
+        return hydrated
 
     def rerun_phase(self, books: list[BookUnit], phase: Phase) -> RerunResult:
         """Re-run `phase` for each book and report the cascade. Local phases
