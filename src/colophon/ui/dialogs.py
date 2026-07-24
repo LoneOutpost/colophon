@@ -17,7 +17,7 @@ from pathlib import Path
 from nicegui import ui
 
 from colophon.adapters.lazylibrarian import PathPatterns
-from colophon.controller import AppController
+from colophon.controller import SCAN_DIFF_ROW_CAP, AppController
 from colophon.core.chapters import Chapter, format_timecode, parse_timecode
 from colophon.core.fields import EDITABLE_FIELDS, get_field
 from colophon.core.models import BookState, BookUnit
@@ -1055,11 +1055,12 @@ async def scan_dialog(
                             ui.notify(f"Invalid pattern: {e}", type="negative")
                             show_options()
                             return
-                        show_results(plan)
+                        changes = await asyncio.to_thread(controller.scan_plan_changes, plan)
+                        show_results(plan, changes)
 
                     ui.button("Scan", icon="radar", on_click=_run_scan).props("unelevated")
 
-        def show_results(plan) -> None:
+        def show_results(plan, changes) -> None:
             body.clear()
             with body:
                 if plan.new_books == 0 and plan.existing_books == 0:
@@ -1073,6 +1074,17 @@ async def scan_dialog(
                     f"{plan.new_books} new · {plan.existing_books} updated · "
                     f"{plan.files_added} files added"
                 ).classes("text-caption colophon-muted")
+                if changes:
+                    ui.label("Changes to existing books").classes("text-caption q-mt-sm")
+                    with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
+                        for ch in changes[:SCAN_DIFF_ROW_CAP]:
+                            ui.label(
+                                f"{ch.title} · {ch.field}: "
+                                f"{ch.before or '(none)'} → {ch.after or '(none)'}"
+                            ).classes("text-caption colophon-muted")
+                    if len(changes) > SCAN_DIFF_ROW_CAP:
+                        ui.label(f"…and {len(changes) - SCAN_DIFF_ROW_CAP} more") \
+                            .classes("text-caption colophon-muted")
 
                 async def _apply() -> None:
                     dialog.close()
