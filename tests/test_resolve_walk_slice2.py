@@ -22,7 +22,7 @@ def test_standalone_title_folder_gets_no_spurious_author(tmp_path):
     assert book.authors == []                       # was ["ingest"]
     assert book.publish_year == 1981
     assert book.narrators == ["William Dufris"]
-    assert "Danse Macabre" in (book.title or "")    # "(Nonfiction)" strip is a later slice
+    assert book.title == "Danse Macabre"            # genre qualifier "(Nonfiction)" stripped
     ctx.close()
 
 

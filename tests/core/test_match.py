@@ -49,6 +49,19 @@ def test_clean_match_title_leaves_clean_title_untouched():
     assert clean_match_title("Elantris") == "Elantris"
 
 
+def test_clean_match_title_strips_genre_qualifier_paren():
+    # A genre qualifier left in the title (e.g. from a "(Nonfiction - read by X)" folder name after
+    # the narrator is extracted) is folder noise, not part of the title.
+    assert clean_match_title("Danse Macabre (Nonfiction)") == "Danse Macabre"
+    assert clean_match_title("Danse Macabre (Non-Fiction)") == "Danse Macabre"
+    assert clean_match_title("Foundation (Science Fiction)") == "Foundation"
+
+
+def test_clean_match_title_keeps_inline_genre_word():
+    # Only a parenthetical/bracket qualifier is stripped; a real title word is kept.
+    assert clean_match_title("The History of Fiction") == "The History of Fiction"
+
+
 def test_clean_match_title_strips_unabridged_paren():
     assert clean_match_title("Mistborn (Unabridged)") == "Mistborn"
 
