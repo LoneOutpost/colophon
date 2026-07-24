@@ -328,6 +328,20 @@ class ReclassifyPreview:
     book_count: int
 
 
+SCAN_DIFF_ROW_CAP = 100   # the scan dialog lists at most this many per-book changes, then "…and N more"
+
+
+@dataclass(frozen=True)
+class BookFieldChange:
+    """One existing book's identity field change a pending scan would apply (before -> after)."""
+
+    book_id: str
+    title: str        # the book's current display title, for the row label
+    field: str        # "title" | "authors" | "series"
+    before: str
+    after: str
+
+
 # Reclassify applies instantly when this many books or fewer are affected; show the preview dialog
 # only when the blast radius exceeds this threshold.
 RECLASSIFY_PREVIEW_THRESHOLD = 3
@@ -491,6 +505,29 @@ class AppController:
         # per-root accessibility guard keeps this cheap and false-positive-safe.
         sweep_missing(self.ctx.books, list(self.ctx.config.scan_paths))
         return written
+
+    def scan_plan_changes(self, plan: ScanPlan) -> list[BookFieldChange]:
+        """The identity changes a computed `plan` would apply to EXISTING books, for the scan
+        dialog's before-apply preview. Diffs each plan unit against its currently-stored book on
+        title/authors/series; a unit with no stored book is a new book (summarized by the count,
+        not listed here). Read-only — no persistence."""
+        fmts = (
+            ("title", lambda b: b.title or ""),
+            ("authors", lambda b: ", ".join(b.authors)),
+            ("series", lambda b: ", ".join(s.name for s in b.series)),
+        )
+        changes: list[BookFieldChange] = []
+        for unit in plan.units:
+            cur = self.ctx.books.get(unit.id)
+            if cur is None:
+                continue  # a new book — not an existing-book change
+            for field, fmt in fmts:
+                before, after = fmt(cur), fmt(unit)
+                if before != after:
+                    changes.append(BookFieldChange(
+                        book_id=unit.id, title=cur.title or cur.source_folder.name,
+                        field=field, before=before, after=after))
+        return changes
 
     def _sync_library_graph(self, plan: ScanPlan) -> None:
         """Mirror what commit_scan persisted into the in-memory graph, per root. Partial
