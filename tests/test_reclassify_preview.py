@@ -4,8 +4,8 @@ anything: the computed changes must match what set_node_classification actually 
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
-from colophon.core.graph_records import graph_records
 from colophon.core.graph_classify import classify_graph
+from colophon.core.graph_records import graph_records
 from colophon.core.models import Phase, PhaseState
 from colophon.core.node_classify import classify_nodes
 from colophon.core.phases import mark
