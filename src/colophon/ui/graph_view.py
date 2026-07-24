@@ -234,7 +234,7 @@ def render_classic_tree(controller: AppController) -> None:
                      f"will change {preview.book_count} books").classes("text-subtitle1")
             with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
                 for ch in preview.changes:
-                    ui.label(f"{ch.title} · {ch.field}: {ch.before or '—'} → {ch.after or '—'}") \
+                    ui.label(f"{ch.title} · {ch.field}: {ch.before or '(none)'} → {ch.after or '(none)'}") \
                         .classes("text-caption")
             with ui.row().classes("w-full justify-end"):
                 ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat no-caps")

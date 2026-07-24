@@ -317,7 +317,7 @@ class ReclassifyChange:
 
     book_id: str
     title: str
-    field: str        # "authors" | "series" | "state"
+    field: str        # "authors" | "state"
     before: str
     after: str
 
@@ -2119,22 +2119,26 @@ class AppController:
         self, path: Path, kind: str, value: str | None = None,
     ) -> ReclassifyPreview:
         """Compute, without persisting, the blast radius of reclassifying `path` as `kind`/`value`:
-        which books' authors/series/state would change (before -> after). Runs the SAME re-derivation
-        `set_node_classification` triggers (`_rederive_root_books`) with the pending override merged,
-        so preview and apply cannot drift."""
+        which books' authors/state THIS reclassify would change (before -> after). Runs the SAME
+        re-derivation `set_node_classification` triggers (`_rederive_root_books`) twice — once with the
+        pending override merged, once without — and diffs the two, so only the override's own delta is
+        reported (not any pre-existing stored drift a plain resync would have corrected anyway) and
+        preview cannot drift from apply."""
+        root = self._scan_root_for_path(path)
+        baseline, _ = self._rederive_root_books({root})
         pending: dict[str, NodeOverride] = dict(self.ctx.overrides.all())
         pending[str(path)] = NodeOverride(kind=kind, value=value)
-        root = self._scan_root_for_path(path)
-        copies, _ = self._rederive_root_books({root}, overrides=pending)
+        changed_books, _ = self._rederive_root_books({root}, overrides=pending)
         changes: list[ReclassifyChange] = []
         changed_ids: set[str] = set()
+        # series is not written onto the re-derived books (only authors/franchise/confidence/state
+        # are), so it never differs here — authors and state are the fields a reclassify moves.
         fmts = (
             ("authors", lambda b: ", ".join(b.authors)),
-            ("series", lambda b: ", ".join(s.name for s in b.series)),
             ("state", lambda b: b.state.value),
         )
-        for bid, new in copies.items():
-            cur = self.ctx.books.get(bid)
+        for bid, new in changed_books.items():
+            cur = baseline.get(bid)
             if cur is None:
                 continue
             for field, fmt in fmts:

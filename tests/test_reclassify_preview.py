@@ -74,10 +74,9 @@ def test_preview_of_a_noop_reclassify_is_empty(tmp_path):
     c = AppController(ctx)
     author_dir = tmp_path / "ingest" / "Brandon Sanderson"
 
-    # Harmonize stored state so books already reflect the graph-derived classification;
-    # after recompute a preview of the same classification must produce no diff.
-    c.recompute_all_identity()
-
+    # Re-asserting the folder's existing classification changes nothing — and this holds even though
+    # the seed leaves books with stale stored state, because the preview diffs against a fresh
+    # without-override baseline, not the stored books, so pre-existing drift is not misattributed.
     preview = c.preview_node_classification(author_dir, "author", "Brandon Sanderson")
 
     assert preview.changes == [] and preview.book_count == 0
