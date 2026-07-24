@@ -69,6 +69,7 @@ from colophon.core.models import (
     Finding,
     FindingCode,
     FindingSeverity,
+    NodeOverride,
     OperationRecord,
     Phase,
     PhaseState,
@@ -332,6 +333,20 @@ def _clear_weak_identity(book: BookUnit) -> None:
         book.provenance.pop(field, None)
 
 
+def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
+    """Whether a re-derived book copy leaves the stored book's derived caches untouched — the
+    fields `_rederive_root_books` fills/stamps (author, franchise, local-identification confidence,
+    BookState). A `_resync_roots` writeback skips books this returns True for."""
+    return (
+        stored.authors == rederived.authors
+        and stored.provenance.get("authors") == rederived.provenance.get("authors")
+        and stored.franchise == rederived.franchise
+        and stored.provenance.get("franchise") == rederived.provenance.get("franchise")
+        and stored.identity_confidence == rederived.identity_confidence
+        and stored.state is rederived.state
+    )
+
+
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
@@ -489,19 +504,50 @@ class AppController:
         if not roots:
             return 0
         books = self.ctx.books.list_all()
-        overrides = self.ctx.overrides.all()
+        by_id = {b.id: b for b in books}
+        rederived, graph_writes = self._rederive_root_books(roots)
+        for root, nodes, edges in graph_writes:
+            # Store first: if the persist raises (e.g. a write conflict), leave the
+            # in-memory graph unchanged so the two never diverge.
+            self.ctx.graph.replace_subgraph(root, nodes, edges)
+            self.ctx.library_graph.replace_root(str(root), nodes, edges)
+        # Write back only the books whose re-derived confidence, state, author or franchise moved.
+        changed = [
+            copy for bid, copy in rederived.items()
+            if (stored := by_id.get(bid)) is not None and not _book_derivation_unchanged(stored, copy)
+        ]
+        for i, book in enumerate(changed):
+            self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
+        return len(changed)
+
+    def _rederive_root_books(
+        self, roots: set[Path], *, overrides: dict[str, NodeOverride] | None = None,
+    ) -> tuple[dict[str, BookUnit], list[tuple[Path, list, list]]]:
+        """Re-derive (in memory, no writeback) the book copies for every scan `root`: rebuild each
+        root's graph from its preserved skeleton + fresh book records, reclassify, fill author/series
+        down, and stamp local-identification confidence + BookState onto deep copies. `overrides`
+        defaults to the persisted set; a caller previewing a pending edit passes an augmented set.
+        Returns `(copies, graph_writes)`: the re-derived copies keyed by book id, plus the per-root
+        graph records `(root, nodes, edges)` a persisting caller replaces the subgraph with. Nothing
+        is upserted or written to the graph here."""
+        overrides = overrides if overrides is not None else self.ctx.overrides.all()
+        books = self.ctx.books.list_all()
         lib = self.ctx.library_graph
-        changed: list[BookUnit] = []
+        rederived: dict[str, BookUnit] = {}
+        graph_writes: list[tuple[Path, list, list]] = []
         for root in roots:
             r = str(root)
             skeleton_nodes = [
                 n for n in lib.nodes.values() if n.root == r and n.physical in ("directory", "file")
             ]
-            root_books = [
+            src_books = [
                 b for b in books if self._scan_root_for_path(b.source_folder) == root
             ]
-            if not root_books and not skeleton_nodes:
+            if not src_books and not skeleton_nodes:
                 continue  # truly empty root — nothing to derive or keep
+            # Work on deep copies throughout so the stored books are never mutated; the caller
+            # compares each copy to its stored original to decide what to write back.
+            root_books = [b.model_copy(deep=True) for b in src_books]
             skeleton_edges = [
                 e for e in lib.edges
                 if e.root == r and e.kind == "contains" and not e.dst.startswith("book:")
@@ -540,32 +586,30 @@ class AppController:
             classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
                            overrides=overrides, known_franchises=self.ctx.franchises.active(),
                            directory_scheme=self.ctx.config.directory_scheme)
-            # Fill folder-derived franchise onto the STORED books before building the persisted
+            # Fill folder-derived franchise onto the book copies before building the persisted
             # franchise edges, so the graph edge and book.franchise agree in one pass (a
             # declared/builtin franchise folder is only visible via the reclassified `recon`). Prefer
             # a node override's verbatim value over the classifier's (proper-cased) ancestor name.
-            moved_ids: set[str] = set()
             for book in root_books:
                 folder_fr = (franchise_for(book.source_folder, overrides, root=root)
                              or ancestor_franchise(recon, book.source_folder, root))
-                if apply_franchise_fill(book, folder_fr):
-                    moved_ids.add(book.id)
-            # Write the re-derived graph author back onto the STORED book (mirrors the franchise fill
-            # above). The copy reflects the new classification: a real ancestor author refills it, an
-            # author-turned-Book folder clears it (dropping the book to "Needs identification").
+                apply_franchise_fill(book, folder_fr)
+            # Write the re-derived graph author back onto the book copy (mirrors the franchise fill
+            # above). The classify copy reflects the new classification: a real ancestor author
+            # refills it, an author-turned-Book folder clears it (dropping the book to "Needs
+            # identification").
             for book in root_books:
                 if book.id not in graph_author_ids:
                     continue
-                rederived = copies[book.id]
-                if book.authors == rederived.authors:
+                classified = copies[book.id]
+                if book.authors == classified.authors:
                     continue
-                book.authors = list(rederived.authors)
-                new_prov = rederived.provenance.get("authors")
+                book.authors = list(classified.authors)
+                new_prov = classified.provenance.get("authors")
                 if new_prov:
                     book.provenance["authors"] = new_prov
                 else:
                     book.provenance.pop("authors", None)
-                moved_ids.add(book.id)
             # Second pass: rebuild the franchise edges from the now-filled books, then serialize.
             franchise_of = {}
             for b in root_books:
@@ -580,22 +624,14 @@ class AppController:
             # Drop edges to skeleton nodes the preserved skeleton doesn't have — a book whose
             # source paths drifted (match/organize) would otherwise re-emit a dangling owns/contains.
             edges = prune_dangling_edges(nodes, sk_edges + book_edges)
-            # Store first: if the persist raises (e.g. a write conflict), leave the
-            # in-memory graph unchanged so the two never diverge.
-            self.ctx.graph.replace_subgraph(root, nodes, edges)
-            lib.replace_root(r, nodes, edges)
-            # Stamp local-identification confidence + re-derive state onto the STORED books from the
-            # freshly-reclassified graph (classify ran on copies, so the stored books keep their
-            # fields; only these two derived caches move). Collect the movers to write.
+            graph_writes.append((root, nodes, edges))
+            # Stamp local-identification confidence + re-derive state onto the book copies from the
+            # freshly-reclassified graph.
             for book in root_books:
-                old_ic, old_state = book.identity_confidence, book.state
                 book.identity_confidence = book_identity_confidence(book, recon, root)
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
-                if book.id in moved_ids or book.identity_confidence != old_ic or book.state is not old_state:
-                    changed.append(book)
-        for i, book in enumerate(changed):
-            self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
-        return len(changed)
+                rederived[book.id] = book
+        return rederived, graph_writes
 
     def recompute_all_identity(self) -> int:
         """One-time backfill: re-derive every scan root's classification and stamp
