@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from nicegui import app, ui
 
-from colophon.controller import AppController
+from colophon.controller import RECLASSIFY_PREVIEW_THRESHOLD, AppController
 from colophon.core.graph import DirectoryNode
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KIND_LABEL, KINDS
 from colophon.core.graph_records import book_node_id
@@ -220,23 +220,43 @@ def render_classic_tree(controller: AppController) -> None:
                 ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
                 ui.button("Confirm", on_click=lambda: dialog.submit(True)).props("no-caps")
         if await dialog:
-            controller.set_node_classification(
-                node.path, kind, (name.value or None) if name is not None else None)
-            ui.notify(f"Marked {node.label} as {label.lower()}", type="positive")
-            await _render_maintained()
+            await _apply_reclassify(
+                node, kind, (name.value or None) if name is not None else None, label)
 
     async def _clear_classify(node) -> None:
         controller.clear_node_classification(node.path)
         ui.notify(f"Cleared the classification on {node.label}")
         await _render_maintained()
 
+    async def _blast_radius_dialog(node_label: str, kind_label: str, preview) -> bool:
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f"Reclassifying '{node_label}' as {kind_label.lower()} "
+                     f"will change {preview.book_count} books").classes("text-subtitle1")
+            with ui.scroll_area().classes("w-full").style("max-height: 40vh"):
+                for ch in preview.changes:
+                    ui.label(f"{ch.title} · {ch.field}: {ch.before or '—'} → {ch.after or '—'}") \
+                        .classes("text-caption")
+            with ui.row().classes("w-full justify-end"):
+                ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat no-caps")
+                ui.button("Apply", on_click=lambda: dialog.submit(True)).props("no-caps")
+        return bool(await dialog)
+
+    async def _apply_reclassify(node, kind: str, value: str | None, kind_label: str) -> None:
+        """Preview the reclassify's blast radius; apply instantly when small, confirm first when large."""
+        preview = await asyncio.to_thread(
+            controller.preview_node_classification, node.path, kind, value)
+        if preview.book_count > RECLASSIFY_PREVIEW_THRESHOLD:
+            if not await _blast_radius_dialog(node.label, kind_label, preview):
+                return  # cancelled — nothing persisted
+        controller.set_node_classification(node.path, kind, value)
+        ui.notify(f"Marked {node.label} as {kind_label.lower()}", type="positive")
+        await _render_maintained()
+
     async def _quick_classify(node, kind: str) -> None:
         """Right-click fast path: re-categorize `node` as `kind` at once, using the folder's own name
         as the value for the entity kinds (a book/container carries none). Recoverable via Clear."""
         value = node.label if kind in _KINDS_WITH_VALUE else None
-        controller.set_node_classification(node.path, kind, value)
-        ui.notify(f"Marked {node.label} as {_CLASSIFY_KINDS[kind].lower()}", type="positive")
-        await _render_maintained()
+        await _apply_reclassify(node, kind, value, _CLASSIFY_KINDS[kind])
 
     def _classify_menu(node) -> None:
         # Right-click anywhere on the row for fast re-categorization (value = the folder's own name);
