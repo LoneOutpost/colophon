@@ -42,14 +42,21 @@ _FORMAT_KEYWORDS = (
 _FORMAT_PAREN_RE = re.compile(
     r"\s*[(\[][^)\]]*\b(?:" + _FORMAT_KEYWORDS + r")\b[^)\]]*[)\]]", re.IGNORECASE
 )
+# A genre qualifier in a parenthetical (e.g. "(Nonfiction)" left in a title after a
+# "(Nonfiction - read by X)" folder name is parsed) is folder noise, not part of the title.
+_GENRE_KEYWORDS = r"non-?fiction|fiction"
+_GENRE_PAREN_RE = re.compile(
+    r"\s*[(\[][^)\]]*\b(?:" + _GENRE_KEYWORDS + r")\b[^)\]]*[)\]]", re.IGNORECASE
+)
 _TRAILING_FORMAT_RE = re.compile(r"\s*[-\u2013\u2014:]?\s*\b(?:unabridged|abridged)\b\s*$", re.IGNORECASE)
 _TITLE_WS_RE = re.compile(r"\s+")
 
 
 def clean_match_title(title: str | None, *, strip_year: bool = True) -> str:
     """Strip query/score noise from a title: a leading year+separator (only when `strip_year`),
-    any parenthetical/bracket carrying an edition/format keyword, and trailing standalone format
-    words. Non-keyword parentheticals (e.g. a series tag) are kept. Returns the original title when
+    any parenthetical/bracket carrying an edition/format or genre (non/fiction) keyword, and trailing
+    standalone format words. Non-keyword parentheticals (e.g. a series tag) are kept. Returns the
+    original title when
     cleaning would empty it, and "" for a falsy title.
 
     `strip_year` defaults True for the match-query/scoring path, where dropping a leading year
@@ -61,6 +68,7 @@ def clean_match_title(title: str | None, *, strip_year: bool = True) -> str:
         return ""
     cleaned = _YEAR_PREFIX_RE.sub("", title) if strip_year else title
     cleaned = _FORMAT_PAREN_RE.sub("", cleaned)
+    cleaned = _GENRE_PAREN_RE.sub("", cleaned)
     cleaned = _TRAILING_FORMAT_RE.sub("", cleaned)
     cleaned = _TITLE_WS_RE.sub(" ", cleaned).strip()
     return cleaned or title
