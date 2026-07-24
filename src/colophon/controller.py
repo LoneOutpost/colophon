@@ -311,6 +311,27 @@ class DeleteResult:
     errors: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ReclassifyChange:
+    """One book's identity/state change from a pending reclassify (for the blast-radius preview)."""
+
+    book_id: str
+    title: str
+    field: str        # "authors" | "series" | "state"
+    before: str
+    after: str
+
+
+@dataclass(frozen=True)
+class ReclassifyPreview:
+    changes: list[ReclassifyChange]
+    book_count: int
+
+
+# Reclassify applies instantly when this many books or fewer are affected; show the preview dialog
+# only when the blast radius exceeds this threshold.
+RECLASSIFY_PREVIEW_THRESHOLD = 3
+
 # Provenances that mean "auto-derived from the folder or filename" — the fields a re-identify
 # should clear so the chosen pattern re-derives them. Everything else (tags, datafile, a match, a
 # manual edit) is authoritative and left alone.
@@ -2093,6 +2114,41 @@ class AppController:
                        directory_scheme=self.ctx.config.directory_scheme)
         self._classic_graph_cache = (key, graph)
         return graph
+
+    def preview_node_classification(
+        self, path: Path, kind: str, value: str | None = None,
+    ) -> ReclassifyPreview:
+        """Compute, without persisting, the blast radius of reclassifying `path` as `kind`/`value`:
+        which books' authors/series/state would change (before -> after). Runs the SAME re-derivation
+        `set_node_classification` triggers (`_rederive_root_books`) with the pending override merged,
+        so preview and apply cannot drift."""
+        pending: dict[str, NodeOverride] = dict(self.ctx.overrides.all())
+        pending[str(path)] = NodeOverride(kind=kind, value=value)
+        root = self._scan_root_for_path(path)
+        copies, _ = self._rederive_root_books({root}, overrides=pending)
+        changes: list[ReclassifyChange] = []
+        changed_ids: set[str] = set()
+        fmts = (
+            ("authors", lambda b: ", ".join(b.authors)),
+            ("series", lambda b: ", ".join(s.name for s in b.series)),
+            ("state", lambda b: b.state.value),
+        )
+        for bid, new in copies.items():
+            cur = self.ctx.books.get(bid)
+            if cur is None:
+                continue
+            for field, fmt in fmts:
+                before, after = fmt(cur), fmt(new)
+                if before != after:
+                    changes.append(ReclassifyChange(
+                        book_id=bid,
+                        title=cur.title or cur.source_folder.name,
+                        field=field,
+                        before=before,
+                        after=after,
+                    ))
+                    changed_ids.add(bid)
+        return ReclassifyPreview(changes=changes, book_count=len(changed_ids))
 
     def set_node_classification(self, path: Path, kind: str, value: str | None = None) -> None:
         """Persist a manual classification for the folder `path` and invalidate the graph
