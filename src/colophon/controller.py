@@ -1137,6 +1137,19 @@ class AppController:
             if tn is not None:
                 return tn
         return source.read_bytes(), mime_for_suffix(source)
+
+    def book_audio_path(self, book_id: str, file_index: int) -> Path | None:
+        """The on-disk path of a book's `file_index`-th source file, for streaming
+        an audio preview. None when the book is unknown or the index is out of
+        range. The path comes from the book's own `source_files`, never from a
+        user-supplied string, so there is no path-traversal surface."""
+        book = self.get_book(book_id)
+        if book is None:
+            return None
+        if file_index < 0 or file_index >= len(book.source_files):
+            return None
+        return book.source_files[file_index].path
+
     async def ensure_cover_cached(self, book: BookUnit) -> None:
         """Cache the book's cover_url into cover_path (if not already cached) so a
         synchronous encode can embed it. No-op when a cached cover exists or there
