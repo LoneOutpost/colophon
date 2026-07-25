@@ -984,7 +984,11 @@ class AppController:
         hard-rerun the At-a-Glance buttons ask for. Without it the rebuild's fill-empty refresh
         would keep a stale-but-present weak name. Hard identity (tag/datafile/match/manual) and
         every sibling are untouched."""
-        hydrated = self._hydrate(books)
+        # Reload each book fresh from the store: the caller may pass objects captured before a
+        # reclassify/edit that has since persisted (e.g. set_node_classification upserts a manual
+        # author). Clearing+upserting a stale object here would clobber that persisted identity
+        # before the rebuild runs, so a reclassify would not survive the re-run.
+        hydrated = self._hydrate([self.get_book(b.id) or b for b in books])
         for book in hydrated:
             _clear_weak_identity(book)
             self.ctx.books.upsert(book)
