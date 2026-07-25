@@ -898,8 +898,25 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                     dur = _fmt_duration(sf.duration_seconds)
                                     caption = f"{dur} · {quality}" if quality else dur
                                     ui.item_label(caption).props("caption")
+                                    player = ui.element("div").classes("w-full")
+
+                                    def _toggle_player(slot=player, bid=book.id, i=idx):
+                                        # Lazy: the <audio> element (and its request) only
+                                        # exists while the player is open. Toggle it off on a
+                                        # second click.
+                                        if slot.default_slot.children:
+                                            slot.clear()
+                                        else:
+                                            with slot:
+                                                ui.html(
+                                                    f'<audio controls autoplay preload="none" '
+                                                    f'style="width:100%;margin-top:8px" '
+                                                    f'src="/audio/{bid}/{i}"></audio>'
+                                                )
+
                                 with ui.item_section().props("side"):
                                     with ui.row().classes("q-gutter-xs no-wrap"):
+                                        ui.button(icon="play_arrow", on_click=_toggle_player).props('flat dense round aria-label="Play the start of this file"').tooltip("Play the start of this file")
                                         ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
                                         ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
                                         ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"').tooltip("Rename file")

@@ -243,3 +243,17 @@ def test_create_app_registers_audio_route(tmp_path):
     paths = {getattr(r, "path", None) for r in nicegui_app.routes}
     assert "/audio/{book_id}/{file_index}" in paths
     ctx.close()
+
+
+def test_files_section_has_lazy_audio_preview():
+    # The Files section must offer a play control that injects a native <audio>
+    # element lazily (only on click), targeting the /audio route by book id + index.
+    # show_detail is a nested closure inside render_workspace, so inspect the
+    # outer function which includes all nested definitions.
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert 'icon="play_arrow"' in src
+    assert "<audio controls" in src
+    assert "/audio/" in src
