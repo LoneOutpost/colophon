@@ -211,3 +211,49 @@ def test_match_dialog_scopes_to_identified():
     assert "ready_state=BookState.IDENTIFIED" in src
     assert 'ready_label="Identified"' in src
     assert "ready to match against sources" in src  # the caption
+
+
+def test_audio_mime_maps_known_extensions():
+    from pathlib import Path
+
+    from colophon.ui import _audio_mime
+
+    assert _audio_mime(Path("a.mp3")) == "audio/mpeg"
+    assert _audio_mime(Path("a.m4b")) == "audio/mp4"
+    assert _audio_mime(Path("a.m4a")) == "audio/mp4"
+    assert _audio_mime(Path("a.aac")) == "audio/mp4"
+    assert _audio_mime(Path("a.ogg")) == "audio/ogg"
+    assert _audio_mime(Path("a.opus")) == "audio/ogg"
+    assert _audio_mime(Path("a.flac")) == "audio/flac"
+    assert _audio_mime(Path("a.MP3")) == "audio/mpeg"     # case-insensitive
+    assert _audio_mime(Path("a.weird")) == "audio/mpeg"   # default
+
+
+def test_create_app_registers_audio_route(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+    from colophon.ui import create_app
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite"))
+    create_app(AppController(ctx))
+
+    from nicegui import app as nicegui_app
+
+    paths = {getattr(r, "path", None) for r in nicegui_app.routes}
+    assert "/audio/{book_id}/{file_index}" in paths
+    ctx.close()
+
+
+def test_files_section_has_lazy_audio_preview():
+    # The Files section must offer a play control that injects a native <audio>
+    # element lazily (only on click), targeting the /audio route by book id + index.
+    # show_detail is a nested closure inside render_workspace, so inspect the
+    # outer function which includes all nested definitions.
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert 'icon="play_arrow"' in src
+    assert "<audio controls" in src
+    assert "/audio/" in src

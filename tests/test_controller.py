@@ -3978,3 +3978,22 @@ def test_duplicate_destinations_ignores_titleless_books(tmp_path):
     _mk("b", "")   # would collapse to the same degenerate path as "a"
 
     assert AppController(ctx).duplicate_destinations() == []
+
+
+def test_book_audio_path_resolves_valid_index(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
+    ctrl = AppController(ctx)
+    assert ctrl.book_audio_path(book.id, 0) == book.source_files[0].path
+    assert ctrl.book_audio_path(book.id, 1) == book.source_files[1].path
+    ctx.close()
+
+
+def test_book_audio_path_none_for_bad_id_or_range(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["01.mp3"])
+    ctrl = AppController(ctx)
+    assert ctrl.book_audio_path("nonexistent-id", 0) is None
+    assert ctrl.book_audio_path(book.id, 5) is None      # out of range
+    assert ctrl.book_audio_path(book.id, -1) is None      # negative
+    ctx.close()

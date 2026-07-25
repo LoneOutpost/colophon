@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import Response
+from fastapi.responses import FileResponse
 from nicegui import app, ui
 
 from colophon.controller import AppController
@@ -18,6 +19,22 @@ from colophon.ui.stats import render_stats
 from colophon.ui.theme import apply_theme, preload_theme_background, setup_dark_mode
 from colophon.ui.workspace import render_workspace
 
+_AUDIO_MIME = {
+    ".mp3": "audio/mpeg",
+    ".m4b": "audio/mp4",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".flac": "audio/flac",
+}
+
+
+def _audio_mime(path: Path) -> str:
+    """MIME type for an audio file by extension, defaulting to audio/mpeg.
+    Explicit because .m4b in particular is commonly mis-guessed by sniffers."""
+    return _AUDIO_MIME.get(path.suffix.lower(), "audio/mpeg")
+
 
 def create_app(controller: AppController) -> None:
     # Serve bundled static assets (self-hosted fonts, etc.) so the UI works offline.
@@ -30,6 +47,13 @@ def create_app(controller: AppController) -> None:
             return Response(status_code=404)
         data, mime = result
         return Response(content=data, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.get("/audio/{book_id}/{file_index}")
+    def audio(book_id: str, file_index: int) -> Response:
+        path = controller.book_audio_path(book_id, file_index)
+        if path is None or not path.exists():
+            return Response(status_code=404)
+        return FileResponse(path, media_type=_audio_mime(path))
 
     @ui.page("/")
     async def index(filter: str = "") -> None:  # the URL query-param name is "filter"
