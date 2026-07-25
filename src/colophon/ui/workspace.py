@@ -889,6 +889,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.separator().classes("q-my-sm")
                     ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
 
+                    players = []  # one audio container per row; only one preview plays at a time
+
                     with ui.list().props("dense bordered").classes("w-full"):
                         for idx, sf in enumerate(book.source_files):
                             with ui.item():
@@ -899,14 +901,18 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                     caption = f"{dur} · {quality}" if quality else dur
                                     ui.item_label(caption).props("caption")
                                     player = ui.element("div").classes("w-full")
+                                    players.append(player)
 
                                     def _toggle_player(slot=player, bid=book.id, i=idx):
-                                        # Lazy: the <audio> element (and its request) only
-                                        # exists while the player is open. Toggle it off on a
-                                        # second click.
-                                        if slot.default_slot.children:
-                                            slot.clear()
-                                        else:
+                                        # Lazy + single-active: the <audio> element (and its
+                                        # request) only exists while a player is open. Clear
+                                        # every player first — removing an <audio> stops its
+                                        # playback — then open this one unless it was already
+                                        # open (so a second click on the same row toggles off).
+                                        was_open = bool(slot.default_slot.children)
+                                        for other in players:
+                                            other.clear()
+                                        if not was_open:
                                             with slot:
                                                 ui.html(
                                                     f'<audio controls autoplay preload="none" '
