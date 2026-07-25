@@ -19,7 +19,6 @@ from colophon.ui.stats import render_stats
 from colophon.ui.theme import apply_theme, preload_theme_background, setup_dark_mode
 from colophon.ui.workspace import render_workspace
 
-
 _AUDIO_MIME = {
     ".mp3": "audio/mpeg",
     ".m4b": "audio/mp4",
