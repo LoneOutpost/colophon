@@ -55,3 +55,24 @@ def test_reidentify_preserves_a_hard_author(tmp_path):
 
     assert ctx.books.get(book.id).authors == ["Stephen King"]  # manual value untouched
     ctx.close()
+
+
+def test_reidentify_applies_a_node_reclassification(tmp_path):
+    # reidentify now runs the resolving walk, so a manual reclassify of the (author) folder feeds it.
+    # The book sits under a real author folder (not directly under the scan root, which classification
+    # deliberately never treats as an author).
+    ingest = tmp_path / "ingest"
+    d = ingest / "Stephen King" / "1981 - Cujo (read by Lorna Raver)"
+    d.mkdir(parents=True)
+    (d / "01.mp3").write_bytes(b"")
+    ctx = AppContext.create(Config(
+        db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib", scan_paths=[ingest]))
+    c = AppController(ctx)
+    c.scan()
+    book = next(b for b in ctx.books.list_all())
+
+    c.set_node_classification(ingest / "Stephen King", "author", "Reclassified Author")
+    c.reidentify([book])
+
+    assert ctx.books.get(book.id).authors == ["Reclassified Author"]
+    ctx.close()

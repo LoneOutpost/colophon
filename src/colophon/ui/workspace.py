@@ -990,7 +990,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     async def _rerun_one(b: BookUnit, phase: Phase) -> None:
                         result = await asyncio.to_thread(controller.rerun_phase, [b], phase)
                         _rerun_notify(result)
-                        repaint(list=True, status=True, detail_book_id=b.id)
+                        # An IDENTIFY re-run re-resolves the whole folder; a multi-book re-group can
+                        # churn b's id, so follow the book to its surviving id (fall back to b.id,
+                        # which renders the empty state if it truly vanished).
+                        target = await asyncio.to_thread(controller.resolve_detail_target, b)
+                        repaint(list=True, status=True, detail_book_id=target or b.id)
 
                     _attn = state_panel.AttentionActions(
                         acquire=lambda b=book: ui.navigate.to(f"/acquire?book={quote(b.id)}"),
