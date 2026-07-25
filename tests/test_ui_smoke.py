@@ -257,3 +257,7 @@ def test_files_section_has_lazy_audio_preview():
     assert 'icon="play_arrow"' in src
     assert "<audio controls" in src
     assert "/audio/" in src
+    # Single-active: every player container is cleared before opening one, so at
+    # most one preview plays at a time (clearing an <audio> stops its playback).
+    assert "players.append(" in src
+    assert "for other in players" in src
