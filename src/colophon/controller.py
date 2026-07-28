@@ -999,6 +999,12 @@ class AppController:
         self._graph_cache.clear()
         return FolderDeleteResult(folder, len(affected), file_count, ok=True)
 
+    def delete_directory_from_disk_path(self, folder: Path) -> bool:
+        """Delete a directory from disk by path, for the Manage empty-folder cleanup. Returns True
+        if it is gone afterward. The caller (the empty-folder tool) only passes folders that
+        scanned as empty."""
+        return file_ops.delete_directory_from_disk(Path(folder))
+
     def empty_folders_under_scan_paths(self) -> list[Path]:
         """Directories under the configured scan paths that hold no files, walking bottom-up so a
         directory containing only now-empty subdirs also counts. Never includes a scan root itself.

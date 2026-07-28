@@ -307,3 +307,21 @@ def test_delete_ui_surfaces_exist():
     assert "delete_file" in wsrc            # per-file delete-from-disk
     assert "delete_forever" in wsrc         # the row icon
     assert "confirm_delete_folder_dialog" in wsrc  # detail folder-delete action
+
+
+def test_manage_has_empty_folder_tool():
+    import inspect
+
+    import colophon.ui.manage as mng
+    src = inspect.getsource(mng)
+    assert "empty_folders_under_scan_paths" in src
+    assert "Empty folders" in src
+
+
+def test_workspace_neighbors_offloaded():
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "asyncio.to_thread(controller.remove_missing" in src
+    assert "asyncio.to_thread(controller.reassign_file" in src
