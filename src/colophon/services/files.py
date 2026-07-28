@@ -1,8 +1,8 @@
-"""Operations on a BookUnit's source files: reorder, exclude, rename.
+"""Operations on a BookUnit's source files: reorder, exclude, move_on_disk.
 
-reorder/exclude mutate only the in-memory BookUnit (the candidate's file list);
-rename also moves the file on disk (collision-safe). Persistence is the caller's
-job (the controller upserts after each call)."""
+reorder/exclude mutate only the in-memory BookUnit (the candidate's file list).
+move_on_disk moves a file on disk without touching the book model; the caller
+re-derives the library from disk afterward. Persistence is the caller's job."""
 
 from __future__ import annotations
 
@@ -41,22 +41,6 @@ def delete_files_from_disk(paths: list[Path]) -> list[Path]:
         except OSError as e:
             logger.warning(f"delete_files_from_disk: could not remove {p}: {e}")
     return removed
-
-
-def rename(book: BookUnit, path: Path, new_name: str) -> Path:
-    """Rename `path` to `new_name` within its directory and update source_files.
-
-    Raises FileExistsError if the target already exists (never overwrites)."""
-    if not new_name.strip():
-        raise ValueError("filename must not be empty")
-    target = path.with_name(new_name)
-    if target.exists():
-        raise FileExistsError(f"{target} already exists")
-    path.rename(target)
-    for sf in book.source_files:
-        if sf.path == path:
-            sf.path = target
-    return target
 
 
 def move_on_disk(path: Path, dest_dir: Path, new_name: str | None = None) -> Path:

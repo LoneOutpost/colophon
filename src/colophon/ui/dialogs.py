@@ -388,7 +388,7 @@ def move_rename_dialog(
             raw = dir_input.value.strip()
             if raw and not controller.path_within_scan_paths(Path(raw)):
                 warn.set_text(
-                    "This folder is outside your library — the file will move but leave "
+                    "This folder is outside your library. The file will move but leave "
                     "Colophon's library."
                 )
             else:

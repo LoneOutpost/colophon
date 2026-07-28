@@ -64,11 +64,11 @@ from colophon.ui.dialogs import (
     cover_dialog,
     match_dialog,
     modal,
+    move_rename_dialog,
     persist_dialog,
     quick_match_dialog,
     remap_dialog,
     remove_from_library_dialog,
-    move_rename_dialog,
     scan_dialog,
     tag_dialog,
 )

@@ -1770,17 +1770,6 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
-    def rename_file(self, book: BookUnit, path: Path, new_name: str) -> Path | None:
-        """Rename a file on disk; returns the new path, or None on collision/error."""
-        try:
-            new = file_ops.rename(book, path, new_name)
-        except (OSError, ValueError) as e:
-            logger.warning(f"rename failed for {path}: {e}")
-            return None
-        book.touch()
-        self.ctx.books.upsert(book)
-        return new
-
     _SEVERITY_RANK: ClassVar[dict[FindingSeverity, int]] = {
         FindingSeverity.ERROR: 0,
         FindingSeverity.WARN: 1,
