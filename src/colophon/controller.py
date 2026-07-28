@@ -278,6 +278,7 @@ class BookProcessResult(_Base):
     book_id: str
     status: str = "queued"  # done / failed / cancelled / skipped
     detail: str | None = None
+    output_folder: Path | None = None  # where a done book's files were placed (for post-move re-derive)
 
 
 class EncodeJobResult(_Base):
@@ -2850,7 +2851,7 @@ class AppController:
             pairs = list(zip([sf.path for sf in ordered], targets, strict=True))
             org = organize_book_parts(
                 self.ctx.books, book, pairs,
-                delete_sources=options.delete_sources or self.ctx.config.reorg_delete_sources,
+                delete_sources=options.delete_sources,
             )
             if not org.moved or org.target_path is None:
                 return self._fail_persist(book, Phase.ORGANIZE, _organize_fail_detail(org))
@@ -2866,7 +2867,9 @@ class AppController:
                     track=(idx if total > 1 else None),
                 ):
                     logger.warning(f"track tag write failed for {dst} (book {book.id})")
-            return BookProcessResult(book_id=book.id, status="done")
+            return BookProcessResult(
+                book_id=book.id, status="done", output_folder=targets[0].parent
+            )
 
         # Encode path: transcode all source files into a single output, then organize + tag.
         target = self._encode_target(book)
@@ -2910,7 +2913,29 @@ class AppController:
             resting, self._canonical_book(book),
             operations=self.ctx.operations, batch_id=batch_id,
         )
-        return BookProcessResult(book_id=book.id, status="done")
+        return BookProcessResult(
+            book_id=book.id, status="done", output_folder=resting.parent
+        )
+
+    def _rederive_after_move(self, results: list[BookProcessResult]) -> None:
+        """After a move (delete_sources) job, remove source book records and re-derive any
+        scan roots that received the moved files. Only books that were actually placed somewhere
+        (`done` with an `output_folder`) are touched — a failed organize kept its sources, and a
+        no-op combo (delete_sources without organize/encode) never moved anything, so both keep
+        their records."""
+        done_ids: list[str] = []
+        dest_roots: set[Path] = set()
+        for res in results:
+            if res.status != "done" or res.output_folder is None:
+                continue
+            done_ids.append(res.book_id)
+            if self.path_within_scan_paths(res.output_folder):
+                dest_roots.add(self._scan_root_for_path(res.output_folder))
+        if done_ids:
+            self.cleanup_remove(done_ids)
+        if dest_roots:
+            self.apply_scan(self.scan_preview(list(dest_roots)))
+            self._graph_cache.clear()
 
     async def run_encode_job(
         self,
@@ -2953,8 +2978,10 @@ class AppController:
                     _emit(book.id, result.status)
                     return result
 
-            results = await asyncio.gather(*(_one(b) for b in books))
-            return EncodeJobResult(results=list(results))
+            results = list(await asyncio.gather(*(_one(b) for b in books)))
+            if options.delete_sources:
+                await asyncio.to_thread(self._rederive_after_move, results)
+            return EncodeJobResult(results=results)
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:
         """Encode + organize a single book (delegates to the unified worker, which

@@ -1368,7 +1368,7 @@ async def persist_dialog(
 
                 ui.label("Operations").classes("colophon-seccap q-mt-sm")
                 tag = ui.checkbox("Tag — write metadata into the files").props("dense")
-                org = ui.checkbox("Organize — move into the library").props("dense")
+                org = ui.checkbox("Organize — place into the library").props("dense")
                 enc = ui.checkbox("Encode — re-encode to M4B").props("dense")
                 ui.label(
                     "Encoding re-encodes each book and can take a long time per book — minutes to "
@@ -1406,15 +1406,35 @@ async def persist_dialog(
                     "dense"
                 ).classes("w-32")
                 conc.bind_visibility_from(enc, "value")
-                dele = ui.checkbox("Delete source files after (verified)").props("dense")
-                dele.bind_visibility_from(enc, "value")
+                mode_box = ui.column().classes("q-gutter-none")
+                with mode_box:
+                    ui.label("Source files").classes("colophon-seccap")
+                    mode = ui.toggle(
+                        {"copy": "Copy (keep originals)", "move": "Move (remove originals after verify)"},
+                        value=("move" if cfg.reorg_delete_sources else "copy"),
+                    ).props("dense no-caps")
                 rem = ui.checkbox("Remove from library after organizing").props("dense")
-                rem.bind_visibility_from(org, "value")
-                ui.label(
+                rem_hint = ui.label(
                     "Removed books leave Colophon; their organized files stay at the "
                     "destination. Colophon won't manage them again unless the destination is "
                     "added to the scan paths."
-                ).classes("text-caption colophon-muted").bind_visibility_from(rem, "value")
+                ).classes("text-caption colophon-muted")
+                rem_hint.bind_visibility_from(rem, "value")
+
+                def _sync_op_visibility() -> None:
+                    mode_box.set_visibility(bool(org.value) or bool(enc.value))
+                    rem_visible = bool(org.value) and mode.value == "copy"
+                    rem.set_visibility(rem_visible)
+                    # Never let a hidden "Remove from library" stay checked — otherwise switching
+                    # from Copy to Move would silently carry a destructive removal the user can no
+                    # longer see. Clearing it also collapses rem_hint via its bind.
+                    if not rem_visible and rem.value:
+                        rem.set_value(False)
+
+                org.on_value_change(lambda _e: _sync_op_visibility())
+                enc.on_value_change(lambda _e: _sync_op_visibility())
+                mode.on_value_change(lambda _e: _sync_op_visibility())
+                _sync_op_visibility()
 
                 block_warn = ui.label("").classes("text-caption text-negative q-mt-xs")
                 warn = ui.label("").classes("text-caption text-warning q-mt-xs")
@@ -1443,9 +1463,6 @@ async def persist_dialog(
                         if not (tag.value or org.value or enc.value):
                             ui.notify("Choose at least one operation")
                             return
-                        if dele.value and not enc.value:
-                            ui.notify("Delete sources requires Encode")
-                            return
                         books = controller.books_for_scope(scope.value, selected_ids)
                         if not books:
                             ui.notify("No books in that scope")
@@ -1467,7 +1484,7 @@ async def persist_dialog(
                             )
                         opts = EncodeJobOptions(
                             encode=bool(enc.value), organize=bool(org.value),
-                            delete_sources=bool(dele.value), concurrency=int(conc.value or 1),
+                            delete_sources=(mode.value == "move"), concurrency=int(conc.value or 1),
                             patterns=_patterns(folder_pat, file_pat),
                         )
                         if opts.organize:
