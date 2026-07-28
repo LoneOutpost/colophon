@@ -103,9 +103,9 @@ def test_move_without_organize_or_encode_does_not_remove_book(tmp_path):
     ctx.close()
 
 
-def test_reorg_config_delete_triggers_rederive_even_without_move_option(tmp_path):
-    # With the reorg_delete_sources config flag ON, a no-encode organize deletes sources even
-    # when the UI move option is OFF. The re-derive must still run so no stale record is left.
+def test_reorg_config_flag_does_not_force_delete_over_explicit_copy(tmp_path):
+    # The reorg_delete_sources config flag seeds the dialog's default toggle, but must NOT
+    # override an explicit Copy (delete_sources=False): originals are kept and the book stays.
     ingest = tmp_path / "ingest"
     library = tmp_path / "library_outside"
     ctx = AppContext.create(Config(
@@ -119,9 +119,8 @@ def test_reorg_config_delete_triggers_rederive_even_without_move_option(tmp_path
     asyncio.run(ctrl.run_encode_job(
         [book], EncodeJobOptions(encode=False, organize=True, delete_sources=False)))
 
-    assert not (ingest / "Dune" / "01.mp3").exists()   # sources deleted by the config flag
-    assert _book_in(ctx, ingest / "Dune") is None       # stale record pruned by the re-derive
-    assert len(ctx.books.list_all()) == 0
+    assert (ingest / "Dune" / "01.mp3").exists()        # Copy kept the original
+    assert _book_in(ctx, ingest / "Dune") is not None    # book stays in the library
     ctx.close()
 
 

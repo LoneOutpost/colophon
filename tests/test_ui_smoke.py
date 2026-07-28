@@ -293,3 +293,4 @@ def test_persist_dialog_has_copy_move_choice():
     assert "Delete sources requires Encode" not in src
     # Honest label: organize no longer claims to always "move".
     assert "place into the library" in src
+    assert "reorg_delete_sources" in src   # toggle default seeded from the saved setting

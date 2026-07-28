@@ -1411,7 +1411,7 @@ async def persist_dialog(
                     ui.label("Source files").classes("colophon-seccap")
                     mode = ui.toggle(
                         {"copy": "Copy (keep originals)", "move": "Move (remove originals after verify)"},
-                        value="copy",
+                        value=("move" if cfg.reorg_delete_sources else "copy"),
                     ).props("dense no-caps")
                 rem = ui.checkbox("Remove from library after organizing").props("dense")
                 rem_hint = ui.label(

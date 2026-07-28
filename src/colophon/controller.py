@@ -2851,7 +2851,7 @@ class AppController:
             pairs = list(zip([sf.path for sf in ordered], targets, strict=True))
             org = organize_book_parts(
                 self.ctx.books, book, pairs,
-                delete_sources=options.delete_sources or self.ctx.config.reorg_delete_sources,
+                delete_sources=options.delete_sources,
             )
             if not org.moved or org.target_path is None:
                 return self._fail_persist(book, Phase.ORGANIZE, _organize_fail_detail(org))
@@ -2979,13 +2979,7 @@ class AppController:
                     return result
 
             results = list(await asyncio.gather(*(_one(b) for b in books)))
-            # A move happened if the user asked for it, or (no-encode reorg only) the config
-            # flag deletes sources on its own — encode never consults that flag. Either way the
-            # emptied source records must be re-derived, not just the explicit-move case.
-            moved = options.delete_sources or (
-                not options.encode and self.ctx.config.reorg_delete_sources
-            )
-            if moved:
+            if options.delete_sources:
                 await asyncio.to_thread(self._rederive_after_move, results)
             return EncodeJobResult(results=results)
 
