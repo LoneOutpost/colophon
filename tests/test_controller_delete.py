@@ -56,3 +56,91 @@ def test_delete_last_file_removes_book(tmp_path):
     assert result.files_deleted == 1 and result.book_removed is True
     assert _book_in(ctx, ingest / "Solo") is None
     ctx.close()
+
+
+def test_delete_folder_removes_tree_and_nested_books(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Series" / "BookA" / "01.mp3")
+    _mp3(ingest / "Series" / "BookB" / "01.mp3")
+    ctrl.scan([ingest])
+    assert len(ctx.books.list_all()) == 2
+
+    result = ctrl.delete_folder(ingest / "Series")
+
+    assert result.ok is True
+    assert result.books_removed == 2
+    assert not (ingest / "Series").exists()
+    assert len(ctx.books.list_all()) == 0
+    ctx.close()
+
+
+def test_delete_folder_refuses_scan_root(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+
+    result = ctrl.delete_folder(ingest)  # the scan root itself
+
+    assert result.ok is False and result.error is not None
+    assert ingest.exists()
+    assert len(ctx.books.list_all()) == 1
+    ctx.close()
+
+
+def test_delete_folder_refuses_outside_scan_paths(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_bytes(b"x")
+
+    result = ctrl.delete_folder(outside)
+
+    assert result.ok is False and result.error is not None
+    assert outside.exists()
+    ctx.close()
+
+
+def test_delete_folder_refuses_when_no_scan_paths(tmp_path):
+    # The most safety-critical guard: a misconfigured (empty) scan_paths must delete nothing.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+    ctx.config.scan_paths = []  # simulate a wiped/half-written config
+
+    result = ctrl.delete_folder(ingest / "Dune")
+
+    assert result.ok is False and result.error is not None
+    assert (ingest / "Dune").exists()
+    assert len(ctx.books.list_all()) == 1
+    ctx.close()
+
+
+def test_delete_folder_empty_in_scope_folder_no_books(tmp_path):
+    # An in-scope folder with no books (a leftover) is deleted; the affected==[] branch.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    ingest.mkdir(parents=True, exist_ok=True)
+    leftover = ingest / "Leftover"
+    leftover.mkdir()
+
+    result = ctrl.delete_folder(leftover)
+
+    assert result.ok is True and result.books_removed == 0
+    assert not leftover.exists()
+    ctx.close()
+
+
+def test_delete_folder_rmtree_failure_leaves_records_intact(tmp_path, monkeypatch):
+    # The crux safety invariant: if the on-disk delete fails, no book record is dropped.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+    monkeypatch.setattr(
+        "colophon.controller.file_ops.delete_directory_from_disk", lambda folder: False
+    )
+
+    result = ctrl.delete_folder(ingest / "Dune")
+
+    assert result.ok is False and result.error is not None
+    assert result.books_removed == 0
+    assert _book_in(ctx, ingest / "Dune") is not None  # record kept
+    ctx.close()
