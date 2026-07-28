@@ -7,6 +7,7 @@ job (the controller upserts after each call)."""
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from colophon.core.models import BookUnit
@@ -55,4 +56,20 @@ def rename(book: BookUnit, path: Path, new_name: str) -> Path:
     for sf in book.source_files:
         if sf.path == path:
             sf.path = target
+    return target
+
+
+def move_on_disk(path: Path, dest_dir: Path, new_name: str | None = None) -> Path:
+    """Move `path` into `dest_dir` on disk, optionally renaming to `new_name`. Creates `dest_dir`
+    (and parents) if missing. Never overwrites: raises FileExistsError if a different file already
+    occupies the target. Returns the new path. Touches no book model — the caller re-derives the
+    library from disk afterward."""
+    name = (new_name or path.name).strip()
+    if not name:
+        raise ValueError("filename must not be empty")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    target = dest_dir / name
+    if target != path and target.exists():
+        raise FileExistsError(f"{target} already exists")
+    shutil.move(str(path), str(target))
     return target
