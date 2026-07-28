@@ -280,3 +280,16 @@ def test_files_row_uses_move_rename_dialog():
     import colophon.ui.workspace as ws
     src = inspect.getsource(ws.render_workspace)
     assert "move_rename_dialog" in src
+
+
+def test_persist_dialog_has_copy_move_choice():
+    import inspect
+
+    import colophon.ui.dialogs as dlg
+    src = inspect.getsource(dlg.persist_dialog)
+    # Copy/Move toggle drives delete_sources; encode-only gate is gone.
+    assert '"copy"' in src and '"move"' in src
+    assert 'delete_sources=' in src
+    assert "Delete sources requires Encode" not in src
+    # Honest label: organize no longer claims to always "move".
+    assert "place into the library" in src
