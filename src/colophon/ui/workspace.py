@@ -852,6 +852,34 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ).props("flat dense no-caps color=negative").tooltip(
                                             "Forget this book (files stay on disk)"
                                         )
+                                        def _delete_folder(b=book) -> None:
+                                            from colophon.ui.dialogs import (
+                                                confirm_delete_folder_dialog,
+                                            )
+                                            folder = b.source_folder
+                                            affected = controller.books_in_folder_tree(folder)
+                                            titles = [bk.title or Path(bk.source_folder).name for bk in affected]
+                                            file_count = sum(len(bk.source_files) for bk in affected)
+
+                                            async def _run() -> None:
+                                                result = await asyncio.to_thread(controller.delete_folder, folder)
+                                                if not result.ok:
+                                                    ui.notify(result.error or "Delete failed", type="negative")
+                                                    return
+                                                ui.notify("Folder deleted")
+                                                _clear_selection()
+
+                                            confirm_delete_folder_dialog(
+                                                folder, affected_titles=titles, file_count=file_count,
+                                                on_confirm=_run,
+                                            )
+
+                                        ui.button(
+                                            "Delete folder from disk", icon="delete_forever",
+                                            on_click=_delete_folder,
+                                        ).props("flat dense no-caps color=negative").tooltip(
+                                            "Permanently delete this book's folder and its files"
+                                        )
 
                         # --- grouped fields ---
                         ui.label("Identity").classes("colophon-seccap")
@@ -927,6 +955,24 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
                                         ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
                                         ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
+                                        def _delete_file(p=sf.path, b=book) -> None:
+                                            from colophon.ui.dialogs import confirm_delete_dialog
+                                            last = len(b.source_files) == 1
+
+                                            async def _run() -> None:
+                                                result = await asyncio.to_thread(controller.delete_file, b, p)
+                                                if result.errors:
+                                                    ui.notify("; ".join(result.errors), type="warning")
+                                                else:
+                                                    ui.notify("Deleted from disk")
+                                                if result.book_removed:
+                                                    _clear_selection()
+                                                else:
+                                                    show_detail(b.id)
+
+                                            confirm_delete_dialog([p], book_removed=last, on_confirm=_run)
+
+                                        ui.button(icon="delete_forever", on_click=_delete_file).props('flat dense round color=negative aria-label="Delete this file from disk"').tooltip("Delete this file from disk (permanent)")
 
                     siblings = controller.folder_sibling_files(book)
                     if siblings:

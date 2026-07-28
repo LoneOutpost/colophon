@@ -9,6 +9,7 @@ Cancel/confirm action row and the loading-button pattern.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
@@ -81,6 +82,14 @@ def busy(button: ui.button) -> Iterator[None]:
         yield
     finally:
         button.props(remove="loading").enable()
+
+
+async def run_busy(button: ui.button, thunk: Callable[[], object]) -> object:
+    """Run a blocking controller call off the event loop while `button` shows its busy/disabled
+    state, so a heavy delete or re-derive never freezes the UI. Returns the thunk's result; do the
+    UI updates (notify/repaint) after awaiting, on the event loop."""
+    with busy(button):
+        return await asyncio.to_thread(thunk)
 
 
 def single_flight(handler: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
@@ -1308,20 +1317,54 @@ def delete_summary(paths: list[Path], *, book_removed: bool) -> str:
     return f"This permanently deletes {len(paths)} file(s) from disk: {names}.{tail}"
 
 
-def confirm_delete_dialog(paths: list[Path], *, book_removed: bool, on_confirm: Callable[[], None]) -> None:
+def confirm_delete_dialog(paths: list[Path], *, book_removed: bool, on_confirm: Callable[[], object]) -> None:
     """A persistent confirm for an irreversible delete. Names exactly what will go; the confirm
-    button runs `on_confirm` (which does the deletion) then closes."""
+    button runs `on_confirm` (sync or async — it's awaited if it returns a coroutine) then closes."""
     dialog = modal()
     with dialog, ui.card().classes("q-pa-md").style("min-width: 22rem"):
         ui.label("Delete permanently?").classes("text-subtitle1")
         ui.label(delete_summary(paths, book_removed=book_removed)).classes("colophon-muted text-caption")
 
-        def _go(btn) -> None:
+        async def _go(btn) -> None:
             with busy(btn):
-                on_confirm()
+                res = on_confirm()
+                if inspect.isawaitable(res):
+                    await res
             dialog.close()
 
         btn = dialog_actions(dialog, confirm_label="Delete", confirm_icon="delete",
+                             on_confirm=lambda: None, confirm_props="unelevated color=negative")
+        btn.on("click", lambda: _go(btn))
+    dialog.open()
+
+
+def confirm_delete_folder_dialog(
+    folder: Path, *, affected_titles: list[str], file_count: int,
+    on_confirm: Callable[[], object],
+) -> None:
+    """A persistent strong-confirm for deleting a directory from disk. Names the folder, the file
+    count, and lists every book that will be removed (so a multi-book or nested-book folder can't
+    be nuked by surprise). The confirm runs `on_confirm` (sync or async) then closes."""
+    dialog = modal()
+    with dialog, ui.card().classes("q-pa-md").style("min-width: 24rem"):
+        ui.label("Delete this folder from disk?").classes("text-subtitle1")
+        ui.label(
+            f"This permanently deletes {folder} and its {file_count} file(s). This cannot be undone."
+        ).classes("colophon-muted text-caption")
+        if len(affected_titles) > 1:
+            ui.label(f"{len(affected_titles)} books will be removed:").classes("text-caption q-mt-sm")
+            with ui.column().classes("q-gutter-none q-pl-sm"):
+                for t in affected_titles:
+                    ui.label(f"• {t}").classes("text-caption colophon-muted")
+
+        async def _go(btn) -> None:
+            with busy(btn):
+                res = on_confirm()
+                if inspect.isawaitable(res):
+                    await res
+            dialog.close()
+
+        btn = dialog_actions(dialog, confirm_label="Delete folder", confirm_icon="delete_forever",
                              on_confirm=lambda: None, confirm_props="unelevated color=negative")
         btn.on("click", lambda: _go(btn))
     dialog.open()

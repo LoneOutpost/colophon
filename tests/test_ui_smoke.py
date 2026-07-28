@@ -294,3 +294,16 @@ def test_persist_dialog_has_copy_move_choice():
     # Honest label: organize no longer claims to always "move".
     assert "place into the library" in src
     assert "reorg_delete_sources" in src   # toggle default seeded from the saved setting
+
+
+def test_delete_ui_surfaces_exist():
+    import inspect
+
+    import colophon.ui.dialogs as dlg
+    import colophon.ui.workspace as ws
+    assert hasattr(dlg, "run_busy")
+    assert hasattr(dlg, "confirm_delete_folder_dialog")
+    wsrc = inspect.getsource(ws.render_workspace)
+    assert "delete_file" in wsrc            # per-file delete-from-disk
+    assert "delete_forever" in wsrc         # the row icon
+    assert "confirm_delete_folder_dialog" in wsrc  # detail folder-delete action
