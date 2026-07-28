@@ -923,6 +923,27 @@ class AppController:
         self._resync_roots({self._scan_root_for_path(book.source_folder)})
         return DeleteResult(files_deleted=len(removed), book_removed=False, errors=tuple(errors))
 
+    def delete_file(self, book: BookUnit, path: Path) -> DeleteResult:
+        """Permanently delete one source file from disk, drop it from `book`, and remove the book
+        entirely if that was its last file. Re-derives the source scan root. Irreversible; the UI
+        gates it behind a confirm dialog. `path` is one of the book's own source files, never a
+        user-typed string, so there is no path-traversal surface."""
+        from colophon.services.files import delete_files_from_disk, exclude
+
+        removed = delete_files_from_disk([path])
+        if not removed:
+            return DeleteResult(files_deleted=0, book_removed=False,
+                                errors=(f"could not delete {path.name}",))
+        exclude(book, path)
+        if not book.source_files:
+            self.cleanup_remove([book.id])
+            return DeleteResult(files_deleted=1, book_removed=True, errors=())
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        self._graph_cache.clear()
+        return DeleteResult(files_deleted=1, book_removed=False, errors=())
+
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
         return self.apply_scan(self.scan_preview(roots, options=options))
