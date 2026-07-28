@@ -144,3 +144,27 @@ def test_delete_folder_rmtree_failure_leaves_records_intact(tmp_path, monkeypatc
     assert result.books_removed == 0
     assert _book_in(ctx, ingest / "Dune") is not None  # record kept
     ctx.close()
+
+
+def test_empty_folders_under_scan_paths_finds_empties(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    (ingest / "HasFile").mkdir(parents=True)
+    (ingest / "HasFile" / "keep.txt").write_bytes(b"x")
+    (ingest / "Empty").mkdir()
+    (ingest / "Nested" / "inner").mkdir(parents=True)  # holds only an empty subdir
+
+    found = set(ctrl.empty_folders_under_scan_paths())
+
+    assert (ingest / "Empty") in found
+    assert (ingest / "Nested" / "inner") in found
+    assert (ingest / "Nested") in found          # parent of only-empty-subdir counts
+    assert (ingest / "HasFile") not in found      # has a file
+    assert ingest not in found                    # never the scan root itself
+    ctx.close()
+
+
+def test_empty_folders_empty_when_no_scan_paths(tmp_path):
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib"))
+    ctrl = AppController(ctx)
+    assert ctrl.empty_folders_under_scan_paths() == []
+    ctx.close()

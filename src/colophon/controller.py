@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -997,6 +998,29 @@ class AppController:
             self._resync_roots({self._scan_root_for_path(folder)})
         self._graph_cache.clear()
         return FolderDeleteResult(folder, len(affected), file_count, ok=True)
+
+    def empty_folders_under_scan_paths(self) -> list[Path]:
+        """Directories under the configured scan paths that hold no files, walking bottom-up so a
+        directory containing only now-empty subdirs also counts. Never includes a scan root itself.
+        Empty when no scan paths are configured, so a misconfigured library never offers a mass
+        delete."""
+        roots = list(self.ctx.config.scan_paths)
+        if not roots:
+            return []
+        empties: list[Path] = []
+        removable: set[str] = set()
+        for root in roots:
+            root_str = str(root)
+            for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+                if dirpath == root_str:
+                    continue  # never offer the scan root
+                subdirs_all_removable = all(
+                    os.path.join(dirpath, d) in removable for d in dirnames
+                )
+                if not filenames and subdirs_all_removable:
+                    empties.append(Path(dirpath))
+                    removable.add(dirpath)
+        return empties
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
@@ -3012,6 +3036,17 @@ class AppController:
             self.apply_scan(self.scan_preview(list(dest_roots)))
             self._graph_cache.clear()
 
+    def _remove_empty_source_folders(self, books: list[BookUnit],
+                                     results: list[BookProcessResult]) -> None:
+        """After a move, delete each moved book's source folder if it is now completely empty. A
+        folder still holding non-audio leftovers (cover art, .nfo) is left for an explicit delete."""
+        by_id = {b.id: b for b in books}
+        for res in results:
+            if res.status == "done" and res.output_folder is not None:
+                book = by_id.get(res.book_id)
+                if book is not None:
+                    file_ops.remove_if_empty(book.source_folder)
+
     async def run_encode_job(
         self,
         books: list[BookUnit],
@@ -3056,6 +3091,7 @@ class AppController:
             results = list(await asyncio.gather(*(_one(b) for b in books)))
             if options.delete_sources:
                 await asyncio.to_thread(self._rederive_after_move, results)
+                await asyncio.to_thread(self._remove_empty_source_folders, books, results)
             return EncodeJobResult(results=results)
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:

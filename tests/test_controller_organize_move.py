@@ -143,3 +143,35 @@ def test_organize_move_failed_book_keeps_sources(tmp_path):
     assert (ingest / "Multi" / "01.mp3").exists()
     assert _book_in(ctx, ingest / "Multi") is not None
     ctx.close()
+
+
+def test_organize_move_auto_removes_empty_source_folder(tmp_path):
+    ingest = tmp_path / "ingest"
+    library = tmp_path / "library_outside"
+    ctx, ctrl, ingest = _ctrl(tmp_path, library)
+    _mp3(ingest / "Solo" / "01.mp3")
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Solo")
+
+    asyncio.run(ctrl.run_encode_job(
+        [book], EncodeJobOptions(encode=False, organize=True, delete_sources=True)))
+
+    assert not (ingest / "Solo").exists()   # emptied source folder auto-removed
+    ctx.close()
+
+
+def test_organize_move_keeps_source_folder_with_sidecar(tmp_path):
+    ingest = tmp_path / "ingest"
+    library = tmp_path / "library_outside"
+    ctx, ctrl, ingest = _ctrl(tmp_path, library)
+    _mp3(ingest / "Solo" / "01.mp3")
+    (ingest / "Solo" / "cover.jpg").write_bytes(b"art")  # non-audio leftover
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Solo")
+
+    asyncio.run(ctrl.run_encode_job(
+        [book], EncodeJobOptions(encode=False, organize=True, delete_sources=True)))
+
+    assert (ingest / "Solo").exists()               # folder kept because a sidecar remains
+    assert (ingest / "Solo" / "cover.jpg").exists()
+    ctx.close()
