@@ -110,3 +110,24 @@ def test_path_within_scan_paths(tmp_path):
     assert ctrl.path_within_scan_paths(ingest) is True
     assert ctrl.path_within_scan_paths(tmp_path / "outside") is False
     ctx.close()
+
+
+def test_relocate_rename_in_multi_book_folder_navigates_to_correct_book(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = ingest / "Shared"
+    _mp3(folder / "bookA.mp3")
+    _mp3(folder / "bookB.mp3")
+    ctrl.scan([ingest])
+    # Force the folder into two single-file books via a partition, then re-derive.
+    ctx.grouping.set_partition(str(folder), [["bookA.mp3"], ["bookB.mp3"]])
+    ctrl.apply_scan(ctrl.scan_preview([ingest]))
+    books = [ctx.books.get(i) for i in ctx.books.ids_in_folder(folder)]
+    book_a = next(b for b in books if b.source_files[0].path.name == "bookA.mp3")
+
+    result = ctrl.relocate_file(book_a, book_a.source_files[0].path, folder, "bookA-renamed.mp3")
+
+    assert result.status == "renamed"
+    nav = ctx.books.get(result.book_id)
+    assert nav is not None
+    assert [sf.path.name for sf in nav.source_files] == ["bookA-renamed.mp3"]  # the book we operated on, not the sibling
+    ctx.close()

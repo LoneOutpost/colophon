@@ -2395,8 +2395,18 @@ class AppController:
         self.apply_scan(self.scan_preview(list(roots)))
         self._graph_cache.clear()
 
-        remaining = list(self.ctx.books.ids_in_folder(src_folder))
-        nav_id = remaining[0] if remaining else None
+        # The book the user was on keeps its other files; the re-derive may have changed its id.
+        # Navigate to whichever book in the source folder now owns those files — deterministic even
+        # in a multi-book folder (only one book holds them), or None if the move emptied the book.
+        expected = {sf.path for sf in book.source_files if sf.path != path}
+        if same_folder:
+            expected.add(new_path)  # the renamed file stays in the source folder
+        nav_id = None
+        for bid in self.ctx.books.ids_in_folder(src_folder):
+            b = self.ctx.books.get(bid)
+            if b is not None and any(sf.path in expected for sf in b.source_files):
+                nav_id = bid
+                break
         status = "renamed" if same_folder else ("regrouped" if under_scan_root else "left_library")
         return RelocateResult(status, new_path, nav_id)
 
