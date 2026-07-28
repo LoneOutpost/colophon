@@ -64,11 +64,11 @@ from colophon.ui.dialogs import (
     cover_dialog,
     match_dialog,
     modal,
+    move_rename_dialog,
     persist_dialog,
     quick_match_dialog,
     remap_dialog,
     remove_from_library_dialog,
-    rename_dialog,
     scan_dialog,
     tag_dialog,
 )
@@ -925,7 +925,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(icon="play_arrow", on_click=_toggle_player).props('flat dense round aria-label="Play the start of this file"').tooltip("Play the start of this file")
                                         ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
                                         ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
-                                        ui.button(icon="edit", on_click=lambda p=sf.path: rename_dialog(controller, book, p, show_detail=show_detail)).props('flat dense round aria-label="Rename file"').tooltip("Rename file")
+                                        ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
                                         ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
 
                     siblings = controller.folder_sibling_files(book)

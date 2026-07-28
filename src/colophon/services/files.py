@@ -1,12 +1,13 @@
-"""Operations on a BookUnit's source files: reorder, exclude, rename.
+"""Operations on a BookUnit's source files: reorder, exclude, move_on_disk.
 
-reorder/exclude mutate only the in-memory BookUnit (the candidate's file list);
-rename also moves the file on disk (collision-safe). Persistence is the caller's
-job (the controller upserts after each call)."""
+reorder/exclude mutate only the in-memory BookUnit (the candidate's file list).
+move_on_disk moves a file on disk without touching the book model; the caller
+re-derives the library from disk afterward. Persistence is the caller's job."""
 
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from colophon.core.models import BookUnit
@@ -42,17 +43,19 @@ def delete_files_from_disk(paths: list[Path]) -> list[Path]:
     return removed
 
 
-def rename(book: BookUnit, path: Path, new_name: str) -> Path:
-    """Rename `path` to `new_name` within its directory and update source_files.
-
-    Raises FileExistsError if the target already exists (never overwrites)."""
-    if not new_name.strip():
+def move_on_disk(path: Path, dest_dir: Path, new_name: str | None = None) -> Path:
+    """Move `path` into `dest_dir` on disk, optionally renaming to `new_name`. Creates `dest_dir`
+    (and parents) if missing. Never overwrites: raises FileExistsError if a different file already
+    occupies the target. Returns the new path. Touches no book model — the caller re-derives the
+    library from disk afterward."""
+    name = (new_name or path.name).strip()
+    if not name:
         raise ValueError("filename must not be empty")
-    target = path.with_name(new_name)
-    if target.exists():
+    if name != Path(name).name or name in (".", ".."):
+        raise ValueError("filename must not contain a path separator")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    target = dest_dir / name
+    if target != path and target.exists():
         raise FileExistsError(f"{target} already exists")
-    path.rename(target)
-    for sf in book.source_files:
-        if sf.path == path:
-            sf.path = target
+    shutil.move(str(path), str(target))
     return target

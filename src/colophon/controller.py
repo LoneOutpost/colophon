@@ -314,6 +314,19 @@ class DeleteResult:
 
 
 @dataclass(frozen=True)
+class RelocateResult:
+    """Outcome of moving/renaming a source file. `status` is "renamed" (same folder),
+    "regrouped" (moved under a scan root; library re-derived), "left_library" (moved outside
+    every scan root; dropped from its book), or "error" (nothing moved). `new_path` is the file's
+    new location (None on error). `book_id` is the id to navigate to — the refreshed source book,
+    or None when that book was emptied and removed. `error` is a user-facing message on failure."""
+    status: str
+    new_path: Path | None
+    book_id: str | None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class ReclassifyChange:
     """One book's identity/state change from a pending reclassify (for the blast-radius preview)."""
 
@@ -1757,17 +1770,6 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
-    def rename_file(self, book: BookUnit, path: Path, new_name: str) -> Path | None:
-        """Rename a file on disk; returns the new path, or None on collision/error."""
-        try:
-            new = file_ops.rename(book, path, new_name)
-        except (OSError, ValueError) as e:
-            logger.warning(f"rename failed for {path}: {e}")
-            return None
-        book.touch()
-        self.ctx.books.upsert(book)
-        return new
-
     _SEVERITY_RANK: ClassVar[dict[FindingSeverity, int]] = {
         FindingSeverity.ERROR: 0,
         FindingSeverity.WARN: 1,
@@ -2337,6 +2339,69 @@ class AppController:
         self._graph_cache.clear()
         self._resync_roots({self._scan_root_for_path(book.source_folder)})
         return self._hydrate([self.ctx.books.get(target.id)])[0]
+
+    def path_within_scan_paths(self, path: Path) -> bool:
+        """True if `path` is inside (or equal to) a configured scan path — i.e. a file moved there
+        stays in the tracked library. Drives the move dialog's out-of-scope warning and
+        relocate_file's re-derive decision."""
+        p = Path(path)
+        return any(p == root or root in p.parents for root in self.ctx.config.scan_paths)
+
+    def relocate_file(
+        self, book: BookUnit, path: Path, dest_dir: Path, new_name: str | None = None
+    ) -> RelocateResult:
+        """Rename `path` and/or move it into `dest_dir` (created if missing) on disk, keeping the
+        library consistent. Same folder -> a plain rename. A different folder under a scan root ->
+        move, then re-derive the affected scan roots from disk (source book loses the file,
+        destination's book gains it or a new book forms). A folder outside every scan root -> move,
+        then drop the file from the library. Never overwrites. See RelocateResult for the contract;
+        ids change when a file set changes, so callers navigate to result.book_id."""
+        name = (new_name or path.name).strip()
+        if not name:
+            return RelocateResult("error", None, book.id, error="Filename must not be empty")
+        src_folder = book.source_folder
+        dest_dir = Path(dest_dir)
+        same_folder = dest_dir == src_folder
+        if same_folder and name == path.name:
+            return RelocateResult("renamed", path, book.id)  # nothing to do
+
+        try:
+            new_path = file_ops.move_on_disk(path, dest_dir, name)
+        except ValueError:
+            return RelocateResult(
+                "error", None, book.id, error="Filename must not contain a path separator"
+            )
+        except FileExistsError:
+            return RelocateResult(
+                "error", None, book.id, error="A file with that name already exists at the destination"
+            )
+        except OSError as e:
+            logger.warning(f"relocate_file: move failed for {path} -> {dest_dir}: {e}")
+            return RelocateResult(
+                "error", None, book.id, error="Could not move the file (permission or path error)"
+            )
+
+        under_scan_root = self.path_within_scan_paths(dest_dir)
+        roots = {self._scan_root_for_path(src_folder)}
+        if under_scan_root:
+            roots.add(self._scan_root_for_path(dest_dir))
+        self.apply_scan(self.scan_preview(list(roots)))
+        self._graph_cache.clear()
+
+        # The book the user was on keeps its other files; the re-derive may have changed its id.
+        # Navigate to whichever book in the source folder now owns those files — deterministic even
+        # in a multi-book folder (only one book holds them), or None if the move emptied the book.
+        expected = {sf.path for sf in book.source_files if sf.path != path}
+        if same_folder:
+            expected.add(new_path)  # the renamed file stays in the source folder
+        nav_id = None
+        for bid in self.ctx.books.ids_in_folder(src_folder):
+            b = self.ctx.books.get(bid)
+            if b is not None and any(sf.path in expected for sf in b.source_files):
+                nav_id = bid
+                break
+        status = "renamed" if same_folder else ("regrouped" if under_scan_root else "left_library")
+        return RelocateResult(status, new_path, nav_id)
 
     def folder_sibling_files(self, book: BookUnit) -> list[tuple[Path, BookUnit]]:
         """The audio files in `book`'s folder owned by *other* books, each with its owning book —

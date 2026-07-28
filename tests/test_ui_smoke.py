@@ -261,3 +261,22 @@ def test_files_section_has_lazy_audio_preview():
     # most one preview plays at a time (clearing an <audio> stops its playback).
     assert "players.append(" in src
     assert "for other in players" in src
+
+
+def test_move_rename_dialog_exposes_destination_and_scope_warning():
+    import inspect
+
+    import colophon.ui.dialogs as dlg
+    assert hasattr(dlg, "move_rename_dialog")
+    src = inspect.getsource(dlg.move_rename_dialog)
+    assert "Destination folder" in src         # the folder field
+    assert "path_within_scan_paths" in src     # live out-of-scope check
+    assert "relocate_file" in src              # wired to the controller op
+
+
+def test_files_row_uses_move_rename_dialog():
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "move_rename_dialog" in src

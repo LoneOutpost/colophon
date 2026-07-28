@@ -941,30 +941,6 @@ def test_exclude_file_persists(tmp_path):
     ctx.close()
 
 
-def test_rename_file_success_and_collision(tmp_path):
-    ctx = _ctx(tmp_path)
-    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
-    ctrl = AppController(ctx)
-    new = ctrl.rename_file(book, book.source_files[0].path, "00 - Intro.mp3")
-    assert new is not None and new.name == "00 - Intro.mp3"
-    assert ctx.books.get(book.id).source_files[0].path.name == "00 - Intro.mp3"
-    # collision returns None and does not change anything
-    collide = ctrl.rename_file(book, book.source_files[1].path, "00 - Intro.mp3")
-    assert collide is None
-    ctx.close()
-
-
-def test_rename_file_bad_name_returns_none(tmp_path):
-    ctx = _ctx(tmp_path)
-    book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])
-    ctrl = AppController(ctx)
-    before = [sf.path.name for sf in book.source_files]
-    # all-whitespace name is caught (ValueError) -> None, no crash, list unchanged
-    assert ctrl.rename_file(book, book.source_files[0].path, "  ") is None
-    assert [sf.path.name for sf in ctx.books.get(book.id).source_files] == before
-    ctx.close()
-
-
 def test_tag_plan_and_write_tags_roundtrip(tmp_path):
     from colophon.adapters.tags import read_embedded_tags, write_embedded_tags
     from colophon.core.models import EmbeddedTags, SourceFile
