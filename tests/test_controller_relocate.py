@@ -104,6 +104,21 @@ def test_relocate_collision_returns_error_without_moving(tmp_path):
     ctx.close()
 
 
+def test_relocate_rejects_path_separator_name(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Src" / "01.mp3")
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Src")
+    original = book.source_files[0].path
+
+    result = ctrl.relocate_file(book, original, ingest / "Src", "../escape.mp3")
+
+    assert result.status == "error"
+    assert result.error is not None
+    assert original.exists()  # nothing moved
+    ctx.close()
+
+
 def test_path_within_scan_paths(tmp_path):
     ctx, ctrl, ingest = _ctrl(tmp_path)
     assert ctrl.path_within_scan_paths(ingest / "Anything") is True

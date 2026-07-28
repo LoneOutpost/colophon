@@ -51,6 +51,8 @@ def move_on_disk(path: Path, dest_dir: Path, new_name: str | None = None) -> Pat
     name = (new_name or path.name).strip()
     if not name:
         raise ValueError("filename must not be empty")
+    if name != Path(name).name or name in (".", ".."):
+        raise ValueError("filename must not contain a path separator")
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / name
     if target != path and target.exists():

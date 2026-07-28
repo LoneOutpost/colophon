@@ -47,3 +47,14 @@ def test_move_on_disk_rejects_empty_name(tmp_path):
     f.write_bytes(b"x")
     with pytest.raises(ValueError):
         move_on_disk(f, src_dir, "   ")
+
+
+def test_move_on_disk_rejects_path_separator_in_name(tmp_path):
+    src_dir = tmp_path / "a"
+    src_dir.mkdir()
+    f = src_dir / "01.mp3"
+    f.write_bytes(b"x")
+    for bad in ["../escape.mp3", "sub/evil.mp3", ".."]:
+        with pytest.raises(ValueError):
+            move_on_disk(f, tmp_path / "dest", bad)
+    assert f.exists()  # source never moved

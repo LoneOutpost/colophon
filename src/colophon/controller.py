@@ -2367,6 +2367,10 @@ class AppController:
 
         try:
             new_path = file_ops.move_on_disk(path, dest_dir, name)
+        except ValueError:
+            return RelocateResult(
+                "error", None, book.id, error="Filename must not contain a path separator"
+            )
         except FileExistsError:
             return RelocateResult(
                 "error", None, book.id, error="A file with that name already exists at the destination"
