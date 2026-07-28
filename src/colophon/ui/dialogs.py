@@ -367,27 +367,55 @@ def bulk_remap_dialog(
     dialog.open()
 
 
-def rename_dialog(
+def move_rename_dialog(
     controller: AppController,
     book: BookUnit,
     sf_path: Path,
     *,
     show_detail: Callable[[str], None],
+    clear_selection: Callable[[], None] | None = None,
 ) -> None:
-    """Rename a single source file of the book."""
-    with modal() as dialog, ui.card():
-        ui.label("Rename file").classes("text-subtitle1")
-        name_input = ui.input("New filename", value=sf_path.name).classes("w-72")
+    """Move a source file to another directory and/or rename it. The destination folder is
+    prefilled with the file's current folder and created if missing. A destination outside every
+    scan path is flagged before confirm, because the file would then leave the tracked library."""
+    with modal() as dialog, ui.card().classes("w-[32rem]"):
+        ui.label("Move / rename file").classes("text-subtitle1")
+        dir_input = ui.input("Destination folder", value=str(sf_path.parent)).classes("w-full")
+        name_input = ui.input("Filename", value=sf_path.name).classes("w-full")
+        warn = ui.label("").classes("text-caption colophon-muted")
 
-        def _do_rename() -> None:
-            if controller.rename_file(book, sf_path, name_input.value.strip()):
-                ui.notify("Renamed")
+        def _refresh_warn() -> None:
+            raw = dir_input.value.strip()
+            if raw and not controller.path_within_scan_paths(Path(raw)):
+                warn.set_text(
+                    "This folder is outside your library — the file will move but leave "
+                    "Colophon's library."
+                )
             else:
-                ui.notify("Rename failed (name in use?)", type="negative")
-            dialog.close()
-            show_detail(book.id)
+                warn.set_text("")
 
-        dialog_actions(dialog, confirm_label="Rename", confirm_icon="edit", on_confirm=_do_rename)
+        dir_input.on_value_change(lambda _: _refresh_warn())
+        _refresh_warn()
+
+        def _do() -> None:
+            dest = Path(dir_input.value.strip() or str(sf_path.parent))
+            result = controller.relocate_file(book, sf_path, dest, name_input.value.strip())
+            if result.error:
+                ui.notify(result.error, type="negative")
+                return  # keep the dialog open so the user can fix the name/destination
+            messages = {
+                "renamed": "Renamed",
+                "regrouped": "Moved",
+                "left_library": "Moved out of the library",
+            }
+            ui.notify(messages[result.status])
+            dialog.close()
+            if result.book_id:
+                show_detail(result.book_id)
+            elif clear_selection is not None:
+                clear_selection()
+
+        dialog_actions(dialog, confirm_label="Apply", confirm_icon="drive_file_move", on_confirm=_do)
     dialog.open()
 
 
