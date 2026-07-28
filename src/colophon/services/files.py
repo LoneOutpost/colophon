@@ -59,3 +59,26 @@ def move_on_disk(path: Path, dest_dir: Path, new_name: str | None = None) -> Pat
         raise FileExistsError(f"{target} already exists")
     shutil.move(str(path), str(target))
     return target
+
+
+def delete_directory_from_disk(folder: Path) -> bool:
+    """Permanently delete `folder` and everything under it. Returns True if the folder is gone
+    afterward, False (logged) on error. Irreversible: callers gate on a confirm dialog and on
+    scan-path guards — this primitive does no validation of its own."""
+    try:
+        shutil.rmtree(folder)
+        return True
+    except OSError as e:
+        logger.warning(f"delete_directory_from_disk: could not remove {folder}: {e}")
+        return False
+
+
+def remove_if_empty(folder: Path) -> bool:
+    """Remove `folder` only if it has no entries at all (no files or subdirs). Returns True if it
+    was removed, False (no-op) when the folder is non-empty, missing, or can't be removed. Never
+    recursive — it never deletes a file."""
+    try:
+        folder.rmdir()  # raises OSError if the folder is non-empty or missing
+        return True
+    except OSError:
+        return False
