@@ -88,7 +88,7 @@ def test_delete_folder_refuses_scan_root(tmp_path):
 
 
 def test_delete_folder_refuses_outside_scan_paths(tmp_path):
-    ctx, ctrl, ingest = _ctrl(tmp_path)
+    ctx, ctrl, _ingest = _ctrl(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "keep.txt").write_bytes(b"x")
