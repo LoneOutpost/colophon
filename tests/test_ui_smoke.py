@@ -324,3 +324,13 @@ def test_workspace_neighbors_offloaded():
     src = inspect.getsource(ws.render_workspace)
     assert "asyncio.to_thread(controller.remove_missing" in src
     assert "asyncio.to_thread(controller.reassign_file" in src
+
+
+def test_detail_has_rescan_this_book_action():
+    import inspect
+
+    import colophon.ui.workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "reevaluate_scope" in src          # wired to the controller op
+    assert "Rescan this book" in src          # the action label/tooltip
+    assert "asyncio.to_thread(controller.reevaluate_scope" in src  # off the event loop
