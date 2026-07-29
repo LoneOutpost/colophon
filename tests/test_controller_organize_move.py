@@ -175,3 +175,25 @@ def test_organize_move_keeps_source_folder_with_sidecar(tmp_path):
     assert (ingest / "Solo").exists()               # folder kept because a sidecar remains
     assert (ingest / "Solo" / "cover.jpg").exists()
     ctx.close()
+
+
+def test_organize_move_rederive_is_folder_scoped(tmp_path):
+    # The post-move re-derive must re-scan only the destination FOLDER, not its whole scan root.
+    # Reproduction: an unrelated folder with audio appears under the scan root; an organize-move
+    # must NOT sweep it in (a full-root rescan would ingest it).
+    ingest = tmp_path / "ingest"
+    library = ingest / "library"  # destination is inside the scan root -> re-track path runs
+    ctx, ctrl, ingest = _ctrl(tmp_path, library)
+    _mp3(ingest / "Solo" / "01.mp3")
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Solo")
+    _mp3(ingest / "Unrelated" / "01.mp3")  # new folder on disk, not yet scanned
+    assert _book_in(ctx, ingest / "Unrelated") is None
+
+    asyncio.run(ctrl.run_encode_job(
+        [book], EncodeJobOptions(encode=False, organize=True, delete_sources=True)))
+
+    # The organized book is re-tracked at its destination, but the unrelated folder must not be
+    # discovered by the scoped re-derive.
+    assert _book_in(ctx, ingest / "Unrelated") is None
+    ctx.close()
