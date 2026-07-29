@@ -2507,11 +2507,16 @@ class AppController:
                 "error", None, book.id, error="Could not move the file (permission or path error)"
             )
 
+        # Re-derive only the affected FOLDERS, not their whole scan roots — a single rename/move
+        # must not os.walk the entire library. scan_preview scopes the walk to each path it is
+        # given (using its scan root only for directory-depth inference), so passing the folders
+        # is folder-scoped, exactly like reidentify/plan_rescan_folders; replace_subgraph reclaims
+        # the folder's nodes/edges from the scan-root subgraph so the persisted graph stays whole.
         under_scan_root = self.path_within_scan_paths(dest_dir)
-        roots = {self._scan_root_for_path(src_folder)}
+        folders = {src_folder}
         if under_scan_root:
-            roots.add(self._scan_root_for_path(dest_dir))
-        self.apply_scan(self.scan_preview(list(roots)))
+            folders.add(dest_dir)
+        self.apply_scan(self.scan_preview(list(folders)))
         self._graph_cache.clear()
 
         # The book the user was on keeps its other files; the re-derive may have changed its id.
@@ -3049,17 +3054,19 @@ class AppController:
         no-op combo (delete_sources without organize/encode) never moved anything, so both keep
         their records."""
         done_ids: list[str] = []
-        dest_roots: set[Path] = set()
+        dest_folders: set[Path] = set()
         for res in results:
             if res.status != "done" or res.output_folder is None:
                 continue
             done_ids.append(res.book_id)
             if self.path_within_scan_paths(res.output_folder):
-                dest_roots.add(self._scan_root_for_path(res.output_folder))
+                # Re-derive the destination FOLDER, not its whole scan root — scoping the walk to
+                # the organized folder(s) avoids os.walking the entire library after a move.
+                dest_folders.add(res.output_folder)
         if done_ids:
             self.cleanup_remove(done_ids)
-        if dest_roots:
-            self.apply_scan(self.scan_preview(list(dest_roots)))
+        if dest_folders:
+            self.apply_scan(self.scan_preview(list(dest_folders)))
             self._graph_cache.clear()
 
     def _remove_empty_source_folders(self, books: list[BookUnit],
