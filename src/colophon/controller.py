@@ -172,6 +172,7 @@ from colophon.services.ingest import (
 )
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import OrganizeResult, organize_book, organize_book_parts
+from colophon.services.resolve import ResolveResult, resolve_scope
 from colophon.services.tag_ops import (
     TagCommitResult,
     TagPlan,
@@ -1183,6 +1184,25 @@ class AppController:
         if template:
             self.record_filename_template(template)
         return len(hydrated)
+
+    def reevaluate_scope(self, book: BookUnit) -> ResolveResult:
+        """Book scope re-evaluate: clear the book's weak (auto-derived) identity, re-read its files
+        and re-derive it in frozen folder context via the resolve service, persist the plan, and
+        return the result (including the on-disk change report). In book scope the id is stable (it
+        keys on source_folder, which does not move), but the caller should navigate to
+        result.plan.units rather than assume — a later re-cluster slice can re-key.
+        Composes: clear -> resolve_scope -> apply_scan."""
+        fresh = self.get_book(book.id) or book
+        _clear_weak_identity(fresh)
+        result = resolve_scope(
+            self.ctx.books, fresh,
+            root=self._root_for(fresh),
+            template=self.ctx.config.filename_template,
+            directory_scheme=self.ctx.config.directory_scheme,
+        )
+        self.apply_scan(result.plan)
+        self._graph_cache.clear()
+        return result
 
     # --- dashboard ---
     @timed("dashboard_stats")
