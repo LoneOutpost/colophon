@@ -2507,11 +2507,16 @@ class AppController:
                 "error", None, book.id, error="Could not move the file (permission or path error)"
             )
 
+        # Re-derive only the affected FOLDERS, not their whole scan roots — a single rename/move
+        # must not os.walk the entire library. scan_preview scopes the walk to each path it is
+        # given (using its scan root only for directory-depth inference), so passing the folders
+        # is folder-scoped, exactly like reidentify/plan_rescan_folders; replace_subgraph reclaims
+        # the folder's nodes/edges from the scan-root subgraph so the persisted graph stays whole.
         under_scan_root = self.path_within_scan_paths(dest_dir)
-        roots = {self._scan_root_for_path(src_folder)}
+        folders = {src_folder}
         if under_scan_root:
-            roots.add(self._scan_root_for_path(dest_dir))
-        self.apply_scan(self.scan_preview(list(roots)))
+            folders.add(dest_dir)
+        self.apply_scan(self.scan_preview(list(folders)))
         self._graph_cache.clear()
 
         # The book the user was on keeps its other files; the re-derive may have changed its id.

@@ -146,3 +146,24 @@ def test_relocate_rename_in_multi_book_folder_navigates_to_correct_book(tmp_path
     assert nav is not None
     assert [sf.path.name for sf in nav.source_files] == ["bookA-renamed.mp3"]  # the book we operated on, not the sibling
     ctx.close()
+
+
+def test_rename_is_folder_scoped_not_a_full_library_scan(tmp_path):
+    # A single-file rename must re-derive only the file's folder, not walk the whole scan root.
+    # Reproduction: an unrelated folder with audio appears on disk after the initial scan; a
+    # rename must NOT discover it (a full-root rescan would ingest it as a new book).
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Dune")
+    _mp3(ingest / "Foundation" / "01.mp3")  # new folder on disk, not yet scanned
+    assert _book_in(ctx, ingest / "Foundation") is None
+
+    result = ctrl.relocate_file(book, book.source_files[0].path, ingest / "Dune", "renamed.mp3")
+
+    assert result.status == "renamed"
+    assert (ingest / "Dune" / "renamed.mp3").exists()
+    assert _book_in(ctx, ingest / "Dune") is not None
+    # The scoped rename must not have swept the whole root and ingested the unrelated folder.
+    assert _book_in(ctx, ingest / "Foundation") is None
+    ctx.close()
