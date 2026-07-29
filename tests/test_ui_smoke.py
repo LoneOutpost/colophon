@@ -308,6 +308,49 @@ def test_delete_ui_surfaces_exist():
     assert "confirm_delete_folder_dialog" in wsrc  # detail folder-delete action
 
 
+def test_busy_does_not_touch_a_button_deleted_by_the_action():
+    # Repro of the delete-dialog use-after-free: a confirmed delete repaints the workspace, which
+    # tears down the dialog + confirm button; busy's restore must NOT touch the now-deleted button
+    # (NiceGUI logs a one-shot "element deleted but still being used" use-after-free warning).
+    from colophon.ui.dialogs import busy
+
+    touched_while_deleted = []
+
+    class _FakeButton:
+        is_deleted = False
+
+        def props(self, *args, **kwargs):
+            if self.is_deleted:
+                touched_while_deleted.append(("props", args, kwargs))
+            return self
+
+        def disable(self):
+            if self.is_deleted:
+                touched_while_deleted.append(("disable",))
+            return self
+
+        def enable(self):
+            if self.is_deleted:
+                touched_while_deleted.append(("enable",))
+            return self
+
+    btn = _FakeButton()
+    with busy(btn):
+        btn.is_deleted = True  # the wrapped action deleted the button (repaint/navigation)
+
+    assert touched_while_deleted == [], f"busy touched a deleted button: {touched_while_deleted}"
+
+
+def test_delete_go_guards_dialog_close_against_deletion():
+    # The confirm _go must not close a dialog the action already tore down.
+    import inspect
+
+    import colophon.ui.dialogs as dlg
+    for fn in (dlg.confirm_delete_dialog, dlg.confirm_delete_folder_dialog):
+        src = inspect.getsource(fn)
+        assert "is_deleted" in src and "dialog.close()" in src
+
+
 def test_manage_has_empty_folder_tool():
     import inspect
 
