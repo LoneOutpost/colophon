@@ -81,7 +81,11 @@ def busy(button: ui.button) -> Iterator[None]:
     try:
         yield
     finally:
-        button.props(remove="loading").enable()
+        # The wrapped action may have repainted/navigated and deleted this button (e.g. a confirmed
+        # delete that removes the book and clears the detail pane). Restoring a deleted element is a
+        # use-after-free NiceGUI warns about once — skip the restore when the button is gone.
+        if not button.is_deleted:
+            button.props(remove="loading").enable()
 
 
 def single_flight(handler: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
@@ -1322,7 +1326,10 @@ def confirm_delete_dialog(paths: list[Path], *, book_removed: bool, on_confirm: 
                 res = on_confirm()
                 if inspect.isawaitable(res):
                     await res
-            dialog.close()
+            # on_confirm may have navigated/repainted and torn this dialog down; only close it if
+            # it is still alive (touching a deleted element is a NiceGUI use-after-free).
+            if not dialog.is_deleted:
+                dialog.close()
 
         btn = dialog_actions(dialog, confirm_label="Delete", confirm_icon="delete",
                              on_confirm=lambda: None, confirm_props="unelevated color=negative")
@@ -1354,7 +1361,10 @@ def confirm_delete_folder_dialog(
                 res = on_confirm()
                 if inspect.isawaitable(res):
                     await res
-            dialog.close()
+            # on_confirm may have navigated/repainted and torn this dialog down; only close it if
+            # it is still alive (touching a deleted element is a NiceGUI use-after-free).
+            if not dialog.is_deleted:
+                dialog.close()
 
         btn = dialog_actions(dialog, confirm_label="Delete folder", confirm_icon="delete_forever",
                              on_confirm=lambda: None, confirm_props="unelevated color=negative")
