@@ -301,7 +301,6 @@ def test_delete_ui_surfaces_exist():
 
     import colophon.ui.dialogs as dlg
     import colophon.ui.workspace as ws
-    assert hasattr(dlg, "run_busy")
     assert hasattr(dlg, "confirm_delete_folder_dialog")
     wsrc = inspect.getsource(ws.render_workspace)
     assert "delete_file" in wsrc            # per-file delete-from-disk

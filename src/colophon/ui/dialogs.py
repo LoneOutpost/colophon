@@ -84,14 +84,6 @@ def busy(button: ui.button) -> Iterator[None]:
         button.props(remove="loading").enable()
 
 
-async def run_busy(button: ui.button, thunk: Callable[[], object]) -> object:
-    """Run a blocking controller call off the event loop while `button` shows its busy/disabled
-    state, so a heavy delete or re-derive never freezes the UI. Returns the thunk's result; do the
-    UI updates (notify/repaint) after awaiting, on the event loop."""
-    with busy(button):
-        return await asyncio.to_thread(thunk)
-
-
 def single_flight(handler: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
     """Wrap an async click handler so it runs at most once at a time: a re-entrant click while a
     prior run is still awaiting is ignored. Belt-and-suspenders with `busy` (which disables the
