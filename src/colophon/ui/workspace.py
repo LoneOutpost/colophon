@@ -818,6 +818,23 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button("Uncombine", icon="call_split", on_click=_uncombine) \
                                             .props("flat dense no-caps").tooltip(
                                                 "Split this combined book back into separate books")
+                            with ui.element("div").classes("colophon-toolgroup"):
+                                ui.label("Re-evaluate").classes("colophon-seccap")
+                                with ui.row().classes("q-gutter-xs"):
+                                    async def _rescan_book(b=book) -> None:
+                                        result = await asyncio.to_thread(controller.reevaluate_scope, b)
+                                        ui.notify(f"Rescanned: {result.changes.summary()}")
+                                        # A rescan can change the derived title/author or resolve a
+                                        # missing/corrupt state, so refresh the list + status + nav,
+                                        # not just the detail pane (match _rerun_one/_reprobe).
+                                        target = result.plan.units[0] if result.plan.units else None
+                                        repaint(nav=True, list=True, status=True,
+                                                detail_book_id=target.id if target else b.id)
+                                    ui.button(
+                                        "Rescan this book", icon="refresh", on_click=_rescan_book,
+                                    ).props("flat dense no-caps").tooltip(
+                                        "Re-read this book's files and re-derive it (its folder place stays fixed)"
+                                    )
                             if book.missing:
                                 with ui.element("div").classes("colophon-toolgroup"):
                                     ui.label("Missing").classes("colophon-seccap")
