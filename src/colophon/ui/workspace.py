@@ -538,12 +538,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             paths = corrupt_source_files(book.source_files)
             book_removed = bool(paths) and len(paths) == len(book.source_files)
 
-        def _run() -> None:
+        async def _run() -> None:
             if book.missing:
-                controller.remove_missing(book)
+                await asyncio.to_thread(controller.remove_missing, book)
                 removed = True
             else:
-                result = controller.delete_corrupt_files(book)
+                result = await asyncio.to_thread(controller.delete_corrupt_files, book)
                 removed = result.book_removed
                 if result.errors:
                     ui.notify("; ".join(result.errors), type="warning")
@@ -822,8 +822,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                 with ui.element("div").classes("colophon-toolgroup"):
                                     ui.label("Missing").classes("colophon-seccap")
                                     with ui.row().classes("q-gutter-xs"):
-                                        def _remove_missing(b=book) -> None:
-                                            controller.remove_missing(b)
+                                        async def _remove_missing(b=book) -> None:
+                                            await asyncio.to_thread(controller.remove_missing, b)
                                             ui.notify("Removed missing book")
                                             # The record is gone; show_detail(None-ish)
                                             # renders the empty placeholder and clears
@@ -851,6 +851,34 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                             on_click=_remove_book,
                                         ).props("flat dense no-caps color=negative").tooltip(
                                             "Forget this book (files stay on disk)"
+                                        )
+                                        def _delete_folder(b=book) -> None:
+                                            from colophon.ui.dialogs import (
+                                                confirm_delete_folder_dialog,
+                                            )
+                                            folder = b.source_folder
+                                            affected = controller.books_in_folder_tree(folder)
+                                            titles = [bk.title or Path(bk.source_folder).name for bk in affected]
+                                            file_count = sum(len(bk.source_files) for bk in affected)
+
+                                            async def _run() -> None:
+                                                result = await asyncio.to_thread(controller.delete_folder, folder)
+                                                if not result.ok:
+                                                    ui.notify(result.error or "Delete failed", type="negative")
+                                                    return
+                                                ui.notify("Folder deleted")
+                                                _clear_selection()
+
+                                            confirm_delete_folder_dialog(
+                                                folder, affected_titles=titles, file_count=file_count,
+                                                on_confirm=_run,
+                                            )
+
+                                        ui.button(
+                                            "Delete folder from disk", icon="delete_forever",
+                                            on_click=_delete_folder,
+                                        ).props("flat dense no-caps color=negative").tooltip(
+                                            "Permanently delete this book's folder and its files"
                                         )
 
                         # --- grouped fields ---
@@ -927,6 +955,24 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
                                         ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
                                         ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
+                                        def _delete_file(p=sf.path, b=book) -> None:
+                                            from colophon.ui.dialogs import confirm_delete_dialog
+                                            last = len(b.source_files) == 1
+
+                                            async def _run() -> None:
+                                                result = await asyncio.to_thread(controller.delete_file, b, p)
+                                                if result.errors:
+                                                    ui.notify("; ".join(result.errors), type="warning")
+                                                else:
+                                                    ui.notify("Deleted from disk")
+                                                if result.book_removed:
+                                                    _clear_selection()
+                                                else:
+                                                    show_detail(b.id)
+
+                                            confirm_delete_dialog([p], book_removed=last, on_confirm=_run)
+
+                                        ui.button(icon="delete_forever", on_click=_delete_file).props('flat dense round color=negative aria-label="Delete this file from disk"').tooltip("Delete this file from disk (permanent)")
 
                     siblings = controller.folder_sibling_files(book)
                     if siblings:
@@ -938,15 +984,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.item_label(sib_path.name)
                                         ui.item_label(f"in {owner.title or owner.source_folder.name}").props("caption")
                                     with ui.item_section().props("side"):
+                                        async def _reassign(p=sib_path) -> None:
+                                            target = await asyncio.to_thread(controller.reassign_file, book, p)
+                                            ui.notify("Added to this book")
+                                            show_detail(target.id)
                                         ui.button(
-                                            icon="playlist_add",
-                                            on_click=lambda p=sib_path: (
-                                                # reassignment changes the book's id (its file set
-                                                # changed), so navigate to the returned book, not the
-                                                # now-deleted book.id.
-                                                show_detail(controller.reassign_file(book, p).id),
-                                                ui.notify("Added to this book"),
-                                            ),
+                                            icon="playlist_add", on_click=_reassign,
                                         ).props('flat dense round color=primary aria-label="Add to this book"').tooltip("Add this file to this book")
 
                     # chapters: applied named chapters (book.chapters) or file-boundary default

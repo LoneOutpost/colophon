@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -312,6 +313,20 @@ class DeleteResult:
     files_deleted: int
     book_removed: bool
     errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FolderDeleteResult:
+    """Outcome of deleting a directory from disk. `ok` is False (with `error` set) when a guard
+    refused (no scan paths, a scan-root target, or an out-of-scope target) or the rmtree failed;
+    nothing is deleted in that case. `books_removed` is the number of book records dropped;
+    `files_deleted` is those books' source (audio) files — non-audio leftovers under the tree are
+    also removed from disk but not counted."""
+    folder: Path
+    books_removed: int
+    files_deleted: int
+    ok: bool
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -922,6 +937,96 @@ class AppController:
         self.ctx.books.upsert(book)
         self._resync_roots({self._scan_root_for_path(book.source_folder)})
         return DeleteResult(files_deleted=len(removed), book_removed=False, errors=tuple(errors))
+
+    def delete_file(self, book: BookUnit, path: Path) -> DeleteResult:
+        """Permanently delete one source file from disk, drop it from `book`, and remove the book
+        entirely if that was its last file. Re-derives the source scan root. Irreversible; the UI
+        gates it behind a confirm dialog. `path` is one of the book's own source files, never a
+        user-typed string, so there is no path-traversal surface."""
+        from colophon.services.files import delete_files_from_disk, exclude
+
+        removed = delete_files_from_disk([path])
+        if not removed:
+            return DeleteResult(files_deleted=0, book_removed=False,
+                                errors=(f"could not delete {path.name}",))
+        exclude(book, path)
+        if not book.source_files:
+            self.cleanup_remove([book.id])
+            return DeleteResult(files_deleted=1, book_removed=True, errors=())
+        book.touch()
+        self.ctx.books.upsert(book)
+        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        self._graph_cache.clear()
+        return DeleteResult(files_deleted=1, book_removed=False, errors=())
+
+    def books_in_folder_tree(self, folder: Path) -> list[BookUnit]:
+        """Every book whose source folder is `folder` or nested under it — the books a recursive
+        delete of `folder` would remove. For delete_folder and the delete-folder confirm's list."""
+        folder = Path(folder)
+        return [
+            b for b in self.ctx.books.list_all()
+            if b.source_folder == folder or folder in b.source_folder.parents
+        ]
+
+    def delete_folder(self, folder: Path) -> FolderDeleteResult:
+        """Permanently delete `folder` and everything under it from disk, dropping every book whose
+        source folder is that folder or nested under it, then re-deriving the affected scan root.
+        Refuses to run without configured scan paths, on a folder that equals a scan root, or on a
+        folder outside every scan path (targets come from book models, never user text). Nothing is
+        deleted on a refusal or an rmtree failure. Irreversible; the UI gates it behind a strong
+        confirm.
+
+        The guards compare paths structurally (like the rest of the controller), so callers must
+        pass a canonical scan-derived path (e.g. `book.source_folder`), not a resolved/symlinked
+        alias — rmtree also refuses a symlinked directory, so an alias fails safe rather than
+        escaping the library."""
+        folder = Path(folder)
+        if not self.ctx.config.scan_paths:
+            return FolderDeleteResult(folder, 0, 0, ok=False, error="No scan paths are configured")
+        if folder in set(self.ctx.config.scan_paths):
+            return FolderDeleteResult(folder, 0, 0, ok=False, error="Refusing to delete a scan root")
+        if not self.path_within_scan_paths(folder):
+            return FolderDeleteResult(folder, 0, 0, ok=False, error="Folder is outside the library")
+
+        affected = self.books_in_folder_tree(folder)
+        file_count = sum(len(b.source_files) for b in affected)
+        if not file_ops.delete_directory_from_disk(folder):
+            return FolderDeleteResult(folder, 0, 0, ok=False, error="Could not delete the folder")
+        if affected:
+            self.cleanup_remove([b.id for b in affected])  # its own re-derive prunes the records
+        else:
+            self._resync_roots({self._scan_root_for_path(folder)})
+        self._graph_cache.clear()
+        return FolderDeleteResult(folder, len(affected), file_count, ok=True)
+
+    def delete_directory_from_disk_path(self, folder: Path) -> bool:
+        """Delete a directory from disk by path, for the Manage empty-folder cleanup. Returns True
+        if it is gone afterward. The caller (the empty-folder tool) only passes folders that
+        scanned as empty."""
+        return file_ops.delete_directory_from_disk(Path(folder))
+
+    def empty_folders_under_scan_paths(self) -> list[Path]:
+        """Directories under the configured scan paths that hold no files, walking bottom-up so a
+        directory containing only now-empty subdirs also counts. Never includes a scan root itself.
+        Empty when no scan paths are configured, so a misconfigured library never offers a mass
+        delete."""
+        roots = list(self.ctx.config.scan_paths)
+        if not roots:
+            return []
+        empties: list[Path] = []
+        removable: set[str] = set()
+        for root in roots:
+            root_str = str(root)
+            for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+                if dirpath == root_str:
+                    continue  # never offer the scan root
+                subdirs_all_removable = all(
+                    os.path.join(dirpath, d) in removable for d in dirnames
+                )
+                if not filenames and subdirs_all_removable:
+                    empties.append(Path(dirpath))
+                    removable.add(dirpath)
+        return empties
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
@@ -2937,6 +3042,17 @@ class AppController:
             self.apply_scan(self.scan_preview(list(dest_roots)))
             self._graph_cache.clear()
 
+    def _remove_empty_source_folders(self, books: list[BookUnit],
+                                     results: list[BookProcessResult]) -> None:
+        """After a move, delete each moved book's source folder if it is now completely empty. A
+        folder still holding non-audio leftovers (cover art, .nfo) is left for an explicit delete."""
+        by_id = {b.id: b for b in books}
+        for res in results:
+            if res.status == "done" and res.output_folder is not None:
+                book = by_id.get(res.book_id)
+                if book is not None:
+                    file_ops.remove_if_empty(book.source_folder)
+
     async def run_encode_job(
         self,
         books: list[BookUnit],
@@ -2981,6 +3097,7 @@ class AppController:
             results = list(await asyncio.gather(*(_one(b) for b in books)))
             if options.delete_sources:
                 await asyncio.to_thread(self._rederive_after_move, results)
+                await asyncio.to_thread(self._remove_empty_source_folders, books, results)
             return EncodeJobResult(results=results)
 
     def process_one(self, book: BookUnit, *, confirm_delete: bool = False) -> ProcessResult:

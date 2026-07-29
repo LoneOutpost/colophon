@@ -281,6 +281,57 @@ def _render_utilities(controller: AppController) -> None:
 
             dup_btn.on_click(_check_duplicates)
 
+        with page_section(
+            "Empty folders",
+            "Remove directories under your scan paths that contain no files (left behind by "
+            "moves and re-organizes).",
+        ):
+            empty_btn = ui.button("Find empty folders", icon="folder_delete").props("unelevated")
+            empty_out = ui.column().classes("w-full q-gutter-xs")
+            armed = {"value": False}
+            running = {"active": False}  # a second click while the delete is in flight is ignored
+
+            async def _find_empties() -> None:
+                empty_out.clear()
+                armed["value"] = False
+                with busy(empty_btn):
+                    folders = await asyncio.to_thread(controller.empty_folders_under_scan_paths)
+                with empty_out:
+                    if not folders:
+                        ui.label("No empty folders.").classes("text-caption colophon-muted")
+                        return
+                    for f in folders[:_CLEANUP_DETAIL_CAP]:
+                        ui.label(str(f)).classes("text-caption colophon-muted")
+
+                    async def _remove(fs=folders) -> None:
+                        if running["active"]:
+                            return
+                        if _cleanup_needs_confirm(len(fs)) and not armed["value"]:
+                            armed["value"] = True
+                            remove_btn.set_text(f"Confirm removing {len(fs)} folders")
+                            return
+                        running["active"] = True
+                        try:
+                            with busy(remove_btn):
+                                removed = await asyncio.to_thread(
+                                    lambda: sum(controller.delete_directory_from_disk_path(p) for p in fs)
+                                )
+                        finally:
+                            running["active"] = False
+                        if removed == len(fs):
+                            ui.notify(f"Removed {removed} empty folder(s)")
+                        else:
+                            ui.notify(f"Removed {removed} of {len(fs)}; {len(fs) - removed} could not be deleted",
+                                      type="warning")
+                        armed["value"] = False
+                        empty_out.clear()
+
+                    remove_btn = ui.button(
+                        "Remove", icon="delete", on_click=_remove,
+                    ).props("unelevated color=negative")
+
+            empty_btn.on_click(_find_empties)
+
 
 def render_manage(controller: AppController, initial_kind: str | None = None,
                   initial_filter: str = "") -> None:
