@@ -38,7 +38,7 @@ def test_inspect_book_returns_rows_and_links(tmp_path):
     got = graph_inspect.inspect(ctx.library_graph, ctx.books, book_ids[0])
     assert got.kind == "book"
     assert any(label == "Files" for label, _ in got.rows)
-    assert any(link.url.startswith("/?filter=") for link in got.links)
+    assert any(link.url.startswith("/?open=") for link in got.links)  # book deep-links to its detail
 
 
 def test_neighborhood_view_depth_widens(tmp_path):
