@@ -147,9 +147,9 @@ def test_links_per_kind():
     assert any(link.url.startswith("/?filter=") for link in franchise)
     assert not any("/manage" in link.url for link in franchise)
 
-    # a book opens in the library filtered by its title
+    # a book deep-links to its exact detail via ?open=<book_id> (id parsed from the node id)
     book = _links_for("book", "Dune", "book:b1")
-    assert book == [NodeLink("Open in Library", "/?filter=Dune")]
+    assert book == [NodeLink("Open in Library", "/?open=b1")]
 
     # _links_for itself has no owner id, so it returns nothing for a file...
     assert _links_for("file", "01.mp3", "f1") == []

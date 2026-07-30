@@ -109,3 +109,16 @@ def test_resolve_scope_does_not_touch_sibling_in_multi_book_folder(tmp_path):
     assert [sf.path.name for sf in result.plan.units[0].source_files] == ["bookA.mp3"]
     assert [sf.path.name for sf in ctx.books.get(book_b.id).source_files] == b_files_before
     ctx.close()
+
+
+def test_aggregate_file_changes_is_file_level_across_the_folder():
+    from colophon.services.resolve import aggregate_file_changes
+
+    prior = [_sf("a/01.mp3"), _sf("a/02.mp3", size=2_000_000, dur=0.0), _sf("b/01.mp3")]
+    post = [_sf("a/01.mp3"), _sf("a/02.mp3", size=2_000_000, dur=30.0),
+            _sf("b/01.mp3"), _sf("b/02.mp3")]
+    ch = aggregate_file_changes(prior, post)
+    assert [p.name for p in ch.added] == ["02.mp3"]              # b/02.mp3 is new
+    assert ch.removed == []
+    assert [p.name for p in ch.corrupt_resolved] == ["02.mp3"]    # a/02.mp3 gained a duration
+    assert ch.missing_resolved == [] and ch.newly_missing == []   # not tracked at folder granularity
