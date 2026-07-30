@@ -379,6 +379,16 @@ def test_detail_has_rescan_this_book_action():
     assert "asyncio.to_thread(controller.reevaluate_scope" in src  # off the event loop
 
 
+def test_graph_panel_has_reevaluate_folder_action():
+    import inspect
+
+    import colophon.ui.graph_view as gv
+    src = inspect.getsource(gv)
+    assert "reevaluate_folder" in src        # wired to the controller op
+    assert "Re-evaluate this folder" in src  # the action label
+    assert "asyncio.to_thread(controller.reevaluate_folder" in src  # off the event loop
+
+
 def test_graph_to_library_open_deeplink():
     import inspect
 

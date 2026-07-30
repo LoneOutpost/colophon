@@ -597,6 +597,18 @@ def render_explorer(controller: AppController, focal_id: str | None,
                 on_reclassify=_open_reclassify if recl else None,
             )
 
+            if recl is not None:
+                folder_path = recl[0]
+
+                async def _reevaluate(f=folder_path) -> None:
+                    result = await asyncio.to_thread(controller.reevaluate_folder, f)
+                    ui.notify(f"Re-evaluated: {result.changes.summary()}")
+                    ui.navigate.to(_graph_url(focal_id, hidden, depth=depth))
+
+                ui.button("Re-evaluate this folder", icon="refresh", on_click=_reevaluate).props(
+                    "flat dense no-caps"
+                ).tooltip("Re-read this folder's files and re-derive its books (folder-scoped)")
+
     def _run_search() -> None:
         results.clear()
         with results:
