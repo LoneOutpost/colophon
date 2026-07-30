@@ -271,7 +271,8 @@ def _render_cover(
             ui.icon("menu_book", color="grey-6").classes(icon)
 
 
-def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filter: str = "") -> None:
+def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filter: str = "",
+                     open_book_id: str = "") -> None:
     # Theme + dark-mode are applied by the page handler *before* it awaits the client
     # (so they ship in the initial HTML and the page doesn't flash the light theme);
     # `dark` is passed in for the header toggle rather than created here.
@@ -2655,9 +2656,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
-    if _restored.open_book_id is not None:
-        _ensure_rendered(_restored.open_book_id)
-        show_detail(_restored.open_book_id)  # reopen the book remembered for this tab
+    _open_target = open_book_id or _restored.open_book_id
+    if _open_target:
+        _ensure_rendered(_open_target)
+        show_detail(_open_target)  # ?open= deep-link wins over the tab's remembered book
     else:
         show_detail("")  # initial empty-state in the detail pane
 

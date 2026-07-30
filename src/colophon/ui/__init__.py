@@ -56,7 +56,7 @@ def create_app(controller: AppController) -> None:
         return FileResponse(path, media_type=_audio_mime(path))
 
     @ui.page("/")
-    async def index(filter: str = "") -> None:  # the URL query-param name is "filter"
+    async def index(filter: str = "", open: str = "") -> None:  # query params: filter, open
         # Apply the full theme (palette, base CSS, dark-mode class) in this synchronous
         # prefix so it ships in the initial HTML, before we await the client. The
         # workspace itself renders only after connect; without the theme up front it
@@ -67,7 +67,7 @@ def create_app(controller: AppController) -> None:
         dark = setup_dark_mode()
         await ui.context.client.connected()
         with span("render / workspace"):
-            render_workspace(controller, dark, initial_filter=filter)
+            render_workspace(controller, dark, initial_filter=filter, open_book_id=open)
 
     @ui.page("/manage")
     def manage(kind: str | None = None, filter: str = "") -> None:  # the URL query-param name is "filter"

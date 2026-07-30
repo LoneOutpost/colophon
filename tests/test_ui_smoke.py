@@ -377,3 +377,20 @@ def test_detail_has_rescan_this_book_action():
     assert "reevaluate_scope" in src          # wired to the controller op
     assert "Rescan this book" in src          # the action label/tooltip
     assert "asyncio.to_thread(controller.reevaluate_scope" in src  # off the event loop
+
+
+def test_graph_to_library_open_deeplink():
+    import inspect
+
+    import colophon.core.graph_inspect as gi
+    import colophon.ui as ui_pkg
+    import colophon.ui.workspace as ws
+
+    isrc = inspect.getsource(ui_pkg.create_app)
+    assert 'open: str = ""' in isrc          # index route accepts ?open=
+    assert "open_book_id=open" in isrc        # ...and passes it to render_workspace
+    assert "open_book_id" in inspect.signature(ws.render_workspace).parameters
+    wsrc = inspect.getsource(ws.render_workspace)
+    assert "open_book_id or _restored.open_book_id" in wsrc  # explicit param wins over snapshot
+    lsrc = inspect.getsource(gi._links_for)
+    assert "/?open=" in lsrc                  # book node deep-links to the exact book

@@ -179,5 +179,6 @@ def _links_for(kind: str, label: str, focal_id: str) -> list[NodeLink]:
     if kind == "franchise":
         return [NodeLink("Open in Library", f"/?filter={q}")]
     if kind == "book":
-        return [NodeLink("Open in Library", f"/?filter={q}")]
+        book_id = focal_id.split(":", 1)[1] if ":" in focal_id else focal_id
+        return [NodeLink("Open in Library", f"/?open={quote(book_id)}")]
     return []
