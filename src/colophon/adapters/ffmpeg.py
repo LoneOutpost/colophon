@@ -65,33 +65,51 @@ def concat_encode(
 ) -> None:
     """Concatenate `inputs` into a single M4B at `output` with chapters from metadata.
 
-    `codec` is "copy" (remux) or "aac" (transcode at `bitrate`). Raises FFmpegError
-    on failure. Uses ffmpeg's concat demuxer via a temporary list file.
+    `codec` is "copy" (remux) or "aac" (transcode at `bitrate`). Raises FFmpegError on failure.
+
+    The transcode path uses ffmpeg's concat FILTER, which decodes and resamples each input
+    independently before joining, so a book with heterogeneous inputs (mixed codecs / sample rates,
+    e.g. mp3 + opus) concatenates correctly. The concat DEMUXER, by contrast, treats the list as one
+    stream with the first input's codec and silently drops any segment that doesn't match — which
+    truncated mixed-format books. The copy (remux) path stays on the demuxer: it is only chosen for a
+    single, already-AAC input, which is uniform by construction.
     """
     for p in inputs:
         if not p.exists():
             raise FFmpegError(f"input does not exist: {p}")
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as listf:
-        for p in inputs:
-            escaped = str(p.resolve()).replace("'", "'\\''")
-            listf.write(f"file '{escaped}'\n")
-        list_path = Path(listf.name)
-
-    args = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-f", "concat", "-safe", "0", "-i", str(list_path),
-        "-i", str(metadata_path), "-map_metadata", "1",
-        "-vn",
-    ]
     if codec == "copy":
-        args += ["-c:a", "copy"]
-    else:
-        args += ["-c:a", "aac", "-b:a", bitrate]
-    args += ["-f", "mp4", str(output)]
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as listf:
+            for p in inputs:
+                escaped = str(p.resolve()).replace("'", "'\\''")
+                listf.write(f"file '{escaped}'\n")
+            list_path = Path(listf.name)
+        args = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(list_path),
+            "-i", str(metadata_path), "-map_metadata", "1", "-vn",
+            "-c:a", "copy", "-f", "mp4", str(output),
+        ]
+        try:
+            _run(args, timeout=timeout)
+        finally:
+            list_path.unlink(missing_ok=True)
+        return
 
-    try:
-        _run(args, timeout=timeout)
-    finally:
-        list_path.unlink(missing_ok=True)
+    # Transcode: concat filter over every input, then the metadata file as the last input so its
+    # chapters map onto the output. The filter decodes/resamples each segment, so inputs with
+    # different codecs, sample rates, or channel layouts join without dropping any of them.
+    n = len(inputs)
+    concat_filter = "".join(f"[{i}:a]" for i in range(n)) + f"concat=n={n}:v=0:a=1[a]"
+    args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    for p in inputs:
+        args += ["-i", str(p)]
+    args += [
+        "-i", str(metadata_path),
+        "-filter_complex", concat_filter, "-map", "[a]",
+        "-map_metadata", str(n),
+        "-c:a", "aac", "-b:a", bitrate,
+        "-f", "mp4", str(output),
+    ]
+    _run(args, timeout=timeout)

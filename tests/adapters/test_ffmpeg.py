@@ -64,3 +64,22 @@ def test_concat_encode_bad_input_raises(tmp_path, make_audio):
     meta.write_text(";FFMETADATA1\n")
     with pytest.raises(FFmpegError):
         concat_encode([tmp_path / "missing.mp3"], tmp_path / "o.m4b", metadata_path=meta, codec="aac", bitrate="64k")
+
+
+def test_concat_encode_joins_heterogeneous_mp3_and_opus(make_audio, tmp_path):
+    # A book mixing mp3 (22.05 kHz) and opus (always 48 kHz) must transcode to one m4b with BOTH
+    # parts. The concat DEMUXER treats the list as one stream with the first input's codec and
+    # silently drops the opus segment (decode fails), truncating the output; the concat FILTER
+    # decodes+resamples each input and joins them correctly.
+    a = make_audio("01.mp3", seconds=2)
+    b = make_audio("02.opus", seconds=2)
+    chapters = file_boundary_chapters([("01.mp3", 2.0), ("02.opus", 2.0)])
+    meta = tmp_path / "meta.txt"
+    meta.write_text(to_ffmetadata(chapters))
+    out = tmp_path / "book.m4b"
+
+    concat_encode([a, b], out, metadata_path=meta, codec="aac", bitrate="64k")
+
+    assert out.exists() and probe_codec(out) == "aac"
+    assert 3.4 < probe_duration_seconds(out) < 4.6   # BOTH 2s parts present, not just the mp3
+    assert probe_chapter_count(out) == 2             # chapters preserved through the filter path
