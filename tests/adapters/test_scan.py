@@ -41,3 +41,14 @@ def test_files_are_natural_sorted(tmp_path: Path):
     units = group_book_units(tmp_path)
     (unit,) = units
     assert [p.name for p in unit.files] == ["1.mp3", "2.mp3", "10.mp3"]
+
+
+def test_mixed_mp3_and_opus_parts_are_one_book(tmp_path: Path):
+    # The Acorna's Quest case: a book whose parts mix .mp3 and .opus must group ALL parts into
+    # one unit — dropping the opus files made the book look like it was missing parts.
+    _touch(tmp_path / "Acorna" / "01.opus")
+    _touch(tmp_path / "Acorna" / "02.opus")
+    _touch(tmp_path / "Acorna" / "08.mp3")
+    units = group_book_units(tmp_path)
+    (unit,) = units
+    assert [p.name for p in unit.files] == ["01.opus", "02.opus", "08.mp3"]

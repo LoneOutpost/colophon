@@ -8,3 +8,9 @@ def test_mp4_is_not_audio_but_m4b_is():
     assert is_audio_file(Path("x/book.m4b"))
     assert is_audio_file(Path("x/book.m4a"))
     assert is_audio_file(Path("x/ch1.mp3"))
+
+
+def test_opus_is_audio():
+    # .opus was missing from the whitelist, so opus parts were dropped at scan and a mixed
+    # mp3/opus book looked like it was missing parts. (.ogg was already recognized.)
+    assert is_audio_file(Path("x/part01.opus"))
