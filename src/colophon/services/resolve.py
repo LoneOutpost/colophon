@@ -98,6 +98,18 @@ def compute_file_changes(
     )
 
 
+def aggregate_file_changes(
+    prior_files: list[SourceFile], post_files: list[SourceFile]
+) -> FileChanges:
+    """Folder-scope diff: compare the folder's whole file set before vs after, id-agnostically.
+    Folder scope re-clusters, so book ids churn — a per-book-id diff would be meaningless. Works at
+    file granularity (added/removed/renamed/corrupt transitions across every book in the folder);
+    per-book missing transitions are not tracked here (ids don't survive the re-cluster)."""
+    return compute_file_changes(
+        prior_files, post_files, prior_missing=False, post_missing=False, book_id="",
+    )
+
+
 def resolve_scope(
     repo: BookUnitRepo,
     book: BookUnit,
