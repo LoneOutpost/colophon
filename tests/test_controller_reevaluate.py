@@ -57,3 +57,48 @@ def test_reevaluate_scope_noop_reports_no_changes(tmp_path):
     assert result.changes.is_empty
     assert result.changes.summary() == "No changes on disk"
     ctx.close()
+
+
+def test_reevaluate_folder_reclusters_and_reports(tmp_path):
+    ctx, ctrl, ingest = _ctx(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+    _mp3(ingest / "Dune" / "02.mp3")  # a new part appeared on disk
+
+    result = ctrl.reevaluate_folder(ingest / "Dune")
+
+    assert [p.name for p in result.changes.added] == ["02.mp3"]
+    book = _book_in(ctx, ingest / "Dune")
+    assert [sf.path.name for sf in book.source_files] == ["01.mp3", "02.mp3"]  # re-clustered together
+    ctx.close()
+
+
+def test_reevaluate_folder_is_scoped_not_a_full_scan(tmp_path):
+    ctx, ctrl, ingest = _ctx(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+    _mp3(ingest / "Unrelated" / "01.mp3")  # new folder elsewhere under the scan root
+    assert _book_in(ctx, ingest / "Unrelated") is None
+
+    ctrl.reevaluate_folder(ingest / "Dune")
+
+    assert _book_in(ctx, ingest / "Unrelated") is None  # folder scope must not walk the whole root
+    ctx.close()
+
+
+def test_reevaluate_folder_empty_folder_is_a_noop_not_a_full_scan(tmp_path):
+    # A book-less folder (e.g. a container directory) must do nothing — not fall through to a
+    # full scan of every scan path (the exact bug this feature prevents).
+    ctx, ctrl, ingest = _ctx(tmp_path)
+    _mp3(ingest / "Dune" / "01.mp3")
+    ctrl.scan([ingest])
+    _mp3(ingest / "Unrelated" / "01.mp3")  # new folder on disk, not yet scanned
+    (ingest / "Container").mkdir()          # a folder with no books
+    assert _book_in(ctx, ingest / "Unrelated") is None
+
+    result = ctrl.reevaluate_folder(ingest / "Container")
+
+    assert result.plan.units == []
+    assert result.changes.is_empty
+    assert _book_in(ctx, ingest / "Unrelated") is None  # must NOT have full-scanned the root
+    ctx.close()

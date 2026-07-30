@@ -172,7 +172,12 @@ from colophon.services.ingest import (
 )
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import OrganizeResult, organize_book, organize_book_parts
-from colophon.services.resolve import ResolveResult, resolve_scope
+from colophon.services.resolve import (
+    FileChanges,
+    ResolveResult,
+    aggregate_file_changes,
+    resolve_scope,
+)
 from colophon.services.tag_ops import (
     TagCommitResult,
     TagPlan,
@@ -1203,6 +1208,34 @@ class AppController:
         self.apply_scan(result.plan)
         self._graph_cache.clear()
         return result
+
+    def reevaluate_folder(self, folder: Path) -> ResolveResult:
+        """Folder scope re-evaluate: re-read and re-derive every book in `folder`, re-clustering it
+        in context (a multi-book folder may split/merge), scoped to the folder — it walks only the
+        folder, never the scan root. Clears weak identity first so auto fields re-derive from
+        scratch (hard/manual survive). Returns the plan + a file-level change report. Book ids can
+        change (a re-cluster re-keys), so the report and any navigation are file/plan based."""
+        folder = Path(folder)
+        ids = list(self.ctx.books.ids_in_folder(folder))
+        # No books in this folder (e.g. a classified container directory that only holds
+        # subfolders): do nothing. Falling through to scan_preview with an empty book_ids set
+        # would take the unscoped branch and full-scan every scan path — the exact bug this
+        # feature prevents.
+        if not ids:
+            return ResolveResult(plan=ScanPlan(), changes=FileChanges())
+        books = [b for b in (self.get_book(i) for i in ids) if b is not None]
+        prior_files = [sf for b in books for sf in b.source_files]
+        for b in books:
+            _clear_weak_identity(b)
+            self.ctx.books.upsert(b)
+        options = ScanOptions(
+            scope=ScanScope.REFRESH, phases=frozenset(LOCAL), book_ids=set(ids),
+        )
+        plan = self.scan_preview(options=options)
+        self.apply_scan(plan)
+        self._graph_cache.clear()
+        post_files = [sf for b in plan.units for sf in b.source_files]
+        return ResolveResult(plan=plan, changes=aggregate_file_changes(prior_files, post_files))
 
     # --- dashboard ---
     @timed("dashboard_stats")
