@@ -1239,6 +1239,34 @@ class AppController:
         post_files = [sf for b in plan.units for sf in b.source_files]
         return ResolveResult(plan=plan, changes=aggregate_file_changes(prior_files, post_files))
 
+    def reevaluate_entity(self, kind: str, name: str) -> ResolveResult:
+        """Entity scope re-evaluate: re-read and re-derive every book under an author/series/
+        franchise, re-clustering each of their folders in context. Disk-truth is file-level +
+        re-clustering + weak identity; hard identity (tags/manual/match) is authoritative and
+        preserved, so a book leaves the entity via re-clustering or changed weak evidence, not by
+        overwriting an embedded tag. Scoped to those books' folders only; everything else is frozen.
+        An unknown/renamed entity resolves to no books and is a no-op."""
+        tree = self.library_tree()
+        key = _name_key(name)
+        books: list[BookUnit] = []
+        if kind == "author":
+            for a in tree.authors:
+                if _name_key(a.name) == key:
+                    books = [b for s in a.series for b in s.books] + list(a.standalone)
+                    break
+        elif kind == "series":
+            for s in tree.series:
+                if _name_key(s.name) == key:
+                    books = list(s.books)
+                    break
+        elif kind == "franchise":
+            for f in tree.franchises:
+                if _name_key(f.name) == key:
+                    books = list(f.books)
+                    break
+        ids = list(dict.fromkeys(b.id for b in books))  # de-dup: a book can appear via >1 series
+        return self._reevaluate_book_ids(ids)
+
     # --- dashboard ---
     @timed("dashboard_stats")
     def dashboard_stats(self) -> dict[str, int]:
