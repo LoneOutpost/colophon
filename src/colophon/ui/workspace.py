@@ -1876,6 +1876,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
 
         ui.menu_item("Rename…", on_click=_rename)
         ui.menu_item("Merge into…", on_click=_merge)
+
+        async def _reevaluate() -> None:
+            result = await asyncio.to_thread(controller.reevaluate_entity, kind, name)
+            ui.notify(f"Re-evaluated: {result.changes.summary()}")
+            repaint(nav=True, middle=True)
+
+        ui.menu_item("Re-evaluate", on_click=_reevaluate)
         # Sources currently aliased to THIS node can be reset (unmerged).
         aliased = [
             src_key

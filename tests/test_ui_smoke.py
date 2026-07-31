@@ -404,3 +404,14 @@ def test_graph_to_library_open_deeplink():
     assert "open_book_id or _restored.open_book_id" in wsrc  # explicit param wins over snapshot
     lsrc = inspect.getsource(gi._links_for)
     assert "/?open=" in lsrc                  # book node deep-links to the exact book
+
+
+def test_entity_menu_has_reevaluate_wired_off_thread():
+    import inspect
+
+    from colophon.ui import workspace as ws
+
+    src = inspect.getsource(ws.render_workspace)
+    assert "Re-evaluate" in src                                  # menu item exists
+    assert "controller.reevaluate_entity" in src                 # wired to the entity re-derive
+    assert "asyncio.to_thread(controller.reevaluate_entity" in src  # off the event loop
