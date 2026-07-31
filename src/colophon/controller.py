@@ -1215,12 +1215,14 @@ class AppController:
         folder, never the scan root. Clears weak identity first so auto fields re-derive from
         scratch (hard/manual survive). Returns the plan + a file-level change report. Book ids can
         change (a re-cluster re-keys), so the report and any navigation are file/plan based."""
-        folder = Path(folder)
-        ids = list(self.ctx.books.ids_in_folder(folder))
-        # No books in this folder (e.g. a classified container directory that only holds
-        # subfolders): do nothing. Falling through to scan_preview with an empty book_ids set
-        # would take the unscoped branch and full-scan every scan path — the exact bug this
-        # feature prevents.
+        return self._reevaluate_book_ids(list(self.ctx.books.ids_in_folder(Path(folder))))
+
+    def _reevaluate_book_ids(self, ids: list[str]) -> ResolveResult:
+        """Shared re-derive core for folder/entity scope: re-read and re-derive the given books in
+        folder context (re-cluster), scoped to their folders — never the scan root. Clears weak
+        identity first (hard/manual survive). Empty ids is a no-op: an empty book_ids set would take
+        scan_preview's unscoped branch and full-scan every scan path — the exact bug this feature
+        prevents."""
         if not ids:
             return ResolveResult(plan=ScanPlan(), changes=FileChanges())
         books = [b for b in (self.get_book(i) for i in ids) if b is not None]
