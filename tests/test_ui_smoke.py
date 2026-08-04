@@ -301,11 +301,11 @@ def test_delete_ui_surfaces_exist():
 
     import colophon.ui.dialogs as dlg
     import colophon.ui.workspace as ws
-    assert hasattr(dlg, "confirm_delete_folder_dialog")
+    assert hasattr(dlg, "confirm_delete_from_disk_dialog")
     wsrc = inspect.getsource(ws.render_workspace)
     assert "delete_file" in wsrc            # per-file delete-from-disk
     assert "delete_forever" in wsrc         # the row icon
-    assert "confirm_delete_folder_dialog" in wsrc  # detail folder-delete action
+    assert "confirm_delete_from_disk_dialog" in wsrc  # detail book-delete action
 
 
 def test_busy_does_not_touch_a_button_deleted_by_the_action():
@@ -346,7 +346,7 @@ def test_delete_go_guards_dialog_close_against_deletion():
     import inspect
 
     import colophon.ui.dialogs as dlg
-    for fn in (dlg.confirm_delete_dialog, dlg.confirm_delete_folder_dialog):
+    for fn in (dlg.confirm_delete_dialog, dlg.confirm_delete_from_disk_dialog):
         src = inspect.getsource(fn)
         assert "is_deleted" in src and "dialog.close()" in src
 

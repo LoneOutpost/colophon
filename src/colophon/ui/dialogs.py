@@ -1337,40 +1337,6 @@ def confirm_delete_dialog(paths: list[Path], *, book_removed: bool, on_confirm: 
     dialog.open()
 
 
-def confirm_delete_folder_dialog(
-    folder: Path, *, affected_titles: list[str], file_count: int,
-    on_confirm: Callable[[], object],
-) -> None:
-    """A persistent strong-confirm for deleting a directory from disk. Names the folder, the file
-    count, and lists every book that will be removed (so a multi-book or nested-book folder can't
-    be nuked by surprise). The confirm runs `on_confirm` (sync or async) then closes."""
-    dialog = modal()
-    with dialog, ui.card().classes("q-pa-md").style("min-width: 24rem"):
-        ui.label("Delete this folder from disk?").classes("text-subtitle1")
-        ui.label(
-            f"This permanently deletes {folder} and its {file_count} file(s). This cannot be undone."
-        ).classes("colophon-muted text-caption")
-        if len(affected_titles) > 1:
-            ui.label(f"{len(affected_titles)} books will be removed:").classes("text-caption q-mt-sm")
-            with ui.column().classes("q-gutter-none q-pl-sm"):
-                for t in affected_titles:
-                    ui.label(f"• {t}").classes("text-caption colophon-muted")
-
-        async def _go(btn) -> None:
-            with busy(btn):
-                res = on_confirm()
-                if inspect.isawaitable(res):
-                    await res
-            # on_confirm may have navigated/repainted and torn this dialog down; only close it if
-            # it is still alive (touching a deleted element is a NiceGUI use-after-free).
-            if not dialog.is_deleted:
-                dialog.close()
-
-        btn = dialog_actions(dialog, confirm_label="Delete folder", confirm_icon="delete_forever",
-                             on_confirm=lambda: None, confirm_props="unelevated color=negative")
-        btn.on("click", lambda: _go(btn))
-    dialog.open()
-
 
 def confirm_delete_from_disk_dialog(
     *, book_title: str, file_count: int, folder_kept: bool,

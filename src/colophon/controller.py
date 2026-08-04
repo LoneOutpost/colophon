@@ -333,19 +333,6 @@ class BookDeleteResult:
     errors: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class FolderDeleteResult:
-    """Outcome of deleting a directory from disk. `ok` is False (with `error` set) when a guard
-    refused (no scan paths, a scan-root target, or an out-of-scope target) or the rmtree failed;
-    nothing is deleted in that case. `books_removed` is the number of book records dropped;
-    `files_deleted` is those books' source (audio) files — non-audio leftovers under the tree are
-    also removed from disk but not counted."""
-    folder: Path
-    books_removed: int
-    files_deleted: int
-    ok: bool
-    error: str | None = None
-
 
 @dataclass(frozen=True)
 class RelocateResult:
@@ -1020,46 +1007,6 @@ class AppController:
         return file_ops.folder_has_audio(
             book.source_folder, frozenset(sf.path for sf in book.source_files)
         )
-
-    def books_in_folder_tree(self, folder: Path) -> list[BookUnit]:
-        """Every book whose source folder is `folder` or nested under it — the books a recursive
-        delete of `folder` would remove. For delete_folder and the delete-folder confirm's list."""
-        folder = Path(folder)
-        return [
-            b for b in self.ctx.books.list_all()
-            if b.source_folder == folder or folder in b.source_folder.parents
-        ]
-
-    def delete_folder(self, folder: Path) -> FolderDeleteResult:
-        """Permanently delete `folder` and everything under it from disk, dropping every book whose
-        source folder is that folder or nested under it, then re-deriving the affected scan root.
-        Refuses to run without configured scan paths, on a folder that equals a scan root, or on a
-        folder outside every scan path (targets come from book models, never user text). Nothing is
-        deleted on a refusal or an rmtree failure. Irreversible; the UI gates it behind a strong
-        confirm.
-
-        The guards compare paths structurally (like the rest of the controller), so callers must
-        pass a canonical scan-derived path (e.g. `book.source_folder`), not a resolved/symlinked
-        alias — rmtree also refuses a symlinked directory, so an alias fails safe rather than
-        escaping the library."""
-        folder = Path(folder)
-        if not self.ctx.config.scan_paths:
-            return FolderDeleteResult(folder, 0, 0, ok=False, error="No scan paths are configured")
-        if folder in set(self.ctx.config.scan_paths):
-            return FolderDeleteResult(folder, 0, 0, ok=False, error="Refusing to delete a scan root")
-        if not self.path_within_scan_paths(folder):
-            return FolderDeleteResult(folder, 0, 0, ok=False, error="Folder is outside the library")
-
-        affected = self.books_in_folder_tree(folder)
-        file_count = sum(len(b.source_files) for b in affected)
-        if not file_ops.delete_directory_from_disk(folder):
-            return FolderDeleteResult(folder, 0, 0, ok=False, error="Could not delete the folder")
-        if affected:
-            self.cleanup_remove([b.id for b in affected])  # its own re-derive prunes the records
-        else:
-            self._resync_roots({self._scan_root_for_path(folder)})
-        self._graph_cache.clear()
-        return FolderDeleteResult(folder, len(affected), file_count, ok=True)
 
     def delete_directory_from_disk_path(self, folder: Path) -> bool:
         """Delete a directory from disk by path, for the Manage empty-folder cleanup. Returns True
