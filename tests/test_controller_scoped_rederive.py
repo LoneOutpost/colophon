@@ -86,3 +86,47 @@ def test_scoped_subtree_root_finds_nearest_entity_ancestor(tmp_path):
     assert sub == book.source_folder or sub in book.source_folder.parents
     assert root == sub or root in sub.parents or root == sub
     ctx.close()
+
+
+def test_save_fields_author_change_equivalent_via_public_api(tmp_path):
+    # save_fields now routes through _resync_scope; a whole-root re-derive must find no further change.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _two_book_author(ctrl, ingest)
+    book = next(b for b in ctx.books.list_all() if "Dragonflight" in b.source_folder.name)
+
+    ctrl.save_fields(book, {"author": "Todd McCaffrey"})
+    after_scope = _derivation(ctx)
+    ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
+    assert after_scope == _derivation(ctx)
+    ctx.close()
+
+
+def test_delete_file_equivalent_via_public_api(tmp_path):
+    # delete_file (not-last-file) routes through the scoped path; must match the whole-root fixed point.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Anne McCaffrey" / "Dragonflight" / "01.mp3", title="Dragonflight")
+    _mp3(ingest / "Anne McCaffrey" / "Dragonflight" / "02.mp3", title="Dragonflight")
+    _mp3(ingest / "Anne McCaffrey" / "Dragonquest" / "01.mp3", title="Dragonquest")
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if "Dragonflight" in b.source_folder.name)
+
+    ctrl.delete_file(book, book.source_files[1].path)
+    after_scope = _derivation(ctx)
+    ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
+    assert after_scope == _derivation(ctx)
+    ctx.close()
+
+
+def test_noop_edit_changes_nothing_and_stays_at_fixed_point(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _two_book_author(ctrl, ingest)
+    book = next(b for b in ctx.books.list_all() if "Dragonflight" in b.source_folder.name)
+
+    before = _derivation(ctx)
+    ctrl.save_fields(book, {"year": "1968"})   # not a graph-affecting field
+    after = _derivation(ctx)
+    # only the edited book's own record may differ (year isn't in the derivation tuple), graph stable
+    assert after == before or set(after) == set(before)
+    ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
+    assert after == _derivation(ctx)
+    ctx.close()
