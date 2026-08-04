@@ -870,33 +870,35 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ).props("flat dense no-caps color=negative").tooltip(
                                             "Forget this book (files stay on disk)"
                                         )
-                                        def _delete_folder(b=book) -> None:
+                                        def _delete_from_disk(b=book) -> None:
                                             from colophon.ui.dialogs import (
-                                                confirm_delete_folder_dialog,
+                                                confirm_delete_from_disk_dialog,
                                             )
-                                            folder = b.source_folder
-                                            affected = controller.books_in_folder_tree(folder)
-                                            titles = [bk.title or Path(bk.source_folder).name for bk in affected]
-                                            file_count = sum(len(bk.source_files) for bk in affected)
+                                            file_count = len(b.source_files)
+                                            folder_kept = controller.folder_kept_after_book_delete(b)
 
                                             async def _run() -> None:
-                                                result = await asyncio.to_thread(controller.delete_folder, folder)
-                                                if not result.ok:
-                                                    ui.notify(result.error or "Delete failed", type="negative")
-                                                    return
-                                                ui.notify("Folder deleted")
-                                                _clear_selection()
+                                                result = await asyncio.to_thread(controller.delete_book_from_disk, b)
+                                                if result.errors:
+                                                    ui.notify("; ".join(result.errors), type="warning")
+                                                if result.book_removed:
+                                                    msg = ("Deleted and removed the folder"
+                                                           if result.folder_removed
+                                                           else "Deleted; folder kept (other books remain)")
+                                                    ui.notify(msg)
+                                                    _clear_selection()
 
-                                            confirm_delete_folder_dialog(
-                                                folder, affected_titles=titles, file_count=file_count,
+                                            confirm_delete_from_disk_dialog(
+                                                book_title=b.title or Path(b.source_folder).name,
+                                                file_count=file_count, folder_kept=folder_kept,
                                                 on_confirm=_run,
                                             )
 
                                         ui.button(
-                                            "Delete folder from disk", icon="delete_forever",
-                                            on_click=_delete_folder,
+                                            "Delete from disk", icon="delete_forever",
+                                            on_click=_delete_from_disk,
                                         ).props("flat dense no-caps color=negative").tooltip(
-                                            "Permanently delete this book's folder and its files"
+                                            "Permanently delete this book's audio files (and the folder if nothing else remains)"
                                         )
 
                         # --- grouped fields ---

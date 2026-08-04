@@ -415,3 +415,20 @@ def test_entity_menu_has_reevaluate_wired_off_thread():
     assert "Re-evaluate" in src                                  # menu item exists
     assert "controller.reevaluate_entity" in src                 # wired to the entity re-derive
     assert "asyncio.to_thread(controller.reevaluate_entity" in src  # off the event loop
+
+
+def test_delete_from_disk_button_and_confirm_wired():
+    import inspect
+
+    from colophon.ui import dialogs as dlg
+    from colophon.ui import workspace as ws
+
+    wsrc = inspect.getsource(ws.render_workspace)
+    assert "Delete from disk" in wsrc                        # relabeled
+    assert "Delete folder from disk" not in wsrc             # old label gone
+    assert "controller.delete_book_from_disk" in wsrc        # wired to the book-scoped delete
+    assert "asyncio.to_thread(controller.delete_book_from_disk" in wsrc  # off the event loop
+    assert "confirm_delete_from_disk_dialog" in wsrc         # uses the new confirm
+
+    assert hasattr(dlg, "confirm_delete_from_disk_dialog")   # the new confirm exists
+    assert not hasattr(dlg, "confirm_delete_folder_dialog")  # old whole-folder confirm removed

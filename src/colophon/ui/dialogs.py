@@ -1372,6 +1372,38 @@ def confirm_delete_folder_dialog(
     dialog.open()
 
 
+def confirm_delete_from_disk_dialog(
+    *, book_title: str, file_count: int, folder_kept: bool,
+    on_confirm: Callable[[], object],
+) -> None:
+    """Strong-confirm for deleting one book's audio files from disk. States the file count and
+    whether the folder will be removed (nothing else remains) or kept (other books remain), so a
+    shared folder can't be nuked by surprise. Runs `on_confirm` (sync or async), then closes."""
+    dialog = modal()
+    with dialog, ui.card().classes("q-pa-md").style("min-width: 24rem"):
+        ui.label(f"Delete '{book_title}' from disk?").classes("text-subtitle1")
+        ui.label(
+            f"This permanently deletes this book's {file_count} audio file(s). This cannot be undone."
+        ).classes("colophon-muted text-caption")
+        tail = ("No audio will remain, so the folder will be removed too."
+                if not folder_kept else
+                "Other books remain in the folder, so the folder is kept.")
+        ui.label(tail).classes("text-caption q-mt-sm")
+
+        async def _go(btn) -> None:
+            with busy(btn):
+                res = on_confirm()
+                if inspect.isawaitable(res):
+                    await res
+            if not dialog.is_deleted:
+                dialog.close()
+
+        btn = dialog_actions(dialog, confirm_label="Delete", confirm_icon="delete_forever",
+                             on_confirm=lambda: None, confirm_props="unelevated color=negative")
+        btn.on("click", lambda: _go(btn))
+    dialog.open()
+
+
 async def persist_dialog(
     controller: AppController,
     *,
