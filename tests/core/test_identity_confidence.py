@@ -74,3 +74,16 @@ def test_series_corroborates_author(tmp_path):
 def test_missing_title_discounts(tmp_path):
     book = _book(tmp_path / "x", title="", author="Stella Rimington", a_prov=Provenance.TAG.value)
     assert book_identity_confidence(book, Graph(), tmp_path) == 63  # 0.9 * 0.7
+
+
+def test_author_equal_to_title_demotes_confidence(tmp_path):
+    # A tag author distinct from the title reads 90. The same book whose author echoes the title is
+    # demoted below the identity threshold (60), while the author value itself is untouched.
+    plain = _book(tmp_path / "loose" / "Restoree", title="Restoree", author="Stella Rimington",
+                  a_prov=Provenance.TAG.value)
+    echo = _book(tmp_path / "loose" / "Restoree", title="Restoree", author="Restoree",
+                 a_prov=Provenance.TAG.value)
+    assert book_identity_confidence(plain, Graph(), tmp_path) == 90
+    demoted = book_identity_confidence(echo, Graph(), tmp_path)
+    assert demoted < 60          # sinks below DEFAULT_IDENTITY_THRESHOLD
+    assert demoted < 90

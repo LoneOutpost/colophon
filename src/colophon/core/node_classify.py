@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.models import WEAK_PROV, BookUnit, NodeOverride
+from colophon.core.normalize import collides_with_title
 
 if TYPE_CHECKING:
     from colophon.core.sequence_affix import SequenceAffix
@@ -692,7 +693,8 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
          if book.series else 0.0)
     corroboration = 0.1 if (a > 0 and s > 0) else 0.0
     title_factor = 1.0 if book.title else 0.7
-    return round(min(1.0, max(a, s) + corroboration) * title_factor * 100)
+    echo_factor = 0.5 if (book.authors and collides_with_title(book.authors[0], book.title)) else 1.0
+    return round(min(1.0, max(a, s) + corroboration) * title_factor * echo_factor * 100)
 
 
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
