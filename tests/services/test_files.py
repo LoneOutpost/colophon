@@ -57,3 +57,34 @@ def test_delete_files_from_disk_removes_and_reports(tmp_path):
     assert not a.exists() and not b.exists()
     # an already-absent path counts as removed (goal achieved) so the caller drops it from the book too
     assert set(removed) == {a, b, gone}
+
+
+def test_folder_has_audio_true_for_direct_and_nested_audio(tmp_path):
+    from colophon.services.files import folder_has_audio
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "01.mp3").write_bytes(b"")
+    assert folder_has_audio(tmp_path)
+    nested = tmp_path / "b" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "part.opus").write_bytes(b"")   # .opus counts as audio
+    assert folder_has_audio(tmp_path / "b")
+
+
+def test_folder_has_audio_false_for_non_audio_only_or_missing(tmp_path):
+    from colophon.services.files import folder_has_audio
+    d = tmp_path / "covers"
+    d.mkdir()
+    (d / "cover.jpg").write_bytes(b"")
+    (d / "book.nfo").write_bytes(b"")
+    assert not folder_has_audio(d)
+    assert not folder_has_audio(tmp_path / "does-not-exist")
+
+
+def test_folder_has_audio_respects_ignoring(tmp_path):
+    from colophon.services.files import folder_has_audio
+    a = tmp_path / "01.mp3"
+    b = tmp_path / "02.mp3"
+    a.write_bytes(b"")
+    b.write_bytes(b"")
+    assert not folder_has_audio(tmp_path, ignoring=frozenset({a, b}))   # all audio ignored
+    assert folder_has_audio(tmp_path, ignoring=frozenset({a}))          # b still remains

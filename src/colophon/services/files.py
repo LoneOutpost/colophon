@@ -7,9 +7,11 @@ re-derives the library from disk afterward. Persistence is the caller's job."""
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
+from colophon.adapters.audio import is_audio_file
 from colophon.core.models import BookUnit
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,20 @@ def delete_files_from_disk(paths: list[Path]) -> list[Path]:
         except OSError as e:
             logger.warning(f"delete_files_from_disk: could not remove {p}: {e}")
     return removed
+
+
+def folder_has_audio(folder: Path, ignoring: frozenset[Path] = frozenset()) -> bool:
+    """True if any audio file (by extension) exists anywhere under `folder`, excluding paths in
+    `ignoring`. A missing folder yields False. `ignoring` lets a caller preview the post-delete state
+    by passing the paths it is about to remove (so the preview and the delete agree). Uses
+    `is_audio_file`, the single source of truth for what counts as audio (e.g. `.opus` included)."""
+    for dirpath, _dirs, names in os.walk(folder):
+        base = Path(dirpath)
+        for name in names:
+            p = base / name
+            if p not in ignoring and is_audio_file(p):
+                return True
+    return False
 
 
 def move_on_disk(path: Path, dest_dir: Path, new_name: str | None = None) -> Path:
