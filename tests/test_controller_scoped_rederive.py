@@ -130,3 +130,24 @@ def test_noop_edit_changes_nothing_and_stays_at_fixed_point(tmp_path):
     ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
     assert after == _derivation(ctx)
     ctx.close()
+
+
+def test_scoped_matches_whole_root_for_nested_entity_spine(tmp_path):
+    # A deeper spine: author -> sub-collection -> book. Editing a leaf must reach the same fixed
+    # point as a whole-root re-derive, exercising a FROZEN multi-level ancestor spine (the case the
+    # single-level fixtures don't cover).
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _mp3(ingest / "Brandon Sanderson" / "Mistborn" / "The Final Empire" / "01.mp3",
+         artist="Brandon Sanderson", title="The Final Empire")
+    _mp3(ingest / "Brandon Sanderson" / "Mistborn" / "The Well of Ascension" / "01.mp3",
+         artist="Brandon Sanderson", title="The Well of Ascension")
+    _mp3(ingest / "Brandon Sanderson" / "Elantris" / "01.mp3",
+         artist="Brandon Sanderson", title="Elantris")
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if "Final Empire" in b.source_folder.name)
+
+    ctrl.save_fields(book, {"author": "Someone Else"})
+    after_scope = _derivation(ctx)
+    ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
+    assert after_scope == _derivation(ctx)
+    ctx.close()
