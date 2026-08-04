@@ -884,9 +884,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                                 if result.book_removed:
                                                     msg = ("Deleted and removed the folder"
                                                            if result.folder_removed
-                                                           else "Deleted; folder kept (other books remain)")
+                                                           else "Deleted; folder kept (audio remains)")
                                                     ui.notify(msg)
                                                     _clear_selection()
+                                                else:
+                                                    show_detail(b.id)  # partial failure: refresh the trimmed book
 
                                             confirm_delete_from_disk_dialog(
                                                 book_title=b.title or Path(b.source_folder).name,

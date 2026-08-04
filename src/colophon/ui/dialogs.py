@@ -1353,7 +1353,7 @@ def confirm_delete_from_disk_dialog(
         ).classes("colophon-muted text-caption")
         tail = ("No audio will remain, so the folder will be removed too."
                 if not folder_kept else
-                "Other books remain in the folder, so the folder is kept.")
+                "Other audio remains in the folder, so the folder is kept.")
         ui.label(tail).classes("text-caption q-mt-sm")
 
         async def _go(btn) -> None:
