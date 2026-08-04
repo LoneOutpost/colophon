@@ -322,6 +322,18 @@ class DeleteResult:
 
 
 @dataclass(frozen=True)
+class BookDeleteResult:
+    """Outcome of deleting one book's own audio files from disk. `book_removed` is True when every
+    file was unlinked and the record dropped; `folder_removed` is True when the source folder held no
+    remaining audio and was removed (taking any non-audio leftovers). A file that failed to unlink
+    keeps the book and the folder, with the reason in `errors`."""
+    files_deleted: int
+    book_removed: bool
+    folder_removed: bool
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class FolderDeleteResult:
     """Outcome of deleting a directory from disk. `ok` is False (with `error` set) when a guard
     refused (no scan paths, a scan-root target, or an out-of-scope target) or the rmtree failed;
@@ -964,6 +976,50 @@ class AppController:
         self._resync_roots({self._scan_root_for_path(book.source_folder)})
         self._graph_cache.clear()
         return DeleteResult(files_deleted=1, book_removed=False, errors=())
+
+    def delete_book_from_disk(self, book: BookUnit) -> BookDeleteResult:
+        """Permanently delete this book's own audio files (`book.source_files`) from disk, drop the
+        book, and remove its source folder only if no audio remains anywhere under it. Targets
+        exactly this book's files — never a folder-wide sweep, never a sibling book's files — so a
+        duplicate book that is a loose set of files can be removed while another book in the same
+        folder stays intact. Non-audio files are never deleted per-file (unattributable); they go
+        only with a full-folder removal. Folder removal keeps the scan-root / within-library guards.
+        A file that fails to unlink keeps the book and the folder and is surfaced as an error.
+        Irreversible; the UI gates it behind a confirm."""
+        folder = book.source_folder
+        targets = [sf.path for sf in book.source_files]
+        removed = file_ops.delete_files_from_disk(targets)
+        removed_set = set(removed)
+        errors = [f"could not delete {p.name}" for p in targets if p not in removed_set]
+        for p in removed:
+            file_ops.exclude(book, p)
+
+        if book.source_files:  # some files could not be unlinked -> keep the book and the folder
+            book.touch()
+            self.ctx.books.upsert(book)
+            self._resync_roots({self._scan_root_for_path(folder)})
+            self._graph_cache.clear()
+            return BookDeleteResult(len(removed), book_removed=False, folder_removed=False,
+                                    errors=tuple(errors))
+
+        self.cleanup_remove([book.id])  # all files gone -> drop the record (its own re-derive prunes)
+        folder_removed = False
+        if (self.ctx.config.scan_paths
+                and folder not in set(self.ctx.config.scan_paths)
+                and self.path_within_scan_paths(folder)
+                and not file_ops.folder_has_audio(folder)):
+            folder_removed = file_ops.delete_directory_from_disk(folder)
+        self._graph_cache.clear()
+        return BookDeleteResult(len(removed), book_removed=True, folder_removed=folder_removed,
+                                errors=tuple(errors))
+
+    def folder_kept_after_book_delete(self, book: BookUnit) -> bool:
+        """Preview for the confirm dialog: would the book's folder survive deleting this book? True
+        when the folder still holds audio that is not this book's own — a sibling book or stray audio
+        remains. Uses the same on-disk audio test as the delete, so the preview never disagrees."""
+        return file_ops.folder_has_audio(
+            book.source_folder, frozenset(sf.path for sf in book.source_files)
+        )
 
     def books_in_folder_tree(self, folder: Path) -> list[BookUnit]:
         """Every book whose source folder is `folder` or nested under it — the books a recursive
