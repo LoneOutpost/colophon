@@ -614,8 +614,16 @@ class AppController:
             self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
         return len(changed)
 
+    @staticmethod
+    def _path_under_any(pathstr: str, sub_strs: tuple[str, ...]) -> bool:
+        """True if `pathstr` is one of `sub_strs` or nested under one — the scoped-subtree membership
+        test. String-based (prefix) rather than `Path.parents` so it stays cheap across a 76k-node
+        scan; paths are canonical scan-derived strings, so a `/`-boundary prefix is exact."""
+        return any(pathstr == s or pathstr.startswith(s + "/") for s in sub_strs)
+
     def _rederive_root_books(
         self, roots: set[Path], *, overrides: dict[str, NodeOverride] | None = None,
+        scope: dict[Path, set[Path]] | None = None,
     ) -> tuple[dict[str, BookUnit], list[tuple[Path, list, list]]]:
         """Re-derive (in memory, no writeback) the book copies for every scan `root`: rebuild each
         root's graph from its preserved skeleton + fresh book records, reclassify, fill author/series
@@ -631,20 +639,45 @@ class AppController:
         graph_writes: list[tuple[Path, list, list]] = []
         for root in roots:
             r = str(root)
+            subs = scope.get(root) if scope is not None else None
+            sub_strs = tuple(str(s) for s in subs) if subs is not None else ()
+            # In scoped mode, only the subtree under each entity ancestor is reclassified; the spine
+            # (its ancestors up to the scan root) rides along as frozen context so _fill_down can walk
+            # to author nodes and depths stay root-relative.
+            spine_paths: set[str] = set()
+            if subs is not None:
+                for s in subs:
+                    cur = s
+                    while cur != root and root in cur.parents:
+                        cur = cur.parent
+                        spine_paths.add(str(cur))
             skeleton_nodes = [
-                n for n in lib.nodes.values() if n.root == r and n.physical in ("directory", "file")
+                n for n in lib.nodes.values()
+                if n.root == r and n.physical in ("directory", "file")
+                and (subs is None or self._path_under_any(str(n.attrs["path"]), sub_strs)
+                     or str(n.attrs["path"]) in spine_paths)
             ]
             src_books = [
-                b for b in books if self._scan_root_for_path(b.source_folder) == root
+                b for b in books
+                if (self._path_under_any(str(b.source_folder), sub_strs) if subs is not None
+                    else self._scan_root_for_path(b.source_folder) == root)
             ]
             if not src_books and not skeleton_nodes:
-                continue  # truly empty root — nothing to derive or keep
+                continue  # truly empty root/scope — nothing to derive or keep
+            # Only the subtree directory nodes are reclassified; the frozen spine keeps its kinds.
+            classify_only = (
+                {n.id for n in skeleton_nodes
+                 if n.physical == "directory" and self._path_under_any(str(n.attrs["path"]), sub_strs)}
+                if subs is not None else None
+            )
             # Work on deep copies throughout so the stored books are never mutated; the caller
             # compares each copy to its stored original to decide what to write back.
             root_books = [b.model_copy(deep=True) for b in src_books]
+            _sk_ids = {n.id for n in skeleton_nodes}
             skeleton_edges = [
                 e for e in lib.edges
                 if e.root == r and e.kind == "contains" and not e.dst.startswith("book:")
+                and (subs is None or (e.src in _sk_ids and e.dst in _sk_ids))
             ]
             # First-pass franchise edges (from the current book field), used only to reconstruct
             # and classify the graph. The persisted edges are rebuilt post-fill below.
@@ -675,11 +708,15 @@ class AppController:
                 copies[bid].provenance.pop("authors", None)
             recon = graph_from_records(
                 skeleton_nodes + book_nodes, skeleton_edges + book_edges, copies, root=root,
+                # Scoped mode restores every node's persisted classification so the frozen spine keeps
+                # its kinds; the subtree's restored kinds are immediately overwritten by classify below.
+                restore_classification=subs is not None,
             )
             classify_graph(recon, root=root)
             classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
                            overrides=overrides, known_franchises=self.ctx.franchises.active(),
-                           directory_scheme=self.ctx.config.directory_scheme)
+                           directory_scheme=self.ctx.config.directory_scheme,
+                           classify_only=classify_only)
             # Fill folder-derived franchise onto the book copies before building the persisted
             # franchise edges, so the graph edge and book.franchise agree in one pass (a
             # declared/builtin franchise folder is only visible via the reclassified `recon`). Prefer
@@ -726,6 +763,77 @@ class AppController:
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
                 rederived[book.id] = book
         return rederived, graph_writes
+
+    _ENTITY_KINDS = frozenset({"author", "series", "franchise"})
+
+    def _scoped_subtree_root(self, folder: Path, root: Path) -> Path:
+        """The folder to root a scoped re-derive at: the nearest ancestor of `folder` (inclusive, up
+        to but not including the scan `root`) whose graph node is classified author/series/franchise.
+        Falls back to `folder` itself when no entity ancestor exists (a loose book under the scan
+        root). The subtree under the returned folder is reclassified; the spine above it is frozen."""
+        cur = folder
+        while True:
+            node = self.ctx.library_graph.nodes.get(DirectoryNode.id_for(cur))
+            if node is not None and node.semantic in self._ENTITY_KINDS:
+                return cur
+            if cur == root or root not in cur.parents:
+                return folder
+            cur = cur.parent
+
+    def _resync_scope(self, folders: set[Path]) -> int:
+        """Scoped re-derive for single-book edits: reclassify only each folder's nearest-entity-
+        ancestor subtree (spine frozen), persist the resulting node/edge delta, and write back only
+        the books whose derivation changed. The bounded counterpart of `_resync_roots` — for per-book
+        edits, never library-wide ops. Callers must PERSIST the edit first (same contract as
+        `_resync_roots`)."""
+        folders = {Path(f) for f in folders}
+        if not folders:
+            return 0
+        scope: dict[Path, set[Path]] = {}
+        for folder in folders:
+            root = self._scan_root_for_path(folder)
+            scope.setdefault(root, set()).add(self._scoped_subtree_root(folder, root))
+        by_id = {b.id: b for b in self.ctx.books.list_all()}
+        rederived, graph_writes = self._rederive_root_books(set(scope), scope=scope)
+        lib = self.ctx.library_graph
+        for root, new_nodes, new_edges in graph_writes:
+            r = str(root)
+            sub_strs = tuple(str(s) for s in scope[root])
+            new_ids = {n.id for n in new_nodes}
+            new_edge_keys = {(e.src, e.kind, e.dst) for e in new_edges}
+            # Everything the re-derive owns for this subtree: directory/file nodes by path, book nodes
+            # by their stored source_folder (still readable after the book row is deleted). Entity
+            # nodes are deliberately excluded — one may be shared with a book outside the subtree, so a
+            # truly-orphan entity is left for reconcile() to prune, never deleted here.
+            subtree_node_ids: set[str] = set()
+            for n in lib.nodes.values():
+                if n.root != r:
+                    continue
+                if n.physical in ("directory", "file"):
+                    if self._path_under_any(str(n.attrs["path"]), sub_strs):
+                        subtree_node_ids.add(n.id)
+                elif n.semantic == "book":
+                    sf = n.attrs.get("source_folder")
+                    if sf and self._path_under_any(str(sf), sub_strs):
+                        subtree_node_ids.add(n.id)
+            del_node_ids = subtree_node_ids - new_ids
+            del_edge_keys = {
+                (e.src, e.kind, e.dst) for e in lib.edges
+                if e.root == r and e.src in subtree_node_ids
+                and (e.src, e.kind, e.dst) not in new_edge_keys
+            }
+            # Store first, then the in-memory mirror, so a failed write never diverges the two.
+            self.ctx.graph.apply_node_delta(upserts=new_nodes, delete_ids=del_node_ids, commit=False)
+            self.ctx.graph.apply_edge_delta(upserts=new_edges, delete_keys=del_edge_keys, commit=True)
+            lib.apply_delta(upsert_nodes=new_nodes, delete_node_ids=del_node_ids,
+                            upsert_edges=new_edges, delete_edge_keys=del_edge_keys)
+        changed = [
+            copy for bid, copy in rederived.items()
+            if (stored := by_id.get(bid)) is not None and not _book_derivation_unchanged(stored, copy)
+        ]
+        for i, book in enumerate(changed):
+            self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
+        return len(changed)
 
     def recompute_all_identity(self) -> int:
         """One-time backfill: re-derive every scan root's classification and stamp
