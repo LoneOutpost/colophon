@@ -700,12 +700,12 @@ def compare_dialog(
                                     ui.item_label("Cover art")
                                     ui.item_label(result.cover_url).props("caption")
 
-                def _apply(res=result) -> None:
+                async def _apply(res=result) -> None:
                     selected = {k for k, c in checks.items() if c.value}
                     if not selected:
                         ui.notify("No fields selected")
                         return
-                    controller.apply_match_fields(book, res, selected)
+                    await asyncio.to_thread(controller.apply_match_fields, book, res, selected)
                     dialog.close()
                     ui.notify(f"Applied {len(selected)} field(s) from {controller.source_label(res.provider)}")
                     refresh_list()

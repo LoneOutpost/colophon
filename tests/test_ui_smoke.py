@@ -432,3 +432,11 @@ def test_delete_from_disk_button_and_confirm_wired():
 
     assert hasattr(dlg, "confirm_delete_from_disk_dialog")   # the new confirm exists
     assert not hasattr(dlg, "confirm_delete_folder_dialog")  # old whole-folder confirm removed
+
+
+def test_match_apply_is_offloaded():
+    import inspect
+
+    from colophon.ui import dialogs as dlg
+    src = inspect.getsource(dlg.compare_dialog)  # holds the per-field match apply handler
+    assert "asyncio.to_thread(controller.apply_match_fields" in src  # off the event loop

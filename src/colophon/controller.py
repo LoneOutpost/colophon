@@ -578,8 +578,9 @@ class AppController:
             self.ctx.library_graph.replace_root(root, nodes, edges)
 
     def _resync_books(self, books: list[BookUnit]) -> None:
-        """Re-derive the graph for every scan root the given books belong to."""
-        self._resync_roots({self._scan_root_for_path(b.source_folder) for b in books})
+        """Re-derive the entity subtree for every folder the given (edited) books belong to — the
+        scoped path for single-book edits (match apply, field save, etc.), not a whole-root pass."""
+        self._resync_scope({b.source_folder for b in books})
 
     def _resync_roots(self, roots: set[Path]) -> int:
         """Keep each root's filesystem skeleton (unchanged by an edit) and re-derive its
@@ -1017,11 +1018,10 @@ class AppController:
         """Delete an orphaned (missing) book record and its history/operations rows.
         The three deletes share one transaction (commit on the last) so the record and
         its satellite rows can't be left half-removed."""
-        root = self._scan_root_for_path(book.source_folder)
         self.ctx.history.delete_for_book(book.id, commit=False)
         self.ctx.operations.delete_for_book(book.id, commit=False)
         self.ctx.books.delete(book.id)  # commits, flushing the two preceding deletes
-        self._resync_roots({root})
+        self._resync_scope({book.source_folder})
 
     def delete_corrupt_files(self, book: BookUnit) -> DeleteResult:
         """Permanently delete this book's corrupt/incomplete files (real size, no readable audio),
@@ -1048,7 +1048,7 @@ class AppController:
         resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         book.touch()
         self.ctx.books.upsert(book)
-        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        self._resync_scope({book.source_folder})
         return DeleteResult(files_deleted=len(removed), book_removed=False, errors=tuple(errors))
 
     def delete_file(self, book: BookUnit, path: Path) -> DeleteResult:
@@ -1068,7 +1068,7 @@ class AppController:
             return DeleteResult(files_deleted=1, book_removed=True, errors=())
         book.touch()
         self.ctx.books.upsert(book)
-        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        self._resync_scope({book.source_folder})
         self._graph_cache.clear()
         return DeleteResult(files_deleted=1, book_removed=False, errors=())
 
@@ -1092,7 +1092,7 @@ class AppController:
         if book.source_files:  # some files could not be unlinked -> keep the book and the folder
             book.touch()
             self.ctx.books.upsert(book)
-            self._resync_roots({self._scan_root_for_path(folder)})
+            self._resync_scope({folder})
             self._graph_cache.clear()
             return BookDeleteResult(len(removed), book_removed=False, folder_removed=False,
                                     errors=tuple(errors))
@@ -2637,7 +2637,7 @@ class AppController:
 
         target = _svc_reassign(self.ctx.books, self.ctx.grouping, book.source_folder, path, book.id)
         self._graph_cache.clear()
-        self._resync_roots({self._scan_root_for_path(book.source_folder)})
+        self._resync_scope({book.source_folder})
         return self._hydrate([self.ctx.books.get(target.id)])[0]
 
     def path_within_scan_paths(self, path: Path) -> bool:
