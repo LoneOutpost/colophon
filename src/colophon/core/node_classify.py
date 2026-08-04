@@ -586,6 +586,7 @@ def _build_ctx(graph: Graph, root: Path, overrides: dict[str, NodeOverride],
 def classify_nodes(
     graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, NodeOverride],
     known_franchises: dict[str, str] | None = None, directory_scheme: str = "",
+    classify_only: set[str] | None = None,
 ) -> None:
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
     then fill empty/weak-author books from the nearest author node (GRAPHING).
@@ -593,10 +594,19 @@ def classify_nodes(
     Ordering contract: `books` must already be through IDENTIFY. Several axioms read book fields and
     their provenance (e.g. ax_leaf_title inspects `book.title`/`book.provenance['title']`), so running
     this before IDENTIFY would classify against un-derived identity. `plan_scan_graph` guarantees the
-    order (identify → classify_nodes)."""
+    order (identify → classify_nodes).
+
+    When `classify_only` is given, only nodes whose id is in the set are reclassified; every other
+    ("frozen" spine) node keeps its existing kind/author. `_fill_down` still reads all nodes, so a
+    frozen author node with a concrete `.author` is recorded as evidenced and can be inherited from."""
     ctx = _build_ctx(graph, root, overrides, known_franchises or {}, directory_scheme)
     evidenced: dict[str, bool] = {}
     for node in graph.directories.values():
+        if classify_only is not None and node.id not in classify_only:
+            # Frozen (spine) node: keep its restored classification; still record whether it carries a
+            # concrete author value so _fill_down treats it as an evidenced author when appropriate.
+            evidenced[node.id] = bool(node.author) if node.kind == "author" else False
+            continue
         evidence: list[Evidence] = []
         for axiom in _AXIOMS:
             evidence.extend(axiom(node, ctx))

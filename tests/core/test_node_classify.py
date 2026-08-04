@@ -599,3 +599,21 @@ def test_leaf_title_singlefile_author_folder_preserved(tmp_path):
     assert node.kind == "author", (
         f"Expected single-file book with title label to keep 'Stephen King' as author, got '{node.kind}'"
     )
+
+
+def _frozen_dir(g, path, *, kind, conf=1.0):
+    d = DirectoryNode(path=path, kind=kind, kind_confidence=conf, kind_value=path.name,
+                      author=path.name if kind == "author" else None)
+    g.directories[d.id] = d
+    return d
+
+
+def test_classify_only_leaves_unlisted_nodes_frozen(tmp_path):
+    from colophon.core.node_classify import classify_nodes
+
+    g = Graph()
+    keep = _frozen_dir(g, tmp_path / "Frozen", kind="author")     # must NOT be reclassified
+    target = _frozen_dir(g, tmp_path / "Reclass", kind="author")  # reclassified: no evidence -> not a conf-1.0 author
+    classify_nodes(g, [], root=tmp_path, overrides={}, classify_only={target.id})
+    assert g.directories[keep.id].kind == "author"         # frozen: unchanged
+    assert not (g.directories[target.id].kind == "author" and g.directories[target.id].kind_confidence == 1.0)
