@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 
 from colophon.core.models import BookUnit, FindingCode
+from colophon.core.normalize import collides_with_title
 from colophon.core.phases import DEFAULT_IDENTITY_THRESHOLD
 
 # Identity fields sourced from these tiers are guesses, not assertions (a tag/datafile/match/manual
@@ -73,5 +74,9 @@ def review_reasons(
         add("No title could be read from the file.")
     elif book.source_folder is not None and _norm(book.title) == _norm(book.source_folder.name):
         add("The title is just the folder name — the file(s) didn't supply one.")
+
+    # Identity echo: a title mis-read into the author slot (sibling of the title==folder-name check).
+    if book.authors and book.title and collides_with_title(book.authors[0], book.title):
+        add("The author and title are identical, which usually means a title was mis-read as the author.")
 
     return reasons

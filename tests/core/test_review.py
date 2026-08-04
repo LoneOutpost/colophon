@@ -97,3 +97,15 @@ def test_series_only_inferred(_series="Liz Carlyle"):
     b = _book(title="At Risk", series=[SeriesRef(name=_series)], identity_confidence=20.0)
     b.provenance["series"] = Provenance.DIRECTORY.value
     assert any("series is only inferred" in r.lower() for r in review_reasons(b))
+
+
+def test_author_equal_to_title_is_a_reason():
+    b = _book(title="Restoree", authors=["Restoree"])
+    b.provenance["authors"] = Provenance.TAG.value
+    assert any("author and title are identical" in r for r in review_reasons(b))
+
+
+def test_distinct_author_and_title_is_not_that_reason():
+    b = _book(title="Restoree", authors=["Anne McCaffrey"], identity_confidence=90.0)
+    b.provenance["authors"] = Provenance.TAG.value
+    assert not any("author and title are identical" in r for r in review_reasons(b))
