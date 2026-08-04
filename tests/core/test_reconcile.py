@@ -257,3 +257,42 @@ def test_reconcile_hard_then_weak_split(tmp_path):
               filename_fields={"title": "The Wheel of Fortune"}, tiers="weak")
     assert book.title == "The Dead Zone"
     assert book.provenance["title"] == "directory"
+
+
+def test_directory_author_equal_to_title_is_deferred():
+    # The original bug shape: an untagged book whose folder is named after the title. The folder
+    # name fills the TITLE; it must not ALSO become the author of the same book.
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title="Restoree",
+              directory_fields={"author": "Restoree"}, filename_fields={})
+    assert book.title == "Restoree"
+    assert book.authors == []               # the title-echo author was declined
+    assert "authors" not in book.provenance
+
+
+def test_filename_author_equal_to_title_is_deferred():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title=None,
+              filename_fields={"title": "Restoree", "author": "Restoree"})
+    assert book.title == "Restoree"
+    assert book.authors == []
+    assert "authors" not in book.provenance
+
+
+def test_weak_author_distinct_from_title_is_kept():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(), dir_title="Cujo",
+              directory_fields={"author": "Stephen King"}, filename_fields={})
+    assert book.title == "Cujo"
+    assert book.authors == ["Stephen King"]
+    assert book.provenance["authors"] == "directory"
+
+
+def test_hard_tag_author_equal_to_title_is_kept_in_reconcile():
+    # The weak guard must NOT touch hard tiers: a tag artist that equals the title is authoritative
+    # input, kept here (it is demoted/surfaced downstream, not dropped).
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(title="Restoree", artist="Restoree"),
+              dir_title=None, filename_fields={})
+    assert book.authors == ["Restoree"]
+    assert book.provenance["authors"] == "tag"

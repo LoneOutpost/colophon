@@ -12,6 +12,7 @@ from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.coerce import to_float, to_int
 from colophon.core.isbn import normalize_isbn
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
+from colophon.core.normalize import collides_with_title
 from colophon.core.people import split_people
 
 
@@ -105,9 +106,11 @@ def reconcile(
             book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
         elif hard and df and df.authors:
             book.authors, book.provenance["authors"] = list(df.authors), Provenance.DATAFILE.value
-        elif weak and dirf.get("author"):
+        elif weak and dirf.get("author") and not collides_with_title(dirf.get("author"), book.title):
             book.authors, book.provenance["authors"] = [dirf["author"]], Provenance.DIRECTORY.value
-        elif weak and filename_fields.get("author"):
+        elif weak and filename_fields.get("author") and not collides_with_title(
+            filename_fields.get("author"), book.title
+        ):
             book.authors = [filename_fields["author"]]
             book.provenance["authors"] = Provenance.FILENAME.value
 
