@@ -201,3 +201,16 @@ def test_collides_with_title_empty_or_none_never_collides():
     assert not collides_with_title("Restoree", "")
     assert not collides_with_title("Restoree", None)
     assert not collides_with_title(None, "Restoree")
+
+
+def test_collides_with_title_punctuation_only_does_not_collide():
+    from colophon.core.normalize import collides_with_title
+    assert not collides_with_title("...", "!!!")  # both keys empty -> not a collision
+
+
+def test_collides_with_title_is_deliberately_narrow():
+    # Only edge punctuation is stripped; internal-punctuation / name-order differences do NOT collide.
+    # Fail-safe by design: the signal drops/demotes authors, so it must never over-match.
+    from colophon.core.normalize import collides_with_title
+    assert not collides_with_title("Spider-Man", "Spider Man")
+    assert not collides_with_title("McCaffrey, Anne", "Anne McCaffrey")

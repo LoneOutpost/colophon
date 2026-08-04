@@ -34,12 +34,18 @@ def _echo_key(s: str) -> str:
 
 def collides_with_title(name: str | None, title: str | None) -> bool:
     """True when `name` is just an echo of `title` — case-, whitespace-, and edge-punctuation-
-    insensitive equality. An empty/None title (or name) never collides. Shared by the reconcile
-    weak-author guard (reject a title-echo author), book_identity_confidence (demote a surviving
-    collision), and review_reasons (surface it), so the three never diverge."""
+    insensitive equality. An empty/None (or punctuation-only) name or title never collides. Shared by
+    the reconcile weak-author guard (reject a title-echo author), book_identity_confidence (demote a
+    surviving collision), and review_reasons (surface it), so the three never diverge.
+
+    The match is deliberately narrow — edge punctuation only, no diacritic-folding or 'Last, First'
+    name-keying (unlike `normalize_key`). This fails safe: a signal that drops/demotes an author must
+    not over-match, since that would wrongly discard a legitimate weak author; a missed echo merely
+    skips the signal. (A local key also avoids an import cycle with `classify._text_key`.)"""
     if not name or not title:
         return False
-    return _echo_key(name) == _echo_key(title)
+    key_name, key_title = _echo_key(name), _echo_key(title)
+    return bool(key_name) and key_name == key_title
 
 
 def _cap(word: str) -> str:

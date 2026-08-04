@@ -693,7 +693,8 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
          if book.series else 0.0)
     corroboration = 0.1 if (a > 0 and s > 0) else 0.0
     title_factor = 1.0 if book.title else 0.7
-    echo_factor = 0.5 if (book.authors and collides_with_title(book.authors[0], book.title)) else 1.0
+    echo_factor = (0.5 if (len(book.authors) == 1 and collides_with_title(book.authors[0], book.title))
+                   else 1.0)
     return round(min(1.0, max(a, s) + corroboration) * title_factor * echo_factor * 100)
 
 

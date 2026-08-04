@@ -76,7 +76,8 @@ def review_reasons(
         add("The title is just the folder name — the file(s) didn't supply one.")
 
     # Identity echo: a title mis-read into the author slot (sibling of the title==folder-name check).
-    if book.authors and book.title and collides_with_title(book.authors[0], book.title):
+    # Single-author only: a real co-author list that happens to contain a title-like token is not a collision.
+    if len(book.authors) == 1 and collides_with_title(book.authors[0], book.title):
         add("The author and title are identical, which usually means a title was mis-read as the author.")
 
     return reasons

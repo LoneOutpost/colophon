@@ -109,3 +109,10 @@ def test_distinct_author_and_title_is_not_that_reason():
     b = _book(title="Restoree", authors=["Anne McCaffrey"], identity_confidence=90.0)
     b.provenance["authors"] = Provenance.TAG.value
     assert not any("author and title are identical" in r for r in review_reasons(b))
+
+
+def test_multi_author_title_echo_is_not_that_reason():
+    # Single-author restriction: a co-author list whose first name echoes the title is not flagged.
+    b = _book(title="Restoree", authors=["Restoree", "Anne McCaffrey"], identity_confidence=90.0)
+    b.provenance["authors"] = Provenance.TAG.value
+    assert not any("author and title are identical" in r for r in review_reasons(b))

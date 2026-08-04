@@ -87,3 +87,11 @@ def test_author_equal_to_title_demotes_confidence(tmp_path):
     demoted = book_identity_confidence(echo, Graph(), tmp_path)
     assert demoted < 60          # sinks below DEFAULT_IDENTITY_THRESHOLD
     assert demoted < 90
+
+
+def test_multi_author_with_title_echo_is_not_demoted(tmp_path):
+    # Single-author restriction: a co-author list whose first name echoes the title is NOT a collision.
+    book = _book(tmp_path / "loose" / "Restoree", title="Restoree", author="Restoree",
+                 a_prov=Provenance.TAG.value)
+    book.authors = ["Restoree", "Anne McCaffrey"]
+    assert book_identity_confidence(book, Graph(), tmp_path) == 90  # not demoted
