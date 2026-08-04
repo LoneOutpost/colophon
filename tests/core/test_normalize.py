@@ -183,3 +183,21 @@ def test_proper_case_if_shouting_ignores_non_alpha():
     from colophon.core.normalize import proper_case_if_shouting
     assert proper_case_if_shouting("") == ""
     assert proper_case_if_shouting("1984") == "1984"
+
+
+def test_collides_with_title_ignores_case_space_and_edge_punct():
+    from colophon.core.normalize import collides_with_title
+    assert collides_with_title("The Carradyne Touch", "the carradyne touch.")
+    assert collides_with_title("Restoree", "  Restoree  ")
+
+
+def test_collides_with_title_rejects_distinct_values():
+    from colophon.core.normalize import collides_with_title
+    assert not collides_with_title("Anne McCaffrey", "Restoree")
+
+
+def test_collides_with_title_empty_or_none_never_collides():
+    from colophon.core.normalize import collides_with_title
+    assert not collides_with_title("Restoree", "")
+    assert not collides_with_title("Restoree", None)
+    assert not collides_with_title(None, "Restoree")

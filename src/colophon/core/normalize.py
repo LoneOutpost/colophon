@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import re
+import string
 import unicodedata
 from collections.abc import Callable
 
@@ -25,6 +26,20 @@ _SMALL_WORDS = {
 _DASH_RE = re.compile(r"\s*-\s*")
 _COMMA_RE = re.compile(r"\s*,\s*")
 _WS_RE = re.compile(r"\s+")
+
+
+def _echo_key(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip().casefold().strip(string.punctuation + " ")
+
+
+def collides_with_title(name: str | None, title: str | None) -> bool:
+    """True when `name` is just an echo of `title` — case-, whitespace-, and edge-punctuation-
+    insensitive equality. An empty/None title (or name) never collides. Shared by the reconcile
+    weak-author guard (reject a title-echo author), book_identity_confidence (demote a surviving
+    collision), and review_reasons (surface it), so the three never diverge."""
+    if not name or not title:
+        return False
+    return _echo_key(name) == _echo_key(title)
 
 
 def _cap(word: str) -> str:
