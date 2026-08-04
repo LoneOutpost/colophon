@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from colophon.adapters.repository.store import GraphStore, connect, migrate, save_graph
 from colophon.core.graph_records import EdgeRecord, NodeRecord
 from colophon.core.library_graph import LibraryGraph
@@ -117,6 +119,39 @@ def test_load_all_preserves_facets_and_attrs(tmp_path):
     nodes, _ = s.load_all()
     (n,) = nodes
     assert n.physical is None and n.semantic == "book" and n.attrs == {"book_id": "xyz"}
+
+
+def test_apply_node_delta_upserts_and_deletes_only_targeted(tmp_path):
+    s = _store(tmp_path)
+    s.replace_subgraph(Path("/lib"), [
+        NodeRecord(id="a", physical="directory", semantic=None, root="/lib", attrs={"name": "A"}),
+        NodeRecord(id="b", physical="directory", semantic="author", root="/lib", attrs={"name": "B"}),
+    ], [])
+    s.apply_node_delta(
+        upserts=[
+            NodeRecord(id="b", physical="directory", semantic="series", root="/lib", attrs={"name": "B2"}),
+            NodeRecord(id="c", physical="directory", semantic=None, root="/lib", attrs={"name": "C"}),
+        ],
+        delete_ids={"a"})
+    nodes, _ = s.load_all()
+    by_id = {n.id: n for n in nodes}
+    assert "a" not in by_id
+    assert by_id["b"].semantic == "series" and by_id["b"].attrs["name"] == "B2"
+    assert by_id["c"].attrs["name"] == "C"
+
+
+def test_apply_edge_delta_upserts_and_deletes_only_targeted(tmp_path):
+    s = _store(tmp_path)
+    s.replace_subgraph(Path("/lib"), [], [
+        EdgeRecord(src="a", kind="contains", dst="b", root="/lib", props={}),
+    ])
+    s.apply_edge_delta(
+        upserts=[EdgeRecord(src="a", kind="contains", dst="c", root="/lib", props={"x": 1})],
+        delete_keys={("a", "contains", "b")})
+    _, edges = s.load_all()
+    keys = {(e.src, e.kind, e.dst) for e in edges}
+    assert ("a", "contains", "b") not in keys
+    assert ("a", "contains", "c") in keys
 
 
 def test_save_graph_round_trips_via_load_all(tmp_path):

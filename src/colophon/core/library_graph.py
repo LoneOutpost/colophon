@@ -46,6 +46,22 @@ class LibraryGraph:
         self.edges.extend(edges)
         self._generation += 1
 
+    def apply_delta(
+        self, *, upsert_nodes: list[NodeRecord], delete_node_ids: set[str],
+        upsert_edges: list[EdgeRecord], delete_edge_keys: set[tuple[str, str, str]],
+    ) -> None:
+        """Scoped in-memory mutation mirroring GraphStore.apply_node_delta/apply_edge_delta: drop the
+        given node ids and edge keys, then add the upserts. Bumps `generation` (one structural
+        change)."""
+        for nid in delete_node_ids:
+            self.nodes.pop(nid, None)
+        for n in upsert_nodes:
+            self.nodes[n.id] = n
+        if delete_edge_keys:
+            self.edges = [e for e in self.edges if (e.src, e.kind, e.dst) not in delete_edge_keys]
+        self.edges.extend(upsert_edges)
+        self._generation += 1
+
 
 @dataclass
 class ReconcileResult:

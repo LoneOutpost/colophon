@@ -177,3 +177,20 @@ def test_replace_root_absent_root_just_adds():
     g = LibraryGraph.from_records([], [])
     g.replace_root("/lib", [_dir("a", "/lib/a", root="/lib")], [])
     assert set(g.nodes) == {"a"}
+
+
+def test_apply_delta_mirrors_store_in_memory():
+    g = LibraryGraph.from_records(
+        [NodeRecord(id="a", physical="directory", semantic=None, root="/lib", attrs={}),
+         NodeRecord(id="b", physical="directory", semantic="author", root="/lib", attrs={})],
+        [EdgeRecord(src="a", kind="contains", dst="b", root="/lib", props={})])
+    gen = g.generation
+    g.apply_delta(
+        upsert_nodes=[NodeRecord(id="b", physical="directory", semantic="series", root="/lib", attrs={})],
+        delete_node_ids={"a"},
+        upsert_edges=[EdgeRecord(src="b", kind="contains", dst="c", root="/lib", props={})],
+        delete_edge_keys={("a", "contains", "b")})
+    assert "a" not in g.nodes and g.nodes["b"].semantic == "series"
+    keys = {(e.src, e.kind, e.dst) for e in g.edges}
+    assert ("a", "contains", "b") not in keys and ("b", "contains", "c") in keys
+    assert g.generation == gen + 1

@@ -577,6 +577,46 @@ class GraphStore:
         else:
             _write()
 
+    def apply_node_delta(
+        self, *, upserts: list[NodeRecord], delete_ids: set[str], commit: bool = True
+    ) -> None:
+        """Upsert only the given node rows (by id) and delete the given ids — the scoped counterpart
+        of replace_subgraph, touching no unrelated rows."""
+        def _write() -> None:
+            if delete_ids:
+                self.conn.executemany("DELETE FROM nodes WHERE id = ?", [(i,) for i in delete_ids])
+            if upserts:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO nodes (id, physical, semantic, root, attrs) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [(n.id, n.physical, n.semantic, n.root, json.dumps(n.attrs)) for n in upserts])
+
+        if commit:
+            with self.conn:
+                _write()
+        else:
+            _write()
+
+    def apply_edge_delta(
+        self, *, upserts: list[EdgeRecord], delete_keys: set[tuple[str, str, str]],
+        commit: bool = True,
+    ) -> None:
+        """Upsert only the given edge rows (by src,kind,dst) and delete the given keys."""
+        def _write() -> None:
+            if delete_keys:
+                self.conn.executemany(
+                    "DELETE FROM edges WHERE src = ? AND kind = ? AND dst = ?", list(delete_keys))
+            if upserts:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO edges (src, kind, dst, root, props) VALUES (?, ?, ?, ?, ?)",
+                    [(e.src, e.kind, e.dst, e.root, json.dumps(e.props)) for e in upserts])
+
+        if commit:
+            with self.conn:
+                _write()
+        else:
+            _write()
+
     def nodes_for(self, root: Path) -> list[NodeRecord]:
         rows = self.conn.execute(
             "SELECT id, physical, semantic, root, attrs FROM nodes WHERE root = ?", (str(root),)
