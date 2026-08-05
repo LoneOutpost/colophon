@@ -654,10 +654,12 @@ def test_numbered_siblings_reads_bare_book_number_shelf():
 
 
 def test_collection_bucket_casts_no_author_vote():
-    from colophon.core.node_classify import (
-        _Ctx, ax_author_from_grouping, ax_author_structure,
-    )
     from colophon.core.graph_classify import GROUPING
+    from colophon.core.node_classify import (
+        _Ctx,
+        ax_author_from_grouping,
+        ax_author_structure,
+    )
     g = Graph()
     root = Path("/lib")
     bucket = _dir(g, "/lib/Anne McCaffrey/Non-Series", kind=GROUPING)
@@ -669,8 +671,8 @@ def test_collection_bucket_casts_no_author_vote():
 
 
 def test_person_named_grouping_still_votes_author():
-    from colophon.core.node_classify import _Ctx, ax_author_from_grouping
     from colophon.core.graph_classify import GROUPING
+    from colophon.core.node_classify import _Ctx, ax_author_from_grouping
     g = Graph()
     root = Path("/lib")
     author = _dir(g, "/lib/Anne McCaffrey", kind=GROUPING)
