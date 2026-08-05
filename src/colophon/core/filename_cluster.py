@@ -39,6 +39,11 @@ _INDEX_COMPOUND = re.compile(r"^\d{1,3}(?:[-/x]\d{1,3})+$", re.IGNORECASE)
 # Bounded to 1-3 digits (like _NUM / _INDEX_COMPOUND) so a 4-digit year + letter ("1984a") is
 # never read as an index.
 _INDEX_PART = re.compile(r"^\d{1,3}[a-z]$", re.IGNORECASE)
+# A leading compound index hyphen-glued to following text ("01-04-Keith Douglass"): the compound
+# is a track-of-total / disc-track index, the rest is title/author text. Requires the INNER numeric
+# separator, so a bare number glued to a word ("30-Day", "7-Eleven") and intra-word hyphens
+# ("X-Wing", "Spider-Man") never match; only a genuine compound index splits.
+_LEADING_COMPOUND_GLUE = re.compile(r"^(\d{1,3}(?:[-/x]\d{1,3})+)-(.+)$", re.IGNORECASE)
 # A trailing sequence number within a chunk ("Wheel of Time 3"). Bounded to 1-3 integer digits + an
 # optional 2-place decimal, matching sequence_affix._NUM so a 4-digit year ("Dune 1984") is never
 # read as a sequence. (This chunk-local, space-separated form is why we can't just call
@@ -67,7 +72,15 @@ def _chunks(stem: str) -> list[str]:
     separator set by style: a spaced name delimits on whitespace (so intra-word hyphens like "X-Wing"
     survive), a spaceless kebab name ("girlblue-01-cd01-01") delimits on the dash itself."""
     sep = _SEP_SPACED if _WHITESPACE.search(stem) else _SEP_KEBAB
-    return [c.strip() for c in sep.split(stem) if c.strip()]
+    out: list[str] = []
+    for c in (c.strip() for c in sep.split(stem) if c.strip()):
+        m = _LEADING_COMPOUND_GLUE.match(c)
+        if m:
+            out.append(m.group(1))
+            out.append(m.group(2).strip())
+        else:
+            out.append(c)
+    return out
 
 
 def _spaced(chunk: str) -> str:

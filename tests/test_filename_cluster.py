@@ -252,3 +252,32 @@ def test_cluster_trailing_part_token_is_one_book():
     r = cluster(_paths(*files))
     assert r.content_kind is ContentKind.SINGLE
     assert len(r.detected_works) == 1
+
+
+def test_chunks_splits_leading_compound_glued_to_text():
+    # "01-04" is a track-of-total index glued to the author; split it off its chunk.
+    assert _chunks("01-04-Keith Douglass - [Carrier #02] - Viper Strike") == \
+        ["01-04", "Keith Douglass", "Carrier #02", "Viper Strike"]
+
+
+def test_chunks_leaves_bare_number_and_intra_word_hyphens_whole():
+    # No inner numeric separator -> not a compound index -> not split.
+    assert _chunks("30-Day Challenge - Author") == ["30-Day Challenge", "Author"]
+    assert _chunks("7-Eleven Nights - Author") == ["7-Eleven Nights", "Author"]
+    assert _chunks("X-Wing Rogue Squadron") == ["X-Wing Rogue Squadron"]
+    # An already-standalone compound chunk is unchanged (no trailing glued text).
+    assert _chunks("01-12 - Chrome Yellow - Aldous Huxley") == \
+        ["01-12", "Chrome Yellow", "Aldous Huxley"]
+
+
+def test_cluster_leading_compound_glued_is_one_book():
+    files = [f"{i:02d}-04-Keith Douglass - [Carrier #02] - Viper Strike.opus" for i in range(1, 5)]
+    r = cluster(_paths(*files))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+
+
+def test_cluster_leading_compound_series_shelf_stays_separate():
+    # Two distinct books sharing an author must not merge (regression guard).
+    r = cluster(_paths("Dragonflight - McCaffrey.mp3", "Dragonquest - McCaffrey.mp3"))
+    assert len(r.detected_works) == 2
