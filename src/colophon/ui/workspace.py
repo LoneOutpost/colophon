@@ -527,35 +527,53 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     if FixAction.DELETE in item.actions:
                         def _del(b=book) -> None:
                             _delete_book_items(b)
-                        ui.button("Delete", icon="delete", on_click=_del).props("flat color=negative")
+                        ui.button(
+                            "Remove" if book.missing else "Delete from disk",
+                            icon="delete_outline" if book.missing else "delete_forever",
+                            on_click=_del,
+                        ).props("flat color=negative")
 
-    def _delete_book_items(book) -> None:
-        from colophon.core.classify import corrupt_source_files
-        from colophon.ui.dialogs import confirm_delete_dialog
+    def _delete_book_from_disk_flow(b) -> None:
+        """Delete a book's audio files (and its folder if no audio remains) from disk — the shared
+        flow for the detail-pane 'Delete from disk' button and the Attention pane's corrupt-book
+        action. Runs off the event loop; refreshes/repaints on completion."""
+        from colophon.ui.dialogs import confirm_delete_from_disk_dialog
 
-        if book.missing:
-            paths, book_removed = [], True
-        else:
-            paths = corrupt_source_files(book.source_files)
-            book_removed = bool(paths) and len(paths) == len(book.source_files)
+        file_count = len(b.source_files)
+        folder_kept = controller.folder_kept_after_book_delete(b)
 
         async def _run() -> None:
-            if book.missing:
-                await asyncio.to_thread(controller.remove_missing, book)
-                removed = True
-            else:
-                result = await asyncio.to_thread(controller.delete_corrupt_files, book)
-                removed = result.book_removed
-                if result.errors:
-                    ui.notify("; ".join(result.errors), type="warning")
-            ui.notify("Deleted", type="info")
-            refresh_list()
-            if removed:
+            result = await asyncio.to_thread(controller.delete_book_from_disk, b)
+            if result.errors:
+                ui.notify("; ".join(result.errors), type="warning")
+            if result.book_removed:
+                ui.notify("Deleted and removed the folder" if result.folder_removed
+                          else "Deleted; folder kept (audio remains)")
+                refresh_list()
                 _clear_selection()
             else:
-                show_detail(book.id)
+                show_detail(b.id)  # partial failure: refresh the trimmed book
 
-        confirm_delete_dialog(paths, book_removed=book_removed, on_confirm=_run)
+        confirm_delete_from_disk_dialog(
+            book_title=b.title or Path(b.source_folder).name,
+            file_count=file_count, folder_kept=folder_kept, on_confirm=_run,
+        )
+
+    def _delete_book_items(book) -> None:
+        """Attention-pane delete: a missing book is removed from the library (its files are already
+        gone); a book with corrupt files is deleted from disk (the whole book and its folder)."""
+        if book.missing:
+            from colophon.ui.dialogs import confirm_delete_dialog
+
+            async def _run() -> None:
+                await asyncio.to_thread(controller.remove_missing, book)
+                ui.notify("Removed", type="info")
+                refresh_list()
+                _clear_selection()
+
+            confirm_delete_dialog([], book_removed=True, on_confirm=_run)
+        else:
+            _delete_book_from_disk_flow(book)
 
     # --- detail pane ---
     def show_detail(book_id: str) -> None:
@@ -871,35 +889,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ).props("flat dense no-caps color=negative").tooltip(
                                             "Forget this book (files stay on disk)"
                                         )
-                                        def _delete_from_disk(b=book) -> None:
-                                            from colophon.ui.dialogs import (
-                                                confirm_delete_from_disk_dialog,
-                                            )
-                                            file_count = len(b.source_files)
-                                            folder_kept = controller.folder_kept_after_book_delete(b)
-
-                                            async def _run() -> None:
-                                                result = await asyncio.to_thread(controller.delete_book_from_disk, b)
-                                                if result.errors:
-                                                    ui.notify("; ".join(result.errors), type="warning")
-                                                if result.book_removed:
-                                                    msg = ("Deleted and removed the folder"
-                                                           if result.folder_removed
-                                                           else "Deleted; folder kept (audio remains)")
-                                                    ui.notify(msg)
-                                                    _clear_selection()
-                                                else:
-                                                    show_detail(b.id)  # partial failure: refresh the trimmed book
-
-                                            confirm_delete_from_disk_dialog(
-                                                book_title=b.title or Path(b.source_folder).name,
-                                                file_count=file_count, folder_kept=folder_kept,
-                                                on_confirm=_run,
-                                            )
-
                                         ui.button(
                                             "Delete from disk", icon="delete_forever",
-                                            on_click=_delete_from_disk,
+                                            on_click=lambda b=book: _delete_book_from_disk_flow(b),
                                         ).props("flat dense no-caps color=negative").tooltip(
                                             "Permanently delete this book's audio files (and the folder if nothing else remains)"
                                         )

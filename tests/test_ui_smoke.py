@@ -448,3 +448,15 @@ def test_save_fields_is_offloaded():
     from colophon.ui import workspace as ws
     src = inspect.getsource(ws.render_workspace)
     assert "asyncio.to_thread(controller.save_fields" in src  # field save runs off the event loop
+
+
+def test_attention_corrupt_delete_is_delete_from_disk():
+    import inspect
+
+    from colophon.ui import workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    # the shared delete-from-disk flow exists and the attention delete routes to it (not surgical)
+    assert "_delete_book_from_disk_flow" in src
+    assert "controller.delete_book_from_disk" in src
+    assert "controller.delete_corrupt_files" not in src            # surgical corrupt-delete no longer wired
+    assert '"Delete from disk"' in src and '"Remove"' in src        # corrupt -> Delete from disk; missing -> Remove
