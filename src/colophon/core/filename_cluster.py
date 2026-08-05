@@ -35,6 +35,10 @@ _NUM = re.compile(r"^\d+(?:\.\d+)?$")          # integer or decimal token
 # ("01-12", "1-40", "02-01", "01/12", "1x40"). The 1-3-digit bound mirrors _NUM so a 4-digit year
 # ("1984-1985") is never read as an index.
 _INDEX_COMPOUND = re.compile(r"^\d{1,3}(?:[-/x]\d{1,3})+$", re.IGNORECASE)
+# A trailing part token: a number + single letter suffix ("01a", "13b") — a disc/part half.
+# Bounded to 1-3 digits (like _NUM / _INDEX_COMPOUND) so a 4-digit year + letter ("1984a") is
+# never read as an index.
+_INDEX_PART = re.compile(r"^\d{1,3}[a-z]$", re.IGNORECASE)
 # A trailing sequence number within a chunk ("Wheel of Time 3"). Bounded to 1-3 integer digits + an
 # optional 2-place decimal, matching sequence_affix._NUM so a 4-digit year ("Dune 1984") is never
 # read as a sequence. (This chunk-local, space-separated form is why we can't just call
@@ -85,9 +89,10 @@ def _is_num(tok: str) -> bool:
 
 
 def _is_index_token(tok: str) -> bool:
-    """True if `tok` is a pure number or a compound track-of-total/disc-track index — the tokens a
-    filename varies across a book's parts, excluded from the text signature."""
-    return _is_num(tok) or bool(_INDEX_COMPOUND.match(tok))
+    """True if `tok` is a pure number, a compound track-of-total/disc-track index, or a
+    number+letter part half — the tokens a filename varies across a book's parts, excluded
+    from the text signature."""
+    return _is_num(tok) or bool(_INDEX_COMPOUND.match(tok)) or bool(_INDEX_PART.match(tok))
 
 
 def _is_chapter_marker(chunk: str) -> bool:

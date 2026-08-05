@@ -232,3 +232,23 @@ def test_cluster_glued_leading_number_is_single_titled_by_residue():
 def test_cluster_leading_number_shelf_with_distinct_titles_stays_multi():
     r = cluster(_paths("01 - Betrayal.mp3", "02 - Bloodlines.mp3"))
     assert r.content_kind is ContentKind.MULTI
+
+
+def test_is_index_token_accepts_number_letter_part():
+    from colophon.core.filename_cluster import _is_index_token
+    assert _is_index_token("01a")          # disc/part half
+    assert _is_index_token("13b")
+    assert _is_index_token("01-04")         # existing compound still true
+    assert _is_index_token("7")             # existing pure number still true
+    assert not _is_index_token("1984a")     # 4-digit year + letter is not a part token
+    assert not _is_index_token("foundation")
+
+
+def test_cluster_trailing_part_token_is_one_book():
+    files = []
+    for i in range(1, 14):
+        files.append(f"07-Foundation and Earth - {i:02d}a.opus")
+        files.append(f"07-Foundation and Earth - {i:02d}b.opus")
+    r = cluster(_paths(*files))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
