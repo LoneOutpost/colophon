@@ -97,3 +97,34 @@ def test_full_scan_and_reidentify_agree_for_clustered_book(tmp_path):
                   for b in (ctx.books.get(i) for i in ctx.books.ids_in_folder(folder))]
     assert after_scan == after_reid == [("Viper Strike", 4)]
     ctx.close()
+
+
+def test_numbered_series_shelf_book_is_authored_by_grandparent(tmp_path):
+    # /Keith Douglass/Carrier/(Carrier Book #N) Title: Carrier is the series, Keith Douglass the author.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    series = ingest / "Keith Douglass" / "Carrier"
+    for sub, title in [("(Carrier Book #1) Carrier", "Carrier"),
+                       ("(Carrier Book #2) Viper Strike", "Viper Strike"),
+                       ("(Carrier Book #3) Armageddon Mode", "Armageddon Mode")]:
+        for i in range(1, 5):
+            _untagged(series / sub / f"{i:02d}-04-Keith Douglass - [Carrier] - {title}.mp3")
+    ctrl.scan([ingest])
+
+    for b in ctx.books.list_all():
+        assert b.authors == ["Keith Douglass"], (b.title, b.authors)
+    carrier_node = next(n for n in ctx.library_graph.nodes.values()
+                        if str(n.attrs.get("path", "")).endswith("/Carrier"))
+    assert carrier_node.attrs.get("kind") == "series", carrier_node.attrs.get("kind")
+    ctx.close()
+
+
+def test_non_series_bucket_is_not_the_author(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    bucket = ingest / "Anne McCaffrey" / "Non-Series"
+    for title in ("Restoree", "Decision at Doona", "The Ship Who Sang"):
+        _untagged(bucket / f"{title}.mp3")
+    ctrl.scan([ingest])
+
+    for b in ctx.books.list_all():
+        assert b.authors != ["Non-Series"], (b.title, b.authors)
+    ctx.close()
