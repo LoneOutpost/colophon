@@ -49,3 +49,51 @@ def test_series_book_prefix_folder_sets_title_series_sequence(tmp_path):
     assert [s.name for s in b.series] == ["A Hamish Macbeth Mystery"]
     assert b.series[0].sequence == 1.0
     ctx.close()
+
+
+def test_leading_compound_glued_folder_is_one_titled_book(tmp_path):
+    # "01-04-Keith Douglass - [Carrier #02] - Viper Strike": four parts of one book; the folder
+    # title wins once the parts cluster. (Author/sequence are the deferred node-classification slice.)
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = ingest / "Keith Douglass" / "Carrier" / "(Carrier Book #2) Viper Strike"
+    for i in range(1, 5):
+        _untagged(folder / f"{i:02d}-04-Keith Douglass - [Carrier #02] - Viper Strike.mp3")
+    ctrl.scan([ingest])
+
+    books = [ctx.books.get(i) for i in ctx.books.ids_in_folder(folder)]
+    assert len(books) == 1, f"expected 1 book, got {len(books)}"
+    assert books[0].title == "Viper Strike", books[0].title
+    assert books[0].provenance.get("title") == "directory"
+    ctx.close()
+
+
+def test_trailing_part_token_folder_is_one_titled_book(tmp_path):
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = ingest / "Isaac Asimov" / "Foundation" / "(Foundation Book #7) Foundation and Earth"
+    for i in range(1, 14):
+        _untagged(folder / f"07-Foundation and Earth - {i:02d}a.mp3")
+        _untagged(folder / f"07-Foundation and Earth - {i:02d}b.mp3")
+    ctrl.scan([ingest])
+
+    books = [ctx.books.get(i) for i in ctx.books.ids_in_folder(folder)]
+    assert len(books) == 1, f"expected 1 book, got {len(books)}"
+    assert books[0].title == "Foundation and Earth", books[0].title
+    ctx.close()
+
+
+def test_full_scan_and_reidentify_agree_for_clustered_book(tmp_path):
+    # The user's "targeted rescan fixes it, full scan re-breaks" was not a real divergence:
+    # both paths run the same clustering primitive and must agree.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = ingest / "Keith Douglass" / "Carrier" / "(Carrier Book #2) Viper Strike"
+    for i in range(1, 5):
+        _untagged(folder / f"{i:02d}-04-Keith Douglass - [Carrier #02] - Viper Strike.mp3")
+    ctrl.scan([ingest])
+    after_scan = [(b.title, len(b.source_files))
+                  for b in (ctx.books.get(i) for i in ctx.books.ids_in_folder(folder))]
+
+    ctrl.reidentify([ctx.books.get(i) for i in ctx.books.ids_in_folder(folder)])
+    after_reid = [(b.title, len(b.source_files))
+                  for b in (ctx.books.get(i) for i in ctx.books.ids_in_folder(folder))]
+    assert after_scan == after_reid == [("Viper Strike", 4)]
+    ctx.close()
