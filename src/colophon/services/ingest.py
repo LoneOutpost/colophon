@@ -31,7 +31,7 @@ from colophon.core.models import (
     PhaseState,
     Provenance,
 )
-from colophon.core.phases import LOCAL, mark, resync_state, state_of
+from colophon.core.phases import LOCAL, invalidate_from, mark, resync_state, state_of
 from colophon.core.reassociate import is_missing, reassociate
 from colophon.services.identify import (
     Evidence,
@@ -358,6 +358,12 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
         run_phases = phases if existing is not None else (phases | {Phase.SEARCH})
         before_empty = _empty_fields(book) if existing is not None else set()
         prior_paths = {sf.path for sf in book.source_files}
+
+        # Disk change-detection: a known book whose files changed on disk (mtime/size, or a file
+        # added/removed) is re-derived; an unchanged one keeps its FRESH phases and is skipped.
+        # REFRESH (force) re-runs regardless, so this only bites the fast UPDATE path.
+        if existing is not None and not force and _files_changed(book, unit.files):
+            invalidate_from(book, Phase.SEARCH)
 
         run_local_phases(book, run_phases, force=force, root=inf_root,
                          pattern=pattern, scheme=scheme, unit_files=unit.files,
