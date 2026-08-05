@@ -487,19 +487,34 @@ def _series_tag_present(books: list[BookUnit]) -> bool:
     return any(b.series and b.provenance.get("series") in _SOFT_AUTHOR_PROV for b in books)
 
 
+def _child_sequence_affix(name: str) -> SequenceAffix | None:
+    """A child folder's sequence affix. Falls back to the folder-title parser for the
+    `(Series Book #N) Title` and `#N - Title` folder forms that parse_sequence_affix does not
+    read (it wants a leading `NN -` / `#N` bare form). A folder-parsed sequence is treated as a
+    strong affix — explicit numbered-series notation, not an incidental leading number."""
+    from colophon.core.sequence_affix import SequenceAffix, parse_sequence_affix
+    aff = parse_sequence_affix(name)
+    if aff is not None:
+        return aff
+    from colophon.core.folder_title import parse_folder_title
+    parsed = parse_folder_title(name)
+    if parsed.sequence is not None:
+        return SequenceAffix(sequence=parsed.sequence, cleaned=parsed.title or name, confidence="strong")
+    return None
+
+
 def ax_numbered_siblings(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     """A folder whose child books carry sequence-number affixes ('02 - Yendi', '03 - Teckla', …)
     is a series ramp — structural series evidence that exists BEFORE any series field does (unlike
     ax_series_ramp, which needs the field). Additive: an attention trigger, a distinct-title ramp,
     and optional tag corroboration; the resolve() sum decides against the author-grouping vote."""
-    from colophon.core.sequence_affix import parse_sequence_affix
     books = ctx.books_by_folder.get(node.path, [])
     if not books:
         return []
     parsed: dict[str, SequenceAffix] = {}   # one entry per direct child name
     for b in books:
         name = _child_name(node.path, b)
-        aff = parse_sequence_affix(name)
+        aff = _child_sequence_affix(name)
         if aff is not None:
             parsed.setdefault(name, aff)
     if not parsed:

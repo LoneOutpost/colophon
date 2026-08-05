@@ -617,3 +617,37 @@ def test_classify_only_leaves_unlisted_nodes_frozen(tmp_path):
     classify_nodes(g, [], root=tmp_path, overrides={}, classify_only={target.id})
     assert g.directories[keep.id].kind == "author"         # frozen: unchanged
     assert not (g.directories[target.id].kind == "author" and g.directories[target.id].kind_confidence == 1.0)
+
+
+def test_numbered_siblings_reads_series_book_prefix_shelf():
+    from colophon.core.node_classify import _Ctx, ax_numbered_siblings
+    g = Graph()
+    root = Path("/lib")
+    carrier = _dir(g, "/lib/Keith Douglass/Carrier")
+    kids = [_titled_book(f"/lib/Keith Douglass/Carrier/{sub}", title) for sub, title in [
+        ("(Carrier Book #1) Carrier", "Carrier"),
+        ("(Carrier Book #2) Viper Strike", "Viper Strike"),
+        ("(Carrier Book #3) Armageddon Mode", "Armageddon Mode"),
+    ]]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={carrier.path: kids},
+               modal_author_depth=None, book_like_children={})
+    ev = ax_numbered_siblings(carrier, ctx)
+    assert {e.kind for e in ev} == {"series"}
+    assert sum(e.weight for e in ev) >= 3.0            # base 1 + ramp 2, beats author-grouping 2.5
+    assert all(e.value == "Carrier" for e in ev)       # value is the shelf folder name
+
+
+def test_numbered_siblings_reads_bare_book_number_shelf():
+    from colophon.core.node_classify import _Ctx, ax_numbered_siblings
+    g = Graph()
+    root = Path("/lib")
+    shelf = _dir(g, "/lib/David Wong/JDATE")
+    kids = [_titled_book(f"/lib/David Wong/JDATE/{sub}", title) for sub, title in [
+        ("#1 - John Dies at the End", "John Dies at the End"),
+        ("#2 - This Book Is Full of Spiders", "This Book Is Full of Spiders"),
+    ]]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={shelf.path: kids},
+               modal_author_depth=None, book_like_children={})
+    ev = ax_numbered_siblings(shelf, ctx)
+    assert {e.kind for e in ev} == {"series"}
+    assert sum(e.weight for e in ev) >= 3.0
