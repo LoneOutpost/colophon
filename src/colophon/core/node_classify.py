@@ -5,6 +5,7 @@ imperative resolve_graph_authors/hint_grouping_kinds passes."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -55,6 +56,24 @@ _BUCKET_WORDS = frozenset({
     "incoming", "downloads", "download", "audiobooks", "audiobook", "books", "misc",
     "unsorted", "new", "temp", "tmp", "media", "library", "import", "imports",
 })
+
+# Content-collection folder names — an author's non-series / standalone / anthology shelf. NOT an
+# author (unlike a person-named grouping). Distinct from _BUCKET_WORDS (staging/library roots). Stored
+# in normalized form (casefold, non-alphanumerics -> single space); membership is EXACT, not substring,
+# so an author "Anthony" or a title "Best of Times" is never caught. A compound name ("Best of Queen")
+# is intentionally not matched — precision over recall, since suppressing a real author is worse.
+_COLLECTION_WORDS = frozenset({
+    "non series", "standalone", "collection", "collections", "anthology", "anthologies",
+    "omnibus", "miscellaneous", "misc", "short stories", "singles", "best of",
+})
+_COLLECTION_NORM = re.compile(r"[^a-z0-9]+")
+
+
+def _is_collection_name(node: DirectoryNode) -> bool:
+    """True when the folder name is a content-collection bucket (Non-Series / Standalone / Anthology),
+    so it is not itself an author. Author axioms abstain for these."""
+    norm = _COLLECTION_NORM.sub(" ", node.path.name.casefold()).strip()
+    return norm in _COLLECTION_WORDS
 
 
 @dataclass(frozen=True)
@@ -226,7 +245,7 @@ def ax_author_structure(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     or the folder is a known franchise (never an author). Uses direct books (a folder-of-folders is
     a bucket, not a multi-series author); a single book is a title, not an author. A node at the
     modal author depth gets a small tree-consistency nudge."""
-    if _is_known_franchise(node, ctx):
+    if _is_known_franchise(node, ctx) or _is_collection_name(node):
         return []
     from colophon.core.graph_classify import _series_label
     from colophon.core.graph_resolve import _resembles
@@ -375,7 +394,7 @@ def ax_author_from_grouping(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  
     folder — vote author; a genuine single-series grouping is pulled to series by ax_series_ramp,
     and a known franchise (never an author) is suppressed."""
     from colophon.core.graph_classify import GROUPING
-    if node.kind == GROUPING and not _is_known_franchise(node, ctx):
+    if node.kind == GROUPING and not _is_known_franchise(node, ctx) and not _is_collection_name(node):
         return [Evidence("author", W_AUTHOR_GROUPING, "a folder of title subfolders (author/series grouping)")]
     return []
 

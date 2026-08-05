@@ -651,3 +651,29 @@ def test_numbered_siblings_reads_bare_book_number_shelf():
     ev = ax_numbered_siblings(shelf, ctx)
     assert {e.kind for e in ev} == {"series"}
     assert sum(e.weight for e in ev) >= 3.0
+
+
+def test_collection_bucket_casts_no_author_vote():
+    from colophon.core.node_classify import (
+        _Ctx, ax_author_from_grouping, ax_author_structure,
+    )
+    from colophon.core.graph_classify import GROUPING
+    g = Graph()
+    root = Path("/lib")
+    bucket = _dir(g, "/lib/Anne McCaffrey/Non-Series", kind=GROUPING)
+    books = [_book(f"/lib/Anne McCaffrey/Non-Series/{t}") for t in ("Dragondrums", "Restoree", "Decision")]
+    ctx = _Ctx(graph=g, root=root, books_by_folder={bucket.path: books},
+               modal_author_depth=None, book_like_children={}, direct_books={bucket.path: books})
+    assert ax_author_from_grouping(bucket, ctx) == []
+    assert ax_author_structure(bucket, ctx) == []
+
+
+def test_person_named_grouping_still_votes_author():
+    from colophon.core.node_classify import _Ctx, ax_author_from_grouping
+    from colophon.core.graph_classify import GROUPING
+    g = Graph()
+    root = Path("/lib")
+    author = _dir(g, "/lib/Anne McCaffrey", kind=GROUPING)
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={})
+    assert any(e.kind == "author" for e in ax_author_from_grouping(author, ctx))
