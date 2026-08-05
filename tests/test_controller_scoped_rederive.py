@@ -151,3 +151,23 @@ def test_scoped_matches_whole_root_for_nested_entity_spine(tmp_path):
     ctrl._resync_roots({ctrl._scan_root_for_path(book.source_folder)})
     assert after_scope == _derivation(ctx)
     ctx.close()
+
+
+def test_cleanup_remove_is_scoped_and_matches_whole_root(tmp_path):
+    # cleanup_remove (the book-removal path used by delete_book_from_disk etc.) re-derives scoped, and
+    # must reach the same fixed point a whole-root re-derive would — with the removed book's node pruned.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    _two_book_author(ctrl, ingest)
+    victim = next(b for b in ctx.books.list_all() if "Dragonflight" in b.source_folder.name)
+    keep = next(b for b in ctx.books.list_all() if "Dragonquest" in b.source_folder.name)
+
+    ctrl.cleanup_remove([victim.id])
+    assert ctx.books.get(victim.id) is None            # removed
+    assert ctx.books.get(keep.id) is not None          # sibling intact
+    after_scoped = _derivation(ctx)
+
+    ctrl._resync_roots({ctrl._scan_root_for_path(keep.source_folder)})
+    assert after_scoped == _derivation(ctx)            # scoped reached the whole-root fixed point
+    # the removed book's graph node is gone
+    assert not any(n.attrs.get("book_id") == victim.id for n in ctx.library_graph.nodes.values())
+    ctx.close()

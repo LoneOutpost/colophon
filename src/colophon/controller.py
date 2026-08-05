@@ -986,25 +986,29 @@ class AppController:
 
     def cleanup_remove(self, book_ids: Iterable[str]) -> int:
         """Delete the given stale books and their satellite rows (edit history,
-        operations) in one transaction, then re-derive the affected graph roots so
-        the removed books' nodes and edges are pruned. Entity aliases, known
-        entities and node overrides are left untouched — user-declared, not
-        file-derived. Returns the number of books removed."""
+        operations) in one transaction, then re-derive the removed books' entity
+        subtrees (scoped, not the whole scan root) so their nodes and edges are pruned
+        and any sibling/ancestor derivation updated. Entity aliases, known entities and
+        node overrides are left untouched — user-declared, not file-derived. Returns the
+        number of books removed."""
         ids = list(book_ids)
         if not ids:
             return 0
         removal = set(ids)
-        roots = {
-            Path(n.root)
+        # The removed books' source folders (captured before deletion, from their book nodes) — the
+        # scope the re-derive must reach. Scoped, so a single-book delete costs ~ms, not a whole-root
+        # reclassify. The scoped delta prunes the removed books' now-stale nodes/edges.
+        folders = {
+            Path(str(sf))
             for n in self.ctx.library_graph.nodes.values()
-            if n.attrs.get("book_id") in removal
+            if n.attrs.get("book_id") in removal and (sf := n.attrs.get("source_folder"))
         }
         last = len(ids) - 1
         for i, bid in enumerate(ids):
             self.ctx.history.delete_for_book(bid, commit=False)
             self.ctx.operations.delete_for_book(bid, commit=False)
             self.ctx.books.delete(bid, commit=(i == last))  # final delete flushes the batch
-        self._resync_roots(roots)
+        self._resync_scope(folders)
         return len(ids)
 
     def remove_from_library(self, book_ids: Iterable[str]) -> int:
