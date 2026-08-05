@@ -723,10 +723,10 @@ async def tag_dialog(
     *,
     refresh_list: Callable[[], None],
     refresh_status: Callable[[], None],
-    save_pending: Callable[[], bool],
+    save_pending: Callable[[], Awaitable[bool]],
 ) -> None:
     """Preview and write metadata tags to the book's files."""
-    save_pending()  # "Write" encompasses Save: persist editor edits first
+    await save_pending()  # "Write" encompasses Save: persist editor edits first
     plan = controller.tag_plan(book)
     with modal() as dialog, ui.card().classes("w-96"):
         ui.label(f"Write tags to {len(plan.files)} file(s)").classes("text-subtitle1")

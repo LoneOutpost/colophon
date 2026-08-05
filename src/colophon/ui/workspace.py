@@ -384,10 +384,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     "Discard", on_click=lambda: (d.close(), _clear_editor_state(), then())
                 ).props("flat color=negative")
 
-                def _save_and() -> None:
+                async def _save_and() -> None:
                     save_pending = editor_state["save_pending"]
                     if save_pending is not None:
-                        save_pending()
+                        await save_pending()
                     d.close()
                     then()
 
@@ -616,9 +616,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         if source:
                             ui.badge(controller.source_label(source)).props("outline").classes("colophon-chip").classes("self-center").tooltip(controller.source_tooltip(source))
 
-                def _save_pending(b=book) -> bool:
+                async def _save_pending(b=book) -> bool:
                     """Persist any pending field edits silently, advancing the editor's
-                    baseline. Returns True when something was saved."""
+                    baseline. Returns True when something was saved. The scoped re-derive runs off
+                    the event loop so a large-author subtree can't jank the socket."""
                     changed = {
                         f: (_editor_text(inputs[f]) or None)
                         for f in EDITABLE_FIELDS
@@ -626,7 +627,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     }
                     if not changed:
                         return False
-                    controller.save_fields(b, changed)
+                    await asyncio.to_thread(controller.save_fields, b, changed)
                     for f in changed:
                         originals[f] = _editor_text(inputs[f])
                     return True
@@ -634,8 +635,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 def _is_dirty() -> bool:
                     return any(_editor_text(inputs[f]) != originals[f] for f in EDITABLE_FIELDS)
 
-                def _save(b=book) -> None:
-                    if not _save_pending(b):
+                async def _save(b=book) -> None:
+                    if not await _save_pending(b):
                         ui.notify("No changes")
                         return
                     _set_dirty(False)
@@ -2531,7 +2532,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         if e.modifiers.shift:
             await editor_state["write"]()
         else:
-            editor_state["save"]()
+            await editor_state["save"]()
 
     ui.keyboard(on_key=_on_save_key, ignore=[])
     # Run via run_javascript (not a <script> in add_head_html): on the async index

@@ -440,3 +440,11 @@ def test_match_apply_is_offloaded():
     from colophon.ui import dialogs as dlg
     src = inspect.getsource(dlg.compare_dialog)  # holds the per-field match apply handler
     assert "asyncio.to_thread(controller.apply_match_fields" in src  # off the event loop
+
+
+def test_save_fields_is_offloaded():
+    import inspect
+
+    from colophon.ui import workspace as ws
+    src = inspect.getsource(ws.render_workspace)
+    assert "asyncio.to_thread(controller.save_fields" in src  # field save runs off the event loop
