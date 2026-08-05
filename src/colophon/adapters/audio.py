@@ -98,6 +98,7 @@ def _read_audio_metadata(
     sf = SourceFile(
         path=path,
         size=size,
+        mtime_ns=mtime_ns,
         duration_seconds=duration,
         ext=ext,
         bitrate=bitrate,

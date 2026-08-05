@@ -154,3 +154,19 @@ def test_ffprobe_still_runs_for_a_file_with_data(tmp_path, monkeypatch):
 
     sf, _ = read_audio_metadata(p)
     assert sf.duration_seconds == 123.0  # ffprobe ran and recovered it
+
+
+def test_source_file_carries_mtime_ns(tmp_path):
+    from mutagen.id3 import ID3, TPE1
+
+    from colophon.adapters.audio import clear_audio_metadata_cache, read_audio_metadata
+
+    clear_audio_metadata_cache()
+    p = tmp_path / "01.mp3"
+    p.write_bytes(b"")
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=["A"]))
+    tags.save(p)
+    sf, _ = read_audio_metadata(p)
+    assert sf.mtime_ns == p.stat().st_mtime_ns
+    assert sf.mtime_ns > 0

@@ -135,6 +135,7 @@ class DetectedWork(_Base):
 class SourceFile(_Base):
     path: Path
     size: int
+    mtime_ns: int = 0      # st_mtime_ns at scan time (0 = pre-fingerprint record; change-detection key)
     duration_seconds: float
     ext: str
     bitrate: int = 0       # bits per second (0 = unknown)
