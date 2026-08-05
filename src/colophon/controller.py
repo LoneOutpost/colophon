@@ -2631,7 +2631,7 @@ class AppController:
         merged = _svc_combine(self.ctx.books, self.ctx.grouping, folder, self.folder_books(folder))
         self._graph_cache.clear()
         self.invalidate(merged, Phase.IDENTIFY)  # re-derive fields/chapters over the new file set
-        self._resync_roots({self._scan_root_for_path(folder)})
+        self._resync_scope({folder})  # grouping change is folder-local — scope the re-derive to it
         return self._hydrate([self.ctx.books.get(merged.id)])[0]
 
     def reassign_file(self, book: BookUnit, path: Path) -> BookUnit:
@@ -2731,7 +2731,7 @@ class AppController:
         books from the snapshot. Returns the restored books."""
         restored = _svc_uncombine(self.ctx.books, self.ctx.grouping, folder)
         self._graph_cache.clear()
-        self._resync_roots({self._scan_root_for_path(folder)})
+        self._resync_scope({folder})  # grouping change is folder-local — scope the re-derive to it
         return restored
 
     def folder_is_combined(self, folder: Path) -> bool:

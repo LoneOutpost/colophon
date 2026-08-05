@@ -41,6 +41,15 @@ def _two_book_author(ctrl, ingest):
     ctrl.scan([ingest])
 
 
+def _two_book_one_folder(ctrl, ingest):
+    """One folder that scans into two books — the Combine/Uncombine subject."""
+    folder = ingest / "Anne McCaffrey" / "Anthology"
+    _mp3(folder / "Dragonflight.mp3", title="Dragonflight")
+    _mp3(folder / "Dragonquest.mp3", title="Dragonquest")
+    ctrl.scan([ingest])
+    return folder
+
+
 def test_resync_scope_persists_and_keeps_sibling(tmp_path):
     ctx, ctrl, ingest = _ctrl(tmp_path)
     _two_book_author(ctrl, ingest)
@@ -170,4 +179,37 @@ def test_cleanup_remove_is_scoped_and_matches_whole_root(tmp_path):
     assert after_scoped == _derivation(ctx)            # scoped reached the whole-root fixed point
     # the removed book's graph node is gone
     assert not any(n.attrs.get("book_id") == victim.id for n in ctx.library_graph.nodes.values())
+    ctx.close()
+
+
+def test_combine_folder_is_scoped_and_matches_whole_root(tmp_path):
+    # combine_folder collapses a folder's books into one; the grouping change is folder-local, so it
+    # re-derives scoped and must reach the same fixed point a whole-root re-derive would.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = _two_book_one_folder(ctrl, ingest)
+    assert len([b for b in ctx.books.list_all() if b.source_folder == folder]) == 2
+
+    merged = ctrl.combine_folder(folder)
+    in_folder = [b for b in ctx.books.list_all() if b.source_folder == folder]
+    assert len(in_folder) == 1 and len(merged.source_files) == 2   # one book, two chapters
+    after_scoped = _derivation(ctx)
+
+    ctrl._resync_roots({ctrl._scan_root_for_path(folder)})
+    assert after_scoped == _derivation(ctx)            # scoped reached the whole-root fixed point
+    ctx.close()
+
+
+def test_uncombine_folder_is_scoped_and_matches_whole_root(tmp_path):
+    # uncombine_folder reverses a combine; the same folder-local grouping change re-derives scoped and
+    # must reach the whole-root fixed point.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = _two_book_one_folder(ctrl, ingest)
+    ctrl.combine_folder(folder)
+
+    restored = ctrl.uncombine_folder(folder)
+    assert len(restored) == 2 and not ctrl.folder_is_combined(folder)
+    after_scoped = _derivation(ctx)
+
+    ctrl._resync_roots({ctrl._scan_root_for_path(folder)})
+    assert after_scoped == _derivation(ctx)            # scoped reached the whole-root fixed point
     ctx.close()
