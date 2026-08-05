@@ -58,3 +58,38 @@ def test_trailing_small_number_is_a_sequence():
     # A 1-3 digit trailing number is still a sequence, so real series detection is preserved.
     work = cluster([Path("/x/Author - Discworld 3.mp3")]).detected_works[0]
     assert work.series == "Discworld" and work.sequence == 3.0
+
+
+def test_track_of_total_leading_clusters_as_one_book():
+    from colophon.core.models import ContentKind
+    stems = [f"/x/Crome Yellow/{i:02d}-12 - Chrome Yellow - Aldous Huxley.opus" for i in range(1, 13)]
+    cr = cluster([Path(s) for s in stems])
+    assert cr.content_kind is ContentKind.MULTI or len(cr.detected_works) == 1
+    assert len(cr.detected_works) == 1
+    assert cr.detected_works[0].label == "Chrome Yellow"
+
+
+def test_track_of_total_trailing_clusters_as_one_book():
+    stems = [f"/x/JDatE/David Wong - John Dies at the End {i:02d}-12.opus" for i in range(1, 13)]
+    cr = cluster([Path(s) for s in stems])
+    assert len(cr.detected_works) == 1
+
+
+def test_lone_track_of_total_file_titles_by_text_not_number():
+    w = cluster([Path("/x/Crome Yellow/01-12 - Chrome Yellow - Aldous Huxley.opus")]).detected_works[0]
+    assert w.label == "Chrome Yellow"
+
+
+def test_is_index_token_recognizes_compound_and_number():
+    from colophon.core.filename_cluster import _is_index_token
+    for t in ("01", "01-12", "1-40", "02-01", "01/12", "1x40"):
+        assert _is_index_token(t), t
+    # A pure number ("1984") is an index token as it always has been (_is_num); the compound
+    # year-guard is that a 4-digit range is NOT read as a compound index.
+    for t in ("chrome", "catch-22", "1984-1985", "30-day"):
+        assert not _is_index_token(t), t
+
+
+def test_distinct_titles_with_numbers_still_split():
+    cr = cluster([Path("/x/Dune 01.mp3"), Path("/x/Foundation 01.mp3")])
+    assert len(cr.detected_works) == 2

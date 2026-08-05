@@ -31,6 +31,10 @@ _WHITESPACE = re.compile(r"\s")                # any whitespace: marks a spaced 
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")    # camelCase boundary
 _LETTER_DIGIT = re.compile(r"(?<=[A-Za-z])(?=\d)")  # letter->digit ONLY ("Part1"->"Part 1"; "7th" intact)
 _NUM = re.compile(r"^\d+(?:\.\d+)?$")          # integer or decimal token
+# A compound track-of-total / disc-track / range token: 1-3-digit numbers joined by -, /, or x
+# ("01-12", "1-40", "02-01", "01/12", "1x40"). The 1-3-digit bound mirrors _NUM so a 4-digit year
+# ("1984-1985") is never read as an index.
+_INDEX_COMPOUND = re.compile(r"^\d{1,3}(?:[-/x]\d{1,3})+$", re.IGNORECASE)
 # A trailing sequence number within a chunk ("Wheel of Time 3"). Bounded to 1-3 integer digits + an
 # optional 2-place decimal, matching sequence_affix._NUM so a 4-digit year ("Dune 1984") is never
 # read as a sequence. (This chunk-local, space-separated form is why we can't just call
@@ -80,6 +84,12 @@ def _is_num(tok: str) -> bool:
     return bool(_NUM.match(tok))
 
 
+def _is_index_token(tok: str) -> bool:
+    """True if `tok` is a pure number or a compound track-of-total/disc-track index — the tokens a
+    filename varies across a book's parts, excluded from the text signature."""
+    return _is_num(tok) or bool(_INDEX_COMPOUND.match(tok))
+
+
 def _is_chapter_marker(chunk: str) -> bool:
     """True if a chunk is an explicit chapter/part index ("Chap 01") or front/back matter
     ("Epilogue"). See `_CHAPTER_MARKER`."""
@@ -87,8 +97,9 @@ def _is_chapter_marker(chunk: str) -> bool:
 
 
 def _text_sig(tokens: list[str]) -> tuple[str, ...]:
-    """The non-number tokens -- a chunk's 'text signature'."""
-    return tuple(t for t in tokens if not _is_num(t))
+    """The non-index tokens -- a chunk's 'text signature'. A track-of-total token ('01-12') is an
+    index, not text, so files that differ only in it share a signature and cluster as one book."""
+    return tuple(t for t in tokens if not _is_index_token(t))
 
 
 def _trailing_number(text: str) -> float | None:
@@ -129,17 +140,22 @@ def _series_and_seq(chunks: list[str]) -> tuple[str | None, float | None]:
 
 
 def _title_chunks(chunks: list[str], stem: str = "") -> list[str]:
-    """Chunks the title is built from: drop a leading number-only chunk (a track/sequence index)
-    ONLY when the original stem reads as a strong sequence affix (spaced or bracketed); an unspaced
-    compound like '30-Day' keeps its number. Keeps at least the last chunk."""
+    """Chunks the title is built from. A leading COMPOUND track-of-total index ('01-12') is always
+    dropped (two joined numbers are never a title). Then the original rule: drop a leading pure-number
+    chunk unless the stem reads as a weak sequence affix (which keeps an unspaced compound like
+    '30-Day' or a title-number like '2001'). Keeps at least the last chunk."""
     from colophon.core.sequence_affix import parse_sequence_affix
+    i = 0
+    while i < len(chunks) - 1 and (toks := _tokens(chunks[i])) and all(_INDEX_COMPOUND.match(t) for t in toks):
+        i += 1
+    chunks = chunks[i:]
     affix = parse_sequence_affix(stem)
     if affix is not None and affix.confidence == "weak":
         return chunks
-    i = 0
-    while i < len(chunks) - 1 and not _text_sig(_tokens(chunks[i])):
-        i += 1
-    return chunks[i:]
+    j = 0
+    while j < len(chunks) - 1 and not _text_sig(_tokens(chunks[j])):
+        j += 1
+    return chunks[j:]
 
 
 def _multi_work(file: Path, chunks: list[str]) -> DetectedWork:
