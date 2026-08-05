@@ -14,18 +14,41 @@ _YEAR_PREFIX = re.compile(r"^\s*(\d{4})\s*[-–—_]\s*")            # "1981 - "
 _READ_BY = re.compile(r"read by\s+([^)]+)", re.IGNORECASE)       # "read by Lorna Raver" (up to ')')
 _NARR_SPLIT = re.compile(r"\s*(?:,|&|\band\b)\s*", re.IGNORECASE)
 _TRAILING_SEP = re.compile(r"[\s\-–—]+$")  # noqa: RUF001
+# "(Old Man's War Book #6) Title", "(Stormlight #3) Title" — a parenthesized series + book number.
+_SERIES_PAREN = re.compile(r"^\s*\(\s*(?P<series>.+?)\s+(?:book\s+)?#\s*(?P<seq>\d+(?:\.\d+)?)\s*\)\s*",
+                           re.IGNORECASE)
+# "#1 - Title", "#12 - Title" — a bare book number (the parent folder names the series, not this).
+_BOOK_NUM = re.compile(r"^\s*#\s*(?P<seq>\d+(?:\.\d+)?)\s*[-–—_]\s*")  # noqa: RUF001
 
 
 class FolderTitle(NamedTuple):
     title: str
     year: int | None
     narrators: list[str]
+    series: str | None = None
+    sequence: float | None = None
 
 
 def parse_folder_title(name: str) -> FolderTitle:
-    """`YEAR - Title (… read by A and B)` -> (title, year, [A, B]). Strips a leading 4-digit year and a
-    `read by …` span (re-closing an edition parenthetical), leaving the rest as the title."""
+    """`YEAR - Title (… read by A and B)` -> (title, year, [A, B]). Also strips a leading book-number /
+    series prefix (`#1 - Title`, `(Series Book #6) Title`), populating `series`/`sequence`. Strips a
+    leading 4-digit year and a `read by …` span (re-closing an edition parenthetical), leaving the
+    rest as the title."""
     s = name.strip()
+
+    series: str | None = None
+    sequence: float | None = None
+    sm = _SERIES_PAREN.match(s)
+    if sm:
+        # Strip a trailing comma: "(The Expanse, #4)" / "(Series, Book #1)" export style.
+        series = sm.group("series").strip().rstrip(",").strip() or None
+        sequence = float(sm.group("seq"))
+        s = s[sm.end():]
+    else:
+        bm = _BOOK_NUM.match(s)
+        if bm:
+            sequence = float(bm.group("seq"))
+            s = s[bm.end():]
 
     year: int | None = None
     m = _YEAR_PREFIX.match(s)
@@ -50,4 +73,4 @@ def parse_folder_title(name: str) -> FolderTitle:
         else:  # bare "Title - read by X" with no parenthetical
             s = _TRAILING_SEP.sub("", s[:rm.start()])
 
-    return FolderTitle(re.sub(r"\s+", " ", s).strip(), year, narrators)
+    return FolderTitle(re.sub(r"\s+", " ", s).strip(), year, narrators, series, sequence)

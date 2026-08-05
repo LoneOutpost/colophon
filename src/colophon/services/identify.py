@@ -141,6 +141,10 @@ def _reconcile_from(book: BookUnit, evidence: Evidence, *, tiers: str = "all") -
     dirf = dict(evidence.directory_fields)
     if parsed.year is not None:
         dirf.setdefault("year", str(parsed.year))
+    if parsed.series is not None:
+        dirf.setdefault("series", parsed.series)
+    if parsed.sequence is not None:
+        dirf.setdefault("sequence", str(parsed.sequence))
     reconcile(
         book,
         embedded=evidence.embedded,

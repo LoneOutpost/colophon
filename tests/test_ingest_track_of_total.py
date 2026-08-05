@@ -31,3 +31,21 @@ def test_track_of_total_folder_identifies_as_one_book_by_parent_author(tmp_path)
     assert b.title in ("Chrome Yellow", "Crome Yellow"), b.title
     assert b.authors == ["Aldous Huxley"], b.authors
     ctx.close()
+
+
+def test_series_book_prefix_folder_sets_title_series_sequence(tmp_path):
+    # A "(Series Book #N) Title" folder identifies title + series + sequence from the folder name.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    folder = (ingest / "MC Beaton" / "A Hamish Macbeth Mystery"
+              / "(A Hamish Macbeth Mystery Book #1) Death of a Gossip")
+    for i in range(1, 5):
+        _untagged(folder / f"(A Hamish Macbeth Mystery Book #1) Death of a Gossip - Part {i:02d}.mp3")
+    ctrl.scan([ingest])
+
+    books = [ctx.books.get(i) for i in ctx.books.ids_in_folder(folder)]
+    assert len(books) == 1
+    b = books[0]
+    assert b.title == "Death of a Gossip"
+    assert [s.name for s in b.series] == ["A Hamish Macbeth Mystery"]
+    assert b.series[0].sequence == 1.0
+    ctx.close()
