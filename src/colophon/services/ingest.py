@@ -97,6 +97,23 @@ def _empty_fields(book: BookUnit) -> set[str]:
     return out
 
 
+def _files_changed(book: BookUnit, current_paths: list[Path]) -> bool:
+    """True if the book's files on disk differ from its stored fingerprint — a file added or removed,
+    or any file's (mtime_ns, size) changed since the last scan. An un-stat-able path counts as
+    changed (conservative: never silently keep stale metadata). Cheap: one stat per file, no parse."""
+    stored = {sf.path: (sf.mtime_ns, sf.size) for sf in book.source_files}
+    if set(current_paths) != set(stored):
+        return True
+    for p in current_paths:
+        try:
+            st = p.stat()
+        except OSError:
+            return True
+        if (st.st_mtime_ns, st.st_size) != stored[p]:
+            return True
+    return False
+
+
 def _run_local(
     book: BookUnit,
     phase: Phase,
