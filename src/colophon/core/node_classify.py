@@ -674,11 +674,12 @@ def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | N
 
 
 def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
-    """For a book under a folder classified `series`, take its sequence from the child-name affix
-    (the reliable position number) and stamp series name + sequence when it has no stronger series.
-    GRAPHING provenance; MATCH overrules. Never touch a tag/datafile/match/manual series. Title
-    affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) runs after
-    classification and owns the book's title."""
+    """For a book under a folder classified `series`, stamp series name + sequence when it has no
+    stronger series. The sequence comes from the book's own folder's explicit book number
+    ("(Series Book #N)" / "#N -"), falling back to the child-name affix ramp ("02 - Yendi") for a
+    plain numbered shelf. GRAPHING provenance; a tag/datafile/match/manual series is never touched.
+    Title affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) owns the title."""
+    from colophon.core.folder_title import parse_folder_title
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
     fillable = WEAK_PROV | {Provenance.GRAPHING.value}
@@ -686,11 +687,14 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
         node = _nearest_series(graph, book.source_folder, root)
         if node is None or not node.kind_value:
             continue
-        aff = parse_sequence_affix(_child_name(node.path, book))
-        if aff is None:
+        seq = parse_folder_title(book.source_folder.name).sequence
+        if seq is None:
+            aff = parse_sequence_affix(_child_name(node.path, book))
+            seq = aff.sequence if aff is not None else None
+        if seq is None:
             continue
         if not book.series or book.provenance.get("series") in fillable:
-            book.series = [SeriesRef(name=node.kind_value, sequence=aff.sequence)]
+            book.series = [SeriesRef(name=node.kind_value, sequence=seq)]
             book.provenance["series"] = Provenance.GRAPHING.value
 
 

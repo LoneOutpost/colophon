@@ -679,3 +679,58 @@ def test_person_named_grouping_still_votes_author():
     ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
                book_like_children={})
     assert any(e.kind == "author" for e in ax_author_from_grouping(author, ctx))
+
+
+def _carrier_book(folder: str, title: str):
+    # A (Series Book #N) leaf book with a track-numbered filename, as clustered on disk.
+    from colophon.core.models import SourceFile
+    b = _titled_book(folder, title)
+    b.source_files = [SourceFile(
+        path=Path(folder) / f"01-04-Keith Douglass - [Carrier] - {title}.opus",
+        size=1, mtime_ns=1, ext="opus", duration_seconds=1.0)]
+    return b
+
+
+def test_fill_series_ramp_takes_sequence_from_series_book_prefix_folder():
+    # Each (Carrier Book #N) leaf folder is its own series node; the sequence must come from the
+    # folder's book number, not the filename's leading track number (which is 01 for every book).
+    from colophon.core.graph import BookNode
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    _dir(g, "/lib/Keith Douglass")
+    _dir(g, "/lib/Keith Douglass/Carrier")
+    books = []
+    for n, title in [(2, "Viper Strike"), (3, "Armageddon Mode")]:
+        folder = f"/lib/Keith Douglass/Carrier/(Carrier Book #{n}) {title}"
+        _dir(g, folder, kind="series", kind_value="Carrier")
+        b = _carrier_book(folder, title)
+        g.books[f"{folder}:0"] = BookNode(id=f"{folder}:0", book=b, owns=[], dir_id=folder)
+        books.append((n, b))
+
+    _fill_series_ramp(g, [b for _, b in books], root=root)
+
+    seqs = {b.title: b.series[0].sequence for _, b in books}
+    assert seqs == {"Viper Strike": 2.0, "Armageddon Mode": 3.0}, seqs
+
+
+def test_fill_series_ramp_does_not_overwrite_a_hard_series():
+    from colophon.core.graph import BookNode
+    from colophon.core.models import Provenance, SeriesRef
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    folder = "/lib/Keith Douglass/Carrier/(Carrier Book #2) Viper Strike"
+    _dir(g, folder, kind="series", kind_value="Carrier")
+    b = _carrier_book(folder, "Viper Strike")
+    b.series = [SeriesRef(name="Carrier", sequence=9.0)]
+    b.provenance["series"] = Provenance.TAG.value          # hard: from the file's own tag
+    g.books[f"{folder}:0"] = BookNode(id=f"{folder}:0", book=b, owns=[], dir_id=folder)
+
+    _fill_series_ramp(g, [b], root=root)
+
+    assert b.series[0].sequence == 9.0                     # untouched
+    assert b.provenance["series"] == Provenance.TAG.value
