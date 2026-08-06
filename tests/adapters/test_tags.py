@@ -108,7 +108,7 @@ def test_tags_from_loaded_empty_for_headerless_and_nonaudio():
 
     assert tags_from_loaded(_FakeMp3(), Path("x.mp3")) == EmbeddedTags()
     # An unsupported extension -> empty regardless of the object.
-    assert tags_from_loaded(object(), Path("x.ogg")) == EmbeddedTags()
+    assert tags_from_loaded(object(), Path("x.wav")) == EmbeddedTags()
     # A None object (MutagenFile failed to identify) -> empty.
     assert tags_from_loaded(None, Path("x.m4b")) == EmbeddedTags()
 
