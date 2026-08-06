@@ -16,6 +16,9 @@ from colophon.core.models import EmbeddedTags
 # (round-trip parity depends on read and write routing a file to the same codec).
 _MP3_EXT = ".mp3"
 _MP4_EXTS = {".m4a", ".m4b", ".mp4", ".aac"}
+# Vorbis-comment formats (opus/ogg/flac): mutagen exposes each as a case-insensitive str -> list[str]
+# mapping, so one handler pair serves all three.
+_VORBIS_EXTS = {".opus", ".ogg", ".oga", ".flac"}
 
 
 def read_embedded_tags(path: Path) -> EmbeddedTags:
@@ -39,6 +42,13 @@ def read_embedded_tags(path: Path) -> EmbeddedTags:
             return _tags_from_mp4(MP4(path))
         except (MutagenError, OSError):
             return EmbeddedTags()
+    if ext in _VORBIS_EXTS:
+        import mutagen
+
+        try:
+            return _tags_from_vorbis(mutagen.File(path))
+        except (MutagenError, OSError):
+            return EmbeddedTags()
     return EmbeddedTags()
 
 
@@ -54,6 +64,8 @@ def tags_from_loaded(audio, path: Path) -> EmbeddedTags:
         return _tags_from_id3(id3) if id3 is not None else EmbeddedTags()
     if ext in _MP4_EXTS:
         return _tags_from_mp4(audio) if audio is not None else EmbeddedTags()
+    if ext in _VORBIS_EXTS:
+        return _tags_from_vorbis(audio) if audio is not None else EmbeddedTags()
     return EmbeddedTags()
 
 
@@ -129,6 +141,33 @@ def _tags_from_mp4(m) -> EmbeddedTags:
         description=_first(m.get("desc")) or _first(m.get("\xa9cmt")),
         asin=freeform("asin"),
         isbn=freeform("isbn"),
+        track=track,
+    )
+
+
+def _tags_from_vorbis(audio) -> EmbeddedTags:
+    """Build EmbeddedTags from a loaded vorbis-comment container (OggOpus/OggVorbis/FLAC), which
+    behaves as a case-insensitive str -> list[str] mapping. `audio` None (unreadable) -> empty tags."""
+    if audio is None:
+        return EmbeddedTags()
+
+    def get(key: str) -> str | None:
+        return _first(audio.get(key))
+
+    trk = (get("TRACKNUMBER") or "").split("/")[0].strip()
+    track = int(trk) if trk.isdigit() else None
+    return EmbeddedTags(
+        title=get("TITLE"),
+        album=get("ALBUM"),
+        artist=get("ARTIST"),
+        narrator=get("NARRATOR"),
+        series=get("SERIES"),
+        sequence=to_float(get("SERIES-PART")),
+        year=year_or_none(get("DATE")),
+        genre=get("GENRE"),
+        description=get("DESCRIPTION"),
+        asin=get("ASIN"),
+        isbn=get("ISBN"),
         track=track,
     )
 
