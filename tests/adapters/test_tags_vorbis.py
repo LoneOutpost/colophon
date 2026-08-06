@@ -100,3 +100,11 @@ def test_write_leaves_unmanaged_tags_intact(tmp_path, ext):
 
     write_embedded_tags(p, _full_tags())
     assert mutagen.File(p).get("COPYRIGHT") == ["ACME"]
+
+
+def test_corrupt_vorbis_file_reads_empty_and_write_raises(tmp_path):
+    p = tmp_path / "garbage.opus"
+    p.write_bytes(b"not an ogg stream at all")
+    assert read_embedded_tags(p) == EmbeddedTags()     # unreadable -> empty, no raise
+    with pytest.raises(TagWriteError):
+        write_embedded_tags(p, EmbeddedTags(title="x"))
