@@ -1,3 +1,4 @@
+import base64
 import shutil
 import subprocess
 from pathlib import Path
@@ -5,7 +6,12 @@ from pathlib import Path
 import mutagen
 import pytest
 
-from colophon.adapters.tags import read_embedded_tags, tags_from_loaded, write_embedded_tags
+from colophon.adapters.tags import (
+    embed_cover,
+    read_embedded_tags,
+    tags_from_loaded,
+    write_embedded_tags,
+)
 from colophon.core.errors import TagWriteError
 from colophon.core.models import EmbeddedTags
 
@@ -135,10 +141,6 @@ def test_tagged_opus_book_identity_comes_from_the_tag(tmp_path):
     finally:
         ctx.close()
 
-
-import base64
-
-from colophon.adapters.tags import embed_cover
 
 # A 1x1 PNG.
 _PNG = base64.b64decode(
