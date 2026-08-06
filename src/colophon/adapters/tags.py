@@ -335,6 +335,30 @@ def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
             m = MP4(path)
             m["covr"] = [MP4Cover(image_bytes, imageformat=fmt)]
             m.save()
+        elif ext in _VORBIS_EXTS:
+            import base64
+
+            from mutagen.flac import FLAC, Picture
+
+            pic = Picture()
+            pic.type = 3          # front cover
+            pic.mime = mime
+            pic.data = image_bytes
+            if ext == ".flac":
+                flac = FLAC(path)
+                flac.clear_pictures()
+                flac.add_picture(pic)
+                flac.save()
+            else:                 # ogg / opus: base64 METADATA_BLOCK_PICTURE comment
+                import mutagen
+
+                audio = mutagen.File(path)
+                if audio is None:
+                    raise TagWriteError(f"unreadable audio container: {path}")
+                if audio.tags is None:
+                    audio.add_tags()
+                audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
+                audio.save()
         else:
             raise TagWriteError(f"unsupported audio format for cover: {ext}")
     except TagWriteError:

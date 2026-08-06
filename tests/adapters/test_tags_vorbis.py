@@ -134,3 +134,47 @@ def test_tagged_opus_book_identity_comes_from_the_tag(tmp_path):
         assert book.authors == ["The Real Author"], book.authors
     finally:
         ctx.close()
+
+
+import base64
+
+from colophon.adapters.tags import embed_cover
+
+# A 1x1 PNG.
+_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQAY3Y2wAAAAAElFTkSuQmCC")
+_PNG2 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def _read_cover(path) -> bytes | None:
+    from mutagen.flac import Picture
+    a = mutagen.File(path)
+    if path.suffix.lower() == ".flac":
+        return a.pictures[0].data if a.pictures else None
+    b64 = a.get("metadata_block_picture")
+    return Picture(base64.b64decode(b64[0])).data if b64 else None
+
+
+@pytest.mark.parametrize("ext", _FORMATS)
+def test_embed_cover_round_trips(tmp_path, ext):
+    p = _silent(tmp_path / f"book{ext}")
+    embed_cover(p, _PNG, "image/png")
+    assert _read_cover(p) == _PNG
+
+
+@pytest.mark.parametrize("ext", _FORMATS)
+def test_embed_cover_replaces_existing(tmp_path, ext):
+    p = _silent(tmp_path / f"book{ext}")
+    embed_cover(p, _PNG, "image/png")
+    embed_cover(p, _PNG2, "image/png")
+    assert _read_cover(p) == _PNG2
+    if ext == ".flac":                      # exactly one picture, not appended
+        assert len(mutagen.File(p).pictures) == 1
+
+
+def test_embed_cover_corrupt_vorbis_raises(tmp_path):
+    p = tmp_path / "garbage.opus"
+    p.write_bytes(b"not an ogg stream at all")
+    with pytest.raises(TagWriteError):
+        embed_cover(p, _PNG, "image/png")
