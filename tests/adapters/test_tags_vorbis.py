@@ -62,3 +62,41 @@ def test_tags_from_loaded_matches_read_embedded_tags(tmp_path, ext):
 
     assert tags_from_loaded(mutagen.File(p), p) == read_embedded_tags(p)
     assert read_embedded_tags(p).title == "Foundation and Earth"
+
+
+def _full_tags() -> EmbeddedTags:
+    return EmbeddedTags(
+        title="Viper Strike", album="Carrier", artist="Keith Douglass",
+        narrator="Frank Muller", series="Carrier", sequence=2.0, year=1996,
+        genre="Science Fiction", description="A book.", asin="B000XYZ", isbn="123", track=3,
+    )
+
+
+@pytest.mark.parametrize("ext", _FORMATS)
+def test_write_then_read_round_trips_every_field(tmp_path, ext):
+    p = _silent(tmp_path / f"book{ext}")
+    write_embedded_tags(p, _full_tags())
+    assert read_embedded_tags(p) == _full_tags()
+
+
+@pytest.mark.parametrize("ext", _FORMATS)
+def test_write_none_clears_a_previously_set_field(tmp_path, ext):
+    p = _silent(tmp_path / f"book{ext}")
+    write_embedded_tags(p, _full_tags())
+    write_embedded_tags(p, EmbeddedTags(title="Only Title"))
+    got = read_embedded_tags(p)
+    assert got.title == "Only Title"
+    assert got.series is None and got.sequence is None and got.track is None
+
+
+@pytest.mark.parametrize("ext", _FORMATS)
+def test_write_leaves_unmanaged_tags_intact(tmp_path, ext):
+    p = _silent(tmp_path / f"book{ext}")
+    audio = mutagen.File(p)
+    if audio.tags is None:
+        audio.add_tags()
+    audio["COPYRIGHT"] = ["ACME"]     # not a managed field
+    audio.save()
+
+    write_embedded_tags(p, _full_tags())
+    assert mutagen.File(p).get("COPYRIGHT") == ["ACME"]

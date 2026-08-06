@@ -189,6 +189,8 @@ def write_embedded_tags(path: Path, tags: EmbeddedTags) -> None:
             _write_mp3(path, tags)
         elif ext in _MP4_EXTS:
             _write_mp4(path, tags)
+        elif ext in _VORBIS_EXTS:
+            _write_vorbis(path, tags)
         else:
             raise TagWriteError(f"unsupported audio format for writing: {ext}")
     except TagWriteError:
@@ -279,6 +281,35 @@ def _write_mp4(path: Path, tags: EmbeddedTags) -> None:
     if tags.track is not None:
         m["trkn"] = [(tags.track, 0)]
     m.save()
+
+
+def _write_vorbis(path: Path, tags: EmbeddedTags) -> None:
+    import mutagen
+
+    audio = mutagen.File(path)
+    if audio is None:
+        raise TagWriteError(f"unreadable audio container: {path}")
+    if audio.tags is None:
+        audio.add_tags()
+
+    def put(key: str, value: object) -> None:
+        audio.pop(key, None)          # clear first so a None value removes the field
+        if value is not None:
+            audio[key] = [str(value)]
+
+    put("TITLE", tags.title)
+    put("ALBUM", tags.album)
+    put("ARTIST", tags.artist)
+    put("DATE", tags.year)
+    put("GENRE", tags.genre)
+    put("DESCRIPTION", tags.description)
+    put("NARRATOR", tags.narrator)
+    put("SERIES", tags.series)
+    put("SERIES-PART", tags.sequence)
+    put("ASIN", tags.asin)
+    put("ISBN", tags.isbn)
+    put("TRACKNUMBER", tags.track)
+    audio.save()
 
 
 def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
