@@ -128,3 +128,21 @@ def test_non_series_bucket_is_not_the_author(tmp_path):
     for b in ctx.books.list_all():
         assert b.authors != ["Non-Series"], (b.title, b.authors)
     ctx.close()
+
+
+def test_numbered_series_shelf_book_gets_its_own_sequence(tmp_path):
+    # Each (Carrier Book #N) book keeps its own series sequence, not the shared filename track number.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    series = ingest / "Keith Douglass" / "Carrier"
+    for n, title in [(1, "Carrier"), (2, "Viper Strike"), (3, "Armageddon Mode")]:
+        for i in range(1, 5):
+            _untagged(series / f"(Carrier Book #{n}) {title}"
+                      / f"{i:02d}-04-Keith Douglass - [Carrier] - {title}.mp3")
+    ctrl.scan([ingest])
+
+    seqs = {}
+    for b in ctx.books.list_all():
+        assert b.series and b.series[0].name == "Carrier", (b.title, b.series)
+        seqs[b.title] = b.series[0].sequence
+    assert seqs == {"Carrier": 1.0, "Viper Strike": 2.0, "Armageddon Mode": 3.0}, seqs
+    ctx.close()
