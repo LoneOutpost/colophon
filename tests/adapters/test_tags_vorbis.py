@@ -108,3 +108,29 @@ def test_corrupt_vorbis_file_reads_empty_and_write_raises(tmp_path):
     assert read_embedded_tags(p) == EmbeddedTags()     # unreadable -> empty, no raise
     with pytest.raises(TagWriteError):
         write_embedded_tags(p, EmbeddedTags(title="x"))
+
+
+def test_tagged_opus_book_identity_comes_from_the_tag(tmp_path):
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+
+    ingest = tmp_path / "audio"
+    folder = ingest / "Some Uploader" / "whatever-folder"
+    p = _silent(folder / "track.opus")
+    audio = mutagen.File(p)
+    if audio.tags is None:
+        audio.add_tags()
+    audio["TITLE"] = ["The Real Title"]
+    audio["ARTIST"] = ["The Real Author"]
+    audio.save()
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite",
+                                   library_root=tmp_path / "lib", scan_paths=[ingest]))
+    try:
+        AppController(ctx).scan([ingest])
+        book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+        assert book.title == "The Real Title", book.title
+        assert book.authors == ["The Real Author"], book.authors
+    finally:
+        ctx.close()
