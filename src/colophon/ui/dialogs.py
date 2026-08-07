@@ -1570,11 +1570,15 @@ async def persist_dialog(
                     "Where each book will be organized under the library. Nothing moves "
                     "until you confirm."
                 ).classes("text-caption colophon-muted")
-                collisions = sum(1 for r in rows if r.collision)
-                if collisions:
+                placed = sum(1 for r in rows if r.disposition == "placed")
+                clashes = sum(1 for r in rows if r.disposition == "clash")
+                if placed:
                     ui.label(
-                        f"⚠ {collisions} destination(s) already exist — those books won't be "
-                        f"moved (they'll fail rather than overwrite)."
+                        f"{placed} already in their final location; they stay put but tags still update."
+                    ).classes("text-caption colophon-muted")
+                if clashes:
+                    ui.label(
+                        f"⚠ {clashes} will be skipped: a different file already sits at the destination."
                     ).classes("text-caption text-warning")
                 notready = sum(1 for b in books if not is_ready_to_persist(b))
                 if notready:
@@ -1592,7 +1596,10 @@ async def persist_dialog(
                             "white-space: nowrap"
                         ):
                             ui.icon(
-                                "warning" if (r.collision or r.blocked) else "east", size="1rem"
+                                "check" if r.disposition == "placed"
+                                else "warning" if (r.disposition == "clash" or r.blocked)
+                                else "east",
+                                size="1rem",
                             ).classes("colophon-muted")
                             ui.label(r.title)
                             ui.label(str(r.target)).classes("text-caption colophon-muted")
