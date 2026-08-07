@@ -1,7 +1,7 @@
 """Pure mapping from a finding (or a weak-identity review reason) to a plain-language
 suggestion and the set of next-actions that resolve it. UI-agnostic and unit-tested:
 `state_panel` renders these and wires each FixAction to a real behavior. Actions reuse
-existing surfaces (Acquire, Persist, Matches, Files, Re-probe, Acknowledge) — no new
+existing surfaces (Persist, Matches, Files, Re-probe, Acknowledge) — no new
 remedy operations here."""
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from colophon.core.models import FindingCode
 
 
 class FixAction(StrEnum):
-    ACQUIRE = "acquire"          # browse a connected store for a good copy of the file
     REPROBE = "reprobe"          # re-read this book's file durations, re-check the flag
     ORGANIZE = "organize"        # Persist > Organize (gated by blocking errors)
     FILES = "files"              # jump to the Files list to remove a duplicate
@@ -27,13 +26,10 @@ class Guidance(NamedTuple):
     actions: tuple[FixAction, ...]
 
 
-# Acquire is a convenience, not the mandate: the real fix (a correct copy of the file,
-# from wherever it lives) leads; the store browse is offered second.
 _CORRUPT = Guidance(
     "This file is corrupt or incomplete. The real fix is to replace it with a good copy "
-    "of the file, from wherever you have it. If the file lives on a connected store, you "
-    "can browse for it in Acquire. If you just want it gone, delete it from disk.",
-    (FixAction.ACQUIRE, FixAction.REPROBE, FixAction.DELETE),
+    "of the file, from wherever you have it. If you just want it gone, delete it from disk.",
+    (FixAction.REPROBE, FixAction.DELETE),
 )
 _MIXED = Guidance(
     "This folder holds more than one book. Persist, then Organize, files each one to its "
@@ -57,9 +53,9 @@ _MIXED_QUALITY = Guidance(
     (FixAction.FILES, FixAction.ACKNOWLEDGE),
 )
 _MISSING_TRACKS = Guidance(
-    "This book looks like it's missing one or more tracks from its sequence. Acquire the missing "
+    "This book looks like it's missing one or more tracks from its sequence. Add the missing "
     "files, or dismiss this note if the book is intentionally partial.",
-    (FixAction.ACQUIRE, FixAction.ACKNOWLEDGE),
+    (FixAction.ACKNOWLEDGE,),
 )
 
 _BY_CODE: dict[FindingCode, Guidance] = {

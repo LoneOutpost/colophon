@@ -9,11 +9,11 @@ def test_every_finding_code_has_guidance():
         assert isinstance(g.actions, tuple)
 
 
-def test_corrupt_audio_points_at_acquire_reprobe_delete_not_acknowledge():
+def test_corrupt_audio_points_at_reprobe_delete_not_acknowledge():
     g = finding_guidance(FindingCode.EMPTY_AUDIO)
-    assert g.actions == (FixAction.ACQUIRE, FixAction.REPROBE, FixAction.DELETE)
+    assert g.actions == (FixAction.REPROBE, FixAction.DELETE)
     assert FixAction.ACKNOWLEDGE not in g.actions  # blocking findings aren't acknowledgeable
-    # Acquire is a convenience, not the mandate: the real fix leads.
+    # the real fix is a good copy of the file.
     assert "replace it" in g.suggestion.lower()
 
 
@@ -61,10 +61,9 @@ def test_advisory_findings_offer_acknowledge():
         assert FixAction.ACKNOWLEDGE in finding_guidance(code).actions
 
 
-def test_missing_tracks_offers_acquire_and_acknowledge():
+def test_missing_tracks_offers_acknowledge():
     from colophon.core.guidance import FixAction, finding_guidance
     from colophon.core.models import FindingCode
 
     actions = finding_guidance(FindingCode.MISSING_TRACKS).actions
-    assert FixAction.ACQUIRE in actions
-    assert FixAction.ACKNOWLEDGE in actions
+    assert actions == (FixAction.ACKNOWLEDGE,)
