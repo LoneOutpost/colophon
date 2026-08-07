@@ -9,6 +9,7 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 from mutagen import MutagenError
 
+from colophon.adapters.audio_formats import AudioInfo, format_for
 from colophon.adapters.ffmpeg import FFmpegError, probe_duration_seconds
 from colophon.adapters.tags import read_embedded_tags, tags_from_loaded
 from colophon.core.audio_quality import codec_label
@@ -89,21 +90,19 @@ def _read_audio_metadata(
             except (FFmpegError, OSError):
                 # ffprobe found no duration (corrupt) or isn't installed — leave duration 0.
                 logger.warning(f"duration: no readable audio in {path} (mutagen and ffprobe failed)")
-    bitrate = sample_rate = channels = 0
-    if audio is not None and audio.info is not None:
-        bitrate = int(getattr(audio.info, "bitrate", 0) or 0)
-        sample_rate = int(getattr(audio.info, "sample_rate", 0) or 0)
-        channels = int(getattr(audio.info, "channels", 0) or 0)
     ext = path.suffix.lower().lstrip(".")
+    fmt = format_for(ext)
+    info = (fmt.read_info(audio, size=size, duration=duration) if fmt is not None
+            else AudioInfo(bitrate=0, sample_rate=0, channels=0))
     sf = SourceFile(
         path=path,
         size=size,
         mtime_ns=mtime_ns,
         duration_seconds=duration,
         ext=ext,
-        bitrate=bitrate,
-        sample_rate=sample_rate,
-        channels=channels,
+        bitrate=info.bitrate,
+        sample_rate=info.sample_rate,
+        channels=info.channels,
         codec=codec_label(ext),
     )
     return sf, tags
