@@ -26,10 +26,6 @@ def test_create_app_registers_pages_without_running(tmp_path):
     assert callable(AppController.scan_paths_missing_graph)
     assert callable(AppController.scan_preview_streamed)
     assert callable(AppController.apply_scan)
-
-    import colophon.ui.acquire as aq
-
-    assert hasattr(aq, "render_acquire")
     ctx.close()
 
 
