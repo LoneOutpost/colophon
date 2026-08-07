@@ -197,3 +197,44 @@ def test_organize_move_rederive_is_folder_scoped(tmp_path):
     # discovered by the scoped re-derive.
     assert _book_in(ctx, ingest / "Unrelated") is None
     ctx.close()
+
+
+def _persist_opts(**kw):
+    from colophon.adapters.lazylibrarian import PathPatterns
+    return EncodeJobOptions(encode=False, organize=True, delete_sources=False,
+                            patterns=PathPatterns(folder="$Author/$Title", single_file="$Title"), **kw)
+
+
+def test_persist_clash_is_skipped_not_failed(tmp_path):
+    from colophon.core.models import Phase, PhaseState
+    from colophon.core.phases import state_of
+    library = tmp_path / "ingest"                       # library == scan path so layout lines up
+    ctx, ctrl, ingest = _ctrl(tmp_path, library)
+    _mp3(ingest / "Some Author" / "Dune" / "01.mp3")    # source name != target name
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Some Author" / "Dune")
+    # occupy the target with a DIFFERENT file, after the scan so it isn't part of the book
+    (ingest / "Some Author" / "Dune" / "Dune.mp3").write_bytes(b"a different book")
+
+    res = ctrl._persist_book(book, _persist_opts())
+    assert res.status == "skipped"
+    assert "occupied" in (res.detail or "").lower()
+    assert (ingest / "Some Author" / "Dune" / "Dune.mp3").read_bytes() == b"a different book"
+    assert state_of(ctx.books.get(book.id), Phase.ORGANIZE) is not PhaseState.FAILED
+    ctx.close()
+
+
+def test_persist_already_placed_is_done_and_tags(tmp_path):
+    from colophon.core.models import Phase, PhaseState
+    from colophon.core.phases import state_of
+    library = tmp_path / "ingest"
+    ctx, ctrl, ingest = _ctrl(tmp_path, library)
+    _mp3(ingest / "Some Author" / "Dune" / "Dune.mp3")  # already in $Author/$Title/$Title layout
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Some Author" / "Dune")
+
+    res = ctrl._persist_book(book, _persist_opts())
+    assert res.status == "done", (res.status, res.detail)
+    assert (ingest / "Some Author" / "Dune" / "Dune.mp3").exists()   # not moved/removed
+    assert state_of(ctx.books.get(book.id), Phase.ORGANIZE) is PhaseState.FRESH
+    ctx.close()

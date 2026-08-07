@@ -171,7 +171,12 @@ from colophon.services.ingest import (
     sweep_missing,
 )
 from colophon.services.matching import gather_matches, query_for_book
-from colophon.services.organize import OrganizeResult, organize_book, organize_book_parts
+from colophon.services.organize import (
+    OrganizeResult,
+    organize_book,
+    organize_book_parts,
+    organize_disposition,
+)
 from colophon.services.resolve import (
     FileChanges,
     ResolveResult,
@@ -3157,12 +3162,17 @@ class AppController:
                 library_root, options.patterns or self.ctx.patterns, cbook, ordered
             )
             pairs = list(zip([sf.path for sf in ordered], targets, strict=True))
+            if organize_disposition([(s, d) for s, d in pairs]) == "clash":
+                return BookProcessResult(book_id=book.id, status="skipped",
+                                         detail="destination occupied by a different file")
             org = organize_book_parts(
                 self.ctx.books, book, pairs,
                 delete_sources=options.delete_sources,
             )
             if not org.moved or org.target_path is None:
-                return self._fail_persist(book, Phase.ORGANIZE, _organize_fail_detail(org))
+                # a race collision after the disposition check -> skip, don't fail
+                return BookProcessResult(book_id=book.id, status="skipped",
+                                         detail=_organize_fail_detail(org))
             total = len(ordered)
             batch_id = new_batch_id()
             for idx, dst in enumerate(targets, start=1):
@@ -3180,6 +3190,25 @@ class AppController:
             )
 
         # Encode path: transcode all source files into a single output, then organize + tag.
+        # Gate on the LIBRARY target's disposition before encoding: a clash is a benign skip (don't
+        # encode an unplaceable m4b); an already-placed m4b needs no re-encode, just a tag refresh.
+        org_target = None
+        if options.organize:
+            library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
+            org_target = build_target_path(
+                library_root, options.patterns or self.ctx.patterns, self._canonical_book(book)
+            )
+            disp = organize_disposition([(book.output_path, org_target)])
+            if disp == "clash":
+                return BookProcessResult(book_id=book.id, status="skipped",
+                                         detail="destination occupied by a different file")
+            if disp == "placed":
+                mark(book, Phase.ORGANIZE, PhaseState.FRESH)
+                resync_state(book)
+                book.touch()
+                self.ctx.books.upsert(book)
+                return self._tag_and_finish(book, book.output_path)
+
         target = self._encode_target(book)
         if target.exists() and target != book.output_path:
             return self._fail_persist(
@@ -3201,18 +3230,18 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
-        if options.organize:
-            library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
-            cbook = self._canonical_book(book)
-            target = build_target_path(
-                library_root, options.patterns or self.ctx.patterns, cbook
-            )
-            org = organize_book(self.ctx.books, book, book.output_path, target=target)
+        if options.organize and org_target is not None:
+            org = organize_book(self.ctx.books, book, book.output_path, target=org_target)
             if not org.moved or org.target_path is None:
-                return self._fail_persist(book, Phase.ORGANIZE, _organize_fail_detail(org))
+                # a race collision after the pre-encode disposition check -> skip, don't fail
+                return BookProcessResult(book_id=book.id, status="skipped",
+                                         detail=_organize_fail_detail(org))
 
+        return self._tag_and_finish(book, book.output_path)
+
+    def _tag_and_finish(self, book: BookUnit, resting: Path) -> BookProcessResult:
+        """Record the resting-path operation, tag the file, and report the persist done."""
         batch_id = new_batch_id()
-        resting = book.output_path
         self.ctx.operations.record(OperationRecord(
             batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
             target=str(resting), before=None, outcome="ok",
