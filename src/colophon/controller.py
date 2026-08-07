@@ -14,12 +14,7 @@ from typing import ClassVar
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import PATTERN_HISTORY_CAP, Config, OrganizePattern, save_config
 from colophon.adapters.cover import mime_for_suffix
-from colophon.adapters.downloader import (
-    DownloadCancelled,  # noqa: F401 - re-exported for the Acquire UI
-)
 from colophon.adapters.lazylibrarian import PathPatterns, read_audiobook_patterns
-from colophon.adapters.realdebrid import RdUser, RealDebridClient, RealDebridSource
-from colophon.adapters.realdebrid_cache import CachingRealDebridSource
 from colophon.adapters.tags import read_embedded_tags
 from colophon.app_context import AppContext, build_all_sources, default_db_path
 from colophon.core.cancel import CancelToken
@@ -88,7 +83,7 @@ from colophon.core.navigator import (
 from colophon.core.node_classify import book_identity_confidence, classify_nodes
 from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
 from colophon.core.part_order import resolve_part_order
-from colophon.core.pathscheme import build_reorg_targets, build_target_path
+from colophon.core.pathscheme import build_reorg_targets, build_target_path, sanitize_name
 from colophon.core.perf import timed
 from colophon.core.phases import (
     LOCAL,
@@ -118,19 +113,6 @@ from colophon.core.sources import (
 from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
-from colophon.services.acquire import (
-    RESOLVE_CONCURRENCY,
-    AcquireCandidate,
-    AcquireMode,
-    AcquireResult,
-    add_torrent,
-    add_torrent_file,
-    download_target_count,
-    download_torrent,
-    failure_breakdown,
-    list_candidates,
-    sanitize_name,
-)
 from colophon.services.catalog import apply_catalog_mapping
 from colophon.services.cleanup import CleanupReport, find_cleanup_candidates
 from colophon.services.combine import combine_books as _svc_combine
@@ -167,7 +149,6 @@ from colophon.services.ingest import (
     plan_rescan_folders,
     plan_scan_graph,
     refresh_local,
-    scan_ingest,
     sweep_missing,
 )
 from colophon.services.matching import gather_matches, query_for_book
@@ -264,19 +245,6 @@ class ProcessResult(_Base):
     encoded: bool = False
     organized: bool = False
     detail: str | None = None
-
-
-class DownloadEntry(_Base):
-    key: str
-    name: str
-    status: str = "queued"   # queued / active / paused / done / partial / failed
-    phase: str = ""          # while active: "resolving" | "downloading"
-    detail: str = ""
-    file_ids: list[int] | None = None  # chosen file subset (None = default audio+cover)
-    files_total: int = 0     # Y: picked-file target, set once (not overwritten)
-    files_done: int = 0      # files completed so far
-    links_total: int = 0     # N: links to resolve (resolve-phase denominator)
-    links_done: int = 0
 
 
 class EncodeJobOptions(_Base):
@@ -428,13 +396,6 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
-        self._downloads: dict[str, DownloadEntry] = {}
-        self._download_cancels: dict[str, CancelToken] = {}
-        self._download_folders: dict[str, Path] = {}  # torrent id -> dest folder, so a resume reuses it
-        self._rd_resolve_sem = asyncio.Semaphore(RESOLVE_CONCURRENCY)
-        self._rd_download_sem = asyncio.Semaphore(
-            max(1, self.ctx.config.real_debrid_max_concurrent_downloads))
-        self.acquire_mode: AcquireMode = AcquireMode.INDEXED
         self._graph_cache: dict[tuple[str, bool], Graph] = {}  # diagnostic /graph: per (root, fresh)
         # Derived-view memos, valid while their input generations (books/aliases/graph) hold. Keyed
         # by those generations so any write rebuilds automatically — no manual invalidation to forget.
@@ -1692,258 +1653,6 @@ class AppController:
         self.invalidate(book, Phase.TAG)
         self._resync_books([book])
         return batch
-
-    # --- Real-Debrid acquisition (issue #11) ---
-    def rd_configured(self) -> bool:
-        return bool(self.ctx.config.real_debrid_token)
-
-    def rd_client(self) -> RealDebridSource:
-        """The Real-Debrid source used for acquisition: the live client wrapped in the
-        persistent cache, so repeat picks and page loads reuse prior responses."""
-        token = self.ctx.config.real_debrid_token
-        if not token:
-            raise ValueError("no Real-Debrid token configured")
-        return CachingRealDebridSource(RealDebridClient(token), self.ctx.rd_cache)
-
-    def _rd_download_dir(self) -> Path:
-        return self.ctx.config.real_debrid_download_dir or (default_db_path().parent / "downloads")
-
-    async def rd_test_connection(self, token: str | None = None) -> RdUser:
-        """Verify the RD token by fetching the account. Tests `token` if given
-        (without persisting it), else the configured one. Lets the Settings page
-        validate a typed-but-unsaved token without mutating live config."""
-        token = token or self.ctx.config.real_debrid_token
-        if not token:
-            raise ValueError("no Real-Debrid token configured")
-        client = RealDebridClient(token)
-        try:
-            return await client.user()
-        finally:
-            await client.aclose()
-
-    async def rd_list_candidates(self) -> list[AcquireCandidate]:
-        client = self.rd_client()
-        try:
-            return await list_candidates(client)
-        finally:
-            await client.aclose()
-
-    async def rd_add_magnet(self, magnet: str, *, audio_only: bool = False) -> str:
-        """Add a magnet to Real-Debrid and select its files. Returns the torrent id."""
-        client = self.rd_client()
-        try:
-            return await add_torrent(client, magnet, audio_only=audio_only)
-        finally:
-            await client.aclose()
-
-    async def rd_add_torrent_file(self, content: bytes, *, audio_only: bool = False) -> str:
-        """Upload a .torrent file to Real-Debrid and select its files. Returns the torrent id."""
-        client = self.rd_client()
-        try:
-            return await add_torrent_file(client, content, audio_only=audio_only)
-        finally:
-            await client.aclose()
-
-    async def rd_refresh_cache(self) -> None:
-        """Force-rescan Real-Debrid, repopulating the cache: a fresh torrent list (which
-        prunes removed torrents) plus a forced torrent_info for every ready torrent."""
-        client = self.rd_client()
-        try:
-            torrents = await client.list_torrents()
-            for t in torrents:
-                if t.status in ("downloaded", "uploading"):  # only ready torrents are cacheable
-                    try:
-                        await client.torrent_info(t.id, force=True)
-                    except Exception as e:  # one torrent failing must not abort the refresh (BLE001 intentional)
-                        logger.warning(f"refresh: torrent_info failed for {t.id}: {e}")
-        finally:
-            await client.aclose()
-
-    def active_downloads(self) -> list[DownloadEntry]:
-        """Every tracked download (queued / active / paused / done / partial / failed)."""
-        return list(self._downloads.values())
-
-    def clear_finished_downloads(self) -> None:
-        """Drop the finished (done / failed / partial) entries and their cancel tokens."""
-        for key in [k for k, e in self._downloads.items() if e.status in ("done", "failed", "partial")]:
-            self._downloads.pop(key, None)
-            self._download_cancels.pop(key, None)
-            self._download_folders.pop(key, None)
-
-    def pause_download(self, key: str) -> None:
-        """Stop an in-flight download but keep its .part files for a later resume."""
-        token = self._download_cancels.get(key)
-        if token is not None:
-            token.cancel()
-
-    def cancel_download(self, key: str) -> None:
-        """Abort a download and discard it: signal any in-flight token, delete the retained
-        partial (.part) files, remove an emptied container, and drop the entry. Deleting only
-        the partials (not the whole folder unless it is now empty) keeps a book-folder fix's
-        other files intact."""
-        token = self._download_cancels.get(key)
-        if token is not None:
-            token.cancel()
-        folder = self._download_folders.get(key)
-        if folder is not None and folder.exists():
-            for part in folder.rglob("*.part"):
-                part.unlink(missing_ok=True)
-            try:
-                folder.rmdir()  # only removes it if now empty
-            except OSError:
-                pass
-        self._downloads.pop(key, None)
-        self._download_cancels.pop(key, None)
-        self._download_folders.pop(key, None)
-
-    async def _run_download(
-        self, torrent_id: str, name: str,
-        *, file_ids: list[int] | None = None,
-        progress: Callable[[str, int, int, str], None] | None = None,
-        dest_dir: Path | None = None,
-        mode: AcquireMode = AcquireMode.INDEXED,
-    ) -> tuple[AcquireResult, list[str]]:
-        """Download one torrent and ingest its folder, tracking progress/status in the
-        registry. The entry is registered as 'queued' and starts 'active' once a
-        download slot frees (at most `real_debrid_max_concurrent_downloads` run at once).
-        A pause leaves it 'paused' (its .part files retained for resume); otherwise it
-        ends 'done', 'partial', or 'failed'. `file_ids` restricts to a chosen subset
-        (stored so a resume re-applies it); `dest_dir` overrides the download location."""
-        entry = DownloadEntry(key=torrent_id, name=name, status="queued", file_ids=file_ids)
-        self._downloads[torrent_id] = entry
-        token = CancelToken()
-        self._download_cancels[torrent_id] = token
-        async with self._rd_download_sem:
-            if token.cancelled:  # cancelled while waiting in the queue
-                entry.status = "paused"
-                return AcquireResult(folder=dest_dir or self._rd_download_dir()), []
-            entry.status, entry.phase = "active", "resolving"
-            return await self._run_download_active(
-                entry, torrent_id, token, file_ids=file_ids, progress=progress,
-                dest_dir=dest_dir, mode=mode)
-
-    async def _run_download_active(
-        self, entry: DownloadEntry, torrent_id: str, token: CancelToken,
-        *, file_ids: list[int] | None,
-        progress: Callable[[str, int, int, str], None] | None,
-        dest_dir: Path | None,
-        mode: AcquireMode,
-    ) -> tuple[AcquireResult, list[str]]:
-        """Run one download that has acquired a slot: resolve + stream, ingest, and set
-        the terminal status. Assumes `entry`/`token` are already registered."""
-        def _byte_progress(done: int, total: int) -> None:
-            entry.detail = f"{done * 100 // total}%" if total else f"{done} bytes"
-
-        def _prog(phase: str, done: int, total: int, fname: str) -> None:
-            entry.phase = phase
-            if phase == "resolving":
-                entry.links_done, entry.links_total = done, total
-            else:  # downloading
-                entry.files_done = done  # files_total is fixed below; don't overwrite
-                if fname:
-                    entry.detail = fname
-            if progress is not None:
-                progress(phase, done, total, fname)
-
-        client = self.rd_client()
-        try:
-            info = await client.torrent_info(torrent_id)
-            entry.files_total = download_target_count(
-                info, set(file_ids) if file_ids is not None else None)
-            result = await download_torrent(
-                client, info, dest_dir or self._rd_download_dir(),
-                folder=self._download_folders.get(torrent_id),
-                file_ids=set(file_ids) if file_ids is not None else None,
-                progress=_prog, byte_progress=_byte_progress, cancel=token,
-                mode=mode, resolve_sem=self._rd_resolve_sem,
-            )
-        finally:
-            await client.aclose()
-        # remember the folder so a later resume reuses it (and finds the retained .part)
-        self._download_folders[torrent_id] = result.folder
-
-        cancelled = any((f.error == "cancelled") for f in result.files)
-        book_ids: list[str] = []
-        if result.any_ok:
-            books = scan_ingest(
-                self.ctx.books, result.folder,
-                template=self.ctx.config.filename_template,
-                directory_scheme=self.ctx.config.directory_scheme,
-            )
-            book_ids = [b.id for b in books]
-        ok_count = sum(1 for f in result.files if f.ok)
-        if cancelled:
-            entry.status = "paused"
-        elif ok_count == 0:
-            entry.status = "failed"
-        elif ok_count < entry.files_total:
-            entry.status = "partial"
-        else:
-            entry.status = "done"
-        entry.phase = ""
-        entry.files_done = ok_count
-        # Surface WHY a download didn't fully land: a compact per-reason breakdown of the failures
-        # (e.g. "90 not on Real-Debrid, 74 couldn't resolve"), or the note when nothing landed for
-        # a structural reason (e.g. a single-archive torrent).
-        entry.detail = (
-            failure_breakdown(result.files) if entry.status in ("partial", "failed") else ""
-        )
-        if not result.any_ok and result.note:
-            entry.detail = result.note
-        return result, book_ids
-
-    async def rd_download(
-        self, torrent_id: str, *, name: str | None = None,
-        file_ids: list[int] | None = None,
-        progress: Callable[[str, int, int, str], None] | None = None,
-        dest_dir: Path | None = None,
-        mode: AcquireMode | None = None,
-    ) -> tuple[AcquireResult, list[str]]:
-        """Download a torrent (optionally only `file_ids`), then ingest the folder,
-        tracked in the registry. Returns the download result and the ids of any newly
-        registered books. `name` is the display label for the Downloads section
-        (defaults to the torrent id); `file_ids=None` keeps the default audio+cover
-        set; `progress(phase, done, total, filename)` is the per-file/resolve callback;
-        `dest_dir` overrides the download location. `mode` overrides the session-sticky
-        acquire mode for this download only; None falls back to `self.acquire_mode`."""
-        return await self._run_download(
-            torrent_id, name or torrent_id, file_ids=file_ids, progress=progress,
-            dest_dir=dest_dir, mode=mode if mode is not None else self.acquire_mode,
-        )
-
-    async def resume_download(self, key: str) -> tuple[AcquireResult, list[str]]:
-        """Re-run a tracked download (resume a paused one, or retry a partial/failed one) into
-        its retained folder. Uses ADD mode so files already on disk are skipped and only the
-        missing/incomplete ones are (re)fetched, re-applying the file subset it was started with.
-        The RD cache makes re-resolving already-fetched links free, and links that previously
-        failed to resolve (throttled) are re-tried."""
-        entry = self._downloads.get(key)
-        name = entry.name if entry else key
-        file_ids = entry.file_ids if entry else None
-        return await self._run_download(key, name, file_ids=file_ids, mode=AcquireMode.ADD)
-
-    def _rd_download_dir_in_scan_paths(self) -> bool:
-        return self._rd_download_dir() in self.ctx.config.scan_paths
-
-    def should_prompt_downloads_scan(self) -> bool:
-        """Whether to offer adding the downloads dir to the scan paths: only when it
-        isn't already a scan path and the prompt hasn't been dismissed before."""
-        return not self.ctx.config.downloads_scan_prompt_seen and not self._rd_download_dir_in_scan_paths()
-
-    def add_downloads_to_scan_paths(self) -> None:
-        """Add the downloads dir to the scan paths (deduped), dismiss the prompt, and persist."""
-        cfg = self.ctx.config
-        d = self._rd_download_dir()
-        if d not in cfg.scan_paths:
-            cfg.scan_paths = [*cfg.scan_paths, d]
-        cfg.downloads_scan_prompt_seen = True
-        self.save_settings(cfg)
-
-    def mark_downloads_scan_prompt_seen(self) -> None:
-        """Dismiss the downloads-scan prompt (without adding the dir) and persist."""
-        cfg = self.ctx.config
-        cfg.downloads_scan_prompt_seen = True
-        self.save_settings(cfg)
 
     # --- filename parsing (interactive, FR-1.x) ---
     def book_filename(self, book: BookUnit) -> str:

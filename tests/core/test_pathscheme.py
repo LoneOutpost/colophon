@@ -355,3 +355,11 @@ def test_franchise_token_renders_and_drops_like_series():
     # With a franchise: the group renders the extra folder level.
     assert expand_pattern("[$Franchise/]$Author/$Title", b) == "Cosmere/Brandon Sanderson/The Way of Kings"
     assert expand_pattern("$Franchise", b) == "Cosmere"
+
+
+def test_sanitize_name_makes_a_filesystem_safe_component():
+    from colophon.core.pathscheme import sanitize_name
+    assert sanitize_name('a/b:c*?"<>|d') == "a_b_c______d"   # illegal chars -> underscores
+    assert sanitize_name("") == "download"                    # empty -> fallback
+    assert sanitize_name("   ") == "download"
+    assert len(sanitize_name("x" * 300)) == 200               # clamped to a single component

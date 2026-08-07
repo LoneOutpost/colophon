@@ -15,6 +15,21 @@ _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # exact (no $PadNum-vs-$Pad ambiguity) and unknown tokens map to "".
 _TOKEN = re.compile(r"\$(\w+)")
 _DOLLAR_SENTINEL = "\x00DOLLAR\x00"  # protects "$$" through token substitution
+
+_MAX_NAME = 200  # keep a single path component well under the common 255-byte limit
+
+
+def sanitize_name(name: str) -> str:
+    """A filesystem-safe version of `name`, clamped to a single path component's
+    length (preserving any extension) and falling back to 'download' when empty."""
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name).strip().strip(".")
+    if not cleaned:
+        return "download"
+    if len(cleaned) > _MAX_NAME:
+        suffix = Path(cleaned).suffix
+        suffix = suffix if len(suffix) <= 16 else ""  # ignore absurdly long "extensions"
+        cleaned = cleaned[: _MAX_NAME - len(suffix)] + suffix
+    return cleaned
 _LBRACK_SENTINEL = "\x00LBRACK\x00"  # protects "[[" (a literal "[") from group parsing
 _RBRACK_SENTINEL = "\x00RBRACK\x00"  # protects "]]" (a literal "]") from group parsing
 
