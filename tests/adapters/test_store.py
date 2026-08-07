@@ -26,10 +26,10 @@ def test_migrate_creates_tables_and_sets_version(tmp_path: Path):
     assert "book_units" in tables
     assert "known_entities" in tables
     assert "schema_version" in tables
-    assert "rd_torrent_cache" in tables
-    assert "rd_link_cache" in tables
+    assert "rd_torrent_cache" not in tables   # Acquire removed: migration 011 drops the RD cache
+    assert "rd_link_cache" not in tables
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 10
+    assert version == 11
 
 
 def test_migrate_is_idempotent(tmp_path: Path):
@@ -37,7 +37,7 @@ def test_migrate_is_idempotent(tmp_path: Path):
     migrate(conn)
     migrate(conn)  # second run must not raise or double-apply
     version = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert version == 10
+    assert version == 11
 
 
 def test_migration_007_heals_legacy_sidecar_provenance(tmp_path: Path):
