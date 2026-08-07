@@ -55,7 +55,7 @@ def page_header(
 
 
 def jobs_indicator(controller: AppController) -> None:
-    """A cross-session indicator of running background jobs (scan, re-probe, encode, downloads).
+    """A cross-session indicator of running background jobs (scan, re-probe, encode).
     Reads the shared server-side registry, so every open browser shows the same live set. A compact
     spinner + count chip in the app bar, click for a popover with each job's progress; hidden when
     idle. A short poll keeps it live without a websocket push. The button and menu are persistent —
@@ -115,7 +115,7 @@ def page_toolbar(*, sticky: bool = False) -> Iterator[None]:
 def page_footer() -> Iterator[ui.column]:
     """A sticky bottom band, the mirror of `page_toolbar(sticky=True)`: it pins page-level
     state to the bottom of the scroll area so it stays visible without scrolling past a long
-    body (the Acquire downloads list). Put the footer content inside the `with` body; the
+    body. Put the footer content inside the `with` body; the
     yielded column is returned so the caller can show/hide the band with `.set_visibility(...)`
     (it starts hidden) and an idle page reclaims the space."""
     with ui.column().classes("colophon-footer w-full q-gutter-xs q-pa-none") as col:

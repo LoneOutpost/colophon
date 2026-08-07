@@ -10,7 +10,6 @@ from nicegui import app, ui
 
 from colophon.controller import AppController
 from colophon.core.perf import span
-from colophon.ui.acquire import render_acquire
 from colophon.ui.franchises import render_franchises
 from colophon.ui.graph_view import render_graph
 from colophon.ui.manage import render_manage
@@ -96,8 +95,3 @@ def create_app(controller: AppController) -> None:
     def settings() -> None:
         preload_theme_background()
         render_settings(controller)
-
-    @ui.page("/acquire")
-    def acquire(book: str = "") -> None:  # the URL query-param name is "book"
-        preload_theme_background()
-        render_acquire(controller, book_id=book)

@@ -37,7 +37,6 @@ class AttentionActions:
     """Behaviors the At-a-Glance Attention section triggers, supplied by the workspace
     (which owns the dialogs, tab control, selection, and navigation)."""
 
-    acquire: Callable[[], None]
     reprobe: Callable[[], None]
     organize: Callable[[], None]
     files: Callable[[], None]
@@ -194,7 +193,6 @@ def _render_embedded_tags(controller, book: BookUnit) -> None:
 
 
 _ACTION_META: dict[FixAction, tuple[str, str]] = {
-    FixAction.ACQUIRE: ("Go to Acquire", "cloud_download"),
     FixAction.REPROBE: ("Re-probe", "timer"),
     FixAction.ORGANIZE: ("Open Persist", "save"),
     FixAction.FILES: ("Files", "folder"),
@@ -216,7 +214,6 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
     def _action_button(action: FixAction, code: FindingCode | None = None) -> None:
         text, icon = _ACTION_META[action]
         handlers: dict[FixAction, Callable[[], None]] = {
-            FixAction.ACQUIRE: actions.acquire,
             FixAction.REPROBE: actions.reprobe,
             FixAction.ORGANIZE: actions.organize,
             FixAction.FILES: actions.files,

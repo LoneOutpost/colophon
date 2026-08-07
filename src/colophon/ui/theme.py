@@ -230,7 +230,7 @@ body.body--dark { color: #ece4d8; }
    opaque surface background keeps scrolled content from showing through. */
 .colophon-toolbar-sticky { position: sticky; top: calc(var(--colophon-header-h) + 1.25rem); z-index: 10; }
 /* Sticky footer band (chrome.page_footer): the mirror of the sticky toolbar, pinned to the
-   bottom of the scroll area so page-level state (e.g. the Acquire downloads list) stays in
+   bottom of the scroll area so page-level state stays in
    view without scrolling past a long body. Its own opaque surface keeps content from showing
    through, and a hairline top rule sets it off from the body. */
 .colophon-footer { background: var(--colophon-surface); border-top: 1px solid var(--colophon-line);

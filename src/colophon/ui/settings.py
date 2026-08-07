@@ -318,37 +318,6 @@ def render_settings(controller: AppController) -> None:
             ).props(field).classes("w-full")
 
         with page_section(
-            "Real-Debrid",
-            "Browse and download audiobooks from your Real-Debrid account on the "
-            "Acquire page. Private API token, and where downloads land before ingest.",
-        ):
-            rd_token = _secret_input("API token", cfg.real_debrid_token or "", field)
-            rd_dir = ui.input(
-                "Download directory (blank = default)",
-                value=str(cfg.real_debrid_download_dir or ""),
-            ).props(field).classes("w-full")
-            with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
-                rd_status = ui.label("").classes("text-caption text-grey")
-
-                async def test_rd() -> None:
-                    # Test the typed value without persisting it.
-                    token = _opt_str(rd_token.value)
-                    if not token:
-                        rd_status.set_text("Enter a token first")
-                        return
-                    rd_status.set_text("Testing...")
-                    try:
-                        user = await controller.rd_test_connection(token)
-                        rd_status.set_text(f"Connected as {user.username}")
-                    except Exception as e:  # surface failure to the operator (BLE001 intentional)
-                        logger.warning(f"RD test connection failed: {e}")
-                        rd_status.set_text("Connection failed (check the token)")
-
-                ui.button(
-                    "Test connection", icon="wifi_tethering", on_click=test_rd
-                ).props("flat").classes("q-ml-auto")
-
-        with page_section(
             "Genres",
             "Control which genres survive matching: an optional whitelist, the "
             "accepted-genre list, and rename mappings applied on Normalize.",
@@ -464,8 +433,6 @@ def render_settings(controller: AppController) -> None:
                     "audiobookshelf_token": _opt_str(abs_token.value),
                     "audiobookshelf_library_id": _opt_str(abs_lib.value),
                     "abs_agg_url": _opt_str(abs_agg_url.value),
-                    "real_debrid_token": _opt_str(rd_token.value),
-                    "real_debrid_download_dir": _opt_path(rd_dir.value),
                     "genre_whitelist_enabled": bool(genre_whitelist.value),
                     "accepted_genres": [g for g in (accepted.value or []) if g and g.strip()],
                     "genre_mapping": {

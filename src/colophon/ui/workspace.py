@@ -14,7 +14,6 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from urllib.parse import quote
 
 from nicegui import app, background_tasks, ui
 
@@ -1078,7 +1077,6 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         repaint(list=True, status=True, detail_book_id=target or b.id)
 
                     _attn = state_panel.AttentionActions(
-                        acquire=lambda b=book: ui.navigate.to(f"/acquire?book={quote(b.id)}"),
                         reprobe=_reprobe,
                         organize=_organize,
                         files=lambda: _tabs.set_value("details"),
