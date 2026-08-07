@@ -187,3 +187,34 @@ def test_organize_disposition_classifies(tmp_path):
     assert organize_disposition([(None, b)]) == "clash"
     assert organize_disposition([(a, a), (a, tmp_path / "free3.m4b")]) == "move"
     assert organize_disposition([(a, a), (a, b)]) == "clash"
+
+
+def test_organize_book_placed_is_noop_success(tmp_path):
+    repo = _repo(tmp_path)
+    book = _book(tmp_path)
+    repo.upsert(book)
+    library = tmp_path / "library"
+    pats = PathPatterns(folder="$Author/$Title", single_file="$Title")
+    target = build_target_path(library, pats, book)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"already here")
+
+    result = organize_book(repo, book, target, target=target)     # m4b_path == target
+
+    assert result.moved is True and result.collision is False
+    assert target.read_bytes() == b"already here"                 # untouched
+    assert repo.get(book.id).output_path == target
+
+
+def test_organize_parts_all_placed_is_noop_success(tmp_path):
+    repo = _repo(tmp_path)
+    book = _book(tmp_path)
+    repo.upsert(book)
+    folder = tmp_path / "library" / "Frank Herbert" / "Dune"
+    folder.mkdir(parents=True)
+    dst = folder / "Dune.m4b"
+    dst.write_bytes(b"here")
+    result = organize_book_parts(repo, book, [(dst, dst)], delete_sources=False)  # src == dst
+    assert result.moved is True and result.collision is False
+    assert dst.read_bytes() == b"here"
+    assert repo.get(book.id).output_path == folder

@@ -49,9 +49,17 @@ def organize_book(
     file. `target` is precomputed by the caller (from the book's canonical entity
     names), so this function owns the move and the book's phase/output_path mutation,
     not the path grammar."""
-    if target.exists():
+    if m4b_path != target and target.exists():
         logger.warning(f"collision organizing {book.id}: {target} exists")
         return OrganizeResult(book_id=book.id, target_path=target, collision=True)
+    if m4b_path == target:
+        # already in its final location: no move, just mark organized.
+        book.output_path = target
+        mark(book, Phase.ORGANIZE, PhaseState.FRESH)
+        resync_state(book)
+        book.touch()
+        repo.upsert(book)
+        return OrganizeResult(book_id=book.id, target_path=target, moved=True)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     # Atomically reserve the destination name so a file appearing after the
@@ -93,22 +101,30 @@ def organize_book_parts(
     the book folder, marks ORGANIZE fresh, and deletes sources only if requested."""
     if not pairs:
         return OrganizeResult(book_id=book.id, error="no files to organize")
-    targets = [dst for _, dst in pairs]
-    folder = targets[0].parent
-    if any(dst.exists() for dst in targets):
+    folder = pairs[0][1].parent
+    to_move = [(src, dst) for src, dst in pairs if src != dst]   # drop already-placed files
+    if any(dst.exists() and src != dst for src, dst in pairs):
         logger.warning(f"collision organizing {book.id}: a target under {folder} exists")
         return OrganizeResult(book_id=book.id, target_path=folder, collision=True)
+    if not to_move:
+        # every file already at its target: no-op success.
+        book.output_path = folder
+        mark(book, Phase.ORGANIZE, PhaseState.FRESH)
+        resync_state(book)
+        book.touch()
+        repo.upsert(book)
+        return OrganizeResult(book_id=book.id, target_path=folder, moved=True)
 
     folder.mkdir(parents=True, exist_ok=True)
     reserved: list[Path] = []
     try:
-        for _src, dst in pairs:
+        for _src, dst in to_move:
             fd = os.open(dst, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             os.close(fd)
             reserved.append(dst)
-        for src, dst in pairs:
+        for src, dst in to_move:
             shutil.copy2(str(src), str(dst))  # replaces the 0-byte placeholder
-        for _src, dst in pairs:
+        for _src, dst in to_move:
             if dst.stat().st_size == 0:
                 raise OSError(f"verification failed: empty file {dst}")
     except FileExistsError:
@@ -123,7 +139,7 @@ def organize_book_parts(
         return OrganizeResult(book_id=book.id, target_path=folder, error=str(e))
 
     if delete_sources:
-        for src, _dst in pairs:
+        for src, _dst in to_move:
             src.unlink(missing_ok=True)
 
     book.output_path = folder
