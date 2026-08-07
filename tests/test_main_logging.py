@@ -36,7 +36,7 @@ def test_explicit_argument_overrides_env(monkeypatch):
 
 
 def test_raise_ws_message_cap_lifts_engineio_buffer(monkeypatch):
-    # A large acquire session can exceed socket.io's 1 MB default; the cap must be lifted so the
+    # A large UI payload can exceed socket.io's 1 MB default; the cap must be lifted so the
     # message goes through instead of dropping the connection.
     from nicegui import core
 
