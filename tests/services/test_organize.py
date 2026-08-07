@@ -173,3 +173,17 @@ def test_organize_parts_collision_leaves_everything_untouched(tmp_path):
     assert not (folder / "Dune - Part 01 of 02.mp3").exists()  # rolled back
     assert (folder / "Dune - Part 02 of 02.mp3").read_bytes() == b"existing"  # untouched
     assert s1.exists() and s2.exists()  # sources kept on failure
+
+
+def test_organize_disposition_classifies(tmp_path):
+    from colophon.services.organize import organize_disposition
+    a, b = tmp_path / "a.m4b", tmp_path / "b.m4b"
+    a.write_bytes(b"x")
+    assert organize_disposition([(a, tmp_path / "free.m4b")]) == "move"
+    assert organize_disposition([(a, a)]) == "placed"
+    b.write_bytes(b"y")
+    assert organize_disposition([(a, b)]) == "clash"
+    assert organize_disposition([(None, tmp_path / "free2.m4b")]) == "move"
+    assert organize_disposition([(None, b)]) == "clash"
+    assert organize_disposition([(a, a), (a, tmp_path / "free3.m4b")]) == "move"
+    assert organize_disposition([(a, a), (a, b)]) == "clash"

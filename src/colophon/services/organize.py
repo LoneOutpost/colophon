@@ -6,12 +6,28 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from typing import Literal
 
 from colophon.adapters.repository.store import BookUnitRepo
 from colophon.core.models import BookUnit, Phase, PhaseState, _Base
 from colophon.core.phases import mark, resync_state
 
 logger = logging.getLogger(__name__)
+
+Disposition = Literal["move", "placed", "clash"]
+
+
+def organize_disposition(pairs: list[tuple[Path | None, Path]]) -> Disposition:
+    """Classify an organize by who occupies each destination FILE path. `pairs` is (current, target)
+    per file; a None current (no file to move yet) never equals its target. Any target occupied by a
+    DIFFERENT existing file -> 'clash'; else every target already holding its own current file ->
+    'placed'; else 'move'. Per-file, never per-directory: an existing destination folder holding other
+    content is not a clash unless a specific target file is taken by a different file."""
+    if any(t.exists() and t != c for c, t in pairs):
+        return "clash"
+    if pairs and all(c is not None and c == t for c, t in pairs):
+        return "placed"
+    return "move"
 
 
 class OrganizeResult(_Base):
