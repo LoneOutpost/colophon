@@ -20,7 +20,6 @@ from colophon.adapters.repository.store import (
     KnownFranchiseRepo,
     NodeOverrideRepo,
     OperationRepo,
-    RdCacheRepo,
     connect,
     migrate,
 )
@@ -54,7 +53,6 @@ class AppContext:
     config: Config
     conn: sqlite3.Connection
     books: BookUnitRepo
-    rd_cache: RdCacheRepo
     history: HistoryRepo
     operations: OperationRepo
     overrides: NodeOverrideRepo
@@ -96,7 +94,6 @@ class AppContext:
             config=config,
             conn=conn,
             books=BookUnitRepo(conn),
-            rd_cache=RdCacheRepo(conn),
             history=HistoryRepo(conn),
             operations=OperationRepo(conn),
             overrides=NodeOverrideRepo(conn),

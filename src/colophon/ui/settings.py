@@ -412,8 +412,8 @@ def render_settings(controller: AppController) -> None:
         def do_save() -> None:
             try:
                 # Copy from the live config so fields this form doesn't edit
-                # (storage_secret, recent_*_patterns, downloads_scan_prompt_seen,
-                # db_path, worker_pool_size, ...) are preserved, not reset to defaults.
+                # (storage_secret, recent_*_patterns, db_path, worker_pool_size, ...)
+                # are preserved, not reset to defaults.
                 new = cfg.model_copy(update={
                     "scan_paths": _text_to_paths(scan_paths.value),
                     "library_root": _opt_path(library_root.value),

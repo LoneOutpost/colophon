@@ -47,10 +47,6 @@ class Config(BaseModel):
     hardcover_api_token: str | None = None
     abs_agg_url: str | None = None  # base URL of a self-hosted abs-agg, e.g. http://host:3000
     storage_secret: str | None = None  # generated on first run; signs NiceGUI tab storage
-    real_debrid_token: str | None = None
-    real_debrid_download_dir: Path | None = None  # None => <data dir>/downloads
-    real_debrid_max_concurrent_downloads: int = 2  # downloads run at once; the rest queue
-    downloads_scan_prompt_seen: bool = False  # have we offered to add the downloads dir to scan paths
     genre_mapping: dict[str, str] = {}
     accepted_genres: list[str] = []
     genre_whitelist_enabled: bool = False
@@ -163,11 +159,6 @@ root_path = ""
 # abs-agg metadata aggregator (https://github.com/Vito0912/abs-agg). Set its base
 # URL to auto-discover and enable its providers.
 # abs_agg_url = "http://localhost:3000"
-
-# Real-Debrid acquisition. Set a private API token to enable the Acquire page.
-# real_debrid_token = "your-rd-private-token"
-# Folder downloaded files land in before ingest. Defaults to <data dir>/downloads.
-# real_debrid_download_dir = "/path/to/downloads"
 """
 
 

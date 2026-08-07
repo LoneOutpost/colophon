@@ -132,25 +132,6 @@ def test_integration_fields_round_trip(tmp_path):
     assert load_config(path) == cfg
 
 
-def test_real_debrid_fields_round_trip(tmp_path):
-    from colophon.adapters.config import Config, load_config, save_config
-
-    cfg = Config(real_debrid_token="rd_tok", real_debrid_download_dir=tmp_path / "dl")
-    path = tmp_path / "c.toml"
-    save_config(cfg, path)
-    loaded = load_config(path)
-    assert loaded.real_debrid_token == "rd_tok"
-    assert loaded.real_debrid_download_dir == tmp_path / "dl"
-
-
-def test_real_debrid_defaults_are_none():
-    from colophon.adapters.config import Config
-
-    cfg = Config()
-    assert cfg.real_debrid_token is None
-    assert cfg.real_debrid_download_dir is None
-
-
 def test_genre_policy_fields_default_empty():
     c = Config()
     assert c.genre_mapping == {}
@@ -231,21 +212,6 @@ def test_legacy_lazylibrarian_keys_are_ignored(tmp_path):
     assert not hasattr(cfg, "lazylibrarian_config_ini")
 
 
-def test_downloads_scan_prompt_flag_round_trips(tmp_path):
-    from colophon.adapters.config import Config, load_config, save_config
-
-    cfg = Config(downloads_scan_prompt_seen=True)
-    path = tmp_path / "c.toml"
-    save_config(cfg, path)
-    assert load_config(path).downloads_scan_prompt_seen is True
-
-
-def test_downloads_scan_prompt_flag_defaults_false():
-    from colophon.adapters.config import Config
-
-    assert Config().downloads_scan_prompt_seen is False
-
-
 def test_settings_save_preserves_non_form_fields():
     """Guard for #111: the Settings page builds the saved config with
     cfg.model_copy(update={form fields}), so fields the form does not edit must
@@ -255,7 +221,6 @@ def test_settings_save_preserves_non_form_fields():
     cfg = Config(
         storage_secret="secret-xyz",
         recent_filename_templates=["$Series #$SerNum - $Title"],
-        downloads_scan_prompt_seen=True,
         hardcover_api_token="hc-token",
         filename_template="$Author - $Title",
     )
@@ -267,7 +232,6 @@ def test_settings_save_preserves_non_form_fields():
     # non-form fields preserved, not reset to defaults
     assert saved.storage_secret == "secret-xyz"
     assert saved.recent_filename_templates == ["$Series #$SerNum - $Title"]
-    assert saved.downloads_scan_prompt_seen is True
     assert saved.hardcover_api_token == "hc-token"
 
 
