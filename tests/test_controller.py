@@ -120,7 +120,7 @@ def test_process_ready_encodes_and_organizes(tmp_path, make_audio):
     ctx.close()
 
 
-def test_process_ready_collision_marks_failed_not_stuck_encoding(tmp_path, make_audio):
+def test_process_ready_clash_is_skipped_not_failed_or_stuck_encoding(tmp_path, make_audio):
     from colophon.core.models import SourceFile
     from colophon.core.pathscheme import build_target_path
 
@@ -134,22 +134,23 @@ def test_process_ready_collision_marks_failed_not_stuck_encoding(tmp_path, make_
     book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
     ctx.books.upsert(book)
 
-    # Pre-create the target so organize_book collides.
+    # Pre-create the target with a DIFFERENT file so the organize target clashes.
     target = build_target_path(ctx.config.library_root, ctx.patterns, book)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"existing")
+    target.write_bytes(b"a different file")
 
     results = AppController(ctx).process_ready(confirm_delete=False)
     persisted = ctx.books.get(book.id)
-    assert persisted.state == BookState.FAILED
+    # A clash is a benign skip (we know it would fail): not FAILED, and not stuck mid-encode.
+    assert persisted.state != BookState.FAILED
+    assert persisted.state != BookState.ENCODING
     assert len(results) == 1
     assert results[0].organized is False
-    # The failure reason is detailed (names the colliding destination) and recorded on the
-    # ORGANIZE phase so At a Glance can surface it, not just returned transiently.
-    assert results[0].detail is not None and "already exists" in results[0].detail
+    assert results[0].detail is not None and "occupied" in results[0].detail
     from colophon.core.models import Phase, PhaseState
-    assert persisted.phases[Phase.ORGANIZE].state is PhaseState.FAILED
-    assert "already exists" in (persisted.phases[Phase.ORGANIZE].detail or "")
+    from colophon.core.phases import state_of
+    assert state_of(persisted, Phase.ORGANIZE) is not PhaseState.FAILED
+    assert target.read_bytes() == b"a different file"   # the different file is untouched
     ctx.close()
 
 
