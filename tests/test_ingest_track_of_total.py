@@ -146,3 +146,25 @@ def test_numbered_series_shelf_book_gets_its_own_sequence(tmp_path):
         seqs[b.title] = b.series[0].sequence
     assert seqs == {"Carrier": 1.0, "Viper Strike": 2.0, "Armageddon Mode": 3.0}, seqs
     ctx.close()
+
+
+def test_series_book_leaf_folder_classifies_as_title_not_series(tmp_path):
+    # The book folders classify as title; only the parent shelf is the series. Book fields unchanged.
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    series = ingest / "Keith Douglass" / "Carrier"
+    for n, title in [(1, "Carrier"), (2, "Viper Strike"), (3, "Armageddon Mode")]:
+        for i in range(1, 5):
+            _untagged(series / f"(Carrier Book #{n}) {title}"
+                      / f"{i:02d}-04-Keith Douglass - [Carrier] - {title}.mp3")
+    ctrl.scan([ingest])
+
+    def kind_of(path):
+        from colophon.core.graph_records import DirectoryNode
+        return ctx.library_graph.nodes[DirectoryNode.id_for(path)].attrs.get("kind")
+
+    assert kind_of(series) == "series"
+    for n, title in [(1, "Carrier"), (2, "Viper Strike"), (3, "Armageddon Mode")]:
+        assert kind_of(series / f"(Carrier Book #{n}) {title}") == "title", (n, title)
+    for b in ctx.books.list_all():
+        assert b.authors == ["Keith Douglass"], (b.title, b.authors)
+    ctx.close()
