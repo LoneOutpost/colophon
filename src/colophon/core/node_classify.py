@@ -372,10 +372,12 @@ def ax_leaf_title(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:  # ctx: uni
 
 
 def ax_folder_title_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
-    """A single-book leaf whose folder name is a strong title shape — a leading `YEAR -` prefix or a
-    parsed `read by` narrator — is that book's title folder. Raw folder-name evidence only, so it
-    holds even when the filenames inside are internal parts/sections that disagree with the folder.
-    Weighted like a leaf title so it beats the lone-book->author fallback (W_LEAF_AUTHOR)."""
+    """A single-book leaf whose folder name is a strong title shape — a leading `YEAR -` prefix, a
+    parsed `read by` narrator, or a `(Series Book #N)` / `#N -` book-in-series prefix with a real title
+    remainder — is that book's title folder. Raw folder-name evidence only, so it holds even when the
+    filenames inside are internal parts/sections that disagree with the folder. Weighted like a leaf
+    title so it beats the lone-book->author fallback (W_LEAF_AUTHOR) and the series-resemblance vote."""
+    from colophon.core.filename_cluster import _text_sig, _tokens
     from colophon.core.folder_title import parse_folder_title
     from colophon.core.graph_classify import TITLE
     if node.kind != TITLE:                       # coarse-type gate: single-book leaves only
@@ -386,6 +388,9 @@ def ax_folder_title_shape(node: DirectoryNode, ctx: _Ctx) -> list[Evidence]:
     if parsed.year is not None or parsed.narrators:
         return [Evidence("title", W_TITLE_LEAF,
                          "folder name is a year/narrator title shape")]
+    if (parsed.series is not None or parsed.sequence is not None) \
+            and _text_sig(_tokens(parsed.title or "")):
+        return [Evidence("title", W_TITLE_LEAF, "folder names a book within a series")]
     return []
 
 

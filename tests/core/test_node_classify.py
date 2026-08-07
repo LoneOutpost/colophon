@@ -734,3 +734,38 @@ def test_fill_series_ramp_does_not_overwrite_a_hard_series():
 
     assert b.series[0].sequence == 9.0                     # untouched
     assert b.provenance["series"] == Provenance.TAG.value
+
+
+def test_folder_title_shape_votes_title_for_series_book_prefix_leaf():
+    from colophon.core.node_classify import _Ctx, ax_folder_title_shape
+    g = Graph()
+    root = Path("/lib")
+    node = _dir(g, "/lib/Keith Douglass/Carrier/(Carrier Book #2) Viper Strike", kind="title")
+    book = _book(node.path)
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={}, direct_books={node.path: [book]})
+    ev = ax_folder_title_shape(node, ctx)
+    assert [e.kind for e in ev] == ["title"]
+
+
+def test_folder_title_shape_votes_title_for_bare_book_number_leaf():
+    from colophon.core.node_classify import _Ctx, ax_folder_title_shape
+    g = Graph()
+    root = Path("/lib")
+    node = _dir(g, "/lib/David Wong/JDATE/#1 - John Dies at the End", kind="title")
+    book = _book(node.path)
+    ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+               book_like_children={}, direct_books={node.path: [book]})
+    assert [e.kind for e in ax_folder_title_shape(node, ctx)] == ["title"]
+
+
+def test_folder_title_shape_ignores_bare_number_and_plain_ramp_leaf():
+    from colophon.core.node_classify import _Ctx, ax_folder_title_shape
+    g = Graph()
+    root = Path("/lib")
+    # "#5" with no title remainder -> no vote; "02 - Yendi" (no '#'/parenthetical) -> no vote (unchanged).
+    for name in ("/lib/A/S/#5", "/lib/Steven Brust/Vlad Taltos/02 - Yendi"):
+        node = _dir(g, name, kind="title")
+        ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
+                   book_like_children={}, direct_books={node.path: [_book(node.path)]})
+        assert ax_folder_title_shape(node, ctx) == [], name
