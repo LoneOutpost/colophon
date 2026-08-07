@@ -172,6 +172,7 @@ from colophon.services.ingest import (
 )
 from colophon.services.matching import gather_matches, query_for_book
 from colophon.services.organize import (
+    Disposition,
     OrganizeResult,
     organize_book,
     organize_book_parts,
@@ -310,12 +311,13 @@ class RerunResult:
 
 @dataclass(frozen=True)
 class OrganizePreviewRow:
-    """One Persist-preview row: where a book would organize, whether that target already
-    exists (a collision that will be skipped), and whether a blocking error will skip it."""
+    """One Persist-preview row: where a book would organize and how — `disposition` is `move`
+    (target free), `placed` (already in its final location, a no-op) or `clash` (a different file
+    occupies a target file, so it is skipped) — plus whether a blocking error will skip it."""
     book_id: str
     title: str
     target: Path
-    collision: bool
+    disposition: Disposition
     blocked: bool
 
 
@@ -3085,32 +3087,48 @@ class AppController:
     def organize_preview(
         self, books: list[BookUnit], *, patterns: PathPatterns | None = None, encode: bool = True
     ) -> list[OrganizePreviewRow]:
-        """Dry-run rows for the Persist preview: each book's organize destination, whether it
-        collides with existing content, and whether a blocking error will skip it. Writes
-        nothing. When `encode` (the common path), the destination is the produced M4B file and
-        a collision is that file already existing. Without encode, a reorg copies the original
-        files into the book folder (one or many), so the destination shown is that folder and a
-        collision is a folder that already holds content; exact per-file collisions are still
-        caught at organize time."""
+        """Dry-run rows for the Persist preview: each book's organize destination and disposition
+        (move / placed / clash), plus whether a blocking error will skip it. Writes nothing, and uses
+        the same per-file `organize_disposition` the executor uses so the two cannot drift. When
+        `encode` the destination is the produced M4B file; without encode it is the book folder the
+        original files reorganize into."""
+        pats = patterns or self.ctx.patterns
+        library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
         targets = dict(self.organize_targets(books, patterns=patterns))
         rows: list[OrganizePreviewRow] = []
         for b in books:
             target = targets[b.id]
             if encode:
-                dest, collision = target, target.exists()
+                dest = target
+                disp = organize_disposition([(b.output_path, target)])
             else:
-                folder = target.parent
-                dest, collision = folder, (folder.exists() and any(folder.iterdir()))
+                dest = target.parent
+                disp = organize_disposition(self._reorg_pairs(b, pats, library_root))
             rows.append(
                 OrganizePreviewRow(
                     book_id=b.id,
                     title=b.title or "(untitled)",
                     target=dest,
-                    collision=collision,
+                    disposition=disp,
                     blocked=has_blocking_error(b),
                 )
             )
         return rows
+
+    def _reorg_pairs(
+        self, book: BookUnit, patterns: PathPatterns, library_root: Path
+    ) -> list[tuple[Path | None, Path]]:
+        """The (current, target) file pairs a no-encode reorg of `book` would produce — the same
+        computation `_persist_book` uses, for the preview's disposition. If the part order is
+        ambiguous (missing/duplicate track numbers) the per-file targets are unknown, so fall back to
+        the book folder as a single pair so the preview still reads move/clash without crashing."""
+        cbook = self._canonical_book(book)
+        tracks = [read_embedded_tags(sf.path).track for sf in book.source_files]
+        ordered = resolve_part_order(book.source_files, tracks)
+        if ordered is None:
+            return [(None, build_target_path(library_root, patterns, cbook).parent)]
+        targets = build_reorg_targets(library_root, patterns, cbook, ordered)
+        return [(sf.path, dst) for sf, dst in zip(ordered, targets, strict=True)]
 
     def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
         """Persist one book, guaranteeing a readable reason on any failure. Wraps the worker so an

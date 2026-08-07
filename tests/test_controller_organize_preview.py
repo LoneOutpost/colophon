@@ -25,19 +25,32 @@ def test_organize_preview_reports_target(tmp_path):
     assert row.book_id == book.id
     assert row.title == "Dune"
     assert row.target == dict(ctrl.organize_targets([book]))[book.id]
-    assert row.collision is False
+    assert row.disposition == "move"
     assert row.blocked is False
 
 
-def test_organize_preview_flags_collision(tmp_path):
+def test_organize_preview_flags_clash(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
     book = _book(ctx, tmp_path)
     target = dict(ctrl.organize_targets([book]))[book.id]
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"already here")
+    target.write_bytes(b"a different file")   # a foreign file at the m4b target
     (row,) = ctrl.organize_preview([book])
-    assert row.collision is True
+    assert row.disposition == "clash"
+
+
+def test_organize_preview_flags_already_placed(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _book(ctx, tmp_path)
+    target = dict(ctrl.organize_targets([book]))[book.id]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"m4b")
+    book.output_path = target                 # the book's own file already at the target
+    ctx.books.upsert(book)
+    (row,) = ctrl.organize_preview([book])
+    assert row.disposition == "placed"
 
 
 def test_organize_preview_flags_blocked(tmp_path):
@@ -51,9 +64,10 @@ def test_organize_preview_flags_blocked(tmp_path):
     assert not row.target.exists()
 
 
-def test_organize_preview_reorg_shows_folder_and_folder_collision(tmp_path):
-    # Without encode, a reorg copies the originals into the book folder (one or many), so the
-    # preview shows that folder (not a fake single .m4b) and flags a folder that already holds content.
+def test_organize_preview_reorg_is_file_level_not_directory(tmp_path):
+    # Without encode, a reorg copies the originals into the book folder; the preview shows that folder
+    # and classifies per FILE — an unrelated file in the folder is not a clash (only a target file taken
+    # by a different file is).
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
     book = _book(ctx, tmp_path)
@@ -61,12 +75,18 @@ def test_organize_preview_reorg_shows_folder_and_folder_collision(tmp_path):
 
     (row,) = ctrl.organize_preview([book], encode=False)
     assert row.target == target.parent          # destination folder, not a fake .m4b path
-    assert row.collision is False               # folder doesn't exist yet
+    assert row.disposition == "move"            # folder doesn't exist yet
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    (target.parent / "existing.mp3").write_bytes(b"x")
+    (target.parent / "unrelated.mp3").write_bytes(b"x")   # other content, not our target file
     (row2,) = ctrl.organize_preview([book], encode=False)
-    assert row2.collision is True               # a folder that already holds content collides
+    assert row2.disposition == "move"           # per-file: an unrelated file is not a clash
+
+    # occupy the book's own reorg target file with a different file -> clash
+    (dst,) = [d for _c, d in ctrl._reorg_pairs(book, ctx.patterns, ctx.config.library_root)]
+    dst.write_bytes(b"a different file")
+    (row3,) = ctrl.organize_preview([book], encode=False)
+    assert row3.disposition == "clash"
 
 
 def test_remove_from_library_drops_record_keeps_output(tmp_path):
