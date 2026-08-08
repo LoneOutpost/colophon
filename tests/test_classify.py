@@ -517,3 +517,35 @@ def test_glued_number_folder_classifies_as_single_titled_by_residue():
     assert r.content_kind is CK.SINGLE
     assert len(r.detected_works) == 1
     assert r.detected_works[0].label == "Cujo"
+
+
+def test_album_group_with_part_titles_is_one_book():
+    # The bulk-tagger bug: files share one album but each Title tag is "Part NN", and the
+    # filenames are informative enough that the clusterer would call them distinct works.
+    # The per-file index titles mean chaptering, so it must stay one book titled from the album.
+    feats = [
+        _feat("/a/d/Mario Puzo - The Godfather Part 01 of 13.mp3",
+              album="The Godfather", title="Part 01", artist="Mario Puzo"),
+        _feat("/a/d/Mario Puzo - The Godfather Part 02 of 13.mp3",
+              album="The Godfather", title="Part 02", artist="Mario Puzo"),
+        _feat("/a/d/Mario Puzo - The Godfather.mp3",
+              album="The Godfather", title="Part 14", artist="Mario Puzo"),
+    ]
+    works, signals = group_works(feats)
+    assert len(works) == 1
+    assert len(works[0].files) == 3
+    assert works[0].label == "The Godfather"
+    assert content_kind_for(works, signals) is CK.SINGLE
+
+
+def test_album_group_with_real_per_file_titles_still_splits():
+    # A box-set sharing one album but with *real* distinct per-file titles is a series shelf and
+    # must still split -- the guard keys on index-shaped titles, not merely on a shared album.
+    feats = [
+        _feat("/a/d/Book 1 - The Fellowship.mp3", album="The Lord of the Rings",
+              title="The Fellowship of the Ring"),
+        _feat("/a/d/Book 2 - The Two Towers.mp3", album="The Lord of the Rings",
+              title="The Two Towers"),
+    ]
+    works, _ = group_works(feats)
+    assert len(works) == 2

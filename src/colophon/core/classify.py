@@ -149,12 +149,26 @@ def _uniform_tag(values) -> str | None:
 # never win over the filename. "Track 3", "Disc 1", "CD 2", "Chapter 5", "Volume 1", "Unknown
 # Album …", "Untitled".
 _PLACEHOLDER = re.compile(
-    r"^(?:(?:track|disc|cd|chapter|volume|vol)\s*\d+|unknown(?:\s.*)?|untitled)$", re.IGNORECASE
+    r"^(?:(?:track|disc|cd|chapter|volume|vol|part)\s*\d+|unknown(?:\s.*)?|untitled)$", re.IGNORECASE
 )
 
 
 def _is_placeholder(value: str | None) -> bool:
     return bool(value) and bool(_PLACEHOLDER.match(value.strip()))
+
+
+_BARE_NUM_TITLE = re.compile(r"^\d{1,4}$")
+
+
+def _all_index_titles(group: list[FileFeatures]) -> bool:
+    """True when every file carries a Title tag that is an index-shaped placeholder
+    ("Part 01", "Chapter 3", "Track 7") or a bare number -- chapter/part markers, not distinct
+    book titles. Signals a chaptered single book even when the filenames read as distinct works,
+    so the album group must not be fanned out and no per-file title may be promoted."""
+    titles = [f.tags.title for f in group]
+    if not all(t for t in titles):
+        return False
+    return all(_is_placeholder(t) or bool(_BARE_NUM_TITLE.match(t.strip())) for t in titles)
 
 
 _ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
@@ -293,6 +307,12 @@ def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[
     works: list[DetectedWork] = []
     for key, group in keyed.items():
         if key.startswith("album:") and len(group) > 1:
+            if _all_index_titles(group):
+                # Per-file titles are all index placeholders ("Part NN"/"Chapter N"): chaptering,
+                # not distinct books. Keep as one book titled from the shared album; do not let the
+                # filename clusterer fan it out, and never promote a per-file title as the label.
+                works.append(_to_work(group))
+                continue
             sub, sub_signals = _cluster_works(group)
             if len(sub) > 1:  # the album was a series name over several distinct-title books
                 works.extend(_overlay_tags(sub, group))
