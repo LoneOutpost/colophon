@@ -549,3 +549,40 @@ def test_album_group_with_real_per_file_titles_still_splits():
     ]
     works, _ = group_works(feats)
     assert len(works) == 2
+
+
+def test_metadata_conflict_title_mismatch_flags():
+    # Recalled To Life: folder title vs a completely different album tag.
+    folder = Path("/audio/Reginald Hill/Dalziel and Pascoe/(Dalziel and Pascoe Book #13) Recalled To Life")
+    feats = [
+        _feat(str(folder / "Reginald Hill - Recalled To Life-01.mp3"),
+              album="A Tale of Two Cities", artist="Reginald Hill", title="Part 01"),
+        _feat(str(folder / "Reginald Hill - Recalled To Life-02.mp3"),
+              album="A Tale of Two Cities", artist="Reginald Hill", title="Part 02"),
+    ]
+    r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert any(f.code is FC.METADATA_CONFLICT for f in r.findings)
+
+
+def test_metadata_conflict_author_absent_from_path_flags():
+    # Dream Eyes: album shares "Dream" so the title side is quiet, but the artist is a different
+    # person absent from the /audio/Amanda Quick/... path.
+    folder = Path("/audio/Amanda Quick/Dark Legacy/(Dark Legacy Book #2) Dream Eyes")
+    feats = [
+        _feat(str(folder / "Ch01-Dream Eyes.mp3"),
+              album="I Dream with Open Eyes", artist="George Prochnik", title="Part 01"),
+        _feat(str(folder / "Ch02-Dream Eyes.mp3"),
+              album="I Dream with Open Eyes", artist="George Prochnik", title="Part 02"),
+    ]
+    r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert any(f.code is FC.METADATA_CONFLICT for f in r.findings)
+
+
+def test_no_metadata_conflict_for_consistent_book():
+    folder = Path("/audio/Brandon Sanderson/(Stormlight Archive Book #1) The Way of Kings")
+    feats = [
+        _feat(str(folder / "01.mp3"), album="The Way of Kings", artist="Brandon Sanderson", title="Chapter 1"),
+        _feat(str(folder / "02.mp3"), album="The Way of Kings", artist="Brandon Sanderson", title="Chapter 2"),
+    ]
+    r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert not any(f.code is FC.METADATA_CONFLICT for f in r.findings)

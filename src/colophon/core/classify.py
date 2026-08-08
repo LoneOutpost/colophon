@@ -16,6 +16,7 @@ from re import Pattern
 from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
+from colophon.core.folder_title import parse_folder_title
 from colophon.core.models import (
     ConfidenceSignal,
     ContentKind,
@@ -339,6 +340,40 @@ def content_kind_for(works: list[DetectedWork], signals: list[ConfidenceSignal])
     return ContentKind.MULTI if points >= CONTENT_THRESHOLD else ContentKind.UNKNOWN
 
 
+def _artist_in_path(artist: str, folder: Path, root: Path) -> bool:
+    """True when the embedded artist shares a word with some directory from `root` down to `folder`
+    -- the author lives in the path under an $Author/... layout. Absent everywhere -> the tag names
+    someone unrelated to where the book sits (a cross-wired author)."""
+    try:
+        segments = folder.relative_to(root).parts
+    except ValueError:
+        segments = folder.parts
+    return any(shares_token(artist, seg) for seg in segments)
+
+
+def _metadata_conflict_finding(
+    folder: Path, root: Path, features: list[FileFeatures], folder_kind: FolderKind
+) -> Finding | None:
+    """Flag a single book whose embedded tags name a *different book* than the folder/path. Two
+    independent hard-contradiction checks (either fires): the parsed folder title vs a uniform Album
+    tag, and a uniform Artist tag vs the folder's ancestor path. Passive -- a bulk tagger wrote the
+    wrong record onto these files; a human confirms and edits. Assumes an author-organized library
+    ($Author/$Title); a flat library would over-flag the author side."""
+    conflicts: list[str] = []
+    album = _uniform_tag(f.tags.album for f in features)
+    if folder_kind is FolderKind.TITLE and album and not _is_placeholder(album):
+        folder_title = parse_folder_title(folder.name).title or folder.name
+        if folder_title and not shares_token(folder_title, album):
+            conflicts.append(f'folder "{folder_title}" vs tag "{album}"')
+    artist = _uniform_tag(f.tags.artist for f in features)
+    if artist and not _artist_in_path(artist, folder, root):
+        conflicts.append(f'author "{artist}" not in the folder path')
+    if not conflicts:
+        return None
+    return Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                   detail="; ".join(conflicts))
+
+
 def _actionable_finding(
     content_kind: ContentKind, folder_kind: FolderKind, works: list[DetectedWork]
 ) -> Finding | None:
@@ -484,6 +519,10 @@ def classify(
                                       [f.path.stem for f in features])
         if gaps is not None:
             findings.append(gaps)
+    if content_kind is ContentKind.SINGLE:
+        conflict = _metadata_conflict_finding(folder, root, features, folder_kind)
+        if conflict is not None:
+            findings.append(conflict)
 
     # An UNKNOWN content folder with no other finding (conflicting/absent signals)
     # would otherwise stay invisible; surface it for a human look.
