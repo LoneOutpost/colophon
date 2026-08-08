@@ -60,3 +60,21 @@ def test_scan_emits_nothing_above_debug(tmp_path, caplog):
     with caplog.at_level(logging.INFO, logger="colophon.services.ingest"):
         scan_ingest(repo, tmp_path, template="$Title", directory_scheme="$Author/$Title")
     assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
+
+
+def test_scan_godfather_part_of_total_is_one_folder_titled_book(tmp_path):
+    # A multi-part book named "Title Part NN of MM" plus a whole-book file used to shatter into one
+    # "Part NN" book per file. It must scan to a single book titled from the folder, not the parts.
+    folder = tmp_path / "Mario Puzo" / "(Godfather Book #1) The Godfather"
+    folder.mkdir(parents=True)
+    for i in range(1, 4):
+        (folder / f"Mario Puzo - The Godfather Part {i:02d} of 13.mp3").write_bytes(b"")
+    (folder / "Mario Puzo - The Godfather.mp3").write_bytes(b"")
+    repo = _repo(tmp_path)
+    scan_ingest(repo, tmp_path, template="$Title", directory_scheme="$Author/$Title")
+    books = [b for b in repo.list_all() if str(b.source_folder).endswith("The Godfather")]
+    assert len(books) == 1
+    book = books[0]
+    assert book.title == "The Godfather"
+    assert book.content_kind is ContentKind.SINGLE
+    assert len(book.source_files) == 4
