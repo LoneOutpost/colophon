@@ -78,3 +78,25 @@ def test_scan_godfather_part_of_total_is_one_folder_titled_book(tmp_path):
     assert book.title == "The Godfather"
     assert book.content_kind is ContentKind.SINGLE
     assert len(book.source_files) == 4
+
+
+def test_metadata_conflict_is_an_active_finding():
+    # A METADATA_CONFLICT finding is not suppressed, so it surfaces in the Attention view.
+    from datetime import UTC, datetime
+
+    from colophon.core.attention import attention_items
+    from colophon.core.models import (
+        SUPPRESSED_FINDINGS,
+        BookUnit,
+        Finding,
+        FindingCode,
+        FindingSeverity,
+    )
+    assert FindingCode.METADATA_CONFLICT not in SUPPRESSED_FINDINGS
+    finding = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                      detail='folder "Recalled To Life" vs tag "A Tale of Two Cities"')
+    now = datetime(2026, 8, 8, tzinfo=UTC)
+    book = BookUnit(id="x", source_folder=Path("/audio/A/B"), findings=[finding],
+                    created_at=now, updated_at=now)
+    items = attention_items(book, [finding])
+    assert any(i.code is FindingCode.METADATA_CONFLICT for i in items)
