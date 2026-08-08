@@ -95,6 +95,7 @@ from colophon.core.phases import (
     resync_state,
     state_of,
 )
+from colophon.core.progress import step
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.quickmatch import (
     IdentifyPlan,
@@ -808,10 +809,11 @@ class AppController:
         """One-time backfill: re-derive every scan root's classification and stamp
         identity_confidence + BookState onto the stored books, writing back only the movers.
         Returns the number of books updated. Idempotent — a harmonized library writes nothing."""
-        roots = {
-            self._scan_root_for_path(b.source_folder) for b in self.ctx.books.list_all()
-        }
-        return self._resync_roots(roots)
+        with step("rebuilding graph classification"):
+            roots = {
+                self._scan_root_for_path(b.source_folder) for b in self.ctx.books.list_all()
+            }
+            return self._resync_roots(roots)
 
     def reprobe_durations(self, *, only_missing: bool = True) -> int:
         """Re-read source-file durations from disk and reconcile the EMPTY_AUDIO finding, persisting
@@ -908,35 +910,37 @@ class AppController:
         active = {str(p) for p in self.ctx.config.scan_paths}
         if not active:
             return 0
-        book_ids = {b.id for b in self.ctx.books.list_all()}
-        result = reconcile(self.ctx.library_graph, active_roots=active, book_ids=book_ids)
-        if not result:
-            return 0
-        for r in result.affected_roots:
-            nodes_r = [n for n in self.ctx.library_graph.nodes.values() if n.root == r]
-            edges_r = [e for e in self.ctx.library_graph.edges if e.root == r]
-            self.ctx.graph.replace_subgraph(Path(r), nodes_r, edges_r)
-        logger.info(
-            f"graph reconcile: removed {len(result.removed_node_ids)} orphan node(s) and "
-            f"{result.removed_edges} dangling edge(s) across {len(result.affected_roots)} root(s)"
-        )
-        return len(result.removed_node_ids)
+        with step("reconciling the graph"):
+            book_ids = {b.id for b in self.ctx.books.list_all()}
+            result = reconcile(self.ctx.library_graph, active_roots=active, book_ids=book_ids)
+            if not result:
+                return 0
+            for r in result.affected_roots:
+                nodes_r = [n for n in self.ctx.library_graph.nodes.values() if n.root == r]
+                edges_r = [e for e in self.ctx.library_graph.edges if e.root == r]
+                self.ctx.graph.replace_subgraph(Path(r), nodes_r, edges_r)
+            logger.info(
+                f"graph reconcile: removed {len(result.removed_node_ids)} orphan node(s) and "
+                f"{result.removed_edges} dangling edge(s) across {len(result.affected_roots)} root(s)"
+            )
+            return len(result.removed_node_ids)
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its
         scan root's entity records from the existing books (no scan, no filesystem walk,
         no book changes). Returns the number of roots rebuilt. Idempotent — a healthy
         graph rebuilds nothing."""
-        books = self.ctx.books.list_all()
-        present = set(self.ctx.library_graph.nodes)
-        missing_roots = {
-            self._scan_root_for_path(b.source_folder)
-            for b in books
-            if book_node_id(b.id) not in present
-        }
-        if missing_roots:
-            self._resync_roots(missing_roots)
-        return len(missing_roots)
+        with step("self-healing missing graph roots"):
+            books = self.ctx.books.list_all()
+            present = set(self.ctx.library_graph.nodes)
+            missing_roots = {
+                self._scan_root_for_path(b.source_folder)
+                for b in books
+                if book_node_id(b.id) not in present
+            }
+            if missing_roots:
+                self._resync_roots(missing_roots)
+            return len(missing_roots)
 
     def scan_paths_missing_graph(self) -> list[Path]:
         """Configured scan paths with no subgraph in the in-memory graph (never scanned /
@@ -1119,7 +1123,8 @@ class AppController:
 
     def scan(self, roots: list[Path] | None = None, *, options: ScanOptions | None = None) -> int:
         """Convenience: preview then immediately commit. Returns the count."""
-        return self.apply_scan(self.scan_preview(roots, options=options))
+        with step("scanning the library"):
+            return self.apply_scan(self.scan_preview(roots, options=options))
 
     def _scan_root_for_path(self, path: Path) -> Path:
         """The configured scan path that contains (or equals) `path`, else `path` itself."""

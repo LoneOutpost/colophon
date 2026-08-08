@@ -82,8 +82,7 @@ def main() -> None:
     # rebuilds anything. Non-fatal like the other startup heals — a failure degrades to
     # "not reconciled", never blocks startup.
     try:
-        with step("reconciling the graph"):
-            purged = controller.reconcile_graph()
+        purged = controller.reconcile_graph()
         if purged:
             logger.info(f"graph: reconciled away {purged} stale/orphan node(s) at startup")
     except Exception:
@@ -93,8 +92,7 @@ def main() -> None:
     # here (e.g. a graph write conflict from an unusual scan-path config) must degrade to
     # "not healed", never prevent startup.
     try:
-        with step("self-healing missing graph roots"):
-            healed = controller.rebuild_missing_graph()
+        healed = controller.rebuild_missing_graph()
         if healed:
             logger.info(f"graph: rebuilt {healed} root(s) from existing books (self-heal)")
     except Exception:
@@ -103,8 +101,7 @@ def main() -> None:
     # library opens harmonized with the current graph classifier. Idempotent and non-fatal:
     # a already-harmonized library writes nothing, and a failure must never block startup.
     try:
-        with step("rebuilding graph classification"):
-            updated = controller.recompute_all_identity()
+        updated = controller.recompute_all_identity()
         if updated:
             logger.info(f"identity: backfilled {updated} book(s) from the graph classification")
     except Exception:
