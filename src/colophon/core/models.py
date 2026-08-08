@@ -85,6 +85,7 @@ class FindingCode(StrEnum):
     EMPTY_AUDIO = "empty_audio"  # a file with real size but no readable audio (corrupt/incomplete)
     MIXED_QUALITY = "mixed_quality"  # a book's audio files disagree in bitrate/format (possible mis-grouping)
     MISSING_TRACKS = "missing_tracks"  # a hole in the book's numbered track sequence
+    METADATA_CONFLICT = "metadata_conflict"  # embedded tags name a different book than the folder/path
 
 
 # Findings whose remedy is fostering the folder into one subfolder per work.

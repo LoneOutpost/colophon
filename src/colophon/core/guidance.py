@@ -57,6 +57,12 @@ _MISSING_TRACKS = Guidance(
     "files, or dismiss this note if the book is intentionally partial.",
     (FixAction.ACKNOWLEDGE,),
 )
+_METADATA_CONFLICT = Guidance(
+    "This book's embedded tags name a different book than its folder does (a bulk tagger wrote the "
+    "wrong metadata). Check the folder against the tags, fix the wrong fields, or dismiss this note "
+    "if the tags are actually right.",
+    (FixAction.MATCHES, FixAction.ACKNOWLEDGE),
+)
 
 _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.EMPTY_AUDIO: _CORRUPT,
@@ -69,6 +75,7 @@ _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.STRUCTURE_UNCLEAR: _UNCLEAR,
     FindingCode.MIXED_QUALITY: _MIXED_QUALITY,
     FindingCode.MISSING_TRACKS: _MISSING_TRACKS,
+    FindingCode.METADATA_CONFLICT: _METADATA_CONFLICT,
 }
 
 
