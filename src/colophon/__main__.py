@@ -18,6 +18,7 @@ from colophon.adapters.config import (
 from colophon.app_context import AppContext
 from colophon.controller import AppController
 from colophon.core.library_graph import check_file_references
+from colophon.core.progress import step
 from colophon.ui import create_app
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,8 @@ def main() -> None:
         save_config(config, default_config_path())
         logger.info("generated a storage secret for per-tab view persistence")
     ctx = AppContext.create(config)
-    validity = check_file_references(ctx.library_graph)
+    with step("checking file references"):
+        validity = check_file_references(ctx.library_graph)
     if validity.missing_dirs or validity.missing_files:
         logger.warning(
             f"graph: {len(validity.missing_dirs)} directory and "
@@ -80,7 +82,8 @@ def main() -> None:
     # rebuilds anything. Non-fatal like the other startup heals — a failure degrades to
     # "not reconciled", never blocks startup.
     try:
-        purged = controller.reconcile_graph()
+        with step("reconciling the graph"):
+            purged = controller.reconcile_graph()
         if purged:
             logger.info(f"graph: reconciled away {purged} stale/orphan node(s) at startup")
     except Exception:
@@ -90,7 +93,8 @@ def main() -> None:
     # here (e.g. a graph write conflict from an unusual scan-path config) must degrade to
     # "not healed", never prevent startup.
     try:
-        healed = controller.rebuild_missing_graph()
+        with step("self-healing missing graph roots"):
+            healed = controller.rebuild_missing_graph()
         if healed:
             logger.info(f"graph: rebuilt {healed} root(s) from existing books (self-heal)")
     except Exception:
@@ -99,7 +103,8 @@ def main() -> None:
     # library opens harmonized with the current graph classifier. Idempotent and non-fatal:
     # a already-harmonized library writes nothing, and a failure must never block startup.
     try:
-        updated = controller.recompute_all_identity()
+        with step("rebuilding graph classification"):
+            updated = controller.recompute_all_identity()
         if updated:
             logger.info(f"identity: backfilled {updated} book(s) from the graph classification")
     except Exception:
@@ -108,7 +113,8 @@ def main() -> None:
     # all collided on one file. Clearing the shared cover_path re-fetches each from its own
     # cover_url into a per-book path. Idempotent and non-fatal — never blocks startup.
     try:
-        healed_covers = controller.dedupe_colliding_covers()
+        with step("de-duplicating covers"):
+            healed_covers = controller.dedupe_colliding_covers()
         if healed_covers:
             logger.info(f"covers: cleared {healed_covers} colliding cover reference(s) to re-fetch")
     except Exception:

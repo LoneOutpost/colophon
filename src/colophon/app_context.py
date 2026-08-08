@@ -30,6 +30,7 @@ from colophon.adapters.sources.internet_archive import InternetArchiveSource
 from colophon.adapters.sources.openlibrary import OpenLibrarySource
 from colophon.core.jobs import JobRegistry
 from colophon.core.library_graph import LibraryGraph
+from colophon.core.progress import step
 from colophon.core.sources import MetadataSource, arrange_sources
 
 __all__ = ["AppContext", "arrange_sources", "build_all_sources", "default_db_path"]
@@ -71,7 +72,8 @@ class AppContext:
     def create(cls, config: Config, *, config_path: Path | None = None) -> AppContext:
         db = config.db_path or default_db_path()
         conn = connect(db)
-        migrate(conn)
+        with step("running database migrations"):
+            migrate(conn)
         patterns = PathPatterns(
             folder=config.organize_folder_pattern,
             single_file=config.organize_file_pattern,
@@ -90,6 +92,8 @@ class AppContext:
             else None
         )
         graph_store = GraphStore(conn)
+        with step("loading library graph"):
+            library_graph = LibraryGraph.from_records(*graph_store.load_all())
         return cls(
             config=config,
             conn=conn,
@@ -101,7 +105,7 @@ class AppContext:
             aliases=EntityAliasRepo(conn),
             franchises=KnownFranchiseRepo(conn),
             graph=graph_store,
-            library_graph=LibraryGraph.from_records(*graph_store.load_all()),
+            library_graph=library_graph,
             sources=sources,
             patterns=patterns,
             abs_client=abs_client,

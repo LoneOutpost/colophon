@@ -57,3 +57,23 @@ def test_raise_ws_message_cap_noops_before_server_built(monkeypatch):
 
     monkeypatch.setattr(core, "sio", None)
     raise_ws_message_cap()  # must not raise when the socket server isn't created yet
+
+
+def test_startup_step_wraps_reconcile_with_progress_logs(tmp_path, caplog):
+    import logging
+
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.controller import AppController
+    from colophon.core.progress import step
+
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite",
+                                   library_root=tmp_path / "lib", scan_paths=[]))
+    ctrl = AppController(ctx)
+    with caplog.at_level(logging.INFO, logger="colophon.progress"):
+        with step("reconciling the graph"):
+            ctrl.reconcile_graph()
+    msgs = [r.message for r in caplog.records if r.name == "colophon.progress"]
+    assert msgs[0] == "reconciling the graph: starting"
+    assert msgs[-1].startswith("reconciling the graph: done in ")
+    ctx.close()
