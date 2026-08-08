@@ -87,6 +87,7 @@ def _spaced(chunk: str) -> str:
     """Display form: space camelCase and letter->digit boundaries, commas to
     spaces, collapse whitespace. Case preserved; ordinals like '7th' stay intact."""
     s = _CAMEL.sub(" ", chunk)
+    s = re.sub(r"(?<=\d)(of)(?=\d)", r" \1 ", s, flags=re.IGNORECASE)  # "01of26" -> "01 of 26"
     s = _LETTER_DIGIT.sub(" ", s)
     s = s.replace(",", " ")
     return re.sub(r"\s+", " ", s).strip()
@@ -114,10 +115,32 @@ def _is_chapter_marker(chunk: str) -> bool:
     return bool(_CHAPTER_MARKER.match(_spaced(chunk).lower()))
 
 
+# Structural marker words that precede an index ("Part 3", "Disc 2", "CD 1"). Dropped from the text
+# signature when adjacent to an index token so "Title Part 01 of 13" matches a bare "Title".
+_STRUCT_MARKER = frozenset({
+    "part", "pt", "ch", "chap", "chapter", "track", "trk", "disc", "cd",
+    "side", "vol", "volume", "section", "sect",
+})
+
+
 def _text_sig(tokens: list[str]) -> tuple[str, ...]:
-    """The non-index tokens -- a chunk's 'text signature'. A track-of-total token ('01-12') is an
-    index, not text, so files that differ only in it share a signature and cluster as one book."""
-    return tuple(t for t in tokens if not _is_index_token(t))
+    """The non-index tokens -- a chunk's 'text signature'. Index tokens (a number, a track-of-total
+    compound, a number+letter half) are dropped; so is a structural marker word ("Part"/"Disc"/"CD")
+    immediately before an index, and an "of" connective inside a "N of N" total-count run. So
+    "Title Part 01 of 13" and a bare "Title" share a signature and cluster as one book's parts."""
+    out: list[str] = []
+    for i, t in enumerate(tokens):
+        if _is_index_token(t):
+            continue
+        if t in _STRUCT_MARKER and i + 1 < len(tokens) and _is_index_token(tokens[i + 1]):
+            continue
+        if t == "of" and (
+            (i > 0 and _is_index_token(tokens[i - 1]))
+            or (i + 1 < len(tokens) and _is_index_token(tokens[i + 1]))
+        ):
+            continue
+        out.append(t)
+    return tuple(out)
 
 
 def _trailing_number(text: str) -> float | None:

@@ -93,3 +93,33 @@ def test_is_index_token_recognizes_compound_and_number():
 def test_distinct_titles_with_numbers_still_split():
     cr = cluster([Path("/x/Dune 01.mp3"), Path("/x/Foundation 01.mp3")])
     assert len(cr.detected_works) == 2
+
+
+def test_part_n_of_total_with_whole_file_is_one_book():
+    r = cluster([
+        Path("Mario Puzo - The Godfather Part 01 of 13.mp3"),
+        Path("Mario Puzo - The Godfather Part 02 of 13.mp3"),
+        Path("Mario Puzo - The Godfather.mp3"),
+    ])
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+
+
+def test_glued_n_of_total_is_one_book():
+    r = cluster([
+        Path("Michael Connelly - Black Echo 01of26.mp3"),
+        Path("Michael Connelly - Black Echo 02of26.mp3"),
+        Path("Michael Connelly - Black Echo 03of26.mp3"),
+    ])
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+
+
+def test_series_shelf_still_splits_after_of_index():
+    # Regression guard: distinct per-file titles must still read as separate books.
+    r = cluster([
+        Path("Brandon Sanderson - Legion.mp3"),
+        Path("Brandon Sanderson - Elantris.mp3"),
+    ])
+    assert r.content_kind is ContentKind.MULTI
+    assert len(r.detected_works) == 2

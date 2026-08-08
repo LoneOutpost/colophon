@@ -44,7 +44,8 @@ def test_is_num_handles_int_and_decimal():
 
 def test_text_sig_drops_number_tokens():
     assert _text_sig(["darkly", "disturbing", "trilogy", "1"]) == ("darkly", "disturbing", "trilogy")
-    assert _text_sig(["7th", "sigma", "part", "1"]) == ("7th", "sigma", "part")  # 7th kept (not a number)
+    # "7th" is an ordinal (kept, not a number); "part 1" is a part index (marker + number, dropped)
+    assert _text_sig(["7th", "sigma", "part", "1"]) == ("7th", "sigma")
 
 
 def test_trailing_number_helpers():
