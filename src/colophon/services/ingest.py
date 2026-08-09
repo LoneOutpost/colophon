@@ -145,6 +145,7 @@ def _run_local(
             FileFeatures(
                 path=sf.path, ext=sf.ext, duration_seconds=sf.duration_seconds,
                 tags=read_audio_metadata(sf.path)[1],  # cache hit from SEARCH
+                true_ext=sf.true_ext,
             )
             for sf in book.source_files
         ]

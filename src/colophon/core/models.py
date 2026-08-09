@@ -143,6 +143,7 @@ class SourceFile(_Base):
     sample_rate: int = 0   # Hz (0 = unknown)
     channels: int = 0      # 1 mono, 2 stereo, ... (0 = unknown)
     codec: str = ""        # friendly format label (MP3 / M4B / AAC / FLAC / Opus / OGG); "" = unknown
+    true_ext: str | None = None  # canonical extension of the real container (mutagen-probed); None = unknown
 
 
 class Chapter(_Base):

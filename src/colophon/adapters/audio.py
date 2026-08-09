@@ -12,7 +12,7 @@ from mutagen import MutagenError
 from colophon.adapters.audio_formats import AudioInfo, format_for
 from colophon.adapters.ffmpeg import FFmpegError, probe_duration_seconds
 from colophon.adapters.tags import read_embedded_tags, tags_from_loaded
-from colophon.core.audio_quality import codec_label
+from colophon.core.audio_quality import codec_label, true_ext_from_container
 from colophon.core.models import EmbeddedTags, SourceFile
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,7 @@ def _read_audio_metadata(
         sample_rate=info.sample_rate,
         channels=info.channels,
         codec=codec_label(ext),
+        true_ext=true_ext_from_container(audio),
     )
     return sf, tags
 

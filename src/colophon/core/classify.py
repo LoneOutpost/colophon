@@ -41,6 +41,7 @@ class FileFeatures:
     ext: str
     duration_seconds: float
     tags: EmbeddedTags  # embedded tags read from the file
+    true_ext: str | None = None  # canonical extension of the real container (mutagen-probed); None = unknown
 
 
 @dataclass(frozen=True)
