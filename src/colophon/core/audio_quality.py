@@ -29,6 +29,35 @@ def codec_label(ext: str) -> str:
     return _CODEC_LABELS.get(ext, ext.upper())
 
 
+# Coarse container families (the level a mislabeled extension actually lies about). opus/ogg share
+# the Ogg container, so opus-in-.ogg is NOT a mismatch; MP3-in-.opus is (mpeg vs ogg).
+_CONTAINER_FAMILY = {
+    "mp3": "mpeg", "opus": "ogg", "ogg": "ogg", "oga": "ogg",
+    "flac": "flac", "m4a": "mp4", "m4b": "mp4", "mp4": "mp4", "aac": "aac", "wav": "wav",
+}
+
+# mutagen object class name -> the canonical extension of its true container.
+_MUTAGEN_TRUE_EXT = {
+    "MP3": "mp3", "EasyMP3": "mp3", "AAC": "aac",
+    "OggOpus": "opus", "OggVorbis": "ogg", "OggFLAC": "ogg",
+    "FLAC": "flac", "MP4": "m4a", "EasyMP4": "m4a", "WAVE": "wav",
+}
+
+
+def container_family(ext: str) -> str | None:
+    """The coarse container family of a bare extension, or None if unknown. Comparing at this level
+    treats opus-in-.ogg as fine while catching a cross-container lie (an MP3 named .opus)."""
+    return _CONTAINER_FAMILY.get(ext.lower().lstrip("."))
+
+
+def true_ext_from_container(audio: object | None) -> str | None:
+    """The canonical extension of an already-loaded mutagen object's *true* container (from its type,
+    which mutagen sniffs by content), or None when the type is unrecognized / audio is None."""
+    if audio is None:
+        return None
+    return _MUTAGEN_TRUE_EXT.get(type(audio).__name__)
+
+
 # Coarse bitrate tiers (kbps upper bounds); files within one tier are "the same" quality,
 # which tolerates VBR jitter (125-130 kbps all land in the 128 tier).
 _BITRATE_TIERS = (64, 96, 128, 192, 256)

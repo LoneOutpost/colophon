@@ -76,3 +76,26 @@ def test_mixed_quality_finding_flags_format_mix_and_ignores_unknown():
     # a single known file + an unknown one does not flag
     assert mixed_quality_finding([_sf("1.mp3", bitrate=128000, codec="MP3", sample_rate=44100, channels=2),
                                   _sf("2.mp3")]) is None
+
+
+def test_container_family_collapses_ogg_and_mp4():
+    from colophon.core.audio_quality import container_family
+    assert container_family("opus") == container_family("ogg") == "ogg"
+    assert container_family("m4a") == container_family("m4b") == "mp4"
+    assert container_family("mp3") == "mpeg"
+    assert container_family("flac") == "flac"
+    assert container_family("xyz") is None
+
+
+def test_true_ext_from_container_reads_mutagen_type():
+    from colophon.core.audio_quality import true_ext_from_container
+
+    class _FakeOpus: ...
+    _FakeOpus.__name__ = "OggOpus"
+
+    class _FakeMp3: ...
+    _FakeMp3.__name__ = "MP3"
+
+    assert true_ext_from_container(_FakeOpus()) == "opus"
+    assert true_ext_from_container(_FakeMp3()) == "mp3"
+    assert true_ext_from_container(None) is None
