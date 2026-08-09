@@ -586,3 +586,23 @@ def test_no_metadata_conflict_for_consistent_book():
     ]
     r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
     assert not any(f.code is FC.METADATA_CONFLICT for f in r.findings)
+
+
+def test_extension_mismatch_flags_mp3_as_opus():
+    folder = Path("/audio/Charles Dickens/Nicholas Nickleby")
+    feats = [
+        _feat(str(folder / "part1.opus"), album="X", artist="Charles Dickens"),
+        _feat(str(folder / "part2.opus"), album="X", artist="Charles Dickens"),
+    ]
+    for f in feats:
+        object.__setattr__(f, "true_ext", "mp3")  # FileFeatures is frozen; set the probe result
+    r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert any(f.code is FC.EXTENSION_MISMATCH for f in r.findings)
+
+
+def test_no_extension_mismatch_for_opus_in_ogg():
+    folder = Path("/audio/A/B")
+    feats = [_feat(str(folder / "x.ogg"), album="X")]
+    object.__setattr__(feats[0], "true_ext", "opus")  # opus-in-.ogg: same family, not a mismatch
+    r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert not any(f.code is FC.EXTENSION_MISMATCH for f in r.findings)

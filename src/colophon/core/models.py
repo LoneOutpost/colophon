@@ -86,6 +86,7 @@ class FindingCode(StrEnum):
     MIXED_QUALITY = "mixed_quality"  # a book's audio files disagree in bitrate/format (possible mis-grouping)
     MISSING_TRACKS = "missing_tracks"  # a hole in the book's numbered track sequence
     METADATA_CONFLICT = "metadata_conflict"  # embedded tags name a different book than the folder/path
+    EXTENSION_MISMATCH = "extension_mismatch"  # the file's real container differs from its extension
 
 
 # Findings whose remedy is fostering the folder into one subfolder per work.

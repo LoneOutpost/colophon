@@ -63,6 +63,11 @@ _METADATA_CONFLICT = Guidance(
     "if the tags are actually right.",
     (FixAction.MATCHES, FixAction.ACKNOWLEDGE),
 )
+_EXTENSION_MISMATCH = Guidance(
+    "One or more of this book's files has an extension that does not match its real audio format "
+    "(e.g. an MP3 named .opus). Rename them to the correct extension, or dismiss this note.",
+    (FixAction.ACKNOWLEDGE,),
+)
 
 _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.EMPTY_AUDIO: _CORRUPT,
@@ -76,6 +81,7 @@ _BY_CODE: dict[FindingCode, Guidance] = {
     FindingCode.MIXED_QUALITY: _MIXED_QUALITY,
     FindingCode.MISSING_TRACKS: _MISSING_TRACKS,
     FindingCode.METADATA_CONFLICT: _METADATA_CONFLICT,
+    FindingCode.EXTENSION_MISMATCH: _EXTENSION_MISMATCH,
 }
 
 

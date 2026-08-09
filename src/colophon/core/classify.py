@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from re import Pattern
 
+from colophon.core.audio_quality import container_family
 from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
@@ -341,6 +342,24 @@ def content_kind_for(works: list[DetectedWork], signals: list[ConfidenceSignal])
     return ContentKind.MULTI if points >= CONTENT_THRESHOLD else ContentKind.UNKNOWN
 
 
+def _extension_mismatch_finding(features: list[FileFeatures]) -> Finding | None:
+    """Flag files whose mutagen-probed true container disagrees (at the container-family level) with
+    their filename extension -- e.g. an MP3 named `.opus`. The extension lies, so the wrong tag writer
+    runs and format comparisons misfire; a human renames them (a one-click fix is offered separately)."""
+    bad = [f for f in features
+           if f.true_ext
+           and container_family(f.true_ext) is not None
+           and container_family(f.ext) is not None
+           and container_family(f.true_ext) != container_family(f.ext)]
+    if not bad:
+        return None
+    example = bad[0].path.name
+    n = len(bad)
+    detail = (f'{n} files are really "{bad[0].true_ext}" but named otherwise (e.g. {example})'
+              if n > 1 else f'"{example}" is really a {bad[0].true_ext} file')
+    return Finding(code=FindingCode.EXTENSION_MISMATCH, severity=FindingSeverity.WARN, detail=detail)
+
+
 def _artist_in_path(artist: str, folder: Path, root: Path) -> bool:
     """True when the embedded artist shares a word with some directory from `root` down to `folder`
     -- the author lives in the path under an $Author/... layout. Absent everywhere -> the tag names
@@ -524,6 +543,9 @@ def classify(
         conflict = _metadata_conflict_finding(folder, root, features, folder_kind)
         if conflict is not None:
             findings.append(conflict)
+    ext_mismatch = _extension_mismatch_finding(features)
+    if ext_mismatch is not None:
+        findings.append(ext_mismatch)
 
     # An UNKNOWN content folder with no other finding (conflicting/absent signals)
     # would otherwise stay invisible; surface it for a human look.
