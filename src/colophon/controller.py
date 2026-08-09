@@ -896,6 +896,33 @@ class AppController:
         self.ctx.books.upsert(book)
         return True
 
+    def fix_extension_mismatches(self, book: BookUnit) -> int:
+        """Rename each of the book's files whose real container (probed true_ext) disagrees with its
+        extension family to the correct extension, then re-derive the book from disk so the corrected
+        files reclassify and the EXTENSION_MISMATCH finding clears. Returns the number renamed. A
+        rename that would collide is skipped and logged (the finding stays truthful)."""
+        from colophon.adapters.audio import clear_audio_metadata_cache
+        from colophon.core.audio_quality import container_family
+        from colophon.services import files as file_ops
+
+        renamed = 0
+        for sf in book.source_files:
+            te = sf.true_ext
+            if not te or container_family(te) is None or container_family(sf.ext) is None:
+                continue
+            if container_family(te) == container_family(sf.ext):
+                continue
+            new_name = f"{sf.path.stem}.{te}"
+            try:
+                file_ops.move_on_disk(sf.path, sf.path.parent, new_name=new_name)
+                renamed += 1
+            except (FileExistsError, OSError, ValueError) as e:
+                logger.warning(f"fix_extension: could not rename {sf.path} -> {new_name}: {e}")
+        if renamed:
+            clear_audio_metadata_cache()
+            self.reevaluate_scope(book)
+        return renamed
+
     def active_jobs(self) -> list[Job]:
         """Snapshot of running background jobs, for the app-bar indicator (shared across sessions)."""
         return self.ctx.jobs.active()

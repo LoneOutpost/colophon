@@ -3622,3 +3622,25 @@ def test_book_audio_path_none_for_bad_id_or_range(tmp_path):
     assert ctrl.book_audio_path(book.id, 5) is None      # out of range
     assert ctrl.book_audio_path(book.id, -1) is None      # negative
     ctx.close()
+
+
+def test_fix_extension_renames_mislabeled_file(tmp_path, make_audio):
+    # A real MP3 named ".opus" (stored true_ext="mp3") must be renamed back to ".mp3".
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    ctx.config.scan_paths = [tmp_path]
+    real_mp3 = make_audio("Author/Book/chapter.mp3", seconds=1)
+    mislabeled = real_mp3.with_suffix(".opus")
+    real_mp3.rename(mislabeled)
+    book = BookUnit.new(source_folder=mislabeled.parent)
+    book.title = "Book"
+    book.source_files = [SourceFile(path=mislabeled, size=mislabeled.stat().st_size,
+                                    duration_seconds=1.0, ext="opus", true_ext="mp3")]
+    ctx.books.upsert(book)
+
+    n = AppController(ctx).fix_extension_mismatches(book)
+    assert n == 1
+    assert (mislabeled.parent / "chapter.mp3").exists()
+    assert not mislabeled.exists()
+    ctx.close()
