@@ -1067,6 +1067,14 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         refresh_list()
                         show_detail(b.id)
 
+                    def _fix_extension(b=book) -> None:
+                        n = controller.fix_extension_mismatches(b)
+                        ui.notify(f"Renamed {n} file(s) to the correct extension" if n
+                                  else "No files needed renaming",
+                                  type="positive" if n else "info")
+                        refresh_list()
+                        show_detail(b.id)
+
                     async def _rerun_one(b: BookUnit, phase: Phase) -> None:
                         result = await asyncio.to_thread(controller.rerun_phase, [b], phase)
                         _rerun_notify(result)
@@ -1087,6 +1095,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             show_detail(b.id)),
                         delete=lambda b=book: _delete_book_items(b),
                         rerun_phase=_rerun_one,
+                        fix_extension=_fix_extension,
                     )
                     state_panel.render(controller, book, actions=_attn)
 

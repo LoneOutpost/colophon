@@ -19,6 +19,7 @@ class FixAction(StrEnum):
     MATCHES = "matches"          # find a source match to confirm identity
     ACKNOWLEDGE = "acknowledge"  # dismiss an advisory finding
     DELETE = "delete"            # permanently delete corrupt files / a missing book
+    FIX_EXTENSION = "fix_extension"  # rename mislabeled files to their true extension
 
 
 class Guidance(NamedTuple):
@@ -66,7 +67,7 @@ _METADATA_CONFLICT = Guidance(
 _EXTENSION_MISMATCH = Guidance(
     "One or more of this book's files has an extension that does not match its real audio format "
     "(e.g. an MP3 named .opus). Rename them to the correct extension, or dismiss this note.",
-    (FixAction.ACKNOWLEDGE,),
+    (FixAction.FIX_EXTENSION, FixAction.ACKNOWLEDGE),
 )
 
 _BY_CODE: dict[FindingCode, Guidance] = {

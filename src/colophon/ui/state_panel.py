@@ -44,6 +44,7 @@ class AttentionActions:
     acknowledge: Callable[[FindingCode], None]
     delete: Callable[[], None]
     rerun_phase: Callable[[BookUnit, Phase], Awaitable[None]]
+    fix_extension: Callable[[], None]
 
 
 _PHASE_LABELS: dict[Phase, str] = {
@@ -199,6 +200,7 @@ _ACTION_META: dict[FixAction, tuple[str, str]] = {
     FixAction.MATCHES: ("Find matches", "travel_explore"),
     FixAction.ACKNOWLEDGE: ("Acknowledge", "check"),
     FixAction.DELETE: ("Delete", "delete"),
+    FixAction.FIX_EXTENSION: ("Fix extension", "edit"),
 }
 
 
@@ -220,6 +222,7 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
             FixAction.MATCHES: actions.matches,
             FixAction.ACKNOWLEDGE: (lambda c=code: actions.acknowledge(c)) if code else (lambda: None),
             FixAction.DELETE: actions.delete,
+            FixAction.FIX_EXTENSION: actions.fix_extension,
         }
         ui.button(text, icon=icon, on_click=handlers[action]).props("flat dense no-caps")
 
