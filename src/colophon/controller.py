@@ -205,9 +205,9 @@ class CoverSetResult(_Base):
 
 
 class RecomputeSummary(_Base):
-    """Outcome of a library-wide graph-only identity recompute."""
+    """Outcome of a library-wide identity re-derivation (re-identify from cache + graph re-derive)."""
 
-    updated: int = 0        # books whose derived state changed and were written back
+    updated: int = 0        # books whose derivation changed across the operation
     into_review: int = 0    # books that entered needs_review
     out_of_review: int = 0  # books that left needs_review
 
@@ -1421,9 +1421,11 @@ class AppController:
         recompute does. Mirrors `reidentify()` semantics but library-wide and from cache: each book's
         WEAK (folder/filename) identity is cleared so it re-derives from the cache, while hard
         tag/datafile/match/manual identity survives. The back half reclassifies, fills author/series
-        down, and re-stamps confidence / title-corroboration verdict / findings / BookState. No
-        filesystem walk; the disk counterpart is Scan then Rebuild. A book whose file vanished and has
-        no cache is logged by `run_local_phases` and left unchanged.
+        down, and re-stamps confidence / title-corroboration verdict / findings / BookState. The
+        audio files are not re-read (cached tags serve CATEGORIZE/IDENTIFY); it still reads any
+        datafile sidecar, so it is not literally disk-free. The full-disk counterpart is Scan then
+        Rebuild. A book whose file vanished and has no cache is logged by `run_local_phases` and left
+        unchanged.
         Returns the review-movement summary the dialog shows; `updated` counts books whose
         derivation fingerprint (title/authors/franchise/year/identity_confidence/verdict/state)
         changed across the whole operation — front-half reconcile or back-half re-derive."""

@@ -1025,8 +1025,8 @@ async def scan_dialog(
                 ).props("dense")
                 ui.label(
                     "Scan reads your files. Re-identify refreshes identification from tags already "
-                    "read (no disk). Repair fixes authors that were mistagged with a title "
-                    "(changes fields)."
+                    "read, without re-reading your audio files. Repair fixes authors that were "
+                    "mistagged with a title (changes fields)."
                 ).classes("text-caption colophon-muted")
 
                 disk = ui.column().classes("w-full")
@@ -1121,8 +1121,8 @@ async def scan_dialog(
                 with recompute:
                     ui.label("Scope: entire library").classes("text-caption colophon-muted")
                     ui.label(
-                        "Re-runs identification from the tags we already read (no disk access). "
-                        "To re-read files from disk, use Scan then Rebuild all."
+                        "Re-runs identification from the tags we already read, without re-reading "
+                        "your audio files. To re-read files from disk, use Scan then Rebuild all."
                     ).classes("text-caption colophon-muted")
 
                     async def _run_recompute() -> None:
@@ -1131,7 +1131,7 @@ async def scan_dialog(
                             ui.label("Re-identify").classes("text-subtitle1")
                             with ui.row().classes("items-center q-gutter-sm"):
                                 ui.spinner()
-                                ui.label("Re-identifying… this doesn't read your files.").classes(
+                                ui.label("Re-identifying… this doesn't re-read your audio files.").classes(
                                     "text-caption colophon-muted")
                         summary = await asyncio.to_thread(controller.reidentify_from_cache)
                         _show_recompute_result(summary)
