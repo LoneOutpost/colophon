@@ -53,6 +53,17 @@ def _seed_ingest(tmp_path) -> Path:
     return ingest
 
 
+def test_book_derivation_unchanged_detects_title_corroboration():
+    from colophon.controller import _book_derivation_unchanged
+    from colophon.core.models import BookUnit
+
+    a = BookUnit.new(source_folder=Path("/x/Title"))
+    b = a.model_copy(deep=True)
+    assert _book_derivation_unchanged(a, b) is True
+    b.title_corroboration = "contradict"
+    assert _book_derivation_unchanged(a, b) is False
+
+
 def test_scan_counts_and_persists(tmp_path):
     ctx = _ctx(tmp_path)
     ingest = _seed_ingest(tmp_path)

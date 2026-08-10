@@ -383,13 +383,15 @@ def _clear_weak_identity(book: BookUnit) -> None:
 def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     """Whether a re-derived book copy leaves the stored book's derived caches untouched — the
     fields `_rederive_root_books` fills/stamps (author, franchise, local-identification confidence,
-    BookState). A `_resync_roots` writeback skips books this returns True for."""
+    title-corroboration verdict, BookState). A `_resync_roots` writeback skips books this returns
+    True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
         and stored.franchise == rederived.franchise
         and stored.provenance.get("franchise") == rederived.provenance.get("franchise")
         and stored.identity_confidence == rederived.identity_confidence
+        and stored.title_corroboration == rederived.title_corroboration
         and stored.state is rederived.state
     )
 
