@@ -153,6 +153,7 @@ from colophon.services.ingest import (
     plan_rescan_folders,
     plan_scan_graph,
     refresh_local,
+    run_local_phases,
     sweep_missing,
 )
 from colophon.services.matching import gather_matches, query_for_book
@@ -1413,6 +1414,55 @@ class AppController:
                     break
         ids = list(dict.fromkeys(b.id for b in books))  # de-dup: a book can appear via >1 series
         return self._reevaluate_book_ids(ids)
+
+    def reidentify_from_cache(self) -> RecomputeSummary:
+        """Re-identify every stored book from its cached `SourceFile.tags` (Slice-A cache; falls
+        back to a disk read only where a book has no cache), then re-derive the graph exactly as a
+        recompute does. Mirrors `reidentify()` semantics but library-wide and from cache: each book's
+        WEAK (folder/filename) identity is cleared so it re-derives from the cache, while hard
+        tag/datafile/match/manual identity survives. The back half reclassifies, fills author/series
+        down, and re-stamps confidence / title-corroboration verdict / findings / BookState. No
+        filesystem walk; the disk counterpart is Scan then Rebuild. A book whose file vanished and has
+        no cache is logged by `run_local_phases` and left unchanged.
+        Returns the review-movement summary the dialog shows; `updated` counts books whose
+        derivation fingerprint (title/authors/franchise/year/identity_confidence/verdict/state)
+        changed across the whole operation — front-half reconcile or back-half re-derive."""
+        cfg = self.ctx.config
+        pattern = compile_template(cfg.filename_template)
+        scheme = parse_scheme(cfg.directory_scheme)
+
+        def _fp(b: BookUnit) -> tuple:
+            # The derivation fields a user would call "changed": reconcile fields + graph stamps.
+            return (b.title, tuple(b.authors), b.franchise, b.publish_year,
+                    round(b.identity_confidence, 3), b.title_corroboration, b.state)
+
+        snapshot = self.ctx.books.list_all()
+        before_fp = {b.id: _fp(b) for b in snapshot}
+        before_state = {b.id: b.state for b in snapshot}
+        with step("Re-identifying from cached tags"):
+            # Front half: refresh each book's fields from the cache, in place. Persist ALL with one
+            # commit so the back half (which reads the store, not these objects) sees the results.
+            books = self.ctx.books.list_all()
+            for i, book in enumerate(books):
+                _clear_weak_identity(book)
+                run_local_phases(
+                    book, frozenset({Phase.CATEGORIZE, Phase.IDENTIFY}), force=True,
+                    root=self._root_for(book),
+                    pattern=pattern, scheme=scheme)
+                book.touch()
+                self.ctx.books.upsert(book, commit=(i == len(books) - 1))
+            # Back half: identical to a recompute — reclassify + re-stamp + write back movers.
+            self._resync_roots(set(cfg.scan_paths))
+        after = {b.id: b for b in self.ctx.books.list_all()}
+        updated = sum(1 for i, fp in before_fp.items()
+                      if i in after and _fp(after[i]) != fp)
+        into = sum(1 for i, b in after.items()
+                   if b.state is BookState.NEEDS_REVIEW
+                   and before_state.get(i) is not BookState.NEEDS_REVIEW)
+        out = sum(1 for i, s in before_state.items()
+                  if s is BookState.NEEDS_REVIEW
+                  and (i not in after or after[i].state is not BookState.NEEDS_REVIEW))
+        return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
 
     def recompute_identity(self) -> RecomputeSummary:
         """Re-run identity/repair derivation across the whole library from the persisted graph —
