@@ -1025,7 +1025,7 @@ async def scan_dialog(
                 ).props("dense")
                 ui.label(
                     "Scan reads your files. Recompute refreshes identification from library data. "
-                    "Repair fixes wrong titles and authors the review flags found (changes fields)."
+                    "Repair fixes authors that were mistagged with a title (changes fields)."
                 ).classes("text-caption colophon-muted")
 
                 disk = ui.column().classes("w-full")
@@ -1136,9 +1136,10 @@ async def scan_dialog(
                         ui.button("Recompute", icon="sync", on_click=_run_recompute).props("unelevated")
 
                 with repair:
-                    ui.label("Fix wrong titles and authors flagged by review. "
-                             "Review each change before applying.").classes(
-                        "text-caption colophon-muted")
+                    ui.label("Replace authors that are really a title with the folder's author. "
+                             "Review each change before applying. "
+                             "(Titles are cleaned automatically; contradictions we can't clean stay "
+                             "flagged for you to Match.)").classes("text-caption colophon-muted")
 
                     async def _preview_repairs() -> None:
                         body.clear()
@@ -1183,10 +1184,7 @@ async def scan_dialog(
                     with ui.row().classes("w-full justify-end q-mt-sm"):
                         ui.button("Back", on_click=show_options).props("flat")
                     return
-                titles = sum(1 for r in rows if r.field == "title")
-                authors = sum(1 for r in rows if r.field == "author")
-                ui.label(f"{len(rows)} proposed repairs — {titles} titles · {authors} authors").classes(
-                    "text-subtitle1")
+                ui.label(f"{len(rows)} proposed author repairs").classes("text-subtitle1")
                 boxes: list[tuple[object, object]] = []
                 with ui.scroll_area().classes("w-full").style("max-height: 42vh"):
                     for r in rows:

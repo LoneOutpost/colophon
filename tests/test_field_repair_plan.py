@@ -50,20 +50,6 @@ def _book(ctx, folder, *, title=None, tprov="tag", authors=None, aprov="tag"):
     return b
 
 
-def test_plan_title_contradiction_row(tmp_path):
-    from colophon.controller import AppController
-    ctx = _ctx(tmp_path)
-    b = _book(ctx, tmp_path / "ingest" / "Stella Rimington" / "At Risk",
-              title="Wrong Title", authors=["Stella Rimington"])
-    rows = AppController(ctx).plan_repairs()
-    title_rows = [r for r in rows if r.book_id == b.id and r.field == "title"]
-    assert len(title_rows) == 1
-    assert title_rows[0].before == "Wrong Title"
-    assert title_rows[0].after == "At Risk"
-    assert title_rows[0].kind == "title_contradiction"
-    ctx.close()
-
-
 def test_plan_author_row_from_scheme(tmp_path):
     from colophon.controller import AppController
     ctx = _ctx(tmp_path)
@@ -98,22 +84,20 @@ def test_plan_empty_for_clean_library(tmp_path):
 
 def test_apply_repairs_commits_manual_and_undoes(tmp_path):
     from colophon.controller import AppController
-    from colophon.core.title_corroborate import book_title_verdict
     ctx = _ctx(tmp_path)
-    b = _book(ctx, tmp_path / "ingest" / "Stella Rimington" / "At Risk",
-              title="Wrong Title", authors=["Stella Rimington"])
+    b = _book(ctx, tmp_path / "ingest" / "Alan Dean Foster" / "Flinx",
+              title="Flinx", authors=["The End of the Matter (Flinx 03)"])
     ctrl = AppController(ctx)
-    rows = [r for r in ctrl.plan_repairs() if r.field == "title"]
-    assert rows
+    rows = ctrl.plan_repairs()
+    assert rows and rows[0].field == "author"
 
     batch = ctrl.apply_repairs(rows)
 
     healed = ctx.books.get(b.id)
-    assert healed.title == "At Risk"
-    assert healed.provenance["title"] == "manual"          # survives a rescan
-    assert book_title_verdict(healed).verdict == "agree"   # contradiction resolved
-    assert ctrl.plan_repairs() == []                       # idempotent
+    assert healed.authors == ["Alan Dean Foster"]
+    assert healed.provenance["authors"] == "manual"   # survives a rescan
+    assert ctrl.plan_repairs() == []                  # idempotent
 
     ctrl.undo(batch)
-    assert ctx.books.get(b.id).title == "Wrong Title"
+    assert ctx.books.get(b.id).authors == ["The End of the Matter (Flinx 03)"]
     ctx.close()

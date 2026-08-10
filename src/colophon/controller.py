@@ -1430,18 +1430,15 @@ class AppController:
         return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
 
     def plan_repairs(self) -> list[RepairRow]:
-        """Scan the library for trust-inverting repairs (a contradicting tag title; a title-shaped
-        author) and return the proposed changes for preview. Pure over the persisted books + the
-        configured directory scheme — no graph, no disk."""
+        """Scan the library for the trust-inverting author repair (a title-shaped author replaced by
+        the folder's author) and return the proposed changes for preview. Pure over the persisted
+        books + the configured directory scheme — no graph, no disk. Title cleaning is automatic
+        (repair_fields), not previewed; a title contradiction we can't confidently clean stays
+        flagged for a human to Match."""
         from colophon.core.title_corroborate import author_looks_like_title
         scheme = parse_scheme(self.ctx.config.directory_scheme)
         rows: list[RepairRow] = []
         for book in self.ctx.books.list_all():
-            tc = book_title_verdict(book)
-            if tc.verdict == "contradict" and tc.suggested_title and tc.suggested_title != book.title:
-                rows.append(RepairRow(
-                    book_id=book.id, field="title", before=book.title or "",
-                    after=tc.suggested_title, kind="title_contradiction"))
             if len(book.authors) == 1 and author_looks_like_title(book.authors[0], book.title):
                 author = infer_from_path(book.source_folder, self._root_for(book), scheme).get("author")
                 if author and author != book.authors[0]:
