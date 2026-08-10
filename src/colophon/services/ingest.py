@@ -137,7 +137,10 @@ def _run_local(
     if phase is Phase.SEARCH:
         if unit_files is None:
             raise ValueError("unit_files required for SEARCH phase")
-        book.source_files = [read_audio_metadata(p)[0] for p in unit_files]
+        book.source_files = []
+        for p in unit_files:
+            sf, tags = read_audio_metadata(p)
+            book.source_files.append(sf.model_copy(update={"tags": tags}))
         logger.debug(f"scan {book.source_folder}: SEARCH probed {len(book.source_files)} files")
 
     elif phase is Phase.CATEGORIZE:
