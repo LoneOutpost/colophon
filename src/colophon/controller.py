@@ -111,6 +111,7 @@ from colophon.core.sources import (
     arrange_sources,
     unchecked_edition_fields,
 )
+from colophon.core.title_corroborate import book_title_verdict
 from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
@@ -198,6 +199,14 @@ def _organize_fail_detail(org: OrganizeResult) -> str:
 class CoverSetResult(_Base):
     ok: bool = False
     error: str | None = None
+
+
+class RecomputeSummary(_Base):
+    """Outcome of a library-wide graph-only identity recompute."""
+
+    updated: int = 0        # books whose derived state changed and were written back
+    into_review: int = 0    # books that entered needs_review
+    out_of_review: int = 0  # books that left needs_review
 
 
 def _detect_image_ext(data: bytes) -> str | None:
@@ -728,10 +737,11 @@ class AppController:
             # source paths drifted (match/organize) would otherwise re-emit a dangling owns/contains.
             edges = prune_dangling_edges(nodes, sk_edges + book_edges)
             graph_writes.append((root, nodes, edges))
-            # Stamp local-identification confidence + re-derive state onto the book copies from the
-            # freshly-reclassified graph.
+            # Stamp local-identification confidence + the title-corroboration verdict + re-derive
+            # state onto the book copies from the freshly-reclassified graph.
             for book in root_books:
                 book.identity_confidence = book_identity_confidence(book, recon, root)
+                book.title_corroboration = book_title_verdict(book).verdict
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
                 rederived[book.id] = book
         return rederived, graph_writes
@@ -1383,6 +1393,21 @@ class AppController:
                     break
         ids = list(dict.fromkeys(b.id for b in books))  # de-dup: a book can appear via >1 series
         return self._reevaluate_book_ids(ids)
+
+    def recompute_identity(self) -> RecomputeSummary:
+        """Re-run identity/repair derivation across the whole library from the persisted graph —
+        NO filesystem access. Reclassifies every scan root's graph, re-stamps confidence, the
+        title-corroboration verdict, findings and BookState, and writes back movers. Returns a
+        summary of review movement for the UI. The cheap counterpart to a filesystem rescan."""
+        before = {b.id: b.state for b in self.ctx.books.list_all()}
+        with step("Recomputing identity from the library graph"):
+            updated = self._resync_roots(set(self.ctx.config.scan_paths))
+        after = {b.id: b.state for b in self.ctx.books.list_all()}
+        into = sum(1 for i, s in after.items()
+                   if s is BookState.NEEDS_REVIEW and before.get(i) is not BookState.NEEDS_REVIEW)
+        out = sum(1 for i, s in before.items()
+                  if s is BookState.NEEDS_REVIEW and after.get(i) is not BookState.NEEDS_REVIEW)
+        return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
 
     # --- dashboard ---
     @timed("dashboard_stats")
