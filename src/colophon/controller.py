@@ -740,8 +740,11 @@ class AppController:
             # Stamp local-identification confidence + the title-corroboration verdict + re-derive
             # state onto the book copies from the freshly-reclassified graph.
             for book in root_books:
-                book.identity_confidence = book_identity_confidence(book, recon, root)
+                # Stamp the verdict first: book_identity_confidence reads book.title_corroboration,
+                # so a stale value would make confidence and the verdict disagree (and scoped vs
+                # whole-root re-derives diverge).
                 book.title_corroboration = book_title_verdict(book).verdict
+                book.identity_confidence = book_identity_confidence(book, recon, root)
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
                 rederived[book.id] = book
         return rederived, graph_writes
@@ -966,9 +969,10 @@ class AppController:
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its
-        scan root's entity records from the existing books (no scan, no filesystem walk,
-        no book changes). Returns the number of roots rebuilt. Idempotent — a healthy
-        graph rebuilds nothing."""
+        scan root's entity records from the existing books (no scan, no filesystem walk).
+        Book identity/content is untouched; the derived caches (confidence, state,
+        title-corroboration verdict) may settle. Returns the number of roots rebuilt.
+        Idempotent — a healthy graph rebuilds nothing."""
         with step("self-healing missing graph roots"):
             books = self.ctx.books.list_all()
             present = set(self.ctx.library_graph.nodes)

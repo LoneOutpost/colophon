@@ -3185,7 +3185,11 @@ def test_rebuild_missing_graph_populates_from_books_without_scanning(tmp_path):
         for e in ctx.library_graph.edges if e.kind == "author"
     }
     assert "Some Author" in authors
-    assert ctx.books.list_all() == before        # books untouched
+    # Book identity/content is untouched (a graph heal re-derives no titles/authors); the derived
+    # caches — confidence/state/corroboration verdict — may settle, so compare content, not equality.
+    after = ctx.books.list_all()
+    assert [(x.id, x.title, x.authors, x.provenance) for x in after] \
+        == [(x.id, x.title, x.authors, x.provenance) for x in before]
     assert ctrl.rebuild_missing_graph() == 0      # idempotent
     ctx.close()
 
