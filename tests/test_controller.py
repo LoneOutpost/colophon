@@ -84,6 +84,43 @@ def test_write_tags_clears_metadata_conflict(tmp_path):
     ctx.close()
 
 
+def test_tag_write_invalidates_cached_tags(tmp_path):
+    from colophon.adapters.tags import write_embedded_tags
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+
+    ctx = _ctx(tmp_path)
+    f = tmp_path / "ingest" / "01.mp3"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"")
+    write_embedded_tags(f, EmbeddedTags(title="Old"))
+    book = BookUnit.new(source_folder=f.parent)
+    book.title, book.authors = "New Title", ["Author"]
+    book.source_files = [SourceFile(path=f, size=1, duration_seconds=60.0, ext="mp3",
+                                    tags=EmbeddedTags(title="Old"))]
+    ctx.books.upsert(book)
+
+    (result,) = asyncio.run(AppController(ctx).write_tags_books([book]))
+
+    assert result.ok and result.written == 1
+    assert ctx.books.get(book.id).source_files[0].tags is None   # cache invalidated
+    ctx.close()
+
+
+def test_clear_cached_tags(tmp_path):
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.source_files = [SourceFile(path=tmp_path / "b/01.mp3", size=1, duration_seconds=1.0,
+                                    ext="mp3", tags=EmbeddedTags(title="T"))]
+    ctx.books.upsert(book)
+
+    assert AppController(ctx).clear_cached_tags() == 1
+    assert ctx.books.get(book.id).source_files[0].tags is None
+    assert AppController(ctx).clear_cached_tags() == 0   # idempotent
+    ctx.close()
+
+
 def test_failed_write_keeps_metadata_conflict(tmp_path):
     from colophon.core.models import (
         BookUnit,

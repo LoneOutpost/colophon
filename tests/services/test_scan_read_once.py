@@ -1,10 +1,12 @@
-"""A scan parses each audio file exactly once: SEARCH loads + caches; CATEGORIZE and
-IDENTIFY are served from the cache. Regression guard for the read-once dedup.
+"""A scan parses each audio file exactly once: SEARCH loads it and caches the tags on the
+SourceFile; CATEGORIZE and IDENTIFY read `sf.tags` and never touch disk. Regression guard
+for the read-once guarantee.
 
 Rather than patch mutagen's constructors (which breaks its internal loading), this asserts
 on the cached reader's own hit/miss counters: after a forced all-phase scan of N single-file
-books, the reader misses once per file (the SEARCH load) and the CATEGORIZE + IDENTIFY reads
-are cache hits. Before the dedup wiring those two phases bypass the cache, so hits stay at 0.
+books, the reader misses once per file (the sole SEARCH load) and is never called again — the
+interpretation phases are served from the per-SourceFile tag cache, not the reader's lru-cache,
+so hits stay at 0. A re-parse would show up as an extra miss.
 """
 
 from __future__ import annotations
@@ -45,7 +47,8 @@ def test_scan_reads_each_file_once_via_cache(make_audio, tmp_path):
     assert {b.title for b in plan.units} == {"Book A", "Book B"}
 
     info = _read_audio_metadata.cache_info()
-    # One real parse per file (the SEARCH load); nothing re-parsed.
+    # One real parse per file (the sole SEARCH load); nothing re-parsed.
     assert info.misses == 2, info
-    # CATEGORIZE + IDENTIFY for each book are served from the cache (2 books x 2 reads).
-    assert info.hits == 4, info
+    # CATEGORIZE + IDENTIFY read the tags cached on each SourceFile, not the reader, so the
+    # reader is never called again — hits stay 0 (a re-parse would show as an extra miss).
+    assert info.hits == 0, info

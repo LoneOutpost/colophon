@@ -1429,6 +1429,17 @@ class AppController:
                   if s is BookState.NEEDS_REVIEW and after.get(i) is not BookState.NEEDS_REVIEW)
         return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
 
+    def clear_cached_tags(self) -> int:
+        """Drop every cached `SourceFile.tags` so the next scan/re-identify re-extracts from disk.
+        Returns the number of books cleared."""
+        cleared = 0
+        for book in self.ctx.books.list_all():
+            if any(sf.tags is not None for sf in book.source_files):
+                book.source_files = [sf.model_copy(update={"tags": None}) for sf in book.source_files]
+                self.ctx.books.upsert(book)
+                cleared += 1
+        return cleared
+
     def plan_repairs(self) -> list[RepairRow]:
         """Scan the library for the trust-inverting author repair (a title-shaped author replaced by
         the folder's author) and return the proposed changes for preview. Pure over the persisted
@@ -1970,6 +1981,8 @@ class AppController:
             # current, so the Tag phase is fresh. A partial/failed write leaves it as-is
             # so it doesn't read as fully tagged. Later field edits re-stale it via invalidate().
             if result.ok and result.written > 0:
+                # The on-disk tags just changed; drop the cache so the next scan/re-identify re-reads.
+                book.source_files = [sf.model_copy(update={"tags": None}) for sf in book.source_files]
                 # The written tags are now authoritative, so the "embedded tags name a different
                 # book" conflict is resolved. Clear it before re-deriving state; a genuine
                 # structural title/folder contradiction honestly re-derives on the next recompute.

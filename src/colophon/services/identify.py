@@ -82,8 +82,12 @@ def gather(
     """Read all identity evidence for `book` and vet it: drop a datafile sidecar that
     describes a container rather than a book. `multi_folder` marks a book that is one of several
     sharing its folder (a split leaf), so a folder-level container datafile is rejected for it too."""
-    first_path = book.source_files[0].path if book.source_files else None
-    embedded = read_audio_metadata(first_path)[1] if first_path else None  # cache hit from SEARCH
+    first_sf = book.source_files[0] if book.source_files else None
+    first_path = first_sf.path if first_sf else None
+    if first_sf is not None and first_sf.tags is not None:
+        embedded = first_sf.tags  # cached by SEARCH; no disk read
+    else:
+        embedded = read_audio_metadata(first_path)[1] if first_path else None
     filename_fields = parse_filename(pattern, first_path.name) if first_path else {}
     datafile = read_datafile_sidecar(book.source_folder)
     if datafile is not None and is_container_datafile(
