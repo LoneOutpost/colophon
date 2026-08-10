@@ -11,7 +11,7 @@ from __future__ import annotations
 from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.coerce import to_float, to_int
 from colophon.core.isbn import normalize_isbn
-from colophon.core.metadata_quality import is_title_shaped_author
+from colophon.core.metadata_quality import is_junk_title, is_title_shaped_author
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
 from colophon.core.normalize import collides_with_title
 from colophon.core.people import split_people
@@ -84,8 +84,8 @@ def reconcile(
         candidates = []
         if hard:
             candidates += [
-                (embedded.title, Provenance.TAG),
-                (embedded.album, Provenance.TAG),
+                (None if is_junk_title(embedded.title) else embedded.title, Provenance.TAG),
+                (None if is_junk_title(embedded.album) else embedded.album, Provenance.TAG),
                 (df.title if df else None, Provenance.DATAFILE),
             ]
         if weak:

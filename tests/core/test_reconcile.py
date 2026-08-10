@@ -319,3 +319,11 @@ def test_title_shaped_artist_no_fallback_leaves_authors_empty():
     reconcile(book, embedded=EmbeddedTags(title="Orphan Star", artist="Orphan Star (Flinx 04)"),
               dir_title=None, filename_fields={})
     assert book.authors == []
+
+
+def test_junk_embedded_title_falls_through_to_filename():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(title="01 of 15"), dir_title=None,
+              filename_fields={"title": "Orphan Star"})
+    assert book.title == "Orphan Star"
+    assert book.provenance["title"] == "filename"
