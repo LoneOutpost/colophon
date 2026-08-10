@@ -1018,14 +1018,15 @@ async def scan_dialog(
                 mode = ui.radio(
                     {
                         "scan": "Scan files",
-                        "recompute": "Recompute from library data",
+                        "recompute": "Re-identify from cached tags",
                         "repair": "Repair flagged books",
                     },
                     value="scan",
                 ).props("dense")
                 ui.label(
-                    "Scan reads your files. Recompute refreshes identification from library data. "
-                    "Repair fixes authors that were mistagged with a title (changes fields)."
+                    "Scan reads your files. Re-identify refreshes identification from tags already "
+                    "read (no disk). Repair fixes authors that were mistagged with a title "
+                    "(changes fields)."
                 ).classes("text-caption colophon-muted")
 
                 disk = ui.column().classes("w-full")
@@ -1119,21 +1120,26 @@ async def scan_dialog(
 
                 with recompute:
                     ui.label("Scope: entire library").classes("text-caption colophon-muted")
+                    ui.label(
+                        "Re-runs identification from the tags we already read (no disk access). "
+                        "To re-read files from disk, use Scan then Rebuild all."
+                    ).classes("text-caption colophon-muted")
 
                     async def _run_recompute() -> None:
                         body.clear()
                         with body:
-                            ui.label("Recompute").classes("text-subtitle1")
+                            ui.label("Re-identify").classes("text-subtitle1")
                             with ui.row().classes("items-center q-gutter-sm"):
                                 ui.spinner()
-                                ui.label("Recomputing… this doesn't read your files.").classes(
+                                ui.label("Re-identifying… this doesn't read your files.").classes(
                                     "text-caption colophon-muted")
-                        summary = await asyncio.to_thread(controller.recompute_identity)
+                        summary = await asyncio.to_thread(controller.reidentify_from_cache)
                         _show_recompute_result(summary)
 
                     with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
                         ui.button("Cancel", on_click=dialog.close).props("flat")
-                        ui.button("Recompute", icon="sync", on_click=_run_recompute).props("unelevated")
+                        ui.button("Re-identify", icon="sync",
+                                  on_click=_run_recompute).props("unelevated")
 
                 with repair:
                     ui.label("Replace authors that are really a title with the folder's author. "
@@ -1160,13 +1166,13 @@ async def scan_dialog(
         def _show_recompute_result(summary) -> None:
             body.clear()
             with body:
-                ui.label("Recompute complete").classes("text-subtitle1")
+                ui.label("Re-identify complete").classes("text-subtitle1")
                 if summary.into_review == 0 and summary.out_of_review == 0:
-                    ui.label("No changes — your library is already up to date.").classes(
+                    ui.label("No changes. Your library is already up to date.").classes(
                         "text-caption colophon-muted")
                 else:
                     ui.label(
-                        f"Recomputed {summary.updated} book(s). "
+                        f"Re-identified {summary.updated} book(s). "
                         f"{summary.into_review} moved into review · {summary.out_of_review} cleared."
                     ).classes("text-caption colophon-muted")
                 with ui.row().classes("w-full justify-end q-mt-sm"):
