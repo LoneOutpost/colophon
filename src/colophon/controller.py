@@ -1435,11 +1435,11 @@ class AppController:
         books + the configured directory scheme — no graph, no disk. Title cleaning is automatic
         (repair_fields), not previewed; a title contradiction we can't confidently clean stays
         flagged for a human to Match."""
-        from colophon.core.title_corroborate import author_looks_like_title
+        from colophon.core.metadata_quality import is_title_shaped_author
         scheme = parse_scheme(self.ctx.config.directory_scheme)
         rows: list[RepairRow] = []
         for book in self.ctx.books.list_all():
-            if len(book.authors) == 1 and author_looks_like_title(book.authors[0], book.title):
+            if len(book.authors) == 1 and is_title_shaped_author(book.authors[0], book.title):
                 author = infer_from_path(book.source_folder, self._root_for(book), scheme).get("author")
                 if author and author != book.authors[0]:
                     rows.append(RepairRow(

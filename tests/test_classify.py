@@ -170,6 +170,15 @@ def test_chaptered_book_keeps_album_as_label():
     assert works[0].label == "The Way of Kings"
 
 
+def test_all_index_titles_recognizes_n_of_m():
+    # Uniform album + per-file "NN of MM" Title tags = a chaptered book; must not fan out even when
+    # the bare filenames don't carry the index. Belt-and-suspenders for the glued track-of-total fix.
+    feats = [_feat(f"/a/d/f{i:02d}.mp3", album="Orphan Star", title=f"{i:02d} of 15") for i in range(1, 16)]
+    works, _ = group_works(feats)
+    assert len(works) == 1
+    assert works[0].label == "Orphan Star"
+
+
 def test_glued_track_of_total_filenames_are_one_book():
     # 'Orphan Star-01 of 15' hyphen-glues the track-of-total index to the title. All 15 parts are one
     # book. Regression: this shattered into 15 units (the glued '-01' kept 'star-01' in the signature).

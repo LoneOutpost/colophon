@@ -741,12 +741,13 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     book under a 0.9 author folder reads ~0.9 even with zero source matches."""
     if not (book.authors or book.series):
         return 0.0
-    from colophon.core.title_corroborate import author_looks_like_title, book_title_verdict
+    from colophon.core.metadata_quality import is_title_shaped_author
+    from colophon.core.title_corroborate import book_title_verdict
     a_node = _nearest_author(graph, book.source_folder, root)
     a = (_field_confidence(book.provenance.get("authors"), a_node.kind_confidence if a_node else 0.0)
          if book.authors else 0.0)
     # B1: an author value that is really a title cannot prop up the score.
-    if len(book.authors) == 1 and author_looks_like_title(book.authors[0], book.title):
+    if len(book.authors) == 1 and is_title_shaped_author(book.authors[0], book.title):
         a = min(a, 0.3)
     s_node = _nearest_series(graph, book.source_folder, root)
     s = (_field_confidence(book.provenance.get("series"), s_node.kind_confidence if s_node else 0.0)

@@ -19,10 +19,10 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from colophon.core.classify import _BARE_NUM_TITLE, _is_placeholder
 from colophon.core.filename_cluster import _spaced, _tokens
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.match import clean_match_title
+from colophon.core.metadata_quality import is_junk_title
 from colophon.core.normalize import collides_with_title
 from colophon.core.sequence_affix import parse_sequence_affix, strip_series_code_affix
 
@@ -32,14 +32,6 @@ if TYPE_CHECKING:
 Verdict = Literal["agree", "abstain", "contradict"]
 
 # A series-book number stuffed into an author value: "... (Flinx 03)", "... (The Expanse #4)".
-_SERIES_PAREN = re.compile(r"\(\s*.+?#?\s*\d", re.IGNORECASE)
-
-# A leading per-file structural marker ("Track 001 - Opening Theme", "Chapter 5", "Disk 2 …"): the
-# string is a track/chapter label, not a book title, so it carries no title residual.
-_TRACK_PREFIX = re.compile(
-    r"^\s*(?:track|disc|disk|cd|chapter|chap|volume|vol|part|side)\s*\d", re.IGNORECASE
-)
-
 # Words that carry no title identity: connectives/articles, and structural/edition markers that
 # routinely stand alone as a junk tag title ("Unabridged", "Track 01", "Disk 1"). A residual made of
 # only these is not a real title, and two titles must not "agree" merely by sharing one.
@@ -51,13 +43,6 @@ _NON_TITLE_WORDS = frozenset({
 })
 
 
-def _is_track_label(value: str) -> bool:
-    """A value that is a per-file track/chapter/disc label or a bare number — never a book title."""
-    return bool(
-        _is_placeholder(value)
-        or _TRACK_PREFIX.match(value)
-        or _BARE_NUM_TITLE.match(value.strip())
-    )
 
 
 @dataclass(frozen=True)
@@ -112,9 +97,7 @@ def _clean_affixes(text: str) -> str:
 
 
 def _tag_residual(tag_title: str | None, noise: list[str], authors: list[str]) -> str:
-    if not tag_title:
-        return ""
-    if _is_track_label(tag_title):                                              # A1
+    if is_junk_title(tag_title):                                                # A1
         return ""
     if len(authors) == 1 and collides_with_title(tag_title, authors[0]):        # A3
         return ""
@@ -123,7 +106,7 @@ def _tag_residual(tag_title: str | None, noise: list[str], authors: list[str]) -
 
 
 def _structural_residual(name: str, noise: list[str]) -> str:
-    if not name or _is_track_label(name):
+    if is_junk_title(name):
         return ""
     base = parse_folder_title(name).title or name   # strips year / read-by / series-paren / book-num
     residual = _clean_affixes(_subtract(base, *noise))
@@ -171,18 +154,6 @@ def corroborate_title(
         verdict="contradict",
         evidence=f'metadata title "{tag}" vs {src0} "{res0}"', suggested_title=res0,
     )
-
-
-def author_looks_like_title(author: str, title: str | None) -> bool:
-    """B1 guard: an author value that is really a title — carries a series-paren number, a strong
-    sequence affix, or simply equals the title. Used to demote the author axis, never to edit it."""
-    if not author:
-        return False
-    if _SERIES_PAREN.search(author):
-        return True
-    if parse_sequence_affix(author) is not None:
-        return True
-    return bool(title and collides_with_title(author, title))
 
 
 def book_title_verdict(book: BookUnit) -> TitleCorroboration:

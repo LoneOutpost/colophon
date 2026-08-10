@@ -18,6 +18,7 @@ from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
+from colophon.core.metadata_quality import is_index_title, is_placeholder_title
 from colophon.core.models import (
     ConfidenceSignal,
     ContentKind,
@@ -142,36 +143,21 @@ def _uniform_tag(values) -> str | None:
     file lacks it or they disagree. A tag identical across a book's files is book-level; one that
     varies is chapter-level. Returns the first file's original casing of the shared value."""
     vals = [v for v in values]
-    usable = [v for v in vals if v and not _is_placeholder(v)]
+    usable = [v for v in vals if v and not is_placeholder_title(v)]
     if len(usable) == len(vals) and len({_text_key(v) for v in usable}) == 1:
         return usable[0]
     return None
 
 
-# Generic placeholder tag values that are not a real title (a rip left the default in): they must
-# never win over the filename. "Track 3", "Disc 1", "CD 2", "Chapter 5", "Volume 1", "Unknown
-# Album …", "Untitled".
-_PLACEHOLDER = re.compile(
-    r"^(?:(?:track|disc|cd|chapter|volume|vol|part)\s*\d+|unknown(?:\s.*)?|untitled)$", re.IGNORECASE
-)
-
-
-def _is_placeholder(value: str | None) -> bool:
-    return bool(value) and bool(_PLACEHOLDER.match(value.strip()))
-
-
-_BARE_NUM_TITLE = re.compile(r"^\d{1,4}$")
-
-
 def _all_index_titles(group: list[FileFeatures]) -> bool:
     """True when every file carries a Title tag that is an index-shaped placeholder
-    ("Part 01", "Chapter 3", "Track 7") or a bare number -- chapter/part markers, not distinct
-    book titles. Signals a chaptered single book even when the filenames read as distinct works,
-    so the album group must not be fanned out and no per-file title may be promoted."""
+    ("Part 01", "Chapter 3", "Track 7"), a bare number, or a track-of-total ("01 of 15") -- chapter/
+    part markers, not distinct book titles. Signals a chaptered single book even when the filenames
+    read as distinct works, so the album group must not be fanned out and no per-file title promoted."""
     titles = [f.tags.title for f in group]
     if not all(t for t in titles):
         return False
-    return all(_is_placeholder(t) or bool(_BARE_NUM_TITLE.match(t.strip())) for t in titles)
+    return all(is_placeholder_title(t) or is_index_title(t) for t in titles)
 
 
 _ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
@@ -208,7 +194,7 @@ def _pick_single_title(
     named a series) is trusted for the title over a bare Album (usually the series or franchise)."""
     series_key = _text_key(fw.series)
     def unusable(v: str) -> bool:              # a placeholder, or actually the filename's series
-        return _is_placeholder(v) or _text_key(v) == series_key
+        return is_placeholder_title(v) or _text_key(v) == series_key
 
     if title and not unusable(title):
         if _tag_is_typo_of(title, fw.label):   # rip typo of the filename title -> trust the filename
@@ -271,7 +257,7 @@ def _to_work(group: list[FileFeatures]) -> DetectedWork:
         tag_label = (
             _uniform_tag(f.tags.album for f in group)
             or _uniform_tag(f.tags.title for f in group)
-            or next((v for v in (album, title) if v and not _is_placeholder(v)), None)
+            or next((v for v in (album, title) if v and not is_placeholder_title(v)), None)
         )
         label = tag_label or normalize_text(group[0].path.stem)
         prov = Provenance.TAG.value if tag_label else Provenance.FILENAME.value
@@ -381,7 +367,7 @@ def _metadata_conflict_finding(
     ($Author/$Title); a flat library would over-flag the author side."""
     conflicts: list[str] = []
     album = _uniform_tag(f.tags.album for f in features)
-    if folder_kind is FolderKind.TITLE and album and not _is_placeholder(album):
+    if folder_kind is FolderKind.TITLE and album and not is_placeholder_title(album):
         folder_title = parse_folder_title(folder.name).title or folder.name
         if folder_title and not shares_token(folder_title, album):
             conflicts.append(f'folder "{folder_title}" vs tag "{album}"')
