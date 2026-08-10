@@ -625,3 +625,10 @@ def test_no_extension_mismatch_for_opus_in_ogg():
     object.__setattr__(feats[0], "true_ext", "opus")  # opus-in-.ogg: same family, not a mismatch
     r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
     assert not any(f.code is FC.EXTENSION_MISMATCH for f in r.findings)
+
+
+def test_junk_tag_title_defers_to_filename_label():
+    # A "NN of MM" Title tag on a single file is junk; the parsed filename names the book.
+    feats = [_feat("/lib/Foo/Orphan Star.mp3", title="01 of 15")]
+    works, _ = group_works(feats)
+    assert works[0].label == "Orphan Star"
