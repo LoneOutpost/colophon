@@ -212,6 +212,9 @@ def normalize(book: BookUnit) -> None:
     # intentional spelling for a name. A single all-caps token is kept as a likely acronym (BBC).
     if book.authors and book.provenance.get("authors") != Provenance.MANUAL.value:
         book.authors = [proper_case_if_shouting(a, keep_acronyms=True) for a in book.authors]
+    # Safe source-preserving cleanings (series-code title affix, impossible year).
+    from colophon.core.field_repair import repair_fields
+    repair_fields(book)
 
 
 def _attribute_legacy(book: BookUnit, evidence: Evidence) -> None:

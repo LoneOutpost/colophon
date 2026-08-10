@@ -32,6 +32,7 @@ from colophon.core.duplicate_check import (
 )
 from colophon.core.entity_alias import canonical_book
 from colophon.core.entity_graph import entity_graph_from_records
+from colophon.core.field_repair import repair_fields
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
@@ -390,10 +391,10 @@ def _clear_weak_identity(book: BookUnit) -> None:
 
 
 def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
-    """Whether a re-derived book copy leaves the stored book's derived caches untouched — the
-    fields `_rederive_root_books` fills/stamps (author, franchise, local-identification confidence,
-    title-corroboration verdict, BookState). A `_resync_roots` writeback skips books this returns
-    True for."""
+    """Whether a re-derived book copy leaves the stored book's derived caches + auto-cleaned fields
+    untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, franchise,
+    local-identification confidence, title-corroboration verdict, BookState, and the repair_fields
+    cleanings: title, publish_year). A `_resync_roots` writeback skips books this returns True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
@@ -401,6 +402,8 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
         and stored.provenance.get("franchise") == rederived.provenance.get("franchise")
         and stored.identity_confidence == rederived.identity_confidence
         and stored.title_corroboration == rederived.title_corroboration
+        and stored.title == rederived.title
+        and stored.publish_year == rederived.publish_year
         and stored.state is rederived.state
     )
 
@@ -740,6 +743,8 @@ class AppController:
             # Stamp local-identification confidence + the title-corroboration verdict + re-derive
             # state onto the book copies from the freshly-reclassified graph.
             for book in root_books:
+                # Safe source-preserving cleanings first, then derive from the cleaned fields.
+                repair_fields(book)
                 # Stamp the verdict first: book_identity_confidence reads book.title_corroboration,
                 # so a stale value would make confidence and the verdict disagree (and scoped vs
                 # whole-root re-derives diverge).

@@ -1,0 +1,39 @@
+"""Safe, source-preserving field cleanings applied automatically in the derive path.
+
+Each cleaning strips junk off a stored value WITHOUT changing its source (like normalize()'s
+de-shout), so it is safe to run on both a scan and a no-disk Recompute. Trust-inverting repairs
+(replacing a tag title, blanking an author) are NOT here — they belong to the previewed Repair
+action (Slice 2)."""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import TYPE_CHECKING
+
+from colophon.core.models import Provenance
+from colophon.core.sequence_affix import strip_series_code_affix
+
+if TYPE_CHECKING:
+    from colophon.core.models import BookUnit
+
+_MIN_YEAR = 1400
+_MAX_YEAR = date.today().year + 1   # seeded once at import; a next-year pub date is plausible
+
+
+def repair_fields(book: BookUnit) -> bool:
+    """Apply the safe field cleanings in place; return True if anything changed. Idempotent, and
+    never touches a manual value."""
+    changed = False
+    # A2: strip a series-code title affix ('SB 01 - StarBridge' -> 'StarBridge') from any non-manual
+    # title. The title stays the tag's, just cleaned (provenance unchanged), like normalize()'s
+    # de-shout.
+    if book.title and book.provenance.get("title") != Provenance.MANUAL.value:
+        cleaned = strip_series_code_affix(book.title)
+        if cleaned != book.title:
+            book.title = cleaned
+            changed = True
+    # C1: drop an impossible publish year.
+    if book.publish_year is not None and not (_MIN_YEAR <= book.publish_year <= _MAX_YEAR):
+        book.publish_year = None
+        changed = True
+    return changed
