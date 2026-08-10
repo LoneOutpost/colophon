@@ -95,3 +95,27 @@ def test_multi_author_with_title_echo_is_not_demoted(tmp_path):
                  a_prov=Provenance.TAG.value)
     book.authors = ["Restoree", "Anne McCaffrey"]
     assert book_identity_confidence(book, Graph(), tmp_path) == 90  # not demoted
+
+
+def test_contradicting_title_drops_below_review_threshold(tmp_path):
+    from colophon.core.models import Provenance
+    book = _book(tmp_path / "loose" / "At Risk", title="Some Other Book",
+                 author="Stella Rimington", a_prov=Provenance.TAG.value)
+    # tag title 'Some Other Book' vs folder 'At Risk' -> contradict -> title_factor 0.5
+    assert book_identity_confidence(book, Graph(), tmp_path) == 45  # 0.9 * 0.5
+
+
+def test_abstaining_title_keeps_confidence(tmp_path):
+    from colophon.core.models import Provenance
+    # placeholder tag title, real folder -> abstain -> unchanged 90
+    book = _book(tmp_path / "loose" / "At Risk", title="Track 001",
+                 author="Stella Rimington", a_prov=Provenance.TAG.value)
+    assert book_identity_confidence(book, Graph(), tmp_path) == 90
+
+
+def test_title_shaped_author_demotes_confidence(tmp_path):
+    from colophon.core.models import Provenance
+    book = _book(tmp_path / "loose" / "x", title="The End of the Matter",
+                 author="The End of the Matter (Flinx 03)", a_prov=Provenance.TAG.value)
+    # author looks like a title -> author axis demoted -> well below threshold
+    assert book_identity_confidence(book, Graph(), tmp_path) < 60

@@ -734,19 +734,31 @@ def _field_confidence(prov: str | None, node_conf: float) -> float:
 def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     """A book's local-identification confidence (0-100): how sure we are, from the graph evidence and
     the book's own provenance, that we've correctly identified it — pre-match, distinct from the
-    post-match `confidence`. The author axis dominates; a corroborating series adds a little; a
-    missing title discounts. Graph/folder-sourced fields inherit the confidence of the classifying
-    node, so a book under a 0.9 author folder reads ~0.9 even with zero source matches."""
+    post-match `confidence`. The author axis dominates; a corroborating series adds a little. The
+    title factor is driven by the corroboration verdict: a title that agrees with (or abstains
+    against) the folder/filenames is neutral, one that contradicts them halves the score, a missing
+    title discounts. Graph/folder-sourced fields inherit the confidence of the classifying node, so a
+    book under a 0.9 author folder reads ~0.9 even with zero source matches."""
     if not (book.authors or book.series):
         return 0.0
+    from colophon.core.title_corroborate import author_looks_like_title, book_title_verdict
     a_node = _nearest_author(graph, book.source_folder, root)
     a = (_field_confidence(book.provenance.get("authors"), a_node.kind_confidence if a_node else 0.0)
          if book.authors else 0.0)
+    # B1: an author value that is really a title cannot prop up the score.
+    if len(book.authors) == 1 and author_looks_like_title(book.authors[0], book.title):
+        a = min(a, 0.3)
     s_node = _nearest_series(graph, book.source_folder, root)
     s = (_field_confidence(book.provenance.get("series"), s_node.kind_confidence if s_node else 0.0)
          if book.series else 0.0)
     corroboration = 0.1 if (a > 0 and s > 0) else 0.0
-    title_factor = 1.0 if book.title else 0.7
+    verdict = book.title_corroboration or book_title_verdict(book).verdict
+    if not book.title:
+        title_factor = 0.7
+    elif verdict == "contradict":
+        title_factor = 0.5
+    else:
+        title_factor = 1.0
     echo_factor = (0.5 if (len(book.authors) == 1 and collides_with_title(book.authors[0], book.title))
                    else 1.0)
     return round(min(1.0, max(a, s) + corroboration) * title_factor * echo_factor * 100)
