@@ -1013,85 +1013,141 @@ async def scan_dialog(
         def show_options() -> None:
             body.clear()
             with body:
-                ui.label("Scan library").classes("text-subtitle1")
+                ui.label("Refresh library").classes("text-subtitle1")
 
-                selection = set(selected_ids or ())
-                scan_paths = list(cfg.scan_paths)
-                path_boxes: dict[Path, object] = {}
-                if selection:
-                    ui.label(f"Scanning: {len(selection)} selected books").classes(
-                        "text-caption colophon-muted"
-                    )
-                elif folder is not None:
-                    ui.label(f"Scanning: folder {folder.name}").classes("text-caption colophon-muted")
-                elif len(scan_paths) > 1:
-                    # Pick which configured scan paths to walk (default all) so a rebuild can
-                    # target one path without re-touching confirmed ones.
-                    ui.label("Scan paths").classes("colophon-seccap")
-                    for p in scan_paths:
-                        cb = ui.checkbox(p.name or str(p), value=True).props("dense")
-                        cb.tooltip(str(p))
-                        path_boxes[p] = cb
-                else:
-                    scope_text = f"path: {scan_paths[0].name}" if scan_paths else "all library paths"
-                    ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
-
-                ui.label("Depth").classes("colophon-seccap")
-                depth_choice = ui.radio(
-                    {"new_changed": "New & changed", "rebuild": "Rebuild all"},
-                    value="new_changed",
+                mode = ui.radio(
+                    {"scan": "Scan files", "recompute": "Recompute from library data"},
+                    value="scan",
                 ).props("dense")
                 ui.label(
-                    "New & changed: add new books and re-process changed folders. "
-                    "Rebuild all: force a full re-derive of everything in scope."
+                    "Scan files reads your audio files. Recompute re-runs identification on the "
+                    "data already in your library and does not read your files."
                 ).classes("text-caption colophon-muted")
 
-                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
-                    ui.button("Cancel", on_click=dialog.close).props("flat")
+                disk = ui.column().classes("w-full")
+                recompute = ui.column().classes("w-full")
 
-                    async def _run_scan() -> None:
-                        if path_boxes:
-                            roots = [p for p, cb in path_boxes.items() if cb.value]
-                            if not roots:
-                                ui.notify("Select at least one scan path", type="warning")
-                                return
-                        elif folder is not None and not selection:
-                            roots = [folder]
-                        else:
-                            roots = None  # a selection uses book_ids; single/no path -> all
-                        opts = ScanOptions(
-                            scope=_DEPTH_TO_SCOPE[depth_choice.value],
-                            phases=frozenset(LOCAL),
-                            book_ids=selection or None,
+                def _sync_mode() -> None:
+                    disk.set_visibility(mode.value == "scan")
+                    recompute.set_visibility(mode.value == "recompute")
+                mode.on_value_change(_sync_mode)
+
+                with disk:
+                    selection = set(selected_ids or ())
+                    scan_paths = list(cfg.scan_paths)
+                    path_boxes: dict[Path, object] = {}
+                    if selection:
+                        ui.label(f"Scanning: {len(selection)} selected books").classes(
+                            "text-caption colophon-muted"
                         )
+                    elif folder is not None:
+                        ui.label(f"Scanning: folder {folder.name}").classes("text-caption colophon-muted")
+                    elif len(scan_paths) > 1:
+                        # Pick which configured scan paths to walk (default all) so a rebuild can
+                        # target one path without re-touching confirmed ones.
+                        ui.label("Scan paths").classes("colophon-seccap")
+                        for p in scan_paths:
+                            cb = ui.checkbox(p.name or str(p), value=True).props("dense")
+                            cb.tooltip(str(p))
+                            path_boxes[p] = cb
+                    else:
+                        scope_text = f"path: {scan_paths[0].name}" if scan_paths else "all library paths"
+                        ui.label(f"Scanning: {scope_text}").classes("text-caption colophon-muted")
+
+                    ui.label("Depth").classes("colophon-seccap")
+                    depth_choice = ui.radio(
+                        {"new_changed": "New & changed", "rebuild": "Rebuild all"},
+                        value="new_changed",
+                    ).props("dense")
+                    ui.label(
+                        "New & changed: add new books and re-process changed folders. "
+                        "Rebuild all: force a full re-derive of everything in scope."
+                    ).classes("text-caption colophon-muted")
+
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                        async def _run_scan() -> None:
+                            if path_boxes:
+                                roots = [p for p, cb in path_boxes.items() if cb.value]
+                                if not roots:
+                                    ui.notify("Select at least one scan path", type="warning")
+                                    return
+                            elif folder is not None and not selection:
+                                roots = [folder]
+                            else:
+                                roots = None  # a selection uses book_ids; single/no path -> all
+                            opts = ScanOptions(
+                                scope=_DEPTH_TO_SCOPE[depth_choice.value],
+                                phases=frozenset(LOCAL),
+                                book_ids=selection or None,
+                            )
+                            body.clear()
+                            with body:
+                                ui.label("Scanning library").classes("text-subtitle1")
+                                with ui.row().classes("items-center q-gutter-sm"):
+                                    ui.spinner()
+                                    prog = ui.label("Scanning…").classes(
+                                        "text-caption colophon-muted"
+                                    )
+
+                            def _progress(done: int, total: int, label: str) -> None:
+                                prog.set_text(f"Scanning {done} / {total} · {label}")
+
+                            try:
+                                plan = await controller.scan_preview_streamed(
+                                    roots,
+                                    template=cfg.filename_template,
+                                    directory_scheme=cfg.directory_scheme,
+                                    options=opts,
+                                    progress=_progress,
+                                )
+                            except ValueError as e:
+                                ui.notify(f"Invalid pattern: {e}", type="negative")
+                                show_options()
+                                return
+                            changes = await asyncio.to_thread(controller.scan_plan_changes, plan)
+                            show_results(plan, changes)
+
+                        ui.button("Scan", icon="radar", on_click=_run_scan).props("unelevated")
+
+                with recompute:
+                    ui.label("Scope: entire library").classes("text-caption colophon-muted")
+
+                    async def _run_recompute() -> None:
                         body.clear()
                         with body:
-                            ui.label("Scanning library").classes("text-subtitle1")
+                            ui.label("Recompute").classes("text-subtitle1")
                             with ui.row().classes("items-center q-gutter-sm"):
                                 ui.spinner()
-                                prog = ui.label("Scanning…").classes(
-                                    "text-caption colophon-muted"
-                                )
+                                ui.label("Recomputing… this doesn't read your files.").classes(
+                                    "text-caption colophon-muted")
+                        summary = await asyncio.to_thread(controller.recompute_identity)
+                        _show_recompute_result(summary)
 
-                        def _progress(done: int, total: int, label: str) -> None:
-                            prog.set_text(f"Scanning {done} / {total} · {label}")
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                        ui.button("Recompute", icon="sync", on_click=_run_recompute).props("unelevated")
 
-                        try:
-                            plan = await controller.scan_preview_streamed(
-                                roots,
-                                template=cfg.filename_template,
-                                directory_scheme=cfg.directory_scheme,
-                                options=opts,
-                                progress=_progress,
-                            )
-                        except ValueError as e:
-                            ui.notify(f"Invalid pattern: {e}", type="negative")
-                            show_options()
-                            return
-                        changes = await asyncio.to_thread(controller.scan_plan_changes, plan)
-                        show_results(plan, changes)
+                _sync_mode()
 
-                    ui.button("Scan", icon="radar", on_click=_run_scan).props("unelevated")
+        def _show_recompute_result(summary) -> None:
+            body.clear()
+            with body:
+                ui.label("Recompute complete").classes("text-subtitle1")
+                if summary.into_review == 0 and summary.out_of_review == 0:
+                    ui.label("No changes — your library is already up to date.").classes(
+                        "text-caption colophon-muted")
+                else:
+                    ui.label(
+                        f"Recomputed {summary.updated} book(s). "
+                        f"{summary.into_review} moved into review · {summary.out_of_review} cleared."
+                    ).classes("text-caption colophon-muted")
+                with ui.row().classes("w-full justify-end q-mt-sm"):
+                    def _done() -> None:
+                        dialog.close()
+                        refresh_all()
+                    ui.button("Done", on_click=_done).props("unelevated")
 
         def show_results(plan, changes) -> None:
             body.clear()
