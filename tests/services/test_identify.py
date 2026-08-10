@@ -436,3 +436,24 @@ def test_end_to_end_untagged_single_book_titled_from_its_folder(tmp_path):
     assert book.title == "Cujo"
     assert book.publish_year == 1981
     assert book.narrators == ["Lorna Raver"]
+
+
+def test_normalize_strips_series_code_affix_from_tag_title(tmp_path):
+    from colophon.core.models import BookUnit, Provenance
+    from colophon.services.identify import normalize
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "SB 01 - StarBridge"
+    b.provenance["title"] = Provenance.TAG.value
+    normalize(b)
+    assert b.title == "StarBridge"
+
+
+def test_normalize_clamps_impossible_year(tmp_path):
+    from colophon.core.models import BookUnit, Provenance
+    from colophon.services.identify import normalize
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    b.title = "A Book"
+    b.provenance["title"] = Provenance.TAG.value
+    b.publish_year = 1
+    normalize(b)
+    assert b.publish_year is None
