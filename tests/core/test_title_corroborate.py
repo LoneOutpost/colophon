@@ -64,6 +64,26 @@ def test_franchise_token_subtracted_from_both_sides():
     assert tc.verdict == "agree"
 
 
+def test_abstain_edition_marker_tag():
+    # 'Unabridged' is an edition marker, not a title -> tag carries no residual -> abstain.
+    assert _v("Unabridged", [], "Bernard Cornwell - Sharpe's Eagle", ["Bernard Cornwell"]) == "abstain"
+
+
+def test_abstain_no_title_placeholder():
+    # A literal 'no Title' placeholder -> abstain, folder title stands.
+    assert _v("no Title", [], "David Eddings - The Diamond Throne", ["David Eddings"]) == "abstain"
+
+
+def test_abstain_glued_disc_track_tag():
+    # 'Disk 01 - Track 01' is a per-file label even after the affix strips to 'Track 01' -> abstain.
+    assert _v("Disk 01 - Track 01", [], "Greg Iles - The Footprints of God", ["Greg Iles"]) == "abstain"
+
+
+def test_no_false_agree_on_shared_stopword():
+    # 'The Cat' vs a folder 'The Dog' must not agree merely by sharing 'the'.
+    assert _v("The Cat", [], "Aesop - The Dog", ["Aesop"]) == "contradict"
+
+
 def test_author_looks_like_title_detects_series_paren():
     assert author_looks_like_title("The End of the Matter (Flinx 03)", "The End of the Matter") is True
     assert author_looks_like_title("Anne McCaffrey", "Restoree") is False

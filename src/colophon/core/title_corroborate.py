@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from colophon.core.classify import _BARE_NUM_TITLE, _is_placeholder
-from colophon.core.filename_cluster import _spaced, _text_sig, _tokens, shares_token
+from colophon.core.filename_cluster import _spaced, _tokens
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.match import clean_match_title
 from colophon.core.normalize import collides_with_title
@@ -34,9 +34,21 @@ Verdict = Literal["agree", "abstain", "contradict"]
 # A series-book number stuffed into an author value: "... (Flinx 03)", "... (The Expanse #4)".
 _SERIES_PAREN = re.compile(r"\(\s*.+?#?\s*\d", re.IGNORECASE)
 
-# A leading per-file structural marker ("Track 001 - Opening Theme", "Chapter 5", "Disc 2 …"): the
+# A leading per-file structural marker ("Track 001 - Opening Theme", "Chapter 5", "Disk 2 …"): the
 # string is a track/chapter label, not a book title, so it carries no title residual.
-_TRACK_PREFIX = re.compile(r"^\s*(?:track|disc|cd|chapter|chap|volume|vol|part|side)\s*\d", re.IGNORECASE)
+_TRACK_PREFIX = re.compile(
+    r"^\s*(?:track|disc|disk|cd|chapter|chap|volume|vol|part|side)\s*\d", re.IGNORECASE
+)
+
+# Words that carry no title identity: connectives/articles, and structural/edition markers that
+# routinely stand alone as a junk tag title ("Unabridged", "Track 01", "Disk 1"). A residual made of
+# only these is not a real title, and two titles must not "agree" merely by sharing one.
+_STOPWORDS = frozenset({"of", "the", "a", "an", "and", "or", "to", "in", "on", "at", "by", "for", "with"})
+_NON_TITLE_WORDS = frozenset({
+    "track", "disc", "disk", "cd", "chapter", "chap", "volume", "vol", "part", "side",
+    "unabridged", "abridged", "intro", "outro", "prologue", "epilogue",
+    "no", "none", "title", "notitle", "untitled", "unknown",
+})
 
 
 def _is_track_label(value: str) -> bool:
@@ -56,10 +68,30 @@ class TitleCorroboration:
     suggested_title: str | None = None
 
 
+# Word extraction that splits on ALL punctuation ('.', '-', ':' included, which _tokens/_spaced keep
+# glued). Comparison must be punctuation-insensitive so "The Land: Founding" and a filename
+# "...The Land Bk1...Founding" share their words. Numbers and single letters carry no title meaning.
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _words(value: str) -> set[str]:
+    return {w for w in _WORD.findall(value.lower()) if len(w) >= 2 and not w.isdigit()}
+
+
+def _title_words(value: str) -> set[str]:
+    """The meaningful words of a title: drop numbers, single letters, connectives, and structural/
+    edition markers. This is the unit of both 'is this a real title' and 'do two titles agree'."""
+    return _words(value) - _STOPWORDS - _NON_TITLE_WORDS
+
+
+def _shares_word(a: str, b: str) -> bool:
+    return bool(_title_words(a) & _title_words(b))
+
+
 def _has_text(value: str) -> bool:
-    # A residual is real only if it has a non-index word of >=2 chars — the same notion of a "word"
-    # shares_token uses, so a residual it could never match (bare articles/initials) reads as empty.
-    return any(len(t) >= 2 for t in _text_sig(_tokens(value)))
+    # A residual is real only if it has a meaningful title word — so bare articles/initials/numbers
+    # or a lone marker ("Unabridged", "Track 01") read as empty and the source abstains.
+    return bool(_title_words(value))
 
 
 def _subtract(text: str, *drop_terms: str) -> str:
@@ -104,10 +136,11 @@ def _filename_residual(filenames: list[str], noise: list[str]) -> str:
     residuals = [r for fn in filenames if (r := _structural_residual(fn, noise))]
     if not residuals:
         return ""
-    common = set(_tokens(residuals[0]))
+    common = _words(residuals[0])
     for r in residuals[1:]:
-        common &= set(_tokens(r))
-    kept = " ".join(w for w in _spaced(residuals[0]).split() if w.lower() in common)
+        common &= _words(r)
+    # keep the shared words, first-seen order, so a chaptered set distills to its common title
+    kept = " ".join(dict.fromkeys(w for w in _WORD.findall(residuals[0].lower()) if w in common))
     return kept if _has_text(kept) else ""
 
 
@@ -127,7 +160,7 @@ def corroborate_title(
     ]
     if not tag or not present:
         return TitleCorroboration(verdict="abstain")
-    agreeing = tuple(src for src, res in present if shares_token(tag, res))
+    agreeing = tuple(src for src, res in present if _shares_word(tag, res))
     if agreeing:
         return TitleCorroboration(
             verdict="agree", agreeing_sources=agreeing,
