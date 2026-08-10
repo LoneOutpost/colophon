@@ -111,6 +111,7 @@ from colophon.core.sources import (
     arrange_sources,
     unchecked_edition_fields,
 )
+from colophon.core.title_corroborate import book_title_verdict
 from colophon.core.triage import has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
@@ -198,6 +199,14 @@ def _organize_fail_detail(org: OrganizeResult) -> str:
 class CoverSetResult(_Base):
     ok: bool = False
     error: str | None = None
+
+
+class RecomputeSummary(_Base):
+    """Outcome of a library-wide graph-only identity recompute."""
+
+    updated: int = 0        # books whose derived state changed and were written back
+    into_review: int = 0    # books that entered needs_review
+    out_of_review: int = 0  # books that left needs_review
 
 
 def _detect_image_ext(data: bytes) -> str | None:
@@ -383,13 +392,15 @@ def _clear_weak_identity(book: BookUnit) -> None:
 def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     """Whether a re-derived book copy leaves the stored book's derived caches untouched — the
     fields `_rederive_root_books` fills/stamps (author, franchise, local-identification confidence,
-    BookState). A `_resync_roots` writeback skips books this returns True for."""
+    title-corroboration verdict, BookState). A `_resync_roots` writeback skips books this returns
+    True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
         and stored.franchise == rederived.franchise
         and stored.provenance.get("franchise") == rederived.provenance.get("franchise")
         and stored.identity_confidence == rederived.identity_confidence
+        and stored.title_corroboration == rederived.title_corroboration
         and stored.state is rederived.state
     )
 
@@ -726,9 +737,13 @@ class AppController:
             # source paths drifted (match/organize) would otherwise re-emit a dangling owns/contains.
             edges = prune_dangling_edges(nodes, sk_edges + book_edges)
             graph_writes.append((root, nodes, edges))
-            # Stamp local-identification confidence + re-derive state onto the book copies from the
-            # freshly-reclassified graph.
+            # Stamp local-identification confidence + the title-corroboration verdict + re-derive
+            # state onto the book copies from the freshly-reclassified graph.
             for book in root_books:
+                # Stamp the verdict first: book_identity_confidence reads book.title_corroboration,
+                # so a stale value would make confidence and the verdict disagree (and scoped vs
+                # whole-root re-derives diverge).
+                book.title_corroboration = book_title_verdict(book).verdict
                 book.identity_confidence = book_identity_confidence(book, recon, root)
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
                 rederived[book.id] = book
@@ -954,9 +969,10 @@ class AppController:
 
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its
-        scan root's entity records from the existing books (no scan, no filesystem walk,
-        no book changes). Returns the number of roots rebuilt. Idempotent — a healthy
-        graph rebuilds nothing."""
+        scan root's entity records from the existing books (no scan, no filesystem walk).
+        Book identity/content is untouched; the derived caches (confidence, state,
+        title-corroboration verdict) may settle. Returns the number of roots rebuilt.
+        Idempotent — a healthy graph rebuilds nothing."""
         with step("self-healing missing graph roots"):
             books = self.ctx.books.list_all()
             present = set(self.ctx.library_graph.nodes)
@@ -1381,6 +1397,21 @@ class AppController:
                     break
         ids = list(dict.fromkeys(b.id for b in books))  # de-dup: a book can appear via >1 series
         return self._reevaluate_book_ids(ids)
+
+    def recompute_identity(self) -> RecomputeSummary:
+        """Re-run identity/repair derivation across the whole library from the persisted graph —
+        NO filesystem access. Reclassifies every scan root's graph, re-stamps confidence, the
+        title-corroboration verdict, findings and BookState, and writes back movers. Returns a
+        summary of review movement for the UI. The cheap counterpart to a filesystem rescan."""
+        before = {b.id: b.state for b in self.ctx.books.list_all()}
+        with step("Recomputing identity from the library graph"):
+            updated = self._resync_roots(set(self.ctx.config.scan_paths))
+        after = {b.id: b.state for b in self.ctx.books.list_all()}
+        into = sum(1 for i, s in after.items()
+                   if s is BookState.NEEDS_REVIEW and before.get(i) is not BookState.NEEDS_REVIEW)
+        out = sum(1 for i, s in before.items()
+                  if s is BookState.NEEDS_REVIEW and after.get(i) is not BookState.NEEDS_REVIEW)
+        return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
 
     # --- dashboard ---
     @timed("dashboard_stats")
@@ -1890,6 +1921,10 @@ class AppController:
             # current, so the Tag phase is fresh. A partial/failed write leaves it as-is
             # so it doesn't read as fully tagged. Later field edits re-stale it via invalidate().
             if result.ok and result.written > 0:
+                # The written tags are now authoritative, so the "embedded tags name a different
+                # book" conflict is resolved. Clear it before re-deriving state; a genuine
+                # structural title/folder contradiction honestly re-derives on the next recompute.
+                book.findings = [f for f in book.findings if f.code != FindingCode.METADATA_CONFLICT]
                 if not book.phases:
                     ensure_phases(book)
                 mark(book, Phase.TAG, PhaseState.FRESH)
