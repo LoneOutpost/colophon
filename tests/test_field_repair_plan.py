@@ -94,3 +94,26 @@ def test_plan_empty_for_clean_library(tmp_path):
           title="At Risk", authors=["Stella Rimington"])
     assert AppController(ctx).plan_repairs() == []
     ctx.close()
+
+
+def test_apply_repairs_commits_manual_and_undoes(tmp_path):
+    from colophon.controller import AppController
+    from colophon.core.title_corroborate import book_title_verdict
+    ctx = _ctx(tmp_path)
+    b = _book(ctx, tmp_path / "ingest" / "Stella Rimington" / "At Risk",
+              title="Wrong Title", authors=["Stella Rimington"])
+    ctrl = AppController(ctx)
+    rows = [r for r in ctrl.plan_repairs() if r.field == "title"]
+    assert rows
+
+    batch = ctrl.apply_repairs(rows)
+
+    healed = ctx.books.get(b.id)
+    assert healed.title == "At Risk"
+    assert healed.provenance["title"] == "manual"          # survives a rescan
+    assert book_title_verdict(healed).verdict == "agree"   # contradiction resolved
+    assert ctrl.plan_repairs() == []                       # idempotent
+
+    ctrl.undo(batch)
+    assert ctx.books.get(b.id).title == "Wrong Title"
+    ctx.close()

@@ -1450,6 +1450,21 @@ class AppController:
                         after=author, kind="title_shaped_author"))
         return rows
 
+    def apply_repairs(self, rows: list[RepairRow]) -> str:
+        """Apply the given repair rows as one undoable batch of MANUAL edits, then re-derive the
+        affected books. Returns the batch id (undo via undo())."""
+        by_book: dict[str, dict[str, str | None]] = {}
+        for r in rows:
+            by_book.setdefault(r.book_id, {})[r.field] = r.after
+        items: list[tuple[BookUnit, dict[str, str | None], str]] = []
+        for book_id, updates in by_book.items():
+            book = self.get_book(book_id)
+            if book is not None:
+                items.append((book, updates, Provenance.MANUAL.value))
+        batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
+        self._resync_books([book for book, _, _ in items])
+        return batch
+
     # --- dashboard ---
     @timed("dashboard_stats")
     def dashboard_stats(self) -> dict[str, int]:
