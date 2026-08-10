@@ -1,4 +1,28 @@
-from colophon.core.sequence_affix import parse_sequence_affix
+from colophon.core.sequence_affix import parse_sequence_affix, strip_series_code_affix
+
+
+def test_strip_series_code_affix_alpha_code():
+    assert strip_series_code_affix("SB 01 - StarBridge") == "StarBridge"
+    assert strip_series_code_affix("DC 02 - Tears of War") == "Tears of War"
+
+
+def test_strip_series_code_affix_book_word():
+    assert strip_series_code_affix("Bk 15 - Swordsman's Legacy") == "Swordsman's Legacy"
+    assert strip_series_code_affix("Book 18 - Agatha Raisin") == "Agatha Raisin"
+
+
+def test_strip_series_code_affix_leaves_plain_titles_alone():
+    assert strip_series_code_affix("Catch-22") == "Catch-22"
+    assert strip_series_code_affix("X-Men") == "X-Men"
+    assert strip_series_code_affix("Se7en") == "Se7en"
+
+
+def test_strip_series_code_affix_never_empties():
+    assert strip_series_code_affix("AB 12 - 34") == "AB 12 - 34"
+
+
+def test_strip_series_code_affix_empty():
+    assert strip_series_code_affix("") == ""
 
 
 def test_leading_spaced_separator_is_strong():
