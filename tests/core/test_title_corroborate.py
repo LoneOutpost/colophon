@@ -2,7 +2,7 @@
 series, franchise, numbering) and decide agree / abstain / contradict. Confidence-only slice — the
 advisory suggested_title is never applied to the stored title."""
 
-from colophon.core.title_corroborate import author_looks_like_title, corroborate_title
+from colophon.core.title_corroborate import corroborate_title
 
 
 def _v(tag, files, folder, author, series=None):
@@ -82,13 +82,3 @@ def test_abstain_glued_disc_track_tag():
 def test_no_false_agree_on_shared_stopword():
     # 'The Cat' vs a folder 'The Dog' must not agree merely by sharing 'the'.
     assert _v("The Cat", [], "Aesop - The Dog", ["Aesop"]) == "contradict"
-
-
-def test_author_looks_like_title_detects_series_paren():
-    assert author_looks_like_title("The End of the Matter (Flinx 03)", "The End of the Matter") is True
-    assert author_looks_like_title("Anne McCaffrey", "Restoree") is False
-
-
-def test_author_looks_like_title_detects_echo_and_sequence():
-    assert author_looks_like_title("Restoree", "Restoree") is True
-    assert author_looks_like_title("02 - Yendi", "Yendi") is True

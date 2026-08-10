@@ -32,8 +32,6 @@ if TYPE_CHECKING:
 Verdict = Literal["agree", "abstain", "contradict"]
 
 # A series-book number stuffed into an author value: "... (Flinx 03)", "... (The Expanse #4)".
-_SERIES_PAREN = re.compile(r"\(\s*.+?#?\s*\d", re.IGNORECASE)
-
 # Words that carry no title identity: connectives/articles, and structural/edition markers that
 # routinely stand alone as a junk tag title ("Unabridged", "Track 01", "Disk 1"). A residual made of
 # only these is not a real title, and two titles must not "agree" merely by sharing one.
@@ -156,18 +154,6 @@ def corroborate_title(
         verdict="contradict",
         evidence=f'metadata title "{tag}" vs {src0} "{res0}"', suggested_title=res0,
     )
-
-
-def author_looks_like_title(author: str, title: str | None) -> bool:
-    """B1 guard: an author value that is really a title — carries a series-paren number, a strong
-    sequence affix, or simply equals the title. Used to demote the author axis, never to edit it."""
-    if not author:
-        return False
-    if _SERIES_PAREN.search(author):
-        return True
-    if parse_sequence_affix(author) is not None:
-        return True
-    return bool(title and collides_with_title(author, title))
 
 
 def book_title_verdict(book: BookUnit) -> TitleCorroboration:
