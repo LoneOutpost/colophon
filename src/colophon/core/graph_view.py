@@ -27,6 +27,8 @@ class FolderRow:
     needs_review: bool = False  # unknown, or auto-classified and unconfirmed
     multi_book: bool = False    # a folder holding >1 book (a title folder that should be one)
     is_container_shape: bool = False  # loose audio alongside subfolders
+    kind: str = ""              # raw classification kind (for filtering); "" = unclassified
+    kind_source: str = ""       # "manual" / "matched" / "" (auto), for the manual filter
 
 
 @dataclass
@@ -87,6 +89,8 @@ def _folder_row(graph: Graph, dir_id: str) -> FolderRow:
         needs_review=(d.kind == "unknown") or (bool(d.kind) and d.kind_source == ""),
         multi_book=len(d.books) > 1,
         is_container_shape=bool(d.child_files and d.child_dirs),
+        kind=d.kind,
+        kind_source=d.kind_source,
     )
 
 

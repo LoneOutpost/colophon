@@ -213,6 +213,8 @@ def render_classic_tree(controller: AppController) -> None:
             return None
 
     state = {"root": str(roots[0])}
+    filters: dict[str, object] = {"kind": "all", "needs_review": False, "name": ""}
+    _last: dict[str, object] = {"graph": None}   # last built graph, so filtering re-renders without a rebuild
     _store = _tab_storage()
     _remembered = _store.get(_ROOT_KEY) if _store is not None else None
     if _remembered in {str(r) for r in roots}:  # restore the last-selected root across page navigation
@@ -230,6 +232,15 @@ def render_classic_tree(controller: AppController) -> None:
             ).classes("colophon-muted")
             help_btn.tooltip(_LEGEND)
             rebuild_btn = ui.button("Rebuild", icon="refresh").props("flat no-caps")
+        with ui.row().classes("items-center q-gutter-sm w-full no-wrap"):
+            kind_filter = ui.select(
+                {"all": "All kinds", "unknown": "Unclassified", "author": "Author",
+                 "series": "Series", "container": "Container", "title": "Book", "manual": "Manual"},
+                value="all",
+            ).props("dense outlined").classes("col-3")
+            review_only = ui.switch("Needs review only").props("dense")
+            name_filter = ui.input(placeholder="Filter folders by name…").props(
+                "dense outlined clearable").classes("col")
         worklist = ui.column().classes("w-full q-gutter-xs")
 
     body = body_column("full")
@@ -359,10 +370,69 @@ def render_classic_tree(controller: AppController) -> None:
         # jump in a follow-up); a real destination, never a dead affordance.
         ui.navigate.to(_mode_url("explorer", DirectoryNode.id_for(path)))
 
+    def _filters_active() -> bool:
+        return (filters["kind"] != "all" or bool(filters["needs_review"])
+                or bool(str(filters["name"]).strip()))
+
+    def _matches(row: FolderRow) -> bool:
+        kind = filters["kind"]
+        if kind == "manual" and row.kind_source != "manual":
+            return False
+        if kind == "unknown" and row.kind not in ("", "unknown"):
+            return False
+        if kind not in ("all", "manual", "unknown") and row.kind != kind:
+            return False
+        if filters["needs_review"] and not row.needs_review:
+            return False
+        q = str(filters["name"]).strip().casefold()
+        return not (q and q not in row.label.casefold())
+
+    def _flatten(rows: list[FolderRow]):
+        for r in rows:
+            yield r
+            yield from _flatten(r.children)
+
+    _FLAT_BATCH = 200
+
+    def _render_flat(rows: list[FolderRow]) -> None:
+        """A flat, windowed list of matching folders (each rendered once, no expansion). Filtering
+        narrows the set; a Show-more button bounds the DOM when a broad filter still matches many."""
+        matches = [r for r in _flatten(rows) if _matches(r)]
+        with body:
+            if not matches:
+                ui.label("No folders match the filter.").classes("colophon-muted q-pa-md")
+                return
+            container = ui.column().classes("w-full q-gutter-xs")
+            footer = ui.row().classes("items-center q-gutter-sm")
+            shown = {"n": 0}
+
+            def _more() -> None:
+                batch = matches[shown["n"]:shown["n"] + _FLAT_BATCH]
+                shown["n"] += len(batch)
+                with container:
+                    for r in batch:
+                        with ui.row().classes("items-center no-wrap w-full q-pl-sm"):
+                            _folder_header(r, on_classify=_classify_menu,
+                                           on_combine=_on_combine, on_attention=_on_attention)
+                footer.clear()
+                with footer:
+                    ui.label(f"Showing {shown['n']} of {len(matches)}").classes(
+                        "colophon-muted text-caption")
+                    if shown["n"] < len(matches):
+                        remaining = len(matches) - shown["n"]
+                        ui.button(f"Show {min(_FLAT_BATCH, remaining)} more",
+                                  on_click=_more).props("flat dense no-caps")
+
+            _more()
+
     def _show(graph) -> None:
+        _last["graph"] = graph
         _render_worklist(graph, graph_summary(graph))
         body.clear()
         rows = folder_rows(graph, Path(state["root"]))
+        if _filters_active():
+            _render_flat(rows)
+            return
         with body:
             if not rows:
                 ui.label("No folders found under this root.").classes("colophon-muted q-pa-md")
@@ -370,6 +440,10 @@ def render_classic_tree(controller: AppController) -> None:
                 for row in rows:
                     _render_folder(row, on_classify=_classify_menu,
                                    on_combine=_on_combine, on_attention=_on_attention)
+
+    def _on_filter_change() -> None:
+        if _last["graph"] is not None:
+            _show(_last["graph"])
 
     async def _build() -> None:
         worklist.clear()
@@ -429,9 +503,16 @@ def render_classic_tree(controller: AppController) -> None:
             store[_ROOT_KEY] = value  # remember the selected root across page navigation
         await _load()
 
+    def _set_filter(key: str, value: object) -> None:
+        filters[key] = value
+        _on_filter_change()
+
     root_select.on_value_change(lambda e: _on_root(e.value))
     rebuild_btn.on_click(_build)
     fresh_switch.on_value_change(lambda e: _load())
+    kind_filter.on_value_change(lambda e: _set_filter("kind", e.value))
+    review_only.on_value_change(lambda e: _set_filter("needs_review", e.value))
+    name_filter.on_value_change(lambda e: _set_filter("name", e.value or ""))
     ui.timer(0.1, _load, once=True)  # initial: render the cached graph, or build the first time
 
 

@@ -71,6 +71,7 @@ def test_folder_rows_are_directory_only_with_counts():
     assert author.badges == ["AUTHOR → Brandon Sanderson · 0.75"]
     assert author.book_count == 2          # rolls up the Collection subtree's two books
     assert author.attention_count == 0     # no findings on these books
+    assert author.kind == "author" and author.kind_source == ""   # raw kind exposed for filtering
 
     collection = author.children[0]
     assert collection.label == "Collection"
