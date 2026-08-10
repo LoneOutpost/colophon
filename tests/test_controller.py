@@ -123,6 +123,24 @@ def test_book_derivation_unchanged_detects_title_corroboration():
     assert _book_derivation_unchanged(a, b) is False
 
 
+def test_book_derivation_unchanged_detects_title_and_year():
+    from colophon.controller import _book_derivation_unchanged
+    from colophon.core.models import BookUnit
+
+    a = BookUnit.new(source_folder=Path("/x/T"))
+    a.title = "StarBridge"
+    a.publish_year = 1982
+    assert _book_derivation_unchanged(a, a.model_copy(deep=True)) is True
+
+    dirty_title = a.model_copy(deep=True)
+    dirty_title.title = "SB 01 - StarBridge"
+    assert _book_derivation_unchanged(a, dirty_title) is False
+
+    dropped_year = a.model_copy(deep=True)
+    dropped_year.publish_year = None
+    assert _book_derivation_unchanged(a, dropped_year) is False
+
+
 def test_scan_counts_and_persists(tmp_path):
     ctx = _ctx(tmp_path)
     ingest = _seed_ingest(tmp_path)
