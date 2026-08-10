@@ -170,6 +170,16 @@ def test_chaptered_book_keeps_album_as_label():
     assert works[0].label == "The Way of Kings"
 
 
+def test_glued_track_of_total_filenames_are_one_book():
+    # 'Orphan Star-01 of 15' hyphen-glues the track-of-total index to the title. All 15 parts are one
+    # book. Regression: this shattered into 15 units (the glued '-01' kept 'star-01' in the signature).
+    feats = [
+        _feat(f"/a/d/Alan Dean Foster - Orphan Star-{i:02d} of 15.opus") for i in range(1, 16)
+    ]
+    works, _ = group_works(feats)
+    assert len(works) == 1
+
+
 def test_chaptered_book_uses_uniform_title_when_album_varies():
     # Files confirmed one book (shared ASIN) but the Album tag differs per file while the Title is
     # identical: the tag that *matches across the files* names the book, so the shared Title wins over
