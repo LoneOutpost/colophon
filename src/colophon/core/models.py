@@ -134,6 +134,23 @@ class DetectedWork(_Base):
     files: list[Path] = []
 
 
+class EmbeddedTags(_Base):
+    """Normalized view of tags read from an audio file (any container)."""
+
+    title: str | None = None
+    album: str | None = None
+    artist: str | None = None
+    narrator: str | None = None
+    series: str | None = None
+    sequence: float | None = None
+    year: int | None = None
+    genre: str | None = None
+    description: str | None = None
+    asin: str | None = None
+    isbn: str | None = None
+    track: int | None = None
+
+
 class SourceFile(_Base):
     path: Path
     size: int
@@ -145,6 +162,7 @@ class SourceFile(_Base):
     channels: int = 0      # 1 mono, 2 stereo, ... (0 = unknown)
     codec: str = ""        # friendly format label (MP3 / M4B / AAC / FLAC / Opus / OGG); "" = unknown
     true_ext: str | None = None  # canonical extension of the real container (mutagen-probed); None = unknown
+    tags: EmbeddedTags | None = None  # cached embedded tags (see tag-cache); None = not cached yet
 
 
 class Chapter(_Base):
@@ -329,20 +347,3 @@ class OperationRecord(_Base):
     after: str | None = None
     outcome: str = "ok"
     detail: str | None = None
-
-
-class EmbeddedTags(_Base):
-    """Normalized view of tags read from an audio file (any container)."""
-
-    title: str | None = None
-    album: str | None = None
-    artist: str | None = None
-    narrator: str | None = None
-    series: str | None = None
-    sequence: float | None = None
-    year: int | None = None
-    genre: str | None = None
-    description: str | None = None
-    asin: str | None = None
-    isbn: str | None = None
-    track: int | None = None

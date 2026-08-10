@@ -21,6 +21,17 @@ def test_integrity_error_is_colophon_error():
         raise IntegrityError("boom")
 
 
+def test_source_file_caches_embedded_tags(tmp_path):
+    from colophon.core.models import EmbeddedTags, SourceFile
+    sf = SourceFile(path=tmp_path / "x.mp3", size=1, duration_seconds=1.0, ext="mp3")
+    assert sf.tags is None
+    tagged = SourceFile(path=tmp_path / "x.mp3", size=1, duration_seconds=1.0, ext="mp3",
+                        tags=EmbeddedTags(title="T", artist="A"))
+    restored = SourceFile.model_validate_json(tagged.model_dump_json())
+    assert restored.tags.title == "T"
+    assert restored.tags.artist == "A"
+
+
 def test_book_unit_title_corroboration_defaults_none(tmp_path):
     b = BookUnit.new(source_folder=tmp_path / "x")
     assert b.title_corroboration is None
