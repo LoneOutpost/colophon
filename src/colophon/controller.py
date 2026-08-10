@@ -32,6 +32,7 @@ from colophon.core.duplicate_check import (
 )
 from colophon.core.entity_alias import canonical_book
 from colophon.core.entity_graph import entity_graph_from_records
+from colophon.core.field_repair import repair_fields
 from colophon.core.fields import get_field
 from colophon.core.filename_parser import compile_template, parse_filename
 from colophon.core.genre_policy import GenrePolicy
@@ -742,6 +743,8 @@ class AppController:
             # Stamp local-identification confidence + the title-corroboration verdict + re-derive
             # state onto the book copies from the freshly-reclassified graph.
             for book in root_books:
+                # Safe source-preserving cleanings first, then derive from the cleaned fields.
+                repair_fields(book)
                 # Stamp the verdict first: book_identity_confidence reads book.title_corroboration,
                 # so a stale value would make confidence and the verdict disagree (and scoped vs
                 # whole-root re-derives diverge).

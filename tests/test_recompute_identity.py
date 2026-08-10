@@ -83,3 +83,20 @@ def test_recompute_empty_scan_paths_is_a_noop(tmp_path):
     summary = AppController(ctx).recompute_identity()
     assert (summary.updated, summary.into_review, summary.out_of_review) == (0, 0, 0)
     ctx.close()
+
+
+def test_recompute_cleans_dirty_title_and_year(tmp_path):
+    ctx, _ = _seed(tmp_path)
+    victim = ctx.books.list_all()[0]
+    victim.title = "SB 01 - " + victim.title   # e.g. "SB 01 - Elantris"
+    victim.publish_year = 1
+    ctx.books.upsert(victim)
+    ctrl = AppController(ctx)
+
+    ctrl.recompute_identity()
+
+    healed = ctx.books.get(victim.id)
+    assert healed.title == "Elantris"
+    assert healed.publish_year is None
+    assert ctrl.recompute_identity().updated == 0   # idempotent: second pass changes nothing
+    ctx.close()
