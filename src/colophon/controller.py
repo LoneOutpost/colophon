@@ -1464,21 +1464,6 @@ class AppController:
                   and (i not in after or after[i].state is not BookState.NEEDS_REVIEW))
         return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
 
-    def recompute_identity(self) -> RecomputeSummary:
-        """Re-run identity/repair derivation across the whole library from the persisted graph —
-        NO filesystem access. Reclassifies every scan root's graph, re-stamps confidence, the
-        title-corroboration verdict, findings and BookState, and writes back movers. Returns a
-        summary of review movement for the UI. The cheap counterpart to a filesystem rescan."""
-        before = {b.id: b.state for b in self.ctx.books.list_all()}
-        with step("Recomputing identity from the library graph"):
-            updated = self._resync_roots(set(self.ctx.config.scan_paths))
-        after = {b.id: b.state for b in self.ctx.books.list_all()}
-        into = sum(1 for i, s in after.items()
-                   if s is BookState.NEEDS_REVIEW and before.get(i) is not BookState.NEEDS_REVIEW)
-        out = sum(1 for i, s in before.items()
-                  if s is BookState.NEEDS_REVIEW and after.get(i) is not BookState.NEEDS_REVIEW)
-        return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
-
     def clear_cached_tags(self) -> int:
         """Drop every cached `SourceFile.tags` so the next scan/re-identify re-extracts from disk.
         Returns the number of books cleared."""
