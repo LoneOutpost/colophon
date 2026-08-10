@@ -33,6 +33,18 @@ def test_leaves_plain_title_untouched():
     assert b.title == "The Way of Kings"
 
 
+def test_strips_trailing_series_book_affix():
+    b = _book("Some Title - Bk01", prov=Provenance.TAG.value)
+    assert repair_fields(b) is True
+    assert b.title == "Some Title"
+
+
+def test_strips_both_leading_and_trailing_affixes():
+    b = _book("SB 01 - StarBridge - Book 3", prov=Provenance.TAG.value)
+    assert repair_fields(b) is True
+    assert b.title == "StarBridge"
+
+
 def test_clamps_low_year():
     b = _book("T", year=1)
     assert repair_fields(b) is True
