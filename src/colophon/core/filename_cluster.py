@@ -87,6 +87,10 @@ def _spaced(chunk: str) -> str:
     """Display form: space camelCase and letter->digit boundaries, commas to
     spaces, collapse whitespace. Case preserved; ordinals like '7th' stay intact."""
     s = _CAMEL.sub(" ", chunk)
+    # Un-glue a hyphen-attached track-of-total index from a title ("Orphan Star-01 of 15" ->
+    # "Orphan Star 01 of 15") so the index drops from the text signature and the parts of one book
+    # cluster together. Gated to the "of N" total so a hyphenated numeric title ("Catch-22") is kept.
+    s = re.sub(r"(?<=[^\W\d_])-(?=\d{1,3}\s+of\s+\d)", " ", s, flags=re.IGNORECASE)
     s = re.sub(r"(?<=\d)(of)(?=\d)", r" \1 ", s, flags=re.IGNORECASE)  # "01of26" -> "01 of 26"
     s = _LETTER_DIGIT.sub(" ", s)
     s = s.replace(",", " ")
