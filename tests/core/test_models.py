@@ -21,6 +21,13 @@ def test_integrity_error_is_colophon_error():
         raise IntegrityError("boom")
 
 
+def test_book_unit_title_corroboration_defaults_none(tmp_path):
+    b = BookUnit.new(source_folder=tmp_path / "x")
+    assert b.title_corroboration is None
+    b.title_corroboration = "contradict"
+    assert b.model_dump()["title_corroboration"] == "contradict"
+
+
 def test_source_file_round_trips_through_json():
     sf = SourceFile(
         path=Path("/ingest/book/01.mp3"),

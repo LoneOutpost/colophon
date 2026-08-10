@@ -256,6 +256,10 @@ class BookUnit(_Base):
     # Local-identification confidence (0-100) rolled up from the graph evidence: how sure we are we
     # know this book locally (pre-match). Distinct from `confidence`, which is the post-match score.
     identity_confidence: float = 0.0
+    # Pre-match title-corroboration verdict: 'agree' | 'abstain' | 'contradict' | None. Computed from
+    # the book's own title vs its folder/filenames (see core/title_corroborate). Persisted inside
+    # book_units.data JSON — no schema migration.
+    title_corroboration: str | None = None
     findings: list[Finding] = []
     detected_works: list[DetectedWork] = []
     acknowledged_findings: list[FindingCode] = []
