@@ -2388,7 +2388,7 @@ def test_graph_roots_returns_configured_scan_paths(tmp_path):
 def test_graph_for_builds_and_resolves_author_subtree(tmp_path):
     from mutagen.id3 import ID3, TPE1
 
-    from colophon.core.graph_view import graph_tree
+    from colophon.core.graph_view import folder_rows
 
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)
@@ -2406,17 +2406,15 @@ def test_graph_for_builds_and_resolves_author_subtree(tmp_path):
     (untagged / "01.mp3").write_bytes(b"")
 
     # graph_for must run the resolution pass, so the AUTHOR classification appears.
-    top = graph_tree(ctrl.graph_for(ingest), ingest)
+    top = folder_rows(ctrl.graph_for(ingest), ingest)
     sk = top[0]
     assert sk.label == "Stephen King"
     assert sk.badges[0].startswith("AUTHOR → Stephen King · ")   # auto -> name + confidence
+    assert sk.book_count == 2                                     # both books roll up to the author
     coll_node = sk.children[0]
-    book_titles = {
-        d.children[0].label
-        for d in coll_node.children
-        if d.children and d.children[0].node_kind == "book"
-    }
-    assert {"The Gunslinger", "Wizard and Glass"} <= book_titles
+    # the two book folders are directory rows (books are rolled up, not rendered as children)
+    assert {c.label for c in coll_node.children} == {"The Gunslinger", "Wizard and Glass"}
+    assert all(c.node_kind == "dir" for c in coll_node.children)
     ctx.close()
 
 

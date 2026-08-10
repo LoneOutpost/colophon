@@ -1,8 +1,21 @@
 from pathlib import Path
 
 from colophon.core.graph import BookNode, DirectoryNode, FileNode, FileRole, Graph
-from colophon.core.graph_view import _dir_badges, graph_summary, graph_tree
-from colophon.core.models import BookUnit, ContentKind, Provenance
+from colophon.core.graph_view import _dir_badges, folder_rows, graph_summary
+from colophon.core.models import (
+    BookUnit,
+    ContentKind,
+    Finding,
+    FindingCode,
+    FindingSeverity,
+    Provenance,
+)
+
+
+def _walk(rows):
+    for r in rows:
+        yield r
+        yield from _walk(r.children)
 
 
 def _build_graph() -> tuple[Graph, Path]:
@@ -47,48 +60,63 @@ def _build_graph() -> tuple[Graph, Path]:
     return g, root
 
 
-def test_graph_tree_nests_dirs_books_and_loose_files():
+def test_folder_rows_are_directory_only_with_counts():
     g, root = _build_graph()
-    top = graph_tree(g, root)
+    rows = folder_rows(g, root)
 
-    assert len(top) == 1
-    author = top[0]
-    assert author.node_kind == "dir"
+    assert all(r.node_kind == "dir" for r in _walk(rows))   # no book/file nodes anywhere
+    assert len(rows) == 1
+    author = rows[0]
     assert author.label == "Brandon Sanderson"
-    assert author.badges == ["AUTHOR → Brandon Sanderson · 0.75"]   # auto -> shows confidence
+    assert author.badges == ["AUTHOR → Brandon Sanderson · 0.75"]
+    assert author.book_count == 2          # rolls up the Collection subtree's two books
+    assert author.attention_count == 0     # no findings on these books
 
-    multi = author.children[0]
-    assert multi.node_kind == "dir" and multi.label == "Collection"
-    # children sorted: books by title (Elantris, Legion), then loose files (metadata.json)
-    kinds = [(c.node_kind, c.label) for c in multi.children]
-    assert kinds == [("book", "Elantris"), ("book", "Legion"), ("file", "metadata.json")]
-
-    elantris = multi.children[0]
-    assert elantris.badges == ["single", "author: tag"]
-    assert [(c.node_kind, c.label, c.badges) for c in elantris.children] == [
-        ("file", "Elantris.mp3", ["audio"])]
-    legion = multi.children[1]
-    assert legion.badges == ["single", "author: graphing"]
-    assert multi.children[2].badges == ["datafile"]   # loose datafile, not owned by a book
+    collection = author.children[0]
+    assert collection.label == "Collection"
+    assert collection.children == []       # books/files are not rendered as folder children
+    assert collection.book_count == 2
+    assert collection.multi_book is True   # a folder holding >1 book
 
 
-def test_graph_tree_empty_when_root_absent():
+def test_folder_rows_attention_rolls_up_active_findings():
+    g, root = _build_graph()
+    g.books["legion"].book.findings = [
+        Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail="x")
+    ]
+    rows = folder_rows(g, root)
+    assert rows[0].attention_count == 1               # lifted to the ancestor author folder
+    assert rows[0].children[0].attention_count == 1
+
+
+def test_folder_rows_acknowledged_or_suppressed_finding_is_not_counted():
+    g, root = _build_graph()
+    b = g.books["legion"].book
+    b.findings = [Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                          detail="x")]
+    b.acknowledged_findings = [FindingCode.METADATA_CONFLICT]
+    assert folder_rows(g, root)[0].attention_count == 0
+
+
+def test_folder_rows_empty_when_root_absent():
     g, _ = _build_graph()
-    assert graph_tree(g, Path("/nowhere")) == []
+    assert folder_rows(g, Path("/nowhere")) == []
 
 
-def test_graph_tree_sorts_dirs_case_insensitively():
+def test_folder_rows_sorts_dirs_case_insensitively_and_flags_needs_review():
     root = Path("/lib")
     g = Graph()
-    # Sibling dirs whose case-sensitive order (Zoo before apple, ASCII) differs from the
-    # natural one. graph_tree must order them case-insensitively: apple before Zoo.
     for name in ("Zoo", "apple"):
-        g.directories[DirectoryNode.id_for(root / name)] = DirectoryNode(path=root / name)
+        d = DirectoryNode(path=root / name)
+        d.kind = "unknown"                 # unknown -> needs_review
+        g.directories[DirectoryNode.id_for(root / name)] = d
     g.directories[DirectoryNode.id_for(root)] = DirectoryNode(
         path=root,
         child_dirs=[DirectoryNode.id_for(root / "Zoo"), DirectoryNode.id_for(root / "apple")],
     )
-    assert [n.label for n in graph_tree(g, root)] == ["apple", "Zoo"]
+    rows = folder_rows(g, root)
+    assert [r.label for r in rows] == ["apple", "Zoo"]
+    assert all(r.needs_review for r in rows)
 
 
 def test_graph_summary_counts():

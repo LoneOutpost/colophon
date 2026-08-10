@@ -1,5 +1,6 @@
-"""Render-agnostic projections of a built Graph for the diagnostic /graph view: a nested
-tree (graph_tree) and summary counts (graph_summary). Pure; no UI dependency."""
+"""Render-agnostic projections of a built Graph for the folder-classification /graph view: a
+directory-only tree with per-folder rollups (folder_rows) and summary counts (graph_summary).
+Pure; no UI dependency."""
 
 from __future__ import annotations
 
@@ -7,16 +8,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
+from colophon.core.models import SUPPRESSED_FINDINGS
 
 
 @dataclass
-class GraphTreeNode:
-    node_kind: str            # "dir" | "book" | "file"
+class FolderRow:
+    """One directory in the classification view. Books and files are never rows here; their weight
+    is rolled up into book_count / attention_count so the view stays a folder-structure instrument."""
+
+    node_kind: str            # always "dir" (kept for symmetry with the old tree API)
     label: str
+    path: Path
     badges: list[str] = field(default_factory=list)
-    children: list[GraphTreeNode] = field(default_factory=list)
+    children: list[FolderRow] = field(default_factory=list)
     tooltip: str = ""
-    path: Path | None = None
+    book_count: int = 0        # books in this folder's subtree (own + descendants)
+    attention_count: int = 0   # subtree books carrying an active finding
+    needs_review: bool = False  # unknown, or auto-classified and unconfirmed
+    multi_book: bool = False    # a folder holding >1 book (a title folder that should be one)
+    is_container_shape: bool = False  # loose audio alongside subfolders
 
 
 @dataclass
@@ -48,54 +58,45 @@ def _dir_badges(node: DirectoryNode) -> list[str]:
     return [f"{base} · {node.kind_confidence:.2f}"]
 
 
-def _file_node(graph: Graph, file_id: str) -> GraphTreeNode:
-    fn = graph.files[file_id]
-    return GraphTreeNode("file", fn.path.name, [fn.role.value])
-
-
-def _book_node(graph: Graph, book_id: str) -> GraphTreeNode:
-    bn = graph.books[book_id]
-    book = bn.book
-    badges = [book.content_kind.value]
-    if book.authors:
-        badges.append(f"author: {book.provenance.get('authors', '?')}")
-    children = sorted(
-        (_file_node(graph, fid) for fid in bn.owns if fid in graph.files),
-        key=lambda n: n.label.casefold(),
+def _book_has_active_finding(book) -> bool:
+    """True when the book carries a finding that is neither acknowledged nor globally suppressed —
+    the same 'active finding' rule the Attention view uses, rolled up to folders here."""
+    return any(
+        f.code not in book.acknowledged_findings and f.code not in SUPPRESSED_FINDINGS
+        for f in book.findings
     )
-    return GraphTreeNode("book", book.title or "(untitled)", badges, children)
 
 
-def _dir_node(graph: Graph, dir_id: str) -> GraphTreeNode:
+def _folder_row(graph: Graph, dir_id: str) -> FolderRow:
     d = graph.directories[dir_id]
-    owned = {fid for bid in d.books if bid in graph.books for fid in graph.books[bid].owns}
-    child_dirs = sorted(
-        (_dir_node(graph, cid) for cid in d.child_dirs if cid in graph.directories),
-        key=lambda n: n.label.casefold(),
+    children = sorted(
+        (_folder_row(graph, cid) for cid in d.child_dirs if cid in graph.directories),
+        key=lambda r: r.label.casefold(),
     )
-    books = sorted(
-        (_book_node(graph, bid) for bid in d.books if bid in graph.books),
-        key=lambda n: n.label.casefold(),
-    )
-    loose = sorted(
-        (_file_node(graph, fid) for fid in d.child_files
-         if fid in graph.files and fid not in owned),
-        key=lambda n: n.label.casefold(),
-    )
-    return GraphTreeNode(
-        "dir", d.path.name, _dir_badges(d), [*child_dirs, *books, *loose],
-        tooltip="; ".join(d.kind_evidence),
+    own_books = [graph.books[bid].book for bid in d.books if bid in graph.books]
+    own_attention = sum(1 for b in own_books if _book_has_active_finding(b))
+    return FolderRow(
+        node_kind="dir",
+        label=d.path.name,
         path=d.path,
+        badges=_dir_badges(d),
+        children=children,
+        tooltip="; ".join(d.kind_evidence),
+        book_count=len(own_books) + sum(c.book_count for c in children),
+        attention_count=own_attention + sum(c.attention_count for c in children),
+        needs_review=(d.kind == "unknown") or (bool(d.kind) and d.kind_source == ""),
+        multi_book=len(d.books) > 1,
+        is_container_shape=bool(d.child_files and d.child_dirs),
     )
 
 
-def graph_tree(graph: Graph, root: Path) -> list[GraphTreeNode]:
-    """The root's children as a nested tree (dirs, then book leaves, then loose files);
-    [] when the root has no DirectoryNode (no books were built under it)."""
+def folder_rows(graph: Graph, root: Path) -> list[FolderRow]:
+    """The root's sub-directories as a nested, directory-only tree with per-folder rollups (subtree
+    book/attention counts, review + structural flags). [] when the root has no DirectoryNode."""
     root_id = DirectoryNode.id_for(root)
     if root_id not in graph.directories:
         return []
-    return _dir_node(graph, root_id).children
+    return _folder_row(graph, root_id).children
 
 
 def grouping_cohort(graph: Graph, *, root: Path, hint: str) -> list[DirectoryNode]:

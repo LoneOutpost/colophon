@@ -17,7 +17,7 @@ from colophon.controller import RECLASSIFY_PREVIEW_THRESHOLD, AppController
 from colophon.core.graph import DirectoryNode
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KIND_LABEL, KINDS
 from colophon.core.graph_records import book_node_id
-from colophon.core.graph_view import GraphTreeNode, graph_summary, graph_tree, grouping_cohort
+from colophon.core.graph_view import FolderRow, folder_rows, graph_summary, grouping_cohort
 from colophon.ui.chrome import body_column, empty_state, page_header, page_toolbar
 from colophon.ui.dialogs import modal
 
@@ -120,33 +120,58 @@ def combine_folder_dialog(controller: AppController, folder: Path, *, on_done=No
     dialog.open()
 
 
-def _render_node(node: GraphTreeNode, on_classify=None) -> None:
-    if node.node_kind == "dir":
-        exp = ui.expansion().props("dense").classes("w-full")
-        with exp.add_slot("header"):
-            with ui.row().classes("items-center q-gutter-xs no-wrap"):
-                ui.icon("folder", color="amber-7")
-                lbl = ui.label(node.label)
-                if node.tooltip:
-                    lbl.tooltip(node.tooltip)
-                for b in node.badges:
-                    ui.badge(b).props("outline").classes("colophon-chip").tooltip(
-                        _CLASSIFICATION_BADGE_TIP
-                    )
-                if on_classify is not None and node.path is not None:
-                    on_classify(node)
-        with exp:
-            for child in node.children:
-                _render_node(child, on_classify)
+def _folder_header(row: FolderRow, *, on_classify, on_combine, on_attention) -> None:
+    """One folder's header content: review dot, name, classification badges, rollup markers
+    (book count, attention chip, multi-book/container Combine), and the classify affordances."""
+    with ui.row().classes("items-center q-gutter-xs no-wrap w-full"):
+        if row.needs_review:
+            ui.icon("fiber_manual_record", size="0.6rem", color="warning").tooltip(
+                "Needs review — unclassified or an unconfirmed guess")
+        ui.icon("folder", color="amber-7")
+        lbl = ui.label(row.label)
+        if row.tooltip:
+            lbl.tooltip(row.tooltip)
+        for b in row.badges:
+            ui.badge(b).props("outline").classes("colophon-chip").tooltip(_CLASSIFICATION_BADGE_TIP)
+        if row.book_count:
+            ui.label(f"{row.book_count} book{'s' if row.book_count != 1 else ''}").classes(
+                "colophon-muted text-caption")
+        if row.attention_count:
+            chip = ui.badge(f"⚠ {row.attention_count}").props("color=warning").classes(
+                "cursor-pointer")
+            chip.tooltip("Books here need attention — open them in the Library")
+            chip.on("click", lambda _=None, p=row.path: on_attention(p))
+        if row.multi_book or row.is_container_shape:
+            marker = "Multiple books" if row.multi_book else "Loose files + subfolders"
+            ui.badge(marker).props("color=grey-7 outline").classes("colophon-chip")
+            ui.button(icon="merge", on_click=lambda _=None, p=row.path: on_combine(p)).props(
+                'flat dense round aria-label="Combine into one book"').tooltip("Combine…")
+        on_classify(row)
+
+
+def _render_folder(row: FolderRow, *, on_classify, on_combine, on_attention) -> None:
+    """Render one directory row. Folders with sub-folders render as a lazy expansion whose children
+    materialize only on first open, so the DOM stays proportional to what's expanded."""
+    header_kwargs = {"on_classify": on_classify, "on_combine": on_combine, "on_attention": on_attention}
+    if not row.children:
+        with ui.row().classes("items-center no-wrap w-full q-pl-lg"):
+            _folder_header(row, **header_kwargs)
         return
-    icon = "menu_book" if node.node_kind == "book" else "insert_drive_file"
-    with ui.row().classes("items-center q-gutter-xs no-wrap q-ml-lg"):
-        ui.icon(icon, color="primary" if node.node_kind == "book" else "grey-6")
-        ui.label(node.label)
-        for b in node.badges:
-            ui.badge(b).props("outline").classes("colophon-chip").tooltip(
-                _CLASSIFICATION_BADGE_TIP
-            )
+    exp = ui.expansion().props("dense").classes("w-full")
+    with exp.add_slot("header"):
+        _folder_header(row, **header_kwargs)
+    with exp:
+        child_box = ui.column().classes("w-full")
+    rendered = {"done": False}
+
+    def _on_toggle(e) -> None:
+        if e.value and not rendered["done"]:
+            rendered["done"] = True
+            with child_box:
+                for child in row.children:
+                    _render_folder(child, **header_kwargs)
+
+    exp.on_value_change(_on_toggle)
 
 
 def _settled_line(s) -> str:
@@ -326,16 +351,25 @@ def render_classic_tree(controller: AppController) -> None:
             if settled:
                 ui.label(settled).classes("colophon-muted text-caption")
 
+    def _on_combine(path: Path) -> None:
+        combine_folder_dialog(controller, path, on_done=_render_maintained)
+
+    def _on_attention(path: Path) -> None:
+        # Jump to the folder's neighborhood in the Nodes explorer (upgraded to a Library-scoped
+        # jump in a follow-up); a real destination, never a dead affordance.
+        ui.navigate.to(_mode_url("explorer", DirectoryNode.id_for(path)))
+
     def _show(graph) -> None:
         _render_worklist(graph, graph_summary(graph))
         body.clear()
-        tree = graph_tree(graph, Path(state["root"]))
+        rows = folder_rows(graph, Path(state["root"]))
         with body:
-            if not tree:
-                ui.label("No books found under this root.").classes("colophon-muted q-pa-md")
+            if not rows:
+                ui.label("No folders found under this root.").classes("colophon-muted q-pa-md")
             else:
-                for node in tree:
-                    _render_node(node, _classify_menu)
+                for row in rows:
+                    _render_folder(row, on_classify=_classify_menu,
+                                   on_combine=_on_combine, on_attention=_on_attention)
 
     async def _build() -> None:
         worklist.clear()
