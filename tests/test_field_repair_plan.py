@@ -36,3 +36,61 @@ def test_bulk_apply_fields_one_batch_across_books(tmp_path):
     assert ctx.books.get(a.id).title == "Old A"
     assert ctx.books.get(b.id).title == "Old B"
     ctx.close()
+
+
+def _book(ctx, folder, *, title=None, tprov="tag", authors=None, aprov="tag"):
+    b = BookUnit.new(source_folder=folder)
+    if title is not None:
+        b.title = title
+        b.provenance["title"] = tprov
+    if authors is not None:
+        b.authors = authors
+        b.provenance["authors"] = aprov
+    ctx.books.upsert(b)
+    return b
+
+
+def test_plan_title_contradiction_row(tmp_path):
+    from colophon.controller import AppController
+    ctx = _ctx(tmp_path)
+    b = _book(ctx, tmp_path / "ingest" / "Stella Rimington" / "At Risk",
+              title="Wrong Title", authors=["Stella Rimington"])
+    rows = AppController(ctx).plan_repairs()
+    title_rows = [r for r in rows if r.book_id == b.id and r.field == "title"]
+    assert len(title_rows) == 1
+    assert title_rows[0].before == "Wrong Title"
+    assert title_rows[0].after == "At Risk"
+    assert title_rows[0].kind == "title_contradiction"
+    ctx.close()
+
+
+def test_plan_author_row_from_scheme(tmp_path):
+    from colophon.controller import AppController
+    ctx = _ctx(tmp_path)
+    b = _book(ctx, tmp_path / "ingest" / "Alan Dean Foster" / "Flinx",
+              title="Flinx", authors=["The End of the Matter (Flinx 03)"])
+    rows = AppController(ctx).plan_repairs()
+    author_rows = [r for r in rows if r.book_id == b.id and r.field == "author"]
+    assert len(author_rows) == 1
+    assert author_rows[0].after == "Alan Dean Foster"
+    assert author_rows[0].kind == "title_shaped_author"
+    ctx.close()
+
+
+def test_plan_no_author_row_when_folder_unmatched(tmp_path):
+    from colophon.controller import AppController
+    ctx = _ctx(tmp_path)
+    b = _book(ctx, tmp_path / "ingest" / "Foster.-.Flinx.-.End",
+              title="End", authors=["The End of the Matter (Flinx 03)"])
+    rows = AppController(ctx).plan_repairs()
+    assert not [r for r in rows if r.book_id == b.id and r.field == "author"]
+    ctx.close()
+
+
+def test_plan_empty_for_clean_library(tmp_path):
+    from colophon.controller import AppController
+    ctx = _ctx(tmp_path)
+    _book(ctx, tmp_path / "ingest" / "Stella Rimington" / "At Risk",
+          title="At Risk", authors=["Stella Rimington"])
+    assert AppController(ctx).plan_repairs() == []
+    ctx.close()
