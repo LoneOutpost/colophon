@@ -296,3 +296,26 @@ def test_hard_tag_author_equal_to_title_is_kept_in_reconcile():
               dir_title=None, filename_fields={})
     assert book.authors == ["Restoree"]
     assert book.provenance["authors"] == "tag"
+
+
+def test_title_shaped_artist_is_skipped_for_folder_author():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(title="Orphan Star", artist="Orphan Star (Flinx 04)"),
+              dir_title=None, filename_fields={}, directory_fields={"author": "Alan Dean Foster"})
+    assert book.authors == ["Alan Dean Foster"]
+    assert book.provenance["authors"] == "directory"
+
+
+def test_normal_artist_still_wins():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(title="X", artist="Stephen King"),
+              dir_title=None, filename_fields={}, directory_fields={"author": "Someone"})
+    assert book.authors == ["Stephen King"]
+    assert book.provenance["authors"] == "tag"
+
+
+def test_title_shaped_artist_no_fallback_leaves_authors_empty():
+    book = _unit()
+    reconcile(book, embedded=EmbeddedTags(title="Orphan Star", artist="Orphan Star (Flinx 04)"),
+              dir_title=None, filename_fields={})
+    assert book.authors == []

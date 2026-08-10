@@ -11,6 +11,7 @@ from __future__ import annotations
 from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.coerce import to_float, to_int
 from colophon.core.isbn import normalize_isbn
+from colophon.core.metadata_quality import is_title_shaped_author
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
 from colophon.core.normalize import collides_with_title
 from colophon.core.people import split_people
@@ -102,7 +103,10 @@ def reconcile(
 
     # authors: embedded.artist -> datafile -> directory -> filename
     if not book.authors:
-        if hard and embedded.artist:
+        # Skip an artist that is clearly a title (a series-book parenthetical / sequence affix) so it
+        # falls through to the folder/filename author. An artist that merely *echoes* the title is
+        # kept (authoritative here, demoted downstream) — hence no `title` argument.
+        if hard and embedded.artist and not is_title_shaped_author(embedded.artist):
             book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
         elif hard and df and df.authors:
             book.authors, book.provenance["authors"] = list(df.authors), Provenance.DATAFILE.value
