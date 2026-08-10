@@ -53,6 +53,65 @@ def _seed_ingest(tmp_path) -> Path:
     return ingest
 
 
+def test_write_tags_clears_metadata_conflict(tmp_path):
+    from colophon.adapters.tags import write_embedded_tags
+    from colophon.core.models import (
+        BookUnit,
+        EmbeddedTags,
+        Finding,
+        FindingCode,
+        FindingSeverity,
+        SourceFile,
+    )
+
+    ctx = _ctx(tmp_path)
+    f = tmp_path / "ingest" / "01.mp3"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"")
+    write_embedded_tags(f, EmbeddedTags(title="Old"))
+    book = BookUnit.new(source_folder=f.parent)
+    book.title, book.authors = "New Title", ["Author"]
+    book.source_files = [SourceFile(path=f, size=1, duration_seconds=60.0, ext="mp3")]
+    book.findings = [Finding(
+        code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail="tags disagree")]
+    ctx.books.upsert(book)
+
+    (result,) = asyncio.run(AppController(ctx).write_tags_books([book]))
+
+    assert result.ok and result.written == 1
+    stored = ctx.books.get(book.id)
+    assert not any(fd.code == FindingCode.METADATA_CONFLICT for fd in stored.findings)
+    ctx.close()
+
+
+def test_failed_write_keeps_metadata_conflict(tmp_path):
+    from colophon.core.models import (
+        BookUnit,
+        Finding,
+        FindingCode,
+        FindingSeverity,
+        SourceFile,
+    )
+
+    ctx = _ctx(tmp_path)
+    # A blocking EMPTY_AUDIO error makes the write a no-op, so the conflict must remain.
+    book = BookUnit.new(source_folder=tmp_path / "b")
+    book.title = "T"
+    book.source_files = [SourceFile(path=tmp_path / "b/01.mp3", size=0, duration_seconds=0.0, ext="mp3")]
+    book.findings = [
+        Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt"),
+        Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail="x"),
+    ]
+    ctx.books.upsert(book)
+
+    (result,) = asyncio.run(AppController(ctx).write_tags_books([book]))
+
+    assert result.written == 0
+    stored = ctx.books.get(book.id)
+    assert any(fd.code == FindingCode.METADATA_CONFLICT for fd in stored.findings)
+    ctx.close()
+
+
 def test_book_derivation_unchanged_detects_title_corroboration():
     from colophon.controller import _book_derivation_unchanged
     from colophon.core.models import BookUnit

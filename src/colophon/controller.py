@@ -1917,6 +1917,10 @@ class AppController:
             # current, so the Tag phase is fresh. A partial/failed write leaves it as-is
             # so it doesn't read as fully tagged. Later field edits re-stale it via invalidate().
             if result.ok and result.written > 0:
+                # The written tags are now authoritative, so the "embedded tags name a different
+                # book" conflict is resolved. Clear it before re-deriving state; a genuine
+                # structural title/folder contradiction honestly re-derives on the next recompute.
+                book.findings = [f for f in book.findings if f.code != FindingCode.METADATA_CONFLICT]
                 if not book.phases:
                     ensure_phases(book)
                 mark(book, Phase.TAG, PhaseState.FRESH)
