@@ -60,3 +60,25 @@ def parse_sequence_affix(name: str) -> SequenceAffix | None:
     if m:
         return _build(m.group("num"), m.group("rest"), strong=bool(m.group("lsp") or m.group("rsp")))
     return None
+
+
+# A series-code affix used as a title prefix: "SB 01 - StarBridge", "DC 02 - Tears of War",
+# "Bk 15 - ...", "Book 18 - ...". A 1-5 letter code (or the word Book/Bk) + a 1-3 digit number +
+# a separator. Comparison-only: this lines residual titles up, it never rewrites a stored title.
+_SERIES_CODE_AFFIX = re.compile(
+    r"^\s*(?:book|bk|[A-Za-z]{1,5})\s*\d{1,3}\s*[-:.]\s*", re.IGNORECASE
+)
+
+
+def strip_series_code_affix(title: str) -> str:
+    """Strip a leading series-code affix ('SB 01 - StarBridge' -> 'StarBridge'). Returns the input
+    unchanged when there is no such affix, or when stripping would leave no letters. Over-stripping is
+    safe for its sole caller (residual comparison): a shorter tag residual can only make two titles
+    agree or abstain, never falsely contradict."""
+    if not title:
+        return title
+    m = _SERIES_CODE_AFFIX.match(title)
+    if not m:
+        return title
+    rest = title[m.end():].strip()
+    return rest if _HAS_LETTER.search(rest) else title
