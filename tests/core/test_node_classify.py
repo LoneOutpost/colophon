@@ -769,3 +769,37 @@ def test_folder_title_shape_ignores_bare_number_and_plain_ramp_leaf():
         ctx = _Ctx(graph=g, root=root, books_by_folder={}, modal_author_depth=None,
                    book_like_children={}, direct_books={node.path: [_book(node.path)]})
         assert ax_folder_title_shape(node, ctx) == [], name
+
+
+def test_fill_title_corroboration_stamps_and_flags(tmp_path):
+    from colophon.core.models import BookUnit, FindingCode, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    agree = BookUnit.new(source_folder=tmp_path / "At Risk")
+    agree.title, agree.authors = "At Risk", ["Stella Rimington"]
+    agree.provenance["authors"] = Provenance.TAG.value
+
+    contra = BookUnit.new(source_folder=tmp_path / "At Risk")
+    contra.title, contra.authors = "Some Other Book", ["Stella Rimington"]
+    contra.provenance["authors"] = Provenance.TAG.value
+
+    _fill_title_corroboration([agree, contra])
+
+    assert agree.title_corroboration == "agree"
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in agree.findings)
+    assert contra.title_corroboration == "contradict"
+    assert any(f.code == FindingCode.METADATA_CONFLICT for f in contra.findings)
+
+
+def test_fill_title_corroboration_mutates_no_field(tmp_path):
+    from colophon.core.models import BookUnit, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    b = BookUnit.new(source_folder=tmp_path / "At Risk")
+    b.title, b.authors = "Some Other Book", ["Stella Rimington"]
+    b.provenance["authors"] = Provenance.TAG.value
+    before = (b.title, list(b.authors), b.publish_year, dict(b.provenance))
+
+    _fill_title_corroboration([b])
+
+    assert (b.title, list(b.authors), b.publish_year, dict(b.provenance)) == before

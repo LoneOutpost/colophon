@@ -663,6 +663,7 @@ def classify_nodes(
         evidenced[node.id] = c.value_evidenced
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
     _fill_series_ramp(graph, books, root=root)
+    _fill_title_corroboration(books)
     _fill_identity_confidence(graph, books, root=root)
 
 
@@ -749,6 +750,24 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     echo_factor = (0.5 if (len(book.authors) == 1 and collides_with_title(book.authors[0], book.title))
                    else 1.0)
     return round(min(1.0, max(a, s) + corroboration) * title_factor * echo_factor * 100)
+
+
+def _fill_title_corroboration(books: list[BookUnit]) -> None:
+    """Stamp each book's title-corroboration verdict and, on a contradiction, raise a passive
+    METADATA_CONFLICT finding. Mutates no identity field — this slice only scores and flags. Runs
+    last, once author/series/franchise are resolved, so the title residual subtracts a complete set
+    of known entities (title-as-residual)."""
+    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.core.title_corroborate import book_title_verdict
+    for book in books:
+        tc = book_title_verdict(book)
+        book.title_corroboration = tc.verdict
+        if tc.verdict == "contradict" and not any(
+            f.code == FindingCode.METADATA_CONFLICT for f in book.findings
+        ):
+            book.findings.append(Finding(
+                code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail=tc.evidence,
+            ))
 
 
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
