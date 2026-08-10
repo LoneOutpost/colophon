@@ -18,6 +18,7 @@ from colophon.core.graph import DirectoryNode
 from colophon.core.graph_explore import KIND_COLOR, KIND_ICON, KIND_LABEL, KINDS
 from colophon.core.graph_records import book_node_id
 from colophon.core.graph_view import FolderRow, folder_rows, graph_summary, grouping_cohort
+from colophon.core.view_state import view_to_snapshot
 from colophon.ui.chrome import body_column, empty_state, page_header, page_toolbar
 from colophon.ui.dialogs import modal
 
@@ -366,9 +367,15 @@ def render_classic_tree(controller: AppController) -> None:
         combine_folder_dialog(controller, path, on_done=_render_maintained)
 
     def _on_attention(path: Path) -> None:
-        # Jump to the folder's neighborhood in the Nodes explorer (upgraded to a Library-scoped
-        # jump in a follow-up); a real destination, never a dead affordance.
-        ui.navigate.to(_mode_url("explorer", DirectoryNode.id_for(path)))
+        # Open the Library scoped to this folder by seeding the same view snapshot the workspace
+        # restores its folder_filter from on load ("workspace_view" in tab storage), then navigate.
+        store = _tab_storage()
+        if store is not None:
+            store["workspace_view"] = view_to_snapshot(
+                scope={"kind": "all", "key": None}, folder_filter={"path": path},
+                view={}, filter_text="", selected_ids=set(), open_book_id=None,
+            )
+        ui.navigate.to("/")
 
     def _filters_active() -> bool:
         return (filters["kind"] != "all" or bool(filters["needs_review"])
