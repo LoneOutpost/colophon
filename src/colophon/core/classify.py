@@ -18,7 +18,7 @@ from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
-from colophon.core.metadata_quality import is_index_title, is_placeholder_title
+from colophon.core.metadata_quality import is_index_title, is_junk_title, is_placeholder_title
 from colophon.core.models import (
     ConfidenceSignal,
     ContentKind,
@@ -193,8 +193,8 @@ def _pick_single_title(
     filename title defers to the filename; otherwise the tag wins. A structured filename (one that
     named a series) is trusted for the title over a bare Album (usually the series or franchise)."""
     series_key = _text_key(fw.series)
-    def unusable(v: str) -> bool:              # a placeholder, or actually the filename's series
-        return is_placeholder_title(v) or _text_key(v) == series_key
+    def unusable(v: str) -> bool:              # junk, or actually the filename's series
+        return is_junk_title(v) or _text_key(v) == series_key
 
     if title and not unusable(title):
         if _tag_is_typo_of(title, fw.label):   # rip typo of the filename title -> trust the filename
