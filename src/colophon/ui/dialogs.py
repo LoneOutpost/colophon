@@ -1016,20 +1016,26 @@ async def scan_dialog(
                 ui.label("Refresh library").classes("text-subtitle1")
 
                 mode = ui.radio(
-                    {"scan": "Scan files", "recompute": "Recompute from library data"},
+                    {
+                        "scan": "Scan files",
+                        "recompute": "Recompute from library data",
+                        "repair": "Repair flagged books",
+                    },
                     value="scan",
                 ).props("dense")
                 ui.label(
-                    "Scan files reads your audio files. Recompute re-runs identification on the "
-                    "data already in your library and does not read your files."
+                    "Scan reads your files. Recompute refreshes identification from library data. "
+                    "Repair fixes authors that were mistagged with a title (changes fields)."
                 ).classes("text-caption colophon-muted")
 
                 disk = ui.column().classes("w-full")
                 recompute = ui.column().classes("w-full")
+                repair = ui.column().classes("w-full")
 
                 def _sync_mode() -> None:
                     disk.set_visibility(mode.value == "scan")
                     recompute.set_visibility(mode.value == "recompute")
+                    repair.set_visibility(mode.value == "repair")
                 mode.on_value_change(_sync_mode)
 
                 with disk:
@@ -1129,6 +1135,26 @@ async def scan_dialog(
                         ui.button("Cancel", on_click=dialog.close).props("flat")
                         ui.button("Recompute", icon="sync", on_click=_run_recompute).props("unelevated")
 
+                with repair:
+                    ui.label("Replace authors that are really a title with the folder's author. "
+                             "Review each change before applying. "
+                             "(Titles are cleaned automatically; contradictions we can't clean stay "
+                             "flagged for you to Match.)").classes("text-caption colophon-muted")
+
+                    async def _preview_repairs() -> None:
+                        body.clear()
+                        with body:
+                            with ui.row().classes("items-center q-gutter-sm"):
+                                ui.spinner()
+                                ui.label("Finding repairs…").classes("text-caption colophon-muted")
+                        rows = await asyncio.to_thread(controller.plan_repairs)
+                        _show_repair_preview(rows)
+
+                    with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                        ui.button("Cancel", on_click=dialog.close).props("flat")
+                        ui.button("Preview repairs", icon="build",
+                                  on_click=_preview_repairs).props("unelevated")
+
                 _sync_mode()
 
         def _show_recompute_result(summary) -> None:
@@ -1144,6 +1170,59 @@ async def scan_dialog(
                         f"{summary.into_review} moved into review · {summary.out_of_review} cleared."
                     ).classes("text-caption colophon-muted")
                 with ui.row().classes("w-full justify-end q-mt-sm"):
+                    def _done() -> None:
+                        dialog.close()
+                        refresh_all()
+                    ui.button("Done", on_click=_done).props("unelevated")
+
+        def _show_repair_preview(rows) -> None:
+            body.clear()
+            with body:
+                if not rows:
+                    ui.label("Nothing to repair — the flagged books need a human decision.").classes(
+                        "text-subtitle1")
+                    with ui.row().classes("w-full justify-end q-mt-sm"):
+                        ui.button("Back", on_click=show_options).props("flat")
+                    return
+                ui.label(f"{len(rows)} proposed author repairs").classes("text-subtitle1")
+                boxes: list[tuple[object, object]] = []
+                with ui.scroll_area().classes("w-full").style("max-height: 42vh"):
+                    for r in rows:
+                        with ui.row().classes("items-center no-wrap q-gutter-sm"):
+                            cb = ui.checkbox(value=True).props("dense")
+                            ui.label(
+                                f'{r.field}: "{r.before}" → "{r.after}"'
+                            ).classes("text-caption colophon-muted")
+                            boxes.append((cb, r))
+
+                async def _apply() -> None:
+                    chosen = [r for cb, r in boxes if cb.value]
+                    if not chosen:
+                        dialog.close()
+                        return
+                    body.clear()
+                    with body:
+                        with ui.row().classes("items-center q-gutter-sm"):
+                            ui.spinner()
+                            ui.label("Applying repairs…").classes("text-caption colophon-muted")
+                    batch = await asyncio.to_thread(controller.apply_repairs, chosen)
+                    _show_repair_result(len(chosen), batch)
+
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    ui.button("Cancel", on_click=dialog.close).props("flat")
+                    ui.button("Apply repairs", icon="check", on_click=_apply).props("unelevated")
+
+        def _show_repair_result(count, batch_id) -> None:
+            body.clear()
+            with body:
+                ui.label(f"Applied {count} repairs.").classes("text-subtitle1")
+                with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
+                    def _undo() -> None:
+                        controller.undo(batch_id)
+                        dialog.close()
+                        refresh_all()
+                    ui.button("Undo", on_click=_undo).props("flat")
+
                     def _done() -> None:
                         dialog.close()
                         refresh_all()

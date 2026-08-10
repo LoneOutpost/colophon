@@ -25,6 +25,7 @@ from colophon.core.confidence import (
     score_identification,
     sort_by_runtime_closeness,
 )
+from colophon.core.dirinfer import infer_from_path, parse_scheme
 from colophon.core.duplicate_check import (
     CollidingBook,
     DuplicateDestination,
@@ -208,6 +209,16 @@ class RecomputeSummary(_Base):
     updated: int = 0        # books whose derived state changed and were written back
     into_review: int = 0    # books that entered needs_review
     out_of_review: int = 0  # books that left needs_review
+
+
+class RepairRow(_Base):
+    """One proposed field repair for the previewed Repair action."""
+
+    book_id: str
+    field: str        # editable-field key: "title" | "author"
+    before: str
+    after: str
+    kind: str         # "title_contradiction" | "title_shaped_author"
 
 
 def _detect_image_ext(data: bytes) -> str | None:
@@ -1417,6 +1428,39 @@ class AppController:
         out = sum(1 for i, s in before.items()
                   if s is BookState.NEEDS_REVIEW and after.get(i) is not BookState.NEEDS_REVIEW)
         return RecomputeSummary(updated=updated, into_review=into, out_of_review=out)
+
+    def plan_repairs(self) -> list[RepairRow]:
+        """Scan the library for the trust-inverting author repair (a title-shaped author replaced by
+        the folder's author) and return the proposed changes for preview. Pure over the persisted
+        books + the configured directory scheme — no graph, no disk. Title cleaning is automatic
+        (repair_fields), not previewed; a title contradiction we can't confidently clean stays
+        flagged for a human to Match."""
+        from colophon.core.title_corroborate import author_looks_like_title
+        scheme = parse_scheme(self.ctx.config.directory_scheme)
+        rows: list[RepairRow] = []
+        for book in self.ctx.books.list_all():
+            if len(book.authors) == 1 and author_looks_like_title(book.authors[0], book.title):
+                author = infer_from_path(book.source_folder, self._root_for(book), scheme).get("author")
+                if author and author != book.authors[0]:
+                    rows.append(RepairRow(
+                        book_id=book.id, field="author", before=book.authors[0],
+                        after=author, kind="title_shaped_author"))
+        return rows
+
+    def apply_repairs(self, rows: list[RepairRow]) -> str:
+        """Apply the given repair rows as one undoable batch of MANUAL edits, then re-derive the
+        affected books. Returns the batch id (undo via undo())."""
+        by_book: dict[str, dict[str, str | None]] = {}
+        for r in rows:
+            by_book.setdefault(r.book_id, {})[r.field] = r.after
+        items: list[tuple[BookUnit, dict[str, str | None], str]] = []
+        for book_id, updates in by_book.items():
+            book = self.get_book(book_id)
+            if book is not None:
+                items.append((book, updates, Provenance.MANUAL.value))
+        batch = bulk_apply_fields(self.ctx.books, self.ctx.history, items)
+        self._resync_books([book for book, _, _ in items])
+        return batch
 
     # --- dashboard ---
     @timed("dashboard_stats")

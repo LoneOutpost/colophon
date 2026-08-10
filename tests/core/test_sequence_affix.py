@@ -81,3 +81,17 @@ def test_letterless_remainder_is_none():
 
 def test_empty_is_none():
     assert parse_sequence_affix("") is None
+
+
+def test_strip_series_book_suffix_trailing():
+    from colophon.core.sequence_affix import strip_series_book_suffix
+    assert strip_series_book_suffix("Some Title - Bk01") == "Some Title"
+    assert strip_series_book_suffix("Some Title - Book 1") == "Some Title"
+    assert strip_series_book_suffix("Silent Songs: Book 12") == "Silent Songs"
+
+
+def test_strip_series_book_suffix_leaves_plain_titles():
+    from colophon.core.sequence_affix import strip_series_book_suffix
+    assert strip_series_book_suffix("Rainbow Six") == "Rainbow Six"
+    assert strip_series_book_suffix("Fahrenheit 451") == "Fahrenheit 451"   # trailing bare number kept
+    assert strip_series_book_suffix("Book 1") == "Book 1"                   # nothing but the affix -> unchanged
