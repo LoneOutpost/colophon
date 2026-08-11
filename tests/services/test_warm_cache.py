@@ -91,3 +91,34 @@ def test_run_local_search_reuses_warm_cache_over_disk(tmp_path):
     assert book.source_files[0].tags is not None
     assert book.source_files[0].tags.title == "WarmTitle"
     assert warm.warm == 1
+
+
+def test_rebuild_warm_equals_cold(tmp_path):
+    # A real tagged file. A cold rebuild and a warm rebuild of the unchanged tree must yield the same
+    # source_files (same tags), and the warm one must register a warm hit.
+    from mutagen.id3 import ID3, TIT2
+
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.services.ingest import WarmCache, plan_scan
+    root = tmp_path / "ingest"
+    d = root / "Author" / "Book"
+    d.mkdir(parents=True)
+    f = d / "01.mp3"
+    f.write_bytes(b"")
+    t = ID3()
+    t.add(TIT2(encoding=3, text=["Real Title"]))
+    t.save(f)
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", scan_paths=[root]))
+    plan = plan_scan(ctx.books, root, template="$Title")
+    for b in plan.units:
+        ctx.books.upsert(b)
+    cold_titles = {str(sf.path): (sf.tags.title if sf.tags else None)
+                   for b in plan.units for sf in b.source_files}
+    warm = WarmCache.build(ctx.books)
+    plan2 = plan_scan(ctx.books, root, template="$Title", warm=warm)
+    warm_titles = {str(sf.path): (sf.tags.title if sf.tags else None)
+                   for b in plan2.units for sf in b.source_files}
+    assert warm_titles == cold_titles and cold_titles
+    assert warm.warm >= 1 and warm.cold == 0
+    ctx.close()

@@ -19,7 +19,7 @@ from colophon.core.models import (
     Provenance,
     SeriesRef,
 )
-from colophon.services.ingest import ScanOptions, plan_scan
+from colophon.services.ingest import ScanOptions, WarmCache, plan_scan
 
 
 def _leaf_book(container: BookUnit, work: DetectedWork, leaf_id: str) -> BookUnit:
@@ -95,6 +95,7 @@ def build_graph(
         options=options, inference_root=inference_root, progress=progress, fresh=fresh,
         single_book_folders=single_book_folders,
         partitioned_folders=partitioned_folders,
+        warm=WarmCache.build(repo),
     )
     g = Graph()
     for book in plan.units:
