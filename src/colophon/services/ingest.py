@@ -43,6 +43,7 @@ from colophon.services.identify import (
 )
 
 logger = logging.getLogger(__name__)
+progress_logger = logging.getLogger("colophon.progress")
 
 _RECONCILED_FIELDS = (
     "title", "subtitle", "authors", "narrators", "series",
@@ -314,7 +315,7 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
 
         plan.units.append(book)
     if warm is not None:
-        logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
+        progress_logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
     return plan
 
 
@@ -379,7 +380,7 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
         plan.files_added += len(book.source_files)
         plan.units.append(book)
     if warm is not None:
-        logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
+        progress_logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
     return plan
 
 
@@ -427,7 +428,7 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
             plan.new_books += 1
         plan.units.append(book)
     if warm is not None:
-        logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
+        progress_logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
     return plan
 
 
