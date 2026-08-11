@@ -28,6 +28,7 @@ from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.match import clean_match_title
+from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.models import (
     RESTRUCTURE_FINDINGS,
     WEAK_PROV,
@@ -107,10 +108,11 @@ def gather(
 
 def seed_series(book: BookUnit) -> None:
     """Pre-resolve: an untagged single book takes its series/sequence from the filename
-    cluster, so reconcile's `if not book.series` gate keeps it."""
+    cluster, so reconcile's `if not book.series` gate keeps it. A structural marker
+    ("Chapter", "Part") is a per-file position, never a series name, rejected."""
     if book.content_kind is ContentKind.SINGLE and book.detected_works:
         dw = book.detected_works[0]
-        if dw.series and not book.series:
+        if dw.series and not is_structural_marker(dw.series) and not book.series:
             book.series = [SeriesRef(name=dw.series, sequence=dw.sequence)]
             book.provenance["series"] = Provenance.FILENAME.value
 

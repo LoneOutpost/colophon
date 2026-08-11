@@ -457,3 +457,27 @@ def test_normalize_clamps_impossible_year(tmp_path):
     b.publish_year = 1
     normalize(b)
     assert b.publish_year is None
+
+
+def _single_book_with_detected_work(series, sequence=1.0):
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, ContentKind, DetectedWork
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    b.content_kind = ContentKind.SINGLE
+    b.detected_works = [DetectedWork(label="Journey to Sorrow's End", series=series, sequence=sequence)]
+    return b
+
+
+def test_seed_series_rejects_structural_series_name():
+    from colophon.services.identify import seed_series
+    b = _single_book_with_detected_work("Chapter")
+    seed_series(b)
+    assert b.series == []          # "Chapter" is a structural marker, not a series
+
+
+def test_seed_series_keeps_real_series_name():
+    from colophon.services.identify import seed_series
+    b = _single_book_with_detected_work("Mistborn")
+    seed_series(b)
+    assert b.series and b.series[0].name == "Mistborn"
