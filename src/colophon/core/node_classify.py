@@ -799,7 +799,6 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
-    from colophon.core.metadata_quality import is_title_shaped_author
     from colophon.core.models import Provenance
     from colophon.core.normalize import proper_case_if_shouting
     from colophon.core.people import split_people
@@ -809,12 +808,6 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     for book in books:
         prov = book.provenance.get("authors")
         if book.authors and prov in _SETTLE_PROV:
-            continue
-        # A real tag/datafile author (the file's own metadata) already outweighs a folder-name guess
-        # in the ballot; keep it so the folder can't overwrite it. Only a junk/title-shaped one falls
-        # through, so the ballot can re-decide it from the folder/filename structure.
-        if (book.authors and prov in _TAG_ID_PROV
-                and not is_title_shaped_author(book.authors[0])):
             continue
         # NOTE (load-bearing, temporary): the two guards below (`root_is_soft_author`, the `title`
         # exclusion via `bool(book.title)`) are what keep a standalone title folder from being named

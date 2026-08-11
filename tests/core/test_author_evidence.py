@@ -76,3 +76,34 @@ def test_multi_author_tag_is_preserved():
     resolve_author(b, author_depth_folder="Folder", classified_author_name=None,
                    datafile_authors=[], filename_author=None, sibling_consensus={})
     assert b.authors == ["Neil Gaiman", "Terry Pratchett"]
+
+
+def test_a3_corroborated_structure_overturns_lone_real_tag():
+    # A genuine (non-junk) tag author, but folder + filename both name a different author -> the
+    # corroborated structure (2.5 + 1.5 = 4.0) overturns the lone tag (3.0).
+    b = _book("/lib/A/Ursula K. Le Guin", "Ursula K. Le Guin - A Wizard of Earthsea.opus",
+              artist="Wrongly Tagged Name")
+    r = resolve_author(b, author_depth_folder="Ursula K. Le Guin", classified_author_name=None,
+                       datafile_authors=[], filename_author="Ursula K. Le Guin", sibling_consensus={})
+    assert r.value == "Ursula K. Le Guin"
+    assert b.provenance["authors"] == Provenance.DIRECTORY.value
+
+
+def test_a2_lone_real_tag_survives_a_single_folder():
+    # Only the folder competes (no filename corroboration): the lone real tag (3.0) beats folder (2.5).
+    b = _book("/lib/misc/Some Folder", "01.opus", artist="Real Tagged Author")
+    r = resolve_author(b, author_depth_folder="Some Folder", classified_author_name=None,
+                       datafile_authors=[], filename_author=None, sibling_consensus={})
+    assert r.value == "Real Tagged Author"
+    assert b.provenance["authors"] == Provenance.TAG.value
+
+
+def test_tag_vote_recovered_from_book_when_sourcefile_untagged():
+    # SourceFile carries no cached tags, but the book already has a tag-provenance author; the ballot
+    # must still weigh it (so a lone folder can't silently overwrite a real tag).
+    b = _book("/lib/A/Folder Name", "01.opus", artist=None)
+    b.authors = ["Committed Tag Author"]
+    b.provenance["authors"] = Provenance.TAG.value
+    r = resolve_author(b, author_depth_folder="Folder Name", classified_author_name=None,
+                       datafile_authors=[], filename_author=None, sibling_consensus={})
+    assert r.value == "Committed Tag Author"

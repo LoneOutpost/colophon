@@ -39,8 +39,16 @@ def collect_author_evidence(
 
     tags = book.source_files[0].tags if book.source_files else None
     artist = tags.artist if tags else None
+    prov = book.provenance.get("authors")
     if artist:
         ev.append(FieldEvidence(artist, _penalized(artist, W.W_A_TAG), "tag", f"tag artist '{artist}'"))
+    elif book.authors and prov in (Provenance.TAG.value, Provenance.DATAFILE.value):
+        # No cached file tag on this in-memory SourceFile, but reconcile committed the file's author
+        # with tag/datafile provenance — recover it so the ballot weighs it as an overturnable vote.
+        src = "tag" if prov == Provenance.TAG.value else "datafile"
+        w = W.W_A_TAG if src == "tag" else W.W_A_DATAFILE
+        val = " & ".join(book.authors)
+        ev.append(FieldEvidence(val, _penalized(val, w), src, f"{src} author '{val}'"))
 
     if datafile_authors:
         joined = " & ".join(datafile_authors)
