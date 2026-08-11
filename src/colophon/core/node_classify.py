@@ -23,34 +23,32 @@ _KIND_ORDER = ("title", "author", "series", "franchise", "container")
 
 # --- Evidence weight ladder ------------------------------------------------------------------
 # Soft votes SUM; the highest-weighted kind wins. Hard votes (manual/match) settle outright.
-# Every axiom draws its weight from here so the precedence story lives in ONE ordered place — read
-# top-to-bottom to see what beats what. Relative order matters more than the absolute numbers; when
-# adding an axiom, slot its constant into the ladder rather than inventing a bare literal. Distinct
-# votes keep distinct names even when values coincide today, so any one can be tuned independently.
-W_MANUAL = 100.0            # hard: the user classified this folder
-W_MATCH = 10.0             # hard: a matched book's author == the folder name
-W_TITLE_LEAF = 5.0         # a single-book leaf folder is that book's title
-W_FRANCHISE = 4.0          # folder name == a declared franchise
-W_LEAF_SERIES = 4.0        # a lone book whose folder resembles its series
-W_SERIES_RAMP = 3.0        # all books one series with a sequence ramp + matching folder name
-W_CONSENSUS_MAX = 3.0      # tagged-author consensus, capped (grows 0.5 + 0.5*n up to this)
-W_MEMOIR_AUTHOR = 3.0      # a memoir/autobiography titled after its author
-W_AUTHOR_STRUCTURE_MAX = 3.0   # loose-books-span-series author vote, CAPPED (else unbounded in n)
-W_ROOT_PRIOR = 2.5         # the scan root is usually a library bucket, not one author
-W_LEAF_AUTHOR = 2.5        # a lone book sitting at the author depth names the author
-W_AUTHOR_GROUPING = 2.0    # a folder of title subfolders (an author/series grouping)
-W_BUCKET_WORD = 2.0        # a bucket/staging stop-word folder name
-W_NUMERIC_NAME = 1.5       # a numeric folder name is not a person
-W_TAG_AUTHOR_MATCH = 1.5   # a tagged author == the folder name (reinforces consensus)
-W_MIXED_LOOSE = 1.0        # loose audio beside subfolders
-W_NUMBERED_BASE = 1.0      # child names carry sequence numbers (series signal)
-W_NUMBERED_RAMP = 2.0      # ...and form a distinct-title numbered ramp
-W_NUMBERED_TAG = 1.0       # ...and a child independently asserts a series tag
-W_MODAL_DEPTH_NUDGE = 0.5  # sits at the library's typical author depth (tree-consistency nudge)
-# Container "bucket" vote grows with the folder-of-folders count: unlike the author vote, MORE
-# child book-folders genuinely means MORE bucket-like, so this one is intentionally unbounded.
-W_BUCKET_BASE = 1.0
-W_BUCKET_PER_CHILD = 0.5
+# All weights now live in colophon.core.evidence_weights, the single tuning surface; imported here
+# so the axioms below read the same names as before.
+from colophon.core.evidence_weights import (  # noqa: E402
+    W_AUTHOR_GROUPING,
+    W_AUTHOR_STRUCTURE_MAX,
+    W_BUCKET_BASE,
+    W_BUCKET_PER_CHILD,
+    W_BUCKET_WORD,
+    W_CONSENSUS_MAX,
+    W_FRANCHISE,
+    W_LEAF_AUTHOR,
+    W_LEAF_SERIES,
+    W_MANUAL,
+    W_MATCH,
+    W_MEMOIR_AUTHOR,
+    W_MIXED_LOOSE,
+    W_MODAL_DEPTH_NUDGE,
+    W_NUMBERED_BASE,
+    W_NUMBERED_RAMP,
+    W_NUMBERED_TAG,
+    W_NUMERIC_NAME,
+    W_ROOT_PRIOR,
+    W_SERIES_RAMP,
+    W_TAG_AUTHOR_MATCH,
+    W_TITLE_LEAF,
+)
 
 _BUCKET_WORDS = frozenset({
     "incoming", "downloads", "download", "audiobooks", "audiobook", "books", "misc",
