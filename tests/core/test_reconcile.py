@@ -327,3 +327,36 @@ def test_junk_embedded_title_falls_through_to_filename():
               filename_fields={"title": "Orphan Star"})
     assert book.title == "Orphan Star"
     assert book.provenance["title"] == "filename"
+
+
+def test_reconcile_rejects_structural_series_from_tag():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags
+    from colophon.core.reconcile import reconcile
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    reconcile(b, embedded=EmbeddedTags(series="Chapter 01", sequence=1.0),
+              dir_title=None, filename_fields={}, tiers="all")
+    assert b.series == []
+
+
+def test_reconcile_rejects_structural_series_from_filename():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags
+    from colophon.core.reconcile import reconcile
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    reconcile(b, embedded=EmbeddedTags(), dir_title=None,
+              filename_fields={"series": "Chapter", "sequence": "1"}, tiers="all")
+    assert b.series == []
+
+
+def test_reconcile_keeps_real_series_from_tag():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags
+    from colophon.core.reconcile import reconcile
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    reconcile(b, embedded=EmbeddedTags(series="Mistborn", sequence=2.0),
+              dir_title=None, filename_fields={}, tiers="all")
+    assert b.series and b.series[0].name == "Mistborn"

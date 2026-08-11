@@ -11,7 +11,11 @@ from __future__ import annotations
 from colophon.adapters.sidecar import DatafileSidecar
 from colophon.core.coerce import to_float, to_int
 from colophon.core.isbn import normalize_isbn
-from colophon.core.metadata_quality import is_junk_title, is_title_shaped_author
+from colophon.core.metadata_quality import (
+    is_junk_title,
+    is_structural_marker,
+    is_title_shaped_author,
+)
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance, SeriesRef
 from colophon.core.normalize import collides_with_title
 from colophon.core.people import split_people
@@ -133,24 +137,28 @@ def reconcile(
             book.narrators = [filename_fields["narrator"]]
             book.provenance["narrators"] = Provenance.FILENAME.value
 
-    # series: embedded -> datafile -> directory -> filename (each tier builds a
-    # non-empty [SeriesRef], so a present source always yields a truthy value)
+    # series: embedded -> datafile -> directory -> filename (each tier builds a non-empty
+    # [SeriesRef], so a present source always yields a truthy value). A structural marker
+    # ("Chapter", "Part 01") is a per-file position, never a series, rejected from every tier.
     if not book.series:
         candidates = []
         if hard:
             candidates += [
                 ([SeriesRef(name=embedded.series, sequence=embedded.sequence)]
-                 if embedded.series else None, Provenance.TAG),
+                 if embedded.series and not is_structural_marker(embedded.series) else None, Provenance.TAG),
                 ([SeriesRef(name=df.series_name, sequence=df.series_sequence)]
-                 if df and df.series_name else None, Provenance.DATAFILE),
+                 if df and df.series_name and not is_structural_marker(df.series_name) else None,
+                 Provenance.DATAFILE),
             ]
         if weak:
             candidates += [
                 ([SeriesRef(name=dirf["series"], sequence=to_float(dirf.get("sequence")))]
-                 if dirf.get("series") else None, Provenance.DIRECTORY),
+                 if dirf.get("series") and not is_structural_marker(dirf["series"]) else None,
+                 Provenance.DIRECTORY),
                 ([SeriesRef(name=filename_fields["series"],
                             sequence=to_float(filename_fields.get("sequence")))]
-                 if filename_fields.get("series") else None, Provenance.FILENAME),
+                 if filename_fields.get("series") and not is_structural_marker(filename_fields["series"])
+                 else None, Provenance.FILENAME),
             ]
         picked = _first(candidates)
         if picked:
