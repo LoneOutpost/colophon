@@ -370,3 +370,25 @@ def test_reconcile_rejects_structural_artist_as_author():
     b = BookUnit.new(source_folder=Path("/lib/x"))
     reconcile(b, embedded=EmbeddedTags(artist="Chapter"), dir_title=None, filename_fields={}, tiers="all")
     assert b.authors == []
+
+
+def test_reconcile_rejects_structural_filename_author():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags
+    from colophon.core.reconcile import reconcile
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    reconcile(b, embedded=EmbeddedTags(), dir_title=None,
+              filename_fields={"author": "Chapter", "title": "Some Title"}, tiers="all")
+    assert b.authors == []          # a filename-parsed "Chapter" is a structural marker, not an author
+
+
+def test_reconcile_rejects_structural_directory_author():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags
+    from colophon.core.reconcile import reconcile
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    reconcile(b, embedded=EmbeddedTags(), dir_title=None, filename_fields={},
+              directory_fields={"author": "Part"}, tiers="all")
+    assert b.authors == []

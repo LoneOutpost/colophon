@@ -115,11 +115,12 @@ def reconcile(
             book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
         elif hard and df and df.authors:
             book.authors, book.provenance["authors"] = list(df.authors), Provenance.DATAFILE.value
-        elif weak and dirf.get("author") and not collides_with_title(dirf.get("author"), book.title):
+        elif (weak and dirf.get("author") and not is_structural_marker(dirf["author"])
+                and not collides_with_title(dirf.get("author"), book.title)):
             book.authors, book.provenance["authors"] = [dirf["author"]], Provenance.DIRECTORY.value
-        elif weak and filename_fields.get("author") and not collides_with_title(
-            filename_fields.get("author"), book.title
-        ):
+        elif (weak and filename_fields.get("author")
+                and not is_structural_marker(filename_fields["author"])
+                and not collides_with_title(filename_fields.get("author"), book.title)):
             book.authors = [filename_fields["author"]]
             book.provenance["authors"] = Provenance.FILENAME.value
 
