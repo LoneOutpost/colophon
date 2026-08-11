@@ -25,6 +25,11 @@ _BARE_NUM_TITLE = re.compile(r"^\d{1,4}$")
 _INDEX_OF = re.compile(r"^\d{1,3}\s+of\s+\d{1,3}$", re.IGNORECASE)   # "01 of 15" track-of-total
 # A series-book number stuffed into an author value: "... (Flinx 03)", "... (The Expanse #4)".
 _SERIES_PAREN = re.compile(r"\(\s*.+?#?\s*\d", re.IGNORECASE)
+# A bare structural marker word — "Chapter", "Part", "Disc" — with or without a trailing number.
+# Catches a marker used verbatim as an identity (e.g. a "Chapter" series), which the numbered
+# _PLACEHOLDER/_TRACK_PREFIX patterns miss.
+_MARKER_WORD = re.compile(
+    r"^(?:track|disc|disk|cd|chapter|chap|volume|vol|part|side)\s*\d*$", re.IGNORECASE)
 
 
 def is_placeholder_title(value: str | None) -> bool:
@@ -40,13 +45,23 @@ def is_index_title(value: str | None) -> bool:
     return bool(_BARE_NUM_TITLE.match(v)) or bool(_INDEX_OF.match(v))
 
 
-def is_junk_title(value: str | None) -> bool:
-    """The umbrella check: `value` is not a usable book title — empty, a placeholder, a leading
-    track/chapter marker, or a bare/track-of-total index."""
+def is_structural_marker(value: str | None) -> bool:
+    """A positional/structural marker, not an identity value: blank, a rip placeholder ("Track 3",
+    "Unknown Album"), a leading track/chapter marker ("Track 007 - Opening"), a bare/track-of-total
+    index ("15", "01 of 15"), or a bare marker word ("Chapter", "Part"). The universal gate wherever a
+    tag value would name an IDENTITY (work-grouping, series, title, author). A structural marker still
+    carries sequence/part info, so callers that derive sequence read it; this only bars it from naming
+    an identity."""
     if not value or not value.strip():
         return True
     v = value.strip()
-    return is_placeholder_title(v) or bool(_TRACK_PREFIX.match(v)) or is_index_title(v)
+    return (is_placeholder_title(v) or bool(_TRACK_PREFIX.match(v))
+            or is_index_title(v) or bool(_MARKER_WORD.match(v)))
+
+
+def is_junk_title(value: str | None) -> bool:
+    """Umbrella check that `value` is not a usable book title — delegates to `is_structural_marker`."""
+    return is_structural_marker(value)
 
 
 def is_title_shaped_author(author: str | None, title: str | None = None) -> bool:

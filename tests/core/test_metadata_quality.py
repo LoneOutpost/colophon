@@ -33,6 +33,28 @@ def test_is_junk_title():
     assert is_junk_title("The Way of Kings") is False
 
 
+def test_is_structural_marker_true_cases():
+    from colophon.core.metadata_quality import is_structural_marker as m
+    for v in ["Chapter 01", "Chapter", "chapter", "Part 3", "Part", "Disc", "Disc 2", "CD 1",
+              "Track 7", "Track 007 - Opening Theme", "Volume 1", "Vol 2", "", "   ", "15",
+              "01 of 15", "Unknown Album", "Untitled"]:
+        assert m(v) is True, v
+
+
+def test_is_structural_marker_false_cases():
+    from colophon.core.metadata_quality import is_structural_marker as m
+    for v in ["Journey to Sorrow's End", "The Bacta War", "Mistborn", "Elantris",
+              "A Wizard of Earthsea", "Book One",
+              "Part of the Pattern", "Chapter and Verse", "Discworld", "The Parting", "Chapters"]:
+        assert m(v) is False, v
+
+
+def test_is_junk_title_delegates_to_is_structural_marker():
+    from colophon.core.metadata_quality import is_junk_title, is_structural_marker
+    for v in ["Chapter 01", "", "15", "Track 3", "Real Title", "Mistborn"]:
+        assert is_junk_title(v) == is_structural_marker(v), v
+
+
 def test_is_title_shaped_author():
     assert is_title_shaped_author("The End of the Matter (Flinx 03)", "The End of the Matter") is True
     assert is_title_shaped_author("02 - Yendi", "Yendi") is True     # sequence affix
