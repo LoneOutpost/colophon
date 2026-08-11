@@ -110,7 +110,8 @@ def reconcile(
         # Skip an artist that is clearly a title (a series-book parenthetical / sequence affix) so it
         # falls through to the folder/filename author. An artist that merely *echoes* the title is
         # kept (authoritative here, demoted downstream) — hence no `title` argument.
-        if hard and embedded.artist and not is_title_shaped_author(embedded.artist):
+        if (hard and embedded.artist and not is_title_shaped_author(embedded.artist)
+                and not is_structural_marker(embedded.artist)):
             book.authors, book.provenance["authors"] = _split_people(embedded.artist), Provenance.TAG.value
         elif hard and df and df.authors:
             book.authors, book.provenance["authors"] = list(df.authors), Provenance.DATAFILE.value

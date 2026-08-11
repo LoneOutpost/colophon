@@ -686,12 +686,13 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
     plain numbered shelf. GRAPHING provenance; a tag/datafile/match/manual series is never touched.
     Title affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) owns the title."""
     from colophon.core.folder_title import parse_folder_title
+    from colophon.core.metadata_quality import is_structural_marker
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
     fillable = WEAK_PROV | {Provenance.GRAPHING.value}
     for book in books:
         node = _nearest_series(graph, book.source_folder, root)
-        if node is None or not node.kind_value:
+        if node is None or not node.kind_value or is_structural_marker(node.kind_value):
             continue
         seq = parse_folder_title(book.source_folder.name).sequence
         if seq is None:

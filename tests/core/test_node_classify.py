@@ -386,6 +386,28 @@ def test_fill_series_ramp_stamps_sequence_from_folder_name():
     assert yendi.provenance["title"] == Provenance.DIRECTORY.value  # title left untouched by the ramp fill
 
 
+def test_fill_series_ramp_skips_structural_series_node_name():
+    # A series node whose name is a structural marker ("Chapter") must never become a book's series.
+    from colophon.core.graph import BookNode
+    from colophon.core.models import Provenance
+    from colophon.core.node_classify import _fill_series_ramp
+
+    g = Graph()
+    root = Path("/lib")
+    _dir(g, "/lib")
+    _dir(g, "/lib/Some Author")
+    _dir(g, "/lib/Some Author/Chapter", kind="series", kind_value="Chapter")
+    bk = _titled_book("/lib/Some Author/Chapter/02 - Yendi", "02 - Yendi")
+    bk.provenance["title"] = Provenance.DIRECTORY.value
+    bd = _dir(g, str(bk.source_folder))
+    bid = f"{bd.id}:0"
+    g.books[bid] = BookNode(id=bid, book=bk, owns=[], dir_id=bd.id)
+
+    _fill_series_ramp(g, [bk], root=root)
+
+    assert bk.series == []          # the structural "Chapter" node name is never stamped as series
+
+
 def test_fill_series_ramp_leaves_weak_compound_title_when_position_is_weak():
     # a series node whose child position is itself a weak (unspaced) compound — e.g. a manual/match
     # series with no strong ramp — must NOT mangle a weak compound title like "30-Day Heart Tune-Up"

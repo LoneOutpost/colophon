@@ -107,3 +107,17 @@ def test_tag_vote_recovered_from_book_when_sourcefile_untagged():
     r = resolve_author(b, author_depth_folder="Folder Name", classified_author_name=None,
                        datafile_authors=[], filename_author=None, sibling_consensus={})
     assert r.value == "Committed Tag Author"
+
+
+def test_structural_artist_is_penalized_out_of_author_ballot():
+    from pathlib import Path
+
+    from colophon.core.author_evidence import resolve_author
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+    d = Path("/lib/A/Real Author")
+    b = BookUnit.new(source_folder=d)
+    b.source_files = [SourceFile(path=d / "01.opus", size=1, duration_seconds=60.0, ext="opus",
+                                 tags=EmbeddedTags(artist="Chapter"))]
+    r = resolve_author(b, author_depth_folder="Real Author", classified_author_name=None,
+                       datafile_authors=[], filename_author=None, sibling_consensus={})
+    assert r.value == "Real Author"          # the structural "Chapter" tag lost to the folder

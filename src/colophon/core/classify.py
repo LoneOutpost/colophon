@@ -19,7 +19,6 @@ from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.metadata_quality import (
-    is_index_title,
     is_junk_title,
     is_placeholder_title,
     is_structural_marker,
@@ -162,7 +161,7 @@ def _all_index_titles(group: list[FileFeatures]) -> bool:
     titles = [f.tags.title for f in group]
     if not all(t for t in titles):
         return False
-    return all(is_placeholder_title(t) or is_index_title(t) for t in titles)
+    return all(is_structural_marker(t) for t in titles)
 
 
 _ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)

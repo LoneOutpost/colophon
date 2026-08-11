@@ -360,3 +360,13 @@ def test_reconcile_keeps_real_series_from_tag():
     reconcile(b, embedded=EmbeddedTags(series="Mistborn", sequence=2.0),
               dir_title=None, filename_fields={}, tiers="all")
     assert b.series and b.series[0].name == "Mistborn"
+
+
+def test_reconcile_rejects_structural_artist_as_author():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags
+    from colophon.core.reconcile import reconcile
+    b = BookUnit.new(source_folder=Path("/lib/x"))
+    reconcile(b, embedded=EmbeddedTags(artist="Chapter"), dir_title=None, filename_fields={}, tiers="all")
+    assert b.authors == []
