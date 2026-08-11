@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -149,6 +149,18 @@ class EmbeddedTags(_Base):
     asin: str | None = None
     isbn: str | None = None
     track: int | None = None
+
+    @model_validator(mode="after")
+    def _blank_strings_to_none(self) -> EmbeddedTags:
+        """A whitespace-only tag value carries no information, so normalize it to None so no consumer
+        (reconcile, classification, resolve) mistakes ' ' for a real author/title. Runs on fresh
+        reads and on model_validate_json (so the tag cache heals on load)."""
+        for name in ("title", "album", "artist", "narrator", "series",
+                     "genre", "description", "asin", "isbn"):
+            v = getattr(self, name)
+            if isinstance(v, str) and not v.strip():
+                setattr(self, name, None)
+        return self
 
 
 class SourceFile(_Base):

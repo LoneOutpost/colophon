@@ -247,3 +247,15 @@ def test_book_state_has_encoded_between_ready_and_organized():
 def test_provenance_has_graphing_tier():
     from colophon.core.models import Provenance
     assert Provenance.GRAPHING.value == "graphing"
+
+
+def test_embedded_tags_blank_strings_normalize_to_none():
+    from colophon.core.models import EmbeddedTags
+    t = EmbeddedTags(artist=" ", title="   ", album="\t", series="")
+    assert t.artist is None and t.title is None and t.album is None and t.series is None
+    # a real value with surrounding space keeps its content (not trimmed away)
+    keep = EmbeddedTags(artist=" Wendy Pini ")
+    assert keep.artist == " Wendy Pini "
+    # heals the cache: a blank value stored in JSON loads back as None
+    restored = EmbeddedTags.model_validate_json('{"artist": "  "}')
+    assert restored.artist is None
