@@ -30,6 +30,7 @@ from colophon.core.models import (
     Phase,
     PhaseState,
     Provenance,
+    SourceFile,
 )
 from colophon.core.phases import LOCAL, invalidate_from, mark, resync_state, state_of
 from colophon.core.reassociate import is_missing, reassociate
@@ -47,6 +48,36 @@ _RECONCILED_FIELDS = (
     "title", "subtitle", "authors", "narrators", "series",
     "publish_year", "publisher", "description", "asin", "isbn",
 )
+
+
+@dataclass
+class WarmCache:
+    """A path -> cached SourceFile map for a warm SEARCH. `take(path)` returns the cached SourceFile
+    (tags, duration, everything) ONLY when the on-disk file is unchanged (same mtime_ns + size) and
+    carries tags; otherwise None (the caller cold-reads). Counts warm hits vs cold misses for metrics.
+    take() returns a SHARED reference to the cached SourceFile, callers must not mutate it in place (the
+    codebase updates SourceFiles copy-on-write via model_copy)."""
+    by_path: dict[str, SourceFile]
+    warm: int = 0
+    cold: int = 0
+
+    @classmethod
+    def build(cls, repo) -> WarmCache:
+        return cls({str(sf.path): sf
+                    for b in repo.list_all() for sf in b.source_files if sf.tags is not None})
+
+    def take(self, path: Path) -> SourceFile | None:
+        cached = self.by_path.get(str(path))
+        if cached is not None and cached.tags is not None:
+            try:
+                st = path.stat()
+            except OSError:
+                st = None
+            if st is not None and cached.mtime_ns == st.st_mtime_ns and cached.size == st.st_size:
+                self.warm += 1
+                return cached
+        self.cold += 1
+        return None
 
 
 @dataclass
