@@ -632,3 +632,34 @@ def test_junk_tag_title_defers_to_filename_label():
     feats = [_feat("/lib/Foo/Orphan Star.mp3", title="01 of 15")]
     works, _ = group_works(feats)
     assert works[0].label == "Orphan Star"
+
+
+def _sm_feat(folder, name, *, title=None, album=None, artist=None):
+    from pathlib import Path
+
+    from colophon.core.classify import FileFeatures
+    from colophon.core.models import EmbeddedTags
+    return FileFeatures(path=Path(folder) / name, ext="opus", duration_seconds=600.0,
+                        tags=EmbeddedTags(title=title, album=album, artist=artist))
+
+
+def test_chaptered_book_with_structural_albums_is_one_work():
+    from colophon.core.classify import group_works
+    d = "/lib/Wendy Pini.-.ElfQuest Bk01.-.Journey to Sorrows End"
+    feats = [_sm_feat(d, f"ElfQuest - Chapter{n:02d}.opus",
+                      title="Elf Quest - Journey to Sorrow's End", album=f"Chapter {n:02d}")
+             for n in range(1, 14)]
+    works, _ = group_works(feats)
+    assert len(works) == 1
+
+
+def test_distinct_real_albums_still_split():
+    # Numeric filenames ("01"/"02") carry no text signature, and there is no title tag, so ONLY the
+    # album work-key can tell these two books apart. A real (non-structural) album must still split
+    # them into two works; if album keying broke, the filename clusterer would merge them into one.
+    from colophon.core.classify import group_works
+    d = "/lib/Some Author"
+    feats = [_sm_feat(d, "01.opus", album="Alpha Chronicles"),
+             _sm_feat(d, "02.opus", album="Beta Chronicles")]
+    works, _ = group_works(feats)
+    assert len(works) == 2

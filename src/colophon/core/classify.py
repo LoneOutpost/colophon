@@ -18,7 +18,12 @@ from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
-from colophon.core.metadata_quality import is_index_title, is_junk_title, is_placeholder_title
+from colophon.core.metadata_quality import (
+    is_index_title,
+    is_junk_title,
+    is_placeholder_title,
+    is_structural_marker,
+)
 from colophon.core.models import (
     ConfidenceSignal,
     ContentKind,
@@ -113,7 +118,7 @@ def _work_key(f: FileFeatures) -> str | None:
         return f"asin:{t.asin.strip().lower()}"
     if t.isbn:
         return f"isbn:{t.isbn.strip().lower()}"
-    if t.album:
+    if t.album and not is_structural_marker(t.album):
         return f"album:{_text_key(t.album)}"
     return None
 
