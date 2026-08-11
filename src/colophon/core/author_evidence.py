@@ -10,16 +10,12 @@ from __future__ import annotations
 from colophon.core import evidence_weights as W
 from colophon.core.field_resolve import FieldEvidence, ResolvedField, resolve_field
 from colophon.core.metadata_quality import is_structural_marker, is_title_shaped_author
-from colophon.core.models import BookUnit, Provenance
+from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
 from colophon.core.people import split_people
 
 # Authoritative provenances that SETTLE the author (never overturned): a user's manual edit + any
 # online-source match. Deliberately EXCLUDES tag/datafile, those are overturnable soft votes.
-_MATCH_PROV = frozenset({
-    Provenance.AUDNEXUS.value, Provenance.AUDIBLE.value, Provenance.HARDCOVER.value,
-    Provenance.OPENLIBRARY.value, Provenance.GOOGLEBOOKS.value,
-})
-_SETTLE_PROV = _MATCH_PROV | {Provenance.MANUAL.value}
+_SETTLE_PROV = AUTHORITATIVE_PROV
 
 
 def _penalized(value: str, weight: float) -> float:

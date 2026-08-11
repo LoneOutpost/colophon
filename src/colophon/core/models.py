@@ -51,6 +51,14 @@ class Provenance(StrEnum):
 # manual value never is. Single source of truth — imported anywhere that gates on "is this weak?".
 WEAK_PROV: frozenset[str] = frozenset({Provenance.DIRECTORY.value, Provenance.FILENAME.value})
 
+# The "authoritative" tier: a user's manual edit or an online-source match named this value. Such a
+# value is never auto-overwritten or scrubbed. Single source of truth — imported anywhere that gates
+# on "is this authoritative?".
+AUTHORITATIVE_PROV: frozenset[str] = frozenset({
+    Provenance.MANUAL.value, Provenance.AUDNEXUS.value, Provenance.AUDIBLE.value,
+    Provenance.HARDCOVER.value, Provenance.OPENLIBRARY.value, Provenance.GOOGLEBOOKS.value,
+})
+
 
 class ContentKind(StrEnum):
     """Axis 1 — how many distinct works a folder holds."""
