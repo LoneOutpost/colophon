@@ -510,3 +510,29 @@ def test_seed_title_keeps_real_tag_label():
     b = _multifile_single_book_with_label("The Real Book Title", Provenance.TAG.value)
     seed_title(b)
     assert b.title == "The Real Book Title"
+
+
+def test_foster_container_structural_folder_name_not_author():
+    from colophon.services.identify import Evidence, _attribute_legacy
+    b = BookUnit.new(source_folder=Path("/lib/Disc 1"))
+    b.content_kind = ContentKind.MULTI
+    b.folder_kind = FolderKind.UNDETERMINED
+    b.detected_works = [DetectedWork(label="Something")]
+    # a RESTRUCTURE finding drives the foster-container branch
+    b.findings = [Finding(code=FindingCode.MULTI_IN_AUTHOR, severity=FindingSeverity.WARN, detail="x")]
+    ev = Evidence(first_path=None)
+    _attribute_legacy(b, ev)
+    assert b.authors == []          # "Disc 1" folder is a structural marker, not an author
+
+
+def test_role_author_structural_folder_name_not_author():
+    from colophon.core.models import SourceFile
+    from colophon.services.identify import Evidence, attribute
+    d = Path("/lib/Chapter")
+    b = BookUnit.new(source_folder=d)
+    b.content_kind = ContentKind.SINGLE
+    b.detected_works = [DetectedWork(label="Some Title")]
+    b.source_files = [SourceFile(path=d / "01.opus", size=1, duration_seconds=60.0, ext="opus")]
+    ev = Evidence(first_path=d / "01.opus")
+    attribute(b, ev, role="author")
+    assert b.authors == []          # "Chapter" folder is structural, not an author

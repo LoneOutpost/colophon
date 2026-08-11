@@ -241,7 +241,7 @@ def _attribute_legacy(book: BookUnit, evidence: Evidence) -> None:
         ):
             book.title = dw.label
             book.provenance["title"] = Provenance.FILENAME.value
-            if not book.authors:
+            if not book.authors and not is_structural_marker(folder_name):
                 book.authors = [folder_name]
                 book.provenance["authors"] = Provenance.FILENAME.value
 
@@ -252,6 +252,7 @@ def _attribute_legacy(book: BookUnit, evidence: Evidence) -> None:
         and book.folder_kind is not FolderKind.TITLE
         and book.detected_works
         and any(f.code in RESTRUCTURE_FINDINGS for f in book.findings)
+        and not is_structural_marker(book.source_folder.name)
     ):
         book.authors = [book.source_folder.name]
         book.provenance["authors"] = Provenance.DIRECTORY.value
@@ -294,7 +295,7 @@ def attribute(book: BookUnit, evidence: Evidence, *, role: str | None = None) ->
                 new_title = _author_folder_title(book, dw.label)
                 if new_title:
                     book.title, book.provenance["title"] = new_title, Provenance.FILENAME.value
-        if not book.authors:
+        if not book.authors and not is_structural_marker(book.source_folder.name):
             book.authors, book.provenance["authors"] = [book.source_folder.name], Provenance.DIRECTORY.value
         return
     # series / franchise / container: no name promotion here.
