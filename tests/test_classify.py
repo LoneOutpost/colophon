@@ -663,3 +663,30 @@ def test_distinct_real_albums_still_split():
              _sm_feat(d, "02.opus", album="Beta Chronicles")]
     works, _ = group_works(feats)
     assert len(works) == 2
+
+
+def test_elfquest_folder_one_book_no_chapter_series():
+    from pathlib import Path
+
+    from colophon.core.classify import FileFeatures, group_works
+    from colophon.core.models import BookUnit, ContentKind, EmbeddedTags, SourceFile
+    from colophon.core.reconcile import reconcile
+    from colophon.services.identify import seed_series, seed_title
+    d = Path("/lib/Wendy Pini.-.ElfQuest Bk01.-.Journey to Sorrows End")
+    feats = [FileFeatures(path=d / f"ElfQuest - Chapter{n:02d}.opus", ext="opus",
+                          duration_seconds=600.0,
+                          tags=EmbeddedTags(title="Elf Quest - Journey to Sorrow's End",
+                                            album=f"Chapter {n:02d}"))
+             for n in range(1, 14)]
+    works, _ = group_works(feats)
+    assert len(works) == 1                      # not shattered into 13
+    b = BookUnit.new(source_folder=d)
+    b.content_kind = ContentKind.SINGLE
+    b.detected_works = works
+    b.source_files = [SourceFile(path=f.path, size=1, duration_seconds=600.0, ext="opus", tags=f.tags)
+                      for f in feats]
+    seed_title(b)
+    seed_series(b)
+    reconcile(b, embedded=feats[0].tags, dir_title=None, filename_fields={}, tiers="all")
+    assert b.title == "Elf Quest - Journey to Sorrow's End"   # correct title from the tag
+    assert b.series == []                                     # no bogus "Chapter" series

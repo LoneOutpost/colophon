@@ -481,3 +481,32 @@ def test_seed_series_keeps_real_series_name():
     b = _single_book_with_detected_work("Mistborn")
     seed_series(b)
     assert b.series and b.series[0].name == "Mistborn"
+
+
+def _multifile_single_book_with_label(label, label_prov):
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, ContentKind, DetectedWork, SourceFile
+    d = Path("/lib/y")
+    b = BookUnit.new(source_folder=d)
+    b.content_kind = ContentKind.SINGLE
+    b.source_files = [SourceFile(path=d / f"{n:02d}.opus", size=1, duration_seconds=60.0, ext="opus")
+                      for n in range(2)]
+    b.detected_works = [DetectedWork(label=label, label_prov=label_prov)]
+    return b
+
+
+def test_seed_title_rejects_structural_tag_label():
+    from colophon.core.models import Provenance
+    from colophon.services.identify import seed_title
+    b = _multifile_single_book_with_label("Chapter 01", Provenance.TAG.value)
+    seed_title(b)
+    assert b.title is None          # a structural album label is not a book title
+
+
+def test_seed_title_keeps_real_tag_label():
+    from colophon.core.models import Provenance
+    from colophon.services.identify import seed_title
+    b = _multifile_single_book_with_label("The Real Book Title", Provenance.TAG.value)
+    seed_title(b)
+    assert b.title == "The Real Book Title"

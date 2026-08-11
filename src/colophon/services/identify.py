@@ -130,7 +130,7 @@ def seed_title(book: BookUnit) -> None:
         and book.detected_works
     ):
         dw = book.detected_works[0]
-        if dw.label and dw.label_prov == Provenance.TAG.value:
+        if dw.label and not is_structural_marker(dw.label) and dw.label_prov == Provenance.TAG.value:
             book.title = dw.label
             book.provenance["title"] = Provenance.TAG.value
 
