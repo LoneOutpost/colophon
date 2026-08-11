@@ -40,12 +40,12 @@ def collect_author_evidence(
     tags = book.source_files[0].tags if book.source_files else None
     artist = tags.artist if tags else None
     if artist:
-        for name in split_people(artist):
-            ev.append(FieldEvidence(name, _penalized(name, W.W_A_TAG), "tag", f"tag artist '{name}'"))
+        ev.append(FieldEvidence(artist, _penalized(artist, W.W_A_TAG), "tag", f"tag artist '{artist}'"))
 
-    for name in datafile_authors:
-        ev.append(FieldEvidence(name, _penalized(name, W.W_A_DATAFILE), "datafile",
-                                f"datafile author '{name}'"))
+    if datafile_authors:
+        joined = " & ".join(datafile_authors)
+        ev.append(FieldEvidence(joined, _penalized(joined, W.W_A_DATAFILE), "datafile",
+                                f"datafile author '{joined}'"))
 
     if classified_author_name:
         ev.append(FieldEvidence(classified_author_name,
@@ -84,8 +84,6 @@ def resolve_author(book: BookUnit, **inputs) -> ResolvedField:
     r = resolve_field(candidates)
     if r.value is None:
         return r
-    winner = max((c for c in candidates if c.value and c.value.strip() and c.weight > 0),
-                 key=lambda c: c.weight)
-    book.authors = [r.value]
-    book.provenance["authors"] = _PROV_FOR.get(winner.source, Provenance.GRAPHING.value)
+    book.authors = split_people(r.value)
+    book.provenance["authors"] = _PROV_FOR.get(r.source, Provenance.GRAPHING.value)
     return r

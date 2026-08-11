@@ -24,6 +24,7 @@ class ResolvedField:
     value: str | None
     likelihood: float
     evidence: list[FieldEvidence] = field(default_factory=list)
+    source: str | None = None      # the winning value's strongest contributing source
 
 
 def _key(value: str) -> str:
@@ -48,4 +49,5 @@ def resolve_field(candidates: list[FieldEvidence]) -> ResolvedField:
     total = sum(totals.values())
     best = max(totals, key=lambda k: (totals[k], strongest[k]))
     likelihood = round(totals[best] / total, 2) if total else 0.0
-    return ResolvedField(display[best], likelihood, list(candidates))
+    best_source = max((c for c in pool if _key(c.value) == best), key=lambda c: c.weight).source
+    return ResolvedField(display[best], likelihood, list(candidates), source=best_source)

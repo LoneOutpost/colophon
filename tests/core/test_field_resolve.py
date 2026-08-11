@@ -54,3 +54,12 @@ def test_two_disagreeing_hard_votes_resolve_within_hard_pool():
                        E("Soft Loud", 999.0, "tag")])
     assert r.value == "Manual Author"
     assert r.likelihood == round(100.0 / 110.0, 2)   # share within the hard pool, soft excluded
+
+
+def test_reports_winning_value_source_from_strongest_contributor():
+    # folder 2.5 + filename 1.5 corroborate to 4.0 and beat a lone tag 3.0; the winning value's
+    # source is the strongest contributor to it (folder), NOT the globally-strongest candidate (tag).
+    r = resolve_field([E("Solo Tag", 3.0, "tag"),
+                       E("Corroborated", 2.5, "folder"), E("corroborated", 1.5, "filename")])
+    assert r.value == "Corroborated"
+    assert r.source == "folder"

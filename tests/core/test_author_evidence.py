@@ -57,3 +57,22 @@ def test_manual_author_is_hard_and_wins():
         datafile_authors=[], filename_author=None, sibling_consensus={})
     assert r.value == "Manually Set"
     assert b.authors == ["Manually Set"]
+
+
+def test_corroborated_folder_beats_lone_tag_and_stamps_folder_provenance():
+    # tag names one author (3.0); folder + filename both name another (2.5 + 1.5 = 4.0) -> corroboration
+    # wins and provenance is DIRECTORY (folder), not TAG.
+    b = _book("/lib/A/Wendy Pini", "Wendy Pini - Book.opus", artist="Wrong Tag Author")
+    r = resolve_author(
+        b, author_depth_folder="Wendy Pini", classified_author_name=None,
+        datafile_authors=[], filename_author="Wendy Pini", sibling_consensus={})
+    assert r.value == "Wendy Pini"
+    assert b.authors == ["Wendy Pini"]
+    assert b.provenance["authors"] == Provenance.DIRECTORY.value
+
+
+def test_multi_author_tag_is_preserved():
+    b = _book("/lib/A/Folder", "01.opus", artist="Neil Gaiman & Terry Pratchett")
+    resolve_author(b, author_depth_folder="Folder", classified_author_name=None,
+                   datafile_authors=[], filename_author=None, sibling_consensus={})
+    assert b.authors == ["Neil Gaiman", "Terry Pratchett"]
