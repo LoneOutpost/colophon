@@ -690,3 +690,28 @@ def test_elfquest_folder_one_book_no_chapter_series():
     reconcile(b, embedded=feats[0].tags, dir_title=None, filename_fields={}, tiers="all")
     assert b.title == "Elf Quest - Journey to Sorrow's End"   # correct title from the tag
     assert b.series == []                                     # no bogus "Chapter" series
+
+
+def test_structural_artist_is_not_a_detected_work_author():
+    from colophon.core.classify import group_works
+    d = "/lib/x"
+    feats = [_sm_feat(d, "01.opus", title="Real Title", album="Real Album", artist="Chapter")]
+    works, _ = group_works(feats)
+    assert works[0].author is None      # a "Chapter" artist tag is not an author
+
+
+def test_real_artist_is_a_detected_work_author():
+    from colophon.core.classify import group_works
+    d = "/lib/x"
+    feats = [_sm_feat(d, "01.opus", title="Real Title", album="Real Album", artist="Ursula K. Le Guin")]
+    works, _ = group_works(feats)
+    assert works[0].author == "Ursula K. Le Guin"
+
+
+def test_multifile_structural_artist_not_authored():
+    from colophon.core.classify import group_works
+    d = "/lib/x"
+    feats = [_sm_feat(d, f"{n:02d}.opus", title="Shared Book", album="Shared Book", artist="Track 3")
+             for n in range(1, 4)]
+    works, _ = group_works(feats)
+    assert len(works) == 1 and works[0].author is None

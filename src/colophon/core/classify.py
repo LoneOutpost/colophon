@@ -142,6 +142,12 @@ def _first(values) -> str | None:
     return None
 
 
+def _clean_artist(artist: str | None) -> str | None:
+    """A structural marker ("Chapter", "Track 3") is a per-file position, never an author. Drop it so
+    a DetectedWork carries no author rather than a bogus one."""
+    return None if is_structural_marker(artist) else artist
+
+
 def _uniform_tag(values) -> str | None:
     """The one value every file shares (case-insensitively, ignoring placeholders), or None if any
     file lacks it or they disagree. A tag identical across a book's files is book-level; one that
@@ -226,7 +232,7 @@ def _overlay_tags(sub_works: list[DetectedWork], group: list[FileFeatures]) -> l
         out.append(w.model_copy(update={
             "label": proper_case_if_shouting(label),
             "label_prov": prov,
-            "author": f.tags.artist or w.author,
+            "author": _clean_artist(f.tags.artist) or w.author,
         }))
     return out
 
@@ -251,7 +257,7 @@ def _partition_works(features: list[FileFeatures], partition: list[list[str]]) -
 def _to_work(group: list[FileFeatures]) -> DetectedWork:
     title = _first(f.tags.title for f in group)
     album = _first(f.tags.album for f in group)
-    author = _first(f.tags.artist for f in group)
+    author = _first(_clean_artist(f.tags.artist) for f in group)
     if len(group) > 1:
         # A multi-file group is one book. The tag that *matches across every file* names the book;
         # the one that varies is per-chapter. Usually that is a shared Album over per-chapter Titles,
