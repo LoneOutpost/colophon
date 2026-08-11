@@ -536,3 +536,20 @@ def test_role_author_structural_folder_name_not_author():
     ev = Evidence(first_path=d / "01.opus")
     attribute(b, ev, role="author")
     assert b.authors == []          # "Chapter" folder is structural, not an author
+
+
+def test_identify_hard_scrubs_then_rederives_title(tmp_path):
+    # A stored structural title ("Chapter", weak provenance) is scrubbed at the top of IDENTIFY, then
+    # re-derived from the file's real Title tag — not left "Chapter", not left empty when derivable.
+    from colophon.core.dirinfer import parse_scheme
+    from colophon.core.filename_parser import compile_template
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+    from colophon.services.identify import identify_hard
+    d = tmp_path / "A" / "B"
+    b = BookUnit.new(source_folder=d)
+    b.source_files = [SourceFile(path=d / "01.opus", size=1, duration_seconds=60.0, ext="opus",
+                                 tags=EmbeddedTags(title="Real Title"))]
+    b.title = "Chapter"
+    b.provenance["title"] = "directory"
+    identify_hard(b, root=tmp_path, pattern=compile_template("$Title"), scheme=parse_scheme(""))
+    assert b.title == "Real Title"

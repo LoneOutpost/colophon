@@ -27,6 +27,7 @@ from colophon.adapters.sidecar import (
 from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import shares_token
 from colophon.core.filename_parser import parse_filename
+from colophon.core.identity_scrub import scrub_structural_identity
 from colophon.core.match import clean_match_title
 from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.models import (
@@ -171,6 +172,7 @@ def identify_hard(
     album-as-title for multi-file books, then fill only the hard-sourced identity tiers
     (embedded tags, datafile sidecar). Returns the gathered Evidence so the weak stage can
     reuse it without re-reading files."""
+    scrub_structural_identity(book)  # drop stored structural junk so the derive below can replace it
     evidence = gather(book, root=root, pattern=pattern, scheme=scheme, multi_folder=multi_folder)
     drop_orphaned_datafile_fields(book, evidence)
     seed_title(book)  # album tag -> title, hard
