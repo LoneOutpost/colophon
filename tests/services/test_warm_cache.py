@@ -68,3 +68,26 @@ def test_build_collects_only_tagged_source_files():
     wc = WarmCache.build(_Repo())
     assert str(d / "a.opus") in wc.by_path
     assert str(d / "b.opus") not in wc.by_path
+
+
+def test_run_local_search_reuses_warm_cache_over_disk(tmp_path):
+    # An EMPTY file on disk (mutagen would find no tags), but a warm entry with real tags -> SEARCH
+    # must reuse the cache, proving the mutagen/ffprobe path was skipped.
+    from colophon.core.dirinfer import parse_scheme
+    from colophon.core.filename_parser import compile_template
+    from colophon.core.models import BookUnit, Phase
+    from colophon.services.ingest import run_local_phases
+    d = tmp_path / "A" / "B"
+    d.mkdir(parents=True)
+    f = d / "01.opus"
+    f.write_bytes(b"")
+    st = f.stat()
+    cached = _sf(f, EmbeddedTags(title="WarmTitle", artist="Warm Author"), st.st_mtime_ns, st.st_size)
+    warm = WarmCache({str(f): cached})
+    book = BookUnit.new(source_folder=d)
+    run_local_phases(book, frozenset({Phase.SEARCH}), force=True, unit_files=[f],
+                     root=tmp_path, pattern=compile_template("$Title"), scheme=parse_scheme(""),
+                     warm=warm)
+    assert book.source_files[0].tags is not None
+    assert book.source_files[0].tags.title == "WarmTitle"
+    assert warm.warm == 1

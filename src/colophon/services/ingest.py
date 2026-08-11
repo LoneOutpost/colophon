@@ -155,6 +155,7 @@ def _run_local(
     unit_files: list[Path] | None = None,
     single_book_folders: frozenset[str] = frozenset(),
     partitioned_folders: dict[str, list[list[str]]] | None = None,
+    warm: WarmCache | None = None,
 ) -> None:
     """Execute one local phase's work for `book`.
 
@@ -170,8 +171,12 @@ def _run_local(
             raise ValueError("unit_files required for SEARCH phase")
         book.source_files = []
         for p in unit_files:
-            sf, tags = read_audio_metadata(p)
-            book.source_files.append(sf.model_copy(update={"tags": tags}))
+            cached = warm.take(p) if warm is not None else None
+            if cached is not None:
+                book.source_files.append(cached)              # warm: reuse tags/duration/all
+            else:
+                sf, tags = read_audio_metadata(p)             # cold: new or changed file
+                book.source_files.append(sf.model_copy(update={"tags": tags}))
         logger.debug(f"scan {book.source_folder}: SEARCH probed {len(book.source_files)} files")
 
     elif phase is Phase.CATEGORIZE:
@@ -214,6 +219,7 @@ def run_local_phases(
     unit_files: list[Path] | None = None,
     single_book_folders: frozenset[str] = frozenset(),
     partitioned_folders: dict[str, list[list[str]]] | None = None,
+    warm: WarmCache | None = None,
 ) -> None:
     """Run the requested LOCAL phases for `book`, in pipeline order. A phase runs when
     `force` or its state is STALE/PENDING (so non-force mirrors the old refresh_local).
@@ -232,7 +238,7 @@ def run_local_phases(
         try:
             _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
                        unit_files=unit_files, single_book_folders=single_book_folders,
-                       partitioned_folders=partitioned_folders)
+                       partitioned_folders=partitioned_folders, warm=warm)
             mark(book, phase, PhaseState.FRESH)
         except Exception as e:  # a local phase must not crash the caller
             logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
