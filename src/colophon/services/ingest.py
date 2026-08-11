@@ -30,6 +30,7 @@ from colophon.core.models import (
     Phase,
     PhaseState,
     Provenance,
+    SourceFile,
 )
 from colophon.core.phases import LOCAL, invalidate_from, mark, resync_state, state_of
 from colophon.core.reassociate import is_missing, reassociate
@@ -42,11 +43,42 @@ from colophon.services.identify import (
 )
 
 logger = logging.getLogger(__name__)
+progress_logger = logging.getLogger("colophon.progress")
 
 _RECONCILED_FIELDS = (
     "title", "subtitle", "authors", "narrators", "series",
     "publish_year", "publisher", "description", "asin", "isbn",
 )
+
+
+@dataclass
+class WarmCache:
+    """A path -> cached SourceFile map for a warm SEARCH. `take(path)` returns the cached SourceFile
+    (tags, duration, everything) ONLY when the on-disk file is unchanged (same mtime_ns + size) and
+    carries tags; otherwise None (the caller cold-reads). Counts warm hits vs cold misses for metrics.
+    take() returns a SHARED reference to the cached SourceFile, callers must not mutate it in place (the
+    codebase updates SourceFiles copy-on-write via model_copy)."""
+    by_path: dict[str, SourceFile]
+    warm: int = 0
+    cold: int = 0
+
+    @classmethod
+    def build(cls, repo) -> WarmCache:
+        return cls({str(sf.path): sf
+                    for b in repo.list_all() for sf in b.source_files if sf.tags is not None})
+
+    def take(self, path: Path) -> SourceFile | None:
+        cached = self.by_path.get(str(path))
+        if cached is not None and cached.tags is not None:
+            try:
+                st = path.stat()
+            except OSError:
+                st = None
+            if st is not None and cached.mtime_ns == st.st_mtime_ns and cached.size == st.st_size:
+                self.warm += 1
+                return cached
+        self.cold += 1
+        return None
 
 
 @dataclass
@@ -124,6 +156,7 @@ def _run_local(
     unit_files: list[Path] | None = None,
     single_book_folders: frozenset[str] = frozenset(),
     partitioned_folders: dict[str, list[list[str]]] | None = None,
+    warm: WarmCache | None = None,
 ) -> None:
     """Execute one local phase's work for `book`.
 
@@ -139,8 +172,12 @@ def _run_local(
             raise ValueError("unit_files required for SEARCH phase")
         book.source_files = []
         for p in unit_files:
-            sf, tags = read_audio_metadata(p)
-            book.source_files.append(sf.model_copy(update={"tags": tags}))
+            cached = warm.take(p) if warm is not None else None
+            if cached is not None:
+                book.source_files.append(cached)              # warm: reuse tags/duration/all
+            else:
+                sf, tags = read_audio_metadata(p)             # cold: new or changed file
+                book.source_files.append(sf.model_copy(update={"tags": tags}))
         logger.debug(f"scan {book.source_folder}: SEARCH probed {len(book.source_files)} files")
 
     elif phase is Phase.CATEGORIZE:
@@ -183,6 +220,7 @@ def run_local_phases(
     unit_files: list[Path] | None = None,
     single_book_folders: frozenset[str] = frozenset(),
     partitioned_folders: dict[str, list[list[str]]] | None = None,
+    warm: WarmCache | None = None,
 ) -> None:
     """Run the requested LOCAL phases for `book`, in pipeline order. A phase runs when
     `force` or its state is STALE/PENDING (so non-force mirrors the old refresh_local).
@@ -201,7 +239,7 @@ def run_local_phases(
         try:
             _run_local(book, phase, root=root, pattern=pattern, scheme=scheme,
                        unit_files=unit_files, single_book_folders=single_book_folders,
-                       partitioned_folders=partitioned_folders)
+                       partitioned_folders=partitioned_folders, warm=warm)
             mark(book, phase, PhaseState.FRESH)
         except Exception as e:  # a local phase must not crash the caller
             logger.warning(f"local phase {phase} failed for {book.source_folder}: {e}")
@@ -232,7 +270,8 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
                    progress: Callable[[int, int, str], None] | None = None,
                    fresh: bool = False,
                    single_book_folders: frozenset[str] = frozenset(),
-                   partitioned_folders: dict[str, list[list[str]]] | None = None) -> ScanPlan:
+                   partitioned_folders: dict[str, list[list[str]]] | None = None,
+                   warm: WarmCache | None = None) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything."""
     pattern = compile_template(template)
     scheme = parse_scheme(directory_scheme)
@@ -248,7 +287,7 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
         # SEARCH phase — capture prior paths before probing for files_added accounting
         prior_paths = {sf.path for sf in book.source_files}
         _run_local(book, Phase.SEARCH, root=root, pattern=pattern, scheme=scheme,
-                   unit_files=unit.files)
+                   unit_files=unit.files, warm=warm)
         mark(book, Phase.SEARCH, PhaseState.FRESH)
         plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
 
@@ -275,6 +314,8 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
             plan.new_books += 1
 
         plan.units.append(book)
+    if warm is not None:
+        progress_logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
     return plan
 
 
@@ -283,7 +324,8 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
               progress: Callable[[int, int, str], None] | None = None,
               fresh: bool = False,
               single_book_folders: frozenset[str] = frozenset(),
-              partitioned_folders: dict[str, list[list[str]]] | None = None) -> ScanPlan:
+              partitioned_folders: dict[str, list[list[str]]] | None = None,
+              warm: WarmCache | None = None) -> ScanPlan:
     """Compute what a scan of `root` would do, without writing anything.
     `options is None` keeps the legacy behavior (all books, all local phases).
     `inference_root` (default `root`) is the scan path used for classify/dir-inference depth.
@@ -294,19 +336,19 @@ def plan_scan(repo: BookUnitRepo, root: Path, *, template: str, directory_scheme
         return _plan_scan_all(repo, root, template=template,
                               directory_scheme=directory_scheme, progress=progress, fresh=fresh,
                               single_book_folders=single_book_folders,
-                              partitioned_folders=partitioned_folders)
+                              partitioned_folders=partitioned_folders, warm=warm)
     if options.scope is ScanScope.NEW_ONLY:
         return _plan_scan_new_only(repo, root, options.phases, template=template,
                                    directory_scheme=directory_scheme,
                                    inference_root=inference_root, progress=progress,
                                    single_book_folders=single_book_folders,
-                                   partitioned_folders=partitioned_folders)
+                                   partitioned_folders=partitioned_folders, warm=warm)
     return _plan_scan_reprocess(repo, root, options.phases,
                                 force=options.scope is ScanScope.REFRESH,
                                 template=template, directory_scheme=directory_scheme,
                                 inference_root=inference_root, progress=progress,
                                 single_book_folders=single_book_folders,
-                                partitioned_folders=partitioned_folders)
+                                partitioned_folders=partitioned_folders, warm=warm)
 
 
 def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase], *,
@@ -314,7 +356,8 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
                         inference_root: Path | None = None,
                         progress: Callable[[int, int, str], None] | None = None,
                         single_book_folders: frozenset[str] = frozenset(),
-                        partitioned_folders: dict[str, list[list[str]]] | None = None) -> ScanPlan:
+                        partitioned_folders: dict[str, list[list[str]]] | None = None,
+                        warm: WarmCache | None = None) -> ScanPlan:
     """Ingest only books not already known; run the selected local phases on each.
     SEARCH is always run for a new book (probing is intrinsic to discovery)."""
     pattern = compile_template(template)
@@ -332,10 +375,12 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
         run_local_phases(book, phases | {Phase.SEARCH}, force=False,
                          root=inf_root, pattern=pattern, scheme=scheme, unit_files=unit.files,
                          single_book_folders=single_book_folders,
-                         partitioned_folders=partitioned_folders)
+                         partitioned_folders=partitioned_folders, warm=warm)
         plan.new_books += 1
         plan.files_added += len(book.source_files)
         plan.units.append(book)
+    if warm is not None:
+        progress_logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
     return plan
 
 
@@ -344,7 +389,8 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
                          inference_root: Path | None = None,
                          progress: Callable[[int, int, str], None] | None = None,
                          single_book_folders: frozenset[str] = frozenset(),
-                         partitioned_folders: dict[str, list[list[str]]] | None = None) -> ScanPlan:
+                         partitioned_folders: dict[str, list[list[str]]] | None = None,
+                         warm: WarmCache | None = None) -> ScanPlan:
     """UPDATE (force=False) / REFRESH (force=True): add new books and re-process known ones
     in `root`. New books run the selected phases (always incl. SEARCH); known books re-run
     the selected phases — only STALE/PENDING unless `force`."""
@@ -372,7 +418,7 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
         run_local_phases(book, run_phases, force=force, root=inf_root,
                          pattern=pattern, scheme=scheme, unit_files=unit.files,
                          single_book_folders=single_book_folders,
-                         partitioned_folders=partitioned_folders)
+                         partitioned_folders=partitioned_folders, warm=warm)
 
         plan.files_added += len({sf.path for sf in book.source_files} - prior_paths)
         if existing is not None:
@@ -381,6 +427,8 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
         else:
             plan.new_books += 1
         plan.units.append(book)
+    if warm is not None:
+        progress_logger.info(f"scan {root.name}: warm SEARCH reused {warm.warm} file(s), cold-read {warm.cold}")
     return plan
 
 
