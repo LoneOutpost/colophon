@@ -712,6 +712,7 @@ class AppController:
             classify_nodes(recon, [bn.book for bn in recon.books.values()], root=root,
                            overrides=overrides, known_franchises=self.ctx.franchises.active(),
                            directory_scheme=self.ctx.config.directory_scheme,
+                           filename_template=self.ctx.config.filename_template,
                            classify_only=classify_only)
             # Fill folder-derived franchise onto the book copies before building the persisted
             # franchise edges, so the graph edge and book.franchise agree in one pass (a
@@ -2406,7 +2407,8 @@ class AppController:
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
                        overrides=self.ctx.overrides.all(),
                        known_franchises=self.ctx.franchises.active(),
-                       directory_scheme=self.ctx.config.directory_scheme)
+                       directory_scheme=self.ctx.config.directory_scheme,
+                       filename_template=self.ctx.config.filename_template)
         self._graph_cache[(str(root), fresh)] = graph
         return graph
 
@@ -2430,7 +2432,8 @@ class AppController:
         classify_nodes(graph, [bn.book for bn in graph.books.values()], root=root,
                        overrides=self.ctx.overrides.all(),
                        known_franchises=self.ctx.franchises.active(),
-                       directory_scheme=self.ctx.config.directory_scheme)
+                       directory_scheme=self.ctx.config.directory_scheme,
+                       filename_template=self.ctx.config.filename_template)
         self._classic_graph_cache = (key, graph)
         return graph
 

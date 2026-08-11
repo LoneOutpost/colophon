@@ -665,7 +665,8 @@ def plan_scan_graph(
     classify_graph(graph, root=root)
     _phase("classify_graph")
     classify_nodes(graph, plan.units, root=root, overrides=node_overrides or {},
-                   known_franchises=known_franchises or {}, directory_scheme=directory_scheme)
+                   known_franchises=known_franchises or {}, directory_scheme=directory_scheme,
+                   filename_template=template)
     _phase("classify_nodes")
     if node_overrides:
         propagate_overrides(graph, plan.units, root=root)

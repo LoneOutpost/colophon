@@ -803,3 +803,24 @@ def test_fill_title_corroboration_mutates_no_field(tmp_path):
     _fill_title_corroboration([b])
 
     assert (b.title, list(b.authors), b.publish_year, dict(b.provenance)) == before
+
+
+def test_author_resolves_from_folder_when_tag_is_blank(tmp_path):
+    # /root/P/Wendy Pini/<book folder>/ElfQuest - Chapter01.opus, artist blank -> no tag author.
+    # The author-depth folder "Wendy Pini" must win; not ' ' or 'ElfQuest' or empty.
+    root = tmp_path / "unsorted"
+    d = root / "P" / "Wendy Pini" / "Wendy Pini.-.ElfQuest Bk01.-.Journey to Sorrows End"
+    d.mkdir(parents=True)
+    (d / "ElfQuest - Chapter01.opus").write_bytes(b"")
+    from colophon.adapters.config import Config
+    from colophon.app_context import AppContext
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.node_classify import classify_nodes
+    from colophon.services.graph_build import build_graph
+    ctx = AppContext.create(Config(db_path=tmp_path / "db.sqlite", scan_paths=[root]))
+    g = build_graph(ctx.books, root, template="$Author - $Title")
+    books = [bn.book for bn in g.books.values()]
+    classify_graph(g, root=root)
+    classify_nodes(g, books, root=root, overrides={}, filename_template="$Author - $Title")
+    assert books[0].authors == ["Wendy Pini"]
+    ctx.close()

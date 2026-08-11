@@ -623,6 +623,7 @@ def _build_ctx(graph: Graph, root: Path, overrides: dict[str, NodeOverride],
 def classify_nodes(
     graph: Graph, books: list[BookUnit], *, root: Path, overrides: dict[str, NodeOverride],
     known_franchises: dict[str, str] | None = None, directory_scheme: str = "",
+    filename_template: str = "",
     classify_only: set[str] | None = None,
 ) -> None:
     """Classify every directory node from accumulated axiom evidence, write the result onto the node,
@@ -659,7 +660,8 @@ def classify_nodes(
         node.kind_source = c.source
         node.kind_evidence = [e.reason for e in c.evidence]
         evidenced[node.id] = c.value_evidenced
-    _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth)
+    _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth,
+               filename_template=filename_template)
     _fill_series_ramp(graph, books, root=root)
     _fill_title_corroboration(books)
     _fill_identity_confidence(graph, books, root=root)
@@ -788,19 +790,31 @@ def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path
 
 
 def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], *,
-               root: Path, author_depth: int | None) -> None:
+               root: Path, author_depth: int | None, filename_template: str = "") -> None:
     """Inherit an author into each empty/weak-author book, walking leaf->root. Prefer the nearest
     classified author node (evidence-named over a folder-name fallback, so an intermediate grouping
     can't shadow the real author); failing that, fall back to the folder at the directory scheme's
     author depth (the declared layout) — but never a folder classified franchise/series/container,
     whose name is not an author. Never overwrite a book's own hard (tag/datafile/match/manual)
     author."""
+    from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
+    from colophon.core.filename_parser import compile_template, parse_filename
+    from colophon.core.metadata_quality import is_title_shaped_author
     from colophon.core.models import Provenance
     from colophon.core.normalize import proper_case_if_shouting
+    from colophon.core.people import split_people
+    from colophon.core.reconcile import _demote_numeric_author
+    pattern = compile_template(filename_template) if filename_template else None
     non_author = {"franchise", "series", "container"}
     for book in books:
         prov = book.provenance.get("authors")
-        if book.authors and prov not in WEAK_PROV:
+        if book.authors and prov in _SETTLE_PROV:
+            continue
+        # A real tag/datafile author (the file's own metadata) already outweighs a folder-name guess
+        # in the ballot; keep it so the folder can't overwrite it. Only a junk/title-shaped one falls
+        # through, so the ballot can re-decide it from the folder/filename structure.
+        if (book.authors and prov in _TAG_ID_PROV
+                and not is_title_shaped_author(book.authors[0])):
             continue
         # NOTE (load-bearing, temporary): the two guards below (`root_is_soft_author`, the `title`
         # exclusion via `bool(book.title)`) are what keep a standalone title folder from being named
@@ -840,22 +854,41 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
                 break
             cur = cur.parent
         chosen = next((n for n in seen if evidenced.get(n.id)), seen[0] if seen else None)
-        if chosen is not None:
-            # a user-confirmed (manual) author node propagates as MANUAL; an inferred one as GRAPHING
-            name = chosen.author
-            provenance = (Provenance.MANUAL.value if chosen.kind_source == "manual"
-                          else Provenance.GRAPHING.value)
-        elif layout is not None:
-            name = layout.path.name
-            provenance = Provenance.DIRECTORY.value
-        else:
+        # A user-confirmed (manual) author folder is authoritative — assign verbatim, skip the ballot.
+        if chosen is not None and chosen.kind_source == "manual" and chosen.author:
+            if book.authors != [chosen.author]:
+                book.authors = [chosen.author]
+                book.provenance["authors"] = Provenance.MANUAL.value
             continue
-        # proper-case a shouting inherited/layout name ('STEPHEN COONTS' -> 'Stephen Coonts'); a
-        # user's manual value is kept verbatim (authoritative spelling).
-        if provenance != Provenance.MANUAL.value:
-            name = proper_case_if_shouting(name)
-        # only (re)stamp when we actually introduce the value, so a book's own more-specific weak
-        # provenance (directory/filename) survives when it already agrees.
-        if book.authors != [name]:
-            book.authors = [name]
-            book.provenance["authors"] = provenance
+        # Structural author signals for the ballot (proper-cased so a shouting folder name is tidy).
+        classified = (proper_case_if_shouting(chosen.author)
+                      if (chosen is not None and chosen.author) else None)
+        adf = proper_case_if_shouting(layout.path.name) if layout is not None else None
+        # Filename $Author (positional pattern parse).
+        filename_author = None
+        if pattern is not None and book.source_files:
+            parsed = parse_filename(pattern, book.source_files[0].path.name)
+            fields = _demote_numeric_author(parsed) if parsed else {}
+            filename_author = fields.get("author")
+        # Datafile authors are NOT re-read from disk here: the hard IDENTIFY stage already vetted the
+        # sidecar (rejecting a container/uploader datafile for a split leaf via is_container_datafile)
+        # and, if legitimate, committed it onto book.authors with `datafile` provenance — which the
+        # tag/datafile skip above preserves. Re-reading the raw sidecar would resurrect a handle the
+        # hard stage deliberately dropped, so the ballot's datafile vote stays empty.
+        prior_authors, prior_prov = list(book.authors), book.provenance.get("authors")
+        r = resolve_author(book, author_depth_folder=adf, classified_author_name=classified,
+                           datafile_authors=[], filename_author=filename_author,
+                           sibling_consensus={})
+        # Provenance of a "folder"-sourced win. resolve_author collapses the classified-author-node
+        # and the raw author-depth folder into one "folder" source, so restore the intended tier here:
+        #   - value unchanged from the book's own weak (directory/filename) decompose -> keep it, so a
+        #     book already correctly attributed by its scheme does not churn to GRAPHING;
+        #   - inherited from a classified AUTHOR node (an evidence-named consensus/match OR a
+        #     structural author grouping) -> GRAPHING, the graph named this author;
+        #   - otherwise the raw author-depth folder-name fallback stays DIRECTORY.
+        if r.source == "folder" and book.provenance.get("authors") == Provenance.DIRECTORY.value:
+            if book.authors == prior_authors and prior_prov in WEAK_PROV:
+                book.provenance["authors"] = prior_prov
+            elif chosen is not None and classified is not None \
+                    and book.authors == split_people(classified):
+                book.provenance["authors"] = Provenance.GRAPHING.value
