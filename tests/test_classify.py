@@ -715,3 +715,21 @@ def test_multifile_structural_artist_not_authored():
              for n in range(1, 4)]
     works, _ = group_works(feats)
     assert len(works) == 1 and works[0].author is None
+
+
+def _disc_split(n: int) -> list[FileFeatures]:
+    # one book ripped to n short disc-track files: uniform album/author, numbered D01.NN, ~3.5 min each.
+    return [
+        FileFeatures(
+            path=Path(f"/lib/Diana Gabaldon - (Outlander 3) Voyager - D01.{i:02d}-23.opus"),
+            ext="opus", duration_seconds=210.0,
+            tags=EmbeddedTags(album="Voyager", artist="Diana Gabaldon", title=f"D01.{i:02d}-23"),
+        )
+        for i in range(1, n + 1)
+    ]
+
+
+def test_group_works_collapses_a_disc_split_book_to_one_work():
+    works, _ = group_works(_disc_split(12))
+    assert len(works) == 1
+    assert works[0].label.lower() == "voyager"
