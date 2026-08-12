@@ -107,3 +107,52 @@ def test_ballots_recorded_including_the_prior():
     d = resolve_grouping(_voyager(3))
     assert all(isinstance(b, GroupBallot) for b in d.ballots)
     assert any(b.outcome == "many" and "prior" in b.reason for b in d.ballots)
+
+
+_CHAPTER_NAMES = ["Introduction", "Julie", "Holden", "Miller", "Naomi", "Amos", "Prologue",
+                  "Epilogue", "Bran", "Arya", "Tyrion", "Cersei", "Jon", "Sansa", "Davos",
+                  "Theon", "Jaime", "Brienne", "Sam", "Dany"]
+
+
+def _album_chapters(n, album="Below Zero", dur=300.0):
+    # distinct chapter NAMES (enumeration can't fire) under one uniform album -> the real miss shape.
+    return [_feat(f"/lib/C J Box - Below Zero - {i:03d} {_CHAPTER_NAMES[i % len(_CHAPTER_NAMES)]}.opus",
+                  dur=dur, album=album, artist="C J Box",
+                  title=f"{i:03d} {_CHAPTER_NAMES[i % len(_CHAPTER_NAMES)]}") for i in range(1, n + 1)]
+
+
+def test_ax_uniform_album_chapters_votes_one_for_many_short_files():
+    from colophon.core.group_resolve import ax_uniform_album_chapters
+    assert [b.outcome for b in ax_uniform_album_chapters(_album_chapters(12, dur=300.0))] == ["one"]
+
+
+def test_ax_uniform_album_chapters_silent_for_few_files():
+    # a few-file box set / shelf must NOT collapse via this axiom (it splits via the clusterer).
+    from colophon.core.group_resolve import ax_uniform_album_chapters
+    assert ax_uniform_album_chapters(_album_chapters(3, dur=300.0)) == []
+
+
+def test_ax_uniform_album_chapters_silent_for_long_files():
+    from colophon.core.group_resolve import ax_uniform_album_chapters
+    assert ax_uniform_album_chapters(_album_chapters(12, dur=36000.0)) == []
+
+
+def test_ax_uniform_album_chapters_silent_when_albums_differ():
+    from colophon.core.group_resolve import ax_uniform_album_chapters
+    g = [_feat(f"/lib/{i}.opus", dur=300.0, album=chr(65 + i)) for i in range(12)]
+    assert ax_uniform_album_chapters(g) == []
+
+
+def test_ax_uniform_album_chapters_silent_without_durations():
+    from colophon.core.group_resolve import ax_uniform_album_chapters
+    assert ax_uniform_album_chapters(_album_chapters(12, dur=0.0)) == []
+
+
+def test_resolve_chapter_named_uniform_album_book_is_one():
+    # distinct chapter names (enumeration can't fire) but uniform album + many short files -> one book.
+    assert resolve_grouping(_album_chapters(20, dur=300.0)).outcome == "one"
+
+
+def test_resolve_uniform_album_long_files_stays_many():
+    # a whole-book-length uniform-album series folder stays split (series axiom wins).
+    assert resolve_grouping(_album_chapters(12, dur=36000.0)).outcome == "many"

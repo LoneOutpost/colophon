@@ -84,8 +84,29 @@ def ax_series_of_books(group: list[FileFeatures]) -> list[GroupBallot]:
     return []
 
 
+def ax_uniform_album_chapters(group: list[FileFeatures]) -> list[GroupBallot]:
+    """MANY files sharing one non-structural album AND chapter-short per-file durations -> the album
+    is the book title and the files are its chapters -> one book. The complement of ax_series_of_books
+    (whole-book-long files -> many); catches chapter-named books enumeration can't (distinct chapter
+    text, but one uniform album).
+
+    Gated on file count: a genuine shelf-in-a-folder has FEW files (one per distinct book, e.g. a
+    box set of 2-3 novels), while a chaptered book has many. Small index-only one-books are already
+    caught by ax_enumeration, so this axiom stays out of the few-file shelf's way."""
+    from colophon.core.classify import _uniform_tag
+    if len(group) < W.W_G_ALBUM_MIN_FILES:
+        return []
+    album = _uniform_tag(f.tags.album for f in group)
+    durs = [f.duration_seconds for f in group if f.duration_seconds]
+    if album and not is_structural_marker(album) and durs and median(durs) < W.W_G_SERIES_MIN_SECONDS:
+        return [GroupBallot("one", W.W_G_ALBUM_CHAPTERS,
+                            f"uniform album '{album}' over {len(group)} chapter-short files")]
+    return []
+
+
 _ONE_AXIOMS = (
     ax_enumeration, ax_index_titles, ax_cohort_constancy, ax_uniform_work_key, ax_uniform_author,
+    ax_uniform_album_chapters,
 )
 
 
