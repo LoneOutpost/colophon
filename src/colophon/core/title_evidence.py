@@ -38,11 +38,9 @@ def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
     series = [s.name for s in book.series]
     akeys = {normalize_key(a) for a in authors}
 
-    dw = book.detected_works[0] if book.detected_works else None
-    if dw and dw.label:
-        src, w = ("tag", W.W_T_TAG) if dw.label_prov == Provenance.TAG.value else ("filename", W.W_T_FILENAME)
-        ev.append(FieldEvidence(dw.label, _penalized(dw.label, w, akeys), src, f"{src} title '{dw.label}'"))
-
+    # NB: the detected-work label is deliberately NOT a candidate — the clusterer's parse is often a
+    # truncated/dirty version of the filename ('weird' from 'weird_name_no_delimiters'). The tokenized
+    # filename candidate below is the clean source.
     prov = book.provenance.get("title", "")
     if book.title and prov in _RECOVER:
         w, src = _RECOVER[prov]
@@ -68,9 +66,17 @@ def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
 
 def resolve_title(book: BookUnit) -> ResolvedField:
     """Resolve the title after the author is known and stamp the winner (normalized) onto `book`. A
-    manual/match title settles; an empty ballot leaves the title as-is."""
+    manual/match title settles; an empty ballot leaves the title as-is.
+
+    Conservative by design: only intervene when the current title is a smuggled author or junk. A real
+    title is kept verbatim, so a good already-derived title is never degraded by a noisier folder or
+    filename token — the ballot targets the smuggling, not every book."""
     if book.title and book.provenance.get("title") in _SETTLE_PROV:
         return ResolvedField(book.title, 1.0, [])
+    if book.title:
+        akeys = {normalize_key(a) for a in book.authors}
+        if normalize_key(book.title) not in akeys and not is_junk_title(book.title):
+            return ResolvedField(book.title, 1.0, [])
     r = resolve_field(collect_title_evidence(book))
     if r.value is None:
         return r

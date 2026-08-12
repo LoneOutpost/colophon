@@ -617,6 +617,11 @@ def _finish_identify_weak(unit: BookUnit, evidence: Evidence, *, role: str | Non
     here (see the caller's `evidence is not None` guard)."""
     try:
         identify_weak(unit, evidence, role=role)
+        # Author is resolved by node_classify before this deferred weak pass, so resolve the title by
+        # ballot now (final identity step, persists): drop the author/series tokens and penalize any
+        # candidate equal to the author, recovering a title that smuggled the author in.
+        from colophon.core.title_evidence import resolve_title
+        resolve_title(unit)
         mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
     except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
         logger.warning(f"leaf IDENTIFY(weak) failed for {unit.source_folder} [{unit.title!r}]: {e}")
