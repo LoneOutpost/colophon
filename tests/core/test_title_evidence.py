@@ -49,6 +49,17 @@ def test_manual_title_settles():
     assert b.title == "Manual"
 
 
+def test_separator_spanning_committed_title_is_outvoted_by_the_leaf_token():
+    # The 245-title class: a committed directory title that is the whole "Author.-.Title" folder
+    # string scores title_junk 1.0, so its dominant committed weight zeroes and the clean leaf token
+    # from the same folder wins.
+    b = _book(folder="Alastair Reynolds.-.House of Suns",
+              stems=["Alastair Reynolds - House of Suns 01"], authors=["Alastair Reynolds"],
+              title="Alastair Reynolds.-.House of Suns", title_prov=Provenance.DIRECTORY.value)
+    resolve_title(b)
+    assert b.title == "House of Suns"
+
+
 def test_good_committed_directory_title_outweighs_noisy_folder_token():
     # no gate: the committed (normalized) directory title out-weighs a noisier folder token by weight.
     b = _book(folder="The Gunslinger (DT1 - original edition)",

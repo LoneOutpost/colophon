@@ -13,7 +13,7 @@ from colophon.core import evidence_weights as W
 from colophon.core.cohort_constancy import cohort_constant_tokens
 from colophon.core.field_resolve import FieldEvidence, ResolvedField, resolve_field
 from colophon.core.identity_tokens import title_candidates
-from colophon.core.metadata_quality import is_junk_title
+from colophon.core.metadata_quality import title_junk
 from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
 from colophon.core.normalize import normalize_key, normalize_text
 
@@ -33,10 +33,13 @@ def _norm(value: str) -> str:
 
 
 def _penalized(value: str, weight: float, author_keys: set[str]) -> float:
-    """Junk, blank, or a value equal to a resolved author -> 0 (kept for the readout, out of tally)."""
-    if not value or not value.strip() or is_junk_title(value) or normalize_key(value) in author_keys:
+    """Two forces, kept distinct. Winner-exclusion — a value the resolved author already claimed —
+    HARD-zeros (relational). Otherwise the intrinsic title-junk magnitude scales the weight down
+    (scalar, not a veto): a `.-.`-spanning folder string, a bare `(5)`, an embedded `N of M`, a
+    leading index all shed most of their weight so a clean token out-votes them."""
+    if not value or not value.strip() or normalize_key(value) in author_keys:
         return 0.0
-    return weight
+    return weight * (1.0 - title_junk(value))
 
 
 def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
