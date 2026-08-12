@@ -61,3 +61,6 @@ W_T_DATAFILE = 3.0          # authored sidecar title
 W_T_FOLDER = 2.5            # folder title token
 W_T_FILENAME = 1.5          # filename title token
 W_T_CONSTANCY_BONUS = 1.0   # corroboration: candidate constant across the cohort (< every source)
+W_T_COMMITTED = 10.0        # the committed (already-decided) title votes at a dominant weight: it wins
+                            # unless the junk/author penalty zeros it (the canonical form of "only
+                            # overturn a title on clear evidence it is wrong")
