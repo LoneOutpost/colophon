@@ -52,3 +52,5 @@ W_G_UNIFORM_KEY = 1.5            # shared album/asin/isbn -> "one" (light)
 W_G_UNIFORM_AUTHOR = 1.0         # uniform author -> "one" (light)
 W_G_SERIES = 12.0                # whole-book-sized files -> "many" (heavy safety)
 W_G_SERIES_MIN_SECONDS = 10800   # 3.0h median/file: at/above this the files look like individual books
+W_G_ALBUM_CHAPTERS = 8.0         # uniform album + chapter-short files -> "one" (heavy; clears the prior alone)
+W_G_ALBUM_MIN_FILES = 8          # ax_uniform_album_chapters gate: >= this many files (few-file shelf stays split)
