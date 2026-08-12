@@ -47,3 +47,12 @@ def test_manual_title_settles():
     b = _book(folder="Whatever", stems=["x"], authors=["A"], title="Manual", title_prov=Provenance.MANUAL.value)
     resolve_title(b)
     assert b.title == "Manual"
+
+
+def test_good_committed_directory_title_outweighs_noisy_folder_token():
+    # no gate: the committed (normalized) directory title out-weighs a noisier folder token by weight.
+    b = _book(folder="The Gunslinger (DT1 - original edition)",
+              stems=["The Gunslinger 01"], authors=["Stephen King"],
+              title="The Gunslinger", title_prov=Provenance.DIRECTORY.value)
+    resolve_title(b)
+    assert b.title == "The Gunslinger"

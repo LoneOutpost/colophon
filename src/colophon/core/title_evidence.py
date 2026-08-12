@@ -1,9 +1,11 @@
-"""Title field resolution from a weighted-evidence ballot, run AFTER the author ballot. Candidates:
-the book-level detected-work label, the committed tag/datafile title, and the title TOKENS isolated
+"""Title field resolution from a weighted-evidence ballot, run AFTER the author ballot. A pure scorer:
+every source casts a weighted `FieldEvidence` and the heaviest value wins — no gate around the
+election. Candidates: the detected-work label, the committed title (recovered at a dominant weight so a
+decided title wins unless the penalty zeros it), and the title TOKENS isolated
 from the folder name and filename by `title_candidates`. A candidate that is blank, junk-shaped, or
-EQUALS a resolved author is penalized to zero (an author is never a title) — this is what un-smuggles
-the ~476 author-as-title books. A cohort-constant candidate earns a bonus; a manual/match title
-settles. See tasks/2026-08-12-title-after-author-design.md."""
+EQUALS a resolved author is penalized to zero (an author is never a title) — this un-smuggles the
+author-as-title books while a good committed title simply out-weighs the raw tokens. A cohort-constant
+candidate earns a bonus; a manual/match title settles. See tasks/2026-08-12-title-after-author-design.md."""
 
 from __future__ import annotations
 
@@ -16,7 +18,12 @@ from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
 from colophon.core.normalize import normalize_key, normalize_text
 
 _SETTLE_PROV = AUTHORITATIVE_PROV
-_RECOVER = {Provenance.TAG.value: (W.W_T_TAG, "tag"), Provenance.DATAFILE.value: (W.W_T_DATAFILE, "datafile")}
+_RECOVER = {
+    Provenance.TAG.value: (W.W_T_TAG, "tag"),
+    Provenance.DATAFILE.value: (W.W_T_DATAFILE, "datafile"),
+    Provenance.DIRECTORY.value: (W.W_T_FOLDER, "folder"),
+    Provenance.FILENAME.value: (W.W_T_FILENAME, "filename"),
+}
 _PROV_FOR = {"tag": Provenance.TAG.value, "datafile": Provenance.DATAFILE.value,
              "folder": Provenance.DIRECTORY.value, "filename": Provenance.FILENAME.value}
 
@@ -38,14 +45,20 @@ def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
     series = [s.name for s in book.series]
     akeys = {normalize_key(a) for a in authors}
 
-    # NB: the detected-work label is deliberately NOT a candidate — the clusterer's parse is often a
-    # truncated/dirty version of the filename ('weird' from 'weird_name_no_delimiters'). The tokenized
-    # filename candidate below is the clean source.
+    dw = book.detected_works[0] if book.detected_works else None
+    if dw and dw.label:
+        src, w = ("tag", W.W_T_TAG) if dw.label_prov == Provenance.TAG.value else ("filename", W.W_T_FILENAME)
+        ev.append(FieldEvidence(dw.label, _penalized(dw.label, w, akeys), src, f"{src} label '{dw.label}'"))
+
+    # The committed title (already decided by reconcile) votes at a DOMINANT weight: it wins the
+    # election unless the junk/author penalty zeros it, at which point a token wins instead. This is
+    # the canonical, in-election form of "only overturn a title on clear evidence it is wrong" — a
+    # scorer, not a gate around the ballot.
     prov = book.provenance.get("title", "")
     if book.title and prov in _RECOVER:
-        w, src = _RECOVER[prov]
-        ev.append(FieldEvidence(book.title, _penalized(book.title, w, akeys), src,
-                                f"{src} title '{book.title}'"))
+        _, src = _RECOVER[prov]
+        ev.append(FieldEvidence(book.title, _penalized(book.title, W.W_T_COMMITTED, akeys), src,
+                                f"committed {src} title '{book.title}'"))
 
     for tok in title_candidates(book.source_folder.name, authors=authors, series=series):
         ev.append(FieldEvidence(tok, _penalized(tok, W.W_T_FOLDER, akeys), "folder", f"folder title '{tok}'"))
@@ -65,20 +78,13 @@ def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
 
 
 def resolve_title(book: BookUnit) -> ResolvedField:
-    """Resolve the title after the author is known and stamp the winner (normalized) onto `book`. A
-    manual/match title settles; an empty ballot leaves the title as-is.
-
-    Conservative by design: only intervene when the current title is a smuggled author or junk. A real
-    title is kept verbatim, so a good already-derived title is never degraded by a noisier folder or
-    filename token — the ballot targets the smuggling, not every book."""
+    """Resolve the title after the author is known and stamp the winner onto `book`. A manual/match
+    title settles; an empty ballot, or one the committed title re-wins, leaves the title verbatim (it
+    is already normalized). Only an overturned title is re-normalized."""
     if book.title and book.provenance.get("title") in _SETTLE_PROV:
         return ResolvedField(book.title, 1.0, [])
-    if book.title:
-        akeys = {normalize_key(a) for a in book.authors}
-        if normalize_key(book.title) not in akeys and not is_junk_title(book.title):
-            return ResolvedField(book.title, 1.0, [])
     r = resolve_field(collect_title_evidence(book))
-    if r.value is None:
+    if r.value is None or r.value == book.title:
         return r
     book.title = normalize_text(r.value)
     book.provenance["title"] = _PROV_FOR.get(r.source, book.provenance.get("title") or Provenance.FILENAME.value)
