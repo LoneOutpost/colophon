@@ -444,6 +444,8 @@ def test_fill_down_proper_cases_shouting_inherited_author():
     _fill_down(g, [b], {author_node.id: False}, root=root, author_depth=None)
     assert b.authors == ["Stephen Coonts"]
 
+
+
 def test_known_franchise_suppresses_structural_author_vote():
     # a declared-franchise folder that spans many series must NOT be read as an author
     from colophon.core.graph_classify import GROUPING

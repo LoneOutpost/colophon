@@ -54,3 +54,10 @@ W_G_SERIES = 12.0                # whole-book-sized files -> "many" (heavy safet
 W_G_SERIES_MIN_SECONDS = 10800   # 3.0h median/file: at/above this the files look like individual books
 W_G_ALBUM_CHAPTERS = 8.0         # uniform album + chapter-short files -> "one" (heavy; clears the prior alone)
 W_G_ALBUM_MIN_FILES = 8          # ax_uniform_album_chapters gate: >= this many files (few-file shelf stays split)
+
+# --- title field ballot ---
+W_T_TAG = 3.0               # book-level tag title / committed tag title
+W_T_DATAFILE = 3.0          # authored sidecar title
+W_T_FOLDER = 2.5            # folder title token
+W_T_FILENAME = 1.5          # filename title token
+W_T_CONSTANCY_BONUS = 1.0   # corroboration: candidate constant across the cohort (< every source)
