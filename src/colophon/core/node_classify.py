@@ -736,17 +736,22 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     title factor is driven by the corroboration verdict: a title that agrees with (or abstains
     against) the folder/filenames is neutral, one that contradicts them halves the score, a missing
     title discounts. Graph/folder-sourced fields inherit the confidence of the classifying node, so a
-    book under a 0.9 author folder reads ~0.9 even with zero source matches."""
+    book under a 0.9 author folder reads ~0.9 even with zero source matches — UNLESS the surviving
+    author value is itself junk-shaped, which discounts it toward the review threshold (the score is a
+    triage hint: below a threshold means get human eyes on it before tagging)."""
     if not (book.authors or book.series):
         return 0.0
-    from colophon.core.metadata_quality import is_title_shaped_author
+    from colophon.core.metadata_quality import author_junk
     from colophon.core.title_corroborate import book_title_verdict
     a_node = _nearest_author(graph, book.source_folder, root)
     a = (_field_confidence(book.provenance.get("authors"), a_node.kind_confidence if a_node else 0.0)
          if book.authors else 0.0)
-    # B1: an author value that is really a title cannot prop up the score.
-    if len(book.authors) == 1 and is_title_shaped_author(book.authors[0], book.title):
-        a = min(a, 0.3)
+    # Honest triage: a junk-shaped author value cannot prop up the score however trusted its source (a
+    # tag reads 0.9 flat), so a SURVIVING '1 of 8 X' / 'Author.-.Title' / '(5)' author drops the record
+    # below the review threshold for human eyes. Subsumes the old title-shaped-author guard — a
+    # title-shaped author is author_junk == 1.0.
+    if book.authors:
+        a *= 1.0 - max(author_junk(x) for x in book.authors)
     s_node = _nearest_series(graph, book.source_folder, root)
     s = (_field_confidence(book.provenance.get("series"), s_node.kind_confidence if s_node else 0.0)
          if book.series else 0.0)
