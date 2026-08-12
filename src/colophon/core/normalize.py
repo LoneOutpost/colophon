@@ -222,6 +222,37 @@ def _split_pascal(token: str) -> str:
     return " ".join(parts)
 
 
+# Suffix tokens that must NOT be split into initials ("JR" -> not "J. R."). Roman numerals also get
+# their all-caps restored after proper-casing (normalize_name would title-case "III" -> "Iii").
+_ROMAN_NUMERALS = frozenset({"II", "III", "IV", "V", "VI"})
+_ROMAN_SUFFIX = _ROMAN_NUMERALS | frozenset({"JR", "SR"})
+
+
+def _as_initials(token: str) -> str | None:
+    """A token of 1-4 letters that is all-uppercase (ignoring periods) and not a roman/suffix token
+    -> its canonical 'X. Y.' spaced form; else None. 'RR'/'R.R.' -> 'R. R.', 'R' -> 'R.'."""
+    letters = token.replace(".", "")
+    if (1 <= len(letters) <= 4 and letters.isalpha() and letters.isupper()
+            and token.upper() not in _ROMAN_SUFFIX):
+        return " ".join(f"{c}." for c in letters)
+    return None
+
+
+def normalize_author(name: str) -> str:
+    """Canonical author display form: underscores -> spaces, glued PascalCase split, initial clusters
+    canonicalized to 'J. D.' form, then proper-cased. Unifies punctuation/spacing variants of one
+    author so they stop fragmenting. Spelling differences (DeMille vs Demille) are left for MATCH."""
+    if not name or not name.strip():
+        return name
+    out: list[str] = []
+    for raw in name.replace("_", " ").split():
+        for tok in _split_pascal(raw).split():
+            out.append(_as_initials(tok) or tok)
+    result = normalize_name(" ".join(out))
+    # restore roman numerals proper_case mangled ("Iii" -> "III")
+    return " ".join(t.upper() if t.upper() in _ROMAN_NUMERALS else t for t in result.split())
+
+
 def normalize_key(name: str) -> str:
     """Canonical comparison key for entity names (author/series/narrator/franchise): tolerant of
     'Last, First' order, case, spacing, punctuation, underscores, Latin diacritics, and guarded
