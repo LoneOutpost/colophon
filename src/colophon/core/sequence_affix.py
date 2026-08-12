@@ -97,3 +97,21 @@ def strip_series_book_suffix(title: str) -> str:
         return title
     stripped = _SERIES_BOOK_SUFFIX.sub("", title).strip()
     return stripped if stripped != title and _HAS_LETTER.search(stripped) else title
+
+
+# A ripped-encoding artifact: a token carrying an '@' bitrate/samplerate marker ("16@64.44m",
+# "@40k-44m"), optionally led by an abridged/unabridged marker or a part number ("UA 16@64.44m",
+# "Unabr @40k-44m", "U @64"). Real-data check: '@' appears in 55 titles, 0 authors, and every
+# occurrence is an encoding artifact — none legitimate — so it is safe to strip outright.
+_ENCODING_ARTIFACT = re.compile(
+    r"\s*[(\[]?\s*(?:unabridged|unabr|una|ua|u)?\s*\d*\s*@\s*[\w.\-]+\s*[)\]]?", re.IGNORECASE)
+
+
+def strip_encoding_artifact(title: str) -> str:
+    """Strip a ripped-encoding '@' artifact ('Fevre Dream (Unabr @40k-44m)' -> 'Fevre Dream',
+    'Sliding Scales UA 16@64.44m' -> 'Sliding Scales'). Returns the input unchanged when there is no
+    '@' or stripping would leave no letters."""
+    if not title or "@" not in title:
+        return title
+    stripped = " ".join(_ENCODING_ARTIFACT.sub(" ", title).split()).strip(" -–—:.")  # noqa: RUF001
+    return stripped if _HAS_LETTER.search(stripped) else title

@@ -119,3 +119,23 @@ def test_title_shaped_author_demotes_confidence(tmp_path):
                  author="The End of the Matter (Flinx 03)", a_prov=Provenance.TAG.value)
     # author looks like a title -> author axis demoted -> well below threshold
     assert book_identity_confidence(book, Graph(), tmp_path) < 60
+
+
+def test_enumeration_fragment_tag_author_drops_below_review_threshold(tmp_path):
+    from colophon.core.models import Provenance
+    # A tag author reads 0.9 flat regardless of value; an embedded 'N of M' fragment is junk, so a
+    # SURVIVING junk author (no clean alternative) must triage for human eyes rather than read 90.
+    clean = _book(tmp_path / "loose" / "Fiery Cross", title="Fiery Cross",
+                  author="Diana Gabaldon", a_prov=Provenance.TAG.value)
+    junk = _book(tmp_path / "loose" / "Fiery Cross", title="Fiery Cross",
+                 author="1 of 8 Diana Gabaldon", a_prov=Provenance.TAG.value)
+    assert book_identity_confidence(clean, Graph(), tmp_path) == 90
+    assert book_identity_confidence(junk, Graph(), tmp_path) < 60
+
+
+def test_separator_spanning_tag_author_zeroes_the_axis(tmp_path):
+    from colophon.core.models import Provenance
+    book = _book(tmp_path / "loose" / "The Prophet", title="The Prophet",
+                 author="Kahlil Gibran.-.The Prophet", a_prov=Provenance.TAG.value)
+    # a whole 'Author.-.Title' string as author is author_junk 1.0 -> axis zeroed -> triage
+    assert book_identity_confidence(book, Graph(), tmp_path) == 0

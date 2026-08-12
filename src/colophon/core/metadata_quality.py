@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from colophon.core.normalize import collides_with_title
+from colophon.core.number_pair import extract_enumeration
 from colophon.core.sequence_affix import parse_sequence_affix
 
 # Generic placeholder tag values a rip leaves in: "Track 3", "Disc 1", "CD 2", "Chapter 5",
@@ -74,3 +75,54 @@ def is_title_shaped_author(author: str | None, title: str | None = None) -> bool
     if parse_sequence_affix(author) is not None:
         return True
     return bool(title and collides_with_title(author, title))
+
+
+# --- Scalar, field-relative junk magnitude -----------------------------------------------------
+# A candidate's ballot weight is scaled by (1 - junk): a scalar, not a veto. Junk here means the token
+# is structurally WRONG for the field on its own account (intrinsic); it is deliberately separate from
+# losing an election to a stronger candidate (relational — the field engine's winner-exclusion). A
+# value can be clean for one field and junk for another, so the scorers are per-field.
+_SEGMENT_SEP = re.compile(r"\.\s*-\s*\.")                    # a ".-." folder separator smuggled in whole
+_BARE_PAREN_NUM = re.compile(r"^\s*[(\[]\s*\d{1,3}\s*[)\]]\s*$")            # "(5)", "[12]"
+_LEADING_INDEX = re.compile(r"^\s*\d{1,3}(?!\d)\s*[-_.)\]]")               # "07-", "01_", "18 -"; not "2001 -"
+
+
+def _has_enum_pair(value: str) -> bool:
+    """True when an explicit "N of M" / "N/M" enumeration pair is embedded — the regex-utility signal,
+    never a lone number. Underscores are folded first so "…_1_of_8" reads as "… 1 of 8"."""
+    _, pairs = extract_enumeration(value.replace("_", " "))
+    return bool(pairs)
+
+
+def author_junk(value: str | None) -> float:
+    """Scalar [0,1] junk magnitude for an AUTHOR candidate. HIGH for a structural marker, a value that
+    spans a ".-." segment separator (a whole `Author.-.Title` string), a title-shaped author, or a
+    value carrying an embedded enumeration pair ("1 of 8 Diana Gabaldon"). A lone number (a year,
+    "Top 100", "E. E. (Doc) Smith") is NOT junk — the pair is the signal, not the digit."""
+    if not value or not value.strip():
+        return 1.0
+    v = value.strip()
+    if (is_structural_marker(v) or is_title_shaped_author(v)
+            or _SEGMENT_SEP.search(v) or _BARE_PAREN_NUM.match(v)):
+        return 1.0
+    if _has_enum_pair(v):
+        return 0.9
+    return 0.0
+
+
+def title_junk(value: str | None) -> float:
+    """Scalar [0,1] junk magnitude for a TITLE candidate. HIGH for a structural marker, a bare
+    parenthesized number ("(5)"), a ".-."-spanning value, or an embedded enumeration pair; MODERATE
+    for a leading small-index prefix ("07-Foundation", "18 - Childhood's End"). A 4-digit-led or prose
+    title ("2001 - A Space Odyssey") scores ~0 — the `_INT` guard keeps the year from reading as an
+    index."""
+    if not value or not value.strip():
+        return 1.0
+    v = value.strip()
+    if is_structural_marker(v) or _BARE_PAREN_NUM.match(v) or _SEGMENT_SEP.search(v):
+        return 1.0
+    if _has_enum_pair(v):
+        return 0.8
+    if _LEADING_INDEX.match(v):
+        return 0.7
+    return 0.0

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from colophon.core import evidence_weights as W
 from colophon.core.field_resolve import FieldEvidence, ResolvedField, resolve_field
-from colophon.core.metadata_quality import is_structural_marker, is_title_shaped_author
+from colophon.core.metadata_quality import author_junk
 from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
 from colophon.core.normalize import normalize_author
 from colophon.core.people import split_people
@@ -20,10 +20,11 @@ _SETTLE_PROV = AUTHORITATIVE_PROV
 
 
 def _penalized(value: str, weight: float) -> float:
-    """Junk-shaped author -> ~0 weight (kept in the ballot for the readout, out of the tally). A
-    structural marker ("Chapter", "Track 3") is a per-file position, never an author."""
-    return 0.0 if (not value or not value.strip()
-                   or is_title_shaped_author(value) or is_structural_marker(value)) else weight
+    """Junk-shaped author -> its weight scaled down by the intrinsic author-junk magnitude (scalar, not
+    a veto). A structural marker ("Chapter", "Track 3"), a title-shaped author, a `.-.`-spanning
+    `Author.-.Title` string, or an embedded `N of M` fragment sheds most/all of its weight; a clean
+    name keeps its full weight."""
+    return weight * (1.0 - author_junk(value))
 
 
 def collect_author_evidence(
