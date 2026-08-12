@@ -41,3 +41,14 @@ W_A_FILENAME = 1.5         # filename $Author (positional pattern parse)
 W_A_CONSENSUS_BASE = 0.5   # sibling tag/match consensus: BASE + STEP*n, capped
 W_A_CONSENSUS_STEP = 0.5
 W_A_CONSENSUS_MAX = 3.0
+
+# --- grouping (Book-bucket one-vs-many election) — provisional, tuned against the real library ---
+W_G_PRIOR = 6.0                  # baseline "many" prior; one-evidence must exceed it to merge
+W_G_ENUMERATION = 10.0           # files differ only by number -> "one" (heavy, reliable)
+W_G_INDEX_TITLES = 10.0          # all per-file titles structural -> "one" (heavy, reliable)
+W_G_CONSTANCY_PER_TOKEN = 1.0    # per constant filename token -> "one" (light corroboration)
+W_G_CONSTANCY_CAP = 3
+W_G_UNIFORM_KEY = 1.5            # shared album/asin/isbn -> "one" (light)
+W_G_UNIFORM_AUTHOR = 1.0         # uniform author -> "one" (light)
+W_G_SERIES = 12.0                # whole-book-sized files -> "many" (heavy safety)
+W_G_SERIES_MIN_SECONDS = 10800   # 3.0h median/file: at/above this the files look like individual books

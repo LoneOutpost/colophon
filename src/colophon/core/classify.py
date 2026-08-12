@@ -18,6 +18,7 @@ from colophon.core.dirinfer import infer_from_path
 from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
+from colophon.core.group_resolve import resolve_grouping
 from colophon.core.metadata_quality import (
     is_junk_title,
     is_placeholder_title,
@@ -159,17 +160,6 @@ def _uniform_tag(values) -> str | None:
     return None
 
 
-def _all_index_titles(group: list[FileFeatures]) -> bool:
-    """True when every file carries a Title tag that is an index-shaped placeholder
-    ("Part 01", "Chapter 3", "Track 7"), a bare number, or a track-of-total ("01 of 15") -- chapter/
-    part markers, not distinct book titles. Signals a chaptered single book even when the filenames
-    read as distinct works, so the album group must not be fanned out and no per-file title promoted."""
-    titles = [f.tags.title for f in group]
-    if not all(t for t in titles):
-        return False
-    return all(is_structural_marker(t) for t in titles)
-
-
 _ARTICLE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
 
 
@@ -287,6 +277,19 @@ def _to_work(group: list[FileFeatures]) -> DetectedWork:
     )
 
 
+def _resolve_group(group: list[FileFeatures]) -> tuple[list[DetectedWork], list[ConfidenceSignal]]:
+    """Force one whole book when the grouping election says "one"; otherwise fall through to today's
+    filename-cluster behavior unchanged."""
+    if len(group) == 1:
+        return [_to_work(group)], []
+    if resolve_grouping(group).outcome == "one":
+        return [_to_work(group)], []
+    sub, sub_signals = _cluster_works(group)
+    if len(sub) > 1:
+        return _overlay_tags(sub, group), sub_signals
+    return [_to_work(group)], []
+
+
 def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[ConfidenceSignal]]:
     """Group files into distinct works. `asin`/`isbn` are per-book identifiers and always group
     as one work. `album` is ambiguous — it may be a book title (files are that book's parts) or a
@@ -306,25 +309,18 @@ def group_works(features: list[FileFeatures]) -> tuple[list[DetectedWork], list[
     works: list[DetectedWork] = []
     for key, group in keyed.items():
         if key.startswith("album:") and len(group) > 1:
-            if _all_index_titles(group):
-                # Per-file titles are all index placeholders ("Part NN"/"Chapter N"): chaptering,
-                # not distinct books. Keep as one book titled from the shared album; do not let the
-                # filename clusterer fan it out, and never promote a per-file title as the label.
-                works.append(_to_work(group))
-                continue
-            sub, sub_signals = _cluster_works(group)
-            if len(sub) > 1:  # the album was a series name over several distinct-title books
-                works.extend(_overlay_tags(sub, group))
-                signals.extend(sub_signals)
-                continue
+            gw, gsig = _resolve_group(group)
+            works.extend(gw)
+            signals.extend(gsig)
+            continue
         works.append(_to_work(group))
     if keyed:
         signals.append(_signal("tag_work_keys", 2 * len(keyed), f"{len(keyed)} work key(s) from tags"))
 
     if len(unkeyed) > 1:
-        sub, sub_signals = _cluster_works(unkeyed)
-        works.extend(_overlay_tags(sub, unkeyed))
-        signals.extend(sub_signals)
+        gw, gsig = _resolve_group(unkeyed)
+        works.extend(gw)
+        signals.extend(gsig)
     elif unkeyed:
         works.append(_to_work(unkeyed))
 

@@ -54,3 +54,17 @@ def cohort_constant_tokens(names: list[str]) -> set[str]:
             display.setdefault(k, v)
     common = set.intersection(*per_file) if per_file else set()
     return {display[k] for k in common}
+
+
+def cohort_varies_only_by_number(names: list[str]) -> bool:
+    """True when, after removing the cohort-constant tokens, every file's remaining material is
+    identical once digit-runs are stripped — the files differ ONLY by number (one book's numbered
+    parts). `< 2` names -> False. Built on the same tokenizer as `cohort_constant_tokens`."""
+    if len(names) < 2:
+        return False
+    const = {_norm(t) for t in cohort_constant_tokens(names)}
+    residues: set[str] = set()
+    for name in names:
+        rest = [t for t in _tokens(name) if _norm(t) not in const]
+        residues.add(_norm(re.sub(r"\d+", " ", " ".join(rest))))
+    return len(residues) == 1

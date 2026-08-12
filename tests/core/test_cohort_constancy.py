@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from colophon.core.cohort_constancy import cohort_constant_tokens
+from colophon.core.cohort_constancy import cohort_constant_tokens, cohort_varies_only_by_number
 
 
 def test_voyager_keeps_constant_author_series_title_drops_disc_index():
@@ -61,3 +61,31 @@ def test_single_file_cohort_returns_empty():
 
 def test_empty_list_returns_empty():
     assert cohort_constant_tokens([]) == set()
+
+
+def test_varies_only_by_number_true_for_numbered_parts():
+    names = [
+        "Diana Gabaldon - (Outlander 3) Voyager - D01.01-23",
+        "Diana Gabaldon - (Outlander 3) Voyager - D01.02-23",
+    ]
+    assert cohort_varies_only_by_number(names) is True
+
+
+def test_varies_only_by_number_true_for_glued_index():
+    assert cohort_varies_only_by_number(["Coyote - Unb-001", "Coyote - Unb-002"]) is True
+
+
+def test_varies_only_by_number_false_for_distinct_chapter_names():
+    assert cohort_varies_only_by_number(["01 - Title", "02 - Prologue"]) is False
+
+
+def test_varies_only_by_number_false_for_distinct_titles():
+    names = [
+        "James Corey - The Expanse - Leviathan Wakes",
+        "James Corey - The Expanse - Calibans War",
+    ]
+    assert cohort_varies_only_by_number(names) is False
+
+
+def test_varies_only_by_number_false_for_single_file():
+    assert cohort_varies_only_by_number(["Diana Gabaldon - Voyager - D01.01-23"]) is False
