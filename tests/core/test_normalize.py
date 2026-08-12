@@ -1,5 +1,6 @@
 from colophon.core.normalize import (
     FIELD_NORMALIZERS,
+    normalize_author,
     normalize_description,
     normalize_key,
     normalize_name,
@@ -214,3 +215,39 @@ def test_collides_with_title_is_deliberately_narrow():
     from colophon.core.normalize import collides_with_title
     assert not collides_with_title("Spider-Man", "Spider Man")
     assert not collides_with_title("McCaffrey, Anne", "Anne McCaffrey")
+
+
+def test_normalize_author_unifies_initial_variants():
+    for v in ("George RR Martin", "George R.R. Martin", "George R. R. Martin", "George R R Martin"):
+        assert normalize_author(v) == "George R. R. Martin"
+    for v in ("JD Robb", "J.D. Robb", "J D Robb", "J. D. Robb"):
+        assert normalize_author(v) == "J. D. Robb"
+
+
+def test_normalize_author_splits_glued_pascalcase():
+    assert normalize_author("AgathaChristie") == "Agatha Christie"
+
+
+def test_normalize_author_replaces_underscores():
+    assert normalize_author("Bernard_Cornwell") == "Bernard Cornwell"
+
+
+def test_normalize_author_keeps_roman_suffix():
+    assert normalize_author("John Smith III") == "John Smith III"
+
+
+def test_normalize_author_leaves_a_normal_name():
+    assert normalize_author("Brandon Sanderson") == "Brandon Sanderson"
+
+
+def test_normalize_author_blank_passthrough():
+    assert normalize_author("") == ""
+
+
+def test_normalize_key_folds_initial_variants():
+    assert normalize_key("George R. R. Martin") == normalize_key("George RR Martin")
+    assert normalize_key("E.E. Cummings") == normalize_key("E E Cummings")
+
+
+def test_normalize_key_leaves_multiword_names():
+    assert normalize_key("Iain Banks") == "iain banks"

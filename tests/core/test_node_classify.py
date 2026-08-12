@@ -224,7 +224,9 @@ def test_classify_nodes_worked_cases(tmp_path):
     assert kind("Sidney Sheldon") == "author"
     assert g.directories[DirectoryNode.id_for(root)].kind == "container"   # no cascade
     assert all(b.authors == ["star trek"] for b in st)                     # Down-fill
-    assert poison[0].authors == [root.name]                                # own author kept
+    # own author kept (not down-filled from the poison); the folder name is canonicalized on the way in.
+    from colophon.core.normalize import normalize_author
+    assert poison[0].authors == [normalize_author(root.name)]
 
 
 def test_known_franchise_axiom_and_resolution():

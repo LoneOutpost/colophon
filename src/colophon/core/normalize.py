@@ -222,6 +222,38 @@ def _split_pascal(token: str) -> str:
     return " ".join(parts)
 
 
+# Suffix tokens that must NOT be split into initials ("JR" -> not "J. R."). Roman numerals also get
+# their all-caps restored after proper-casing (normalize_name would title-case "III" -> "Iii").
+_ROMAN_NUMERALS = frozenset({"II", "III", "IV", "V", "VI"})
+_ROMAN_SUFFIX = _ROMAN_NUMERALS | frozenset({"JR", "SR"})
+
+
+def _as_initials(token: str) -> str | None:
+    """A token of 1-4 letters that is all-uppercase (ignoring periods) and not a roman/suffix token
+    -> its canonical 'X. Y.' spaced form; else None. 'RR'/'R.R.' -> 'R. R.', 'R' -> 'R.'."""
+    letters = token.replace(".", "")
+    if (1 <= len(letters) <= 4 and letters.isalpha() and letters.isupper()
+            and token.upper() not in _ROMAN_SUFFIX):
+        return " ".join(f"{c}." for c in letters)
+    return None
+
+
+def normalize_author(name: str) -> str:
+    """Canonical author display form: de-shout an all-caps name, split underscores + glued PascalCase,
+    canonicalize initial clusters to 'J. D.' form. Unifies punctuation/spacing variants of one author
+    so they stop fragmenting. Intentional internal casing ('McIntyre', 'bell hooks') and roman
+    suffixes are preserved (no aggressive title-case); spelling differences (DeMille vs Demille) are
+    left for MATCH."""
+    if not name or not name.strip():
+        return name
+    deshouted = proper_case_if_shouting(name, keep_acronyms=True)   # 'SANDRA BROWN' -> 'Sandra Brown'
+    out: list[str] = []
+    for raw in deshouted.replace("_", " ").split():
+        for tok in _split_pascal(raw).split():
+            out.append(_as_initials(tok) or tok)
+    return " ".join(out)
+
+
 def normalize_key(name: str) -> str:
     """Canonical comparison key for entity names (author/series/narrator/franchise): tolerant of
     'Last, First' order, case, spacing, punctuation, underscores, Latin diacritics, and guarded
@@ -235,4 +267,18 @@ def normalize_key(name: str) -> str:
     s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
     s = " ".join(_split_pascal(tok) for tok in s.split())
     s = re.sub(r"[\W_]+", " ", s)          # drop punctuation and underscore; keep Unicode letters/digits
-    return re.sub(r"\s+", " ", s).strip().casefold()
+    s = re.sub(r"\s+", " ", s).strip().casefold()
+    # fold consecutive single-letter tokens so initial variants unify ("r r" == "rr", "e e" == "ee")
+    merged: list[str] = []
+    buf = ""
+    for tok in s.split():
+        if len(tok) == 1:
+            buf += tok
+        else:
+            if buf:
+                merged.append(buf)
+                buf = ""
+            merged.append(tok)
+    if buf:
+        merged.append(buf)
+    return " ".join(merged)

@@ -18,7 +18,8 @@ def test_collect_includes_folder_and_penalizes_blank_tag():
         b, author_depth_folder="Wendy Pini", classified_author_name=None,
         datafile_authors=[], filename_author="ElfQuest", sibling_consensus={})
     values = {e.value for e in ev}
-    assert "Wendy Pini" in values and "ElfQuest" in values
+    # 'ElfQuest' is canonicalized to 'Elf Quest' (glued PascalCase split) before voting.
+    assert "Wendy Pini" in values and "Elf Quest" in values
 
 
 def test_resolve_folder_beats_competing_filename_when_tag_junk():
@@ -121,3 +122,18 @@ def test_structural_artist_is_penalized_out_of_author_ballot():
     r = resolve_author(b, author_depth_folder="Real Author", classified_author_name=None,
                        datafile_authors=[], filename_author=None, sibling_consensus={})
     assert r.value == "Real Author"          # the structural "Chapter" tag lost to the folder
+
+
+def test_collect_author_evidence_canonicalizes_and_merges_variants():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+
+    b = BookUnit.new(source_folder=Path("/lib/George RR Martin"))
+    b.source_files = [SourceFile(path=Path("/lib/x.opus"), size=1, duration_seconds=0.0, ext="opus",
+                                 tags=EmbeddedTags(artist="George RR Martin"))]
+    ev = collect_author_evidence(
+        b, author_depth_folder="George R. R. Martin", classified_author_name=None,
+        datafile_authors=[], filename_author=None, sibling_consensus={})
+    vals = {e.value for e in ev if e.weight > 0}
+    assert vals == {"George R. R. Martin"}

@@ -11,6 +11,7 @@ from colophon.core import evidence_weights as W
 from colophon.core.field_resolve import FieldEvidence, ResolvedField, resolve_field
 from colophon.core.metadata_quality import is_structural_marker, is_title_shaped_author
 from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
+from colophon.core.normalize import normalize_author
 from colophon.core.people import split_people
 
 # Authoritative provenances that SETTLE the author (never overturned): a user's manual edit + any
@@ -39,36 +40,40 @@ def collect_author_evidence(
     artist = tags.artist if tags else None
     prov = book.provenance.get("authors")
     if artist:
-        ev.append(FieldEvidence(artist, _penalized(artist, W.W_A_TAG), "tag", f"tag artist '{artist}'"))
+        a = normalize_author(artist)
+        ev.append(FieldEvidence(a, _penalized(a, W.W_A_TAG), "tag", f"tag artist '{a}'"))
     elif book.authors and prov in (Provenance.TAG.value, Provenance.DATAFILE.value):
         # No cached file tag on this in-memory SourceFile, but reconcile committed the file's author
         # with tag/datafile provenance — recover it so the ballot weighs it as an overturnable vote.
         src = "tag" if prov == Provenance.TAG.value else "datafile"
         w = W.W_A_TAG if src == "tag" else W.W_A_DATAFILE
-        val = " & ".join(book.authors)
+        val = normalize_author(" & ".join(book.authors))
         ev.append(FieldEvidence(val, _penalized(val, w), src, f"{src} author '{val}'"))
 
     if datafile_authors:
-        joined = " & ".join(datafile_authors)
+        joined = normalize_author(" & ".join(datafile_authors))
         ev.append(FieldEvidence(joined, _penalized(joined, W.W_A_DATAFILE), "datafile",
                                 f"datafile author '{joined}'"))
 
     if classified_author_name:
-        ev.append(FieldEvidence(classified_author_name,
-                                _penalized(classified_author_name, W.W_A_FOLDER),
-                                "folder", f"classified author node '{classified_author_name}'"))
+        c = normalize_author(classified_author_name)
+        ev.append(FieldEvidence(c, _penalized(c, W.W_A_FOLDER),
+                                "folder", f"classified author node '{c}'"))
     elif author_depth_folder:
-        ev.append(FieldEvidence(author_depth_folder, _penalized(author_depth_folder, W.W_A_FOLDER),
-                                "folder", f"author-depth folder '{author_depth_folder}'"))
+        f = normalize_author(author_depth_folder)
+        ev.append(FieldEvidence(f, _penalized(f, W.W_A_FOLDER),
+                                "folder", f"author-depth folder '{f}'"))
 
     if filename_author:
-        ev.append(FieldEvidence(filename_author, _penalized(filename_author, W.W_A_FILENAME),
-                                "filename", f"filename $Author '{filename_author}'"))
+        fn = normalize_author(filename_author)
+        ev.append(FieldEvidence(fn, _penalized(fn, W.W_A_FILENAME),
+                                "filename", f"filename $Author '{fn}'"))
 
     for value, n in sibling_consensus.items():
+        v = normalize_author(value)
         w = min(W.W_A_CONSENSUS_MAX, W.W_A_CONSENSUS_BASE + W.W_A_CONSENSUS_STEP * n)
-        ev.append(FieldEvidence(value, _penalized(value, w), "sibling",
-                                f"{n} sibling(s) assert '{value}'"))
+        ev.append(FieldEvidence(v, _penalized(v, w), "sibling",
+                                f"{n} sibling(s) assert '{v}'"))
     return ev
 
 
