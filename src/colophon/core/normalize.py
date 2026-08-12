@@ -239,18 +239,19 @@ def _as_initials(token: str) -> str | None:
 
 
 def normalize_author(name: str) -> str:
-    """Canonical author display form: underscores -> spaces, glued PascalCase split, initial clusters
-    canonicalized to 'J. D.' form, then proper-cased. Unifies punctuation/spacing variants of one
-    author so they stop fragmenting. Spelling differences (DeMille vs Demille) are left for MATCH."""
+    """Canonical author display form: de-shout an all-caps name, split underscores + glued PascalCase,
+    canonicalize initial clusters to 'J. D.' form. Unifies punctuation/spacing variants of one author
+    so they stop fragmenting. Intentional internal casing ('McIntyre', 'bell hooks') and roman
+    suffixes are preserved (no aggressive title-case); spelling differences (DeMille vs Demille) are
+    left for MATCH."""
     if not name or not name.strip():
         return name
+    deshouted = proper_case_if_shouting(name, keep_acronyms=True)   # 'SANDRA BROWN' -> 'Sandra Brown'
     out: list[str] = []
-    for raw in name.replace("_", " ").split():
+    for raw in deshouted.replace("_", " ").split():
         for tok in _split_pascal(raw).split():
             out.append(_as_initials(tok) or tok)
-    result = normalize_name(" ".join(out))
-    # restore roman numerals proper_case mangled ("Iii" -> "III")
-    return " ".join(t.upper() if t.upper() in _ROMAN_NUMERALS else t for t in result.split())
+    return " ".join(out)
 
 
 def normalize_key(name: str) -> str:

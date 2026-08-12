@@ -62,10 +62,10 @@ def test_refresh_heals_stranded_author_after_bad_datafile_removed(tmp_path):
     migrate(conn)
     repo = BookUnitRepo(conn)
 
-    # Phase 1: the bad datafile sidecar leaks the bucket as author.
+    # Phase 1: the bad datafile sidecar leaks the bucket as author (canonicalized on the way in).
     plan = plan_scan_graph(repo, root, template="$Author - $Title", directory_scheme="")
     commit_scan(repo, plan, reconcile=True)
-    assert _authors_by_folder(repo)["stella Rimington"] == {"TE_Audiobooks_S"}
+    assert _authors_by_folder(repo)["stella Rimington"] == {"T. E. Audiobooks S."}
 
     # Operator removes the erroneous datafile sidecar.
     (root / "stella Rimington" / "metadata.json").unlink()
