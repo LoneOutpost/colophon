@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from colophon.core.ballot import tally
+
 
 @dataclass(frozen=True)
 class FieldEvidence:
@@ -38,16 +40,9 @@ def resolve_field(candidates: list[FieldEvidence]) -> ResolvedField:
         return ResolvedField(None, 0.0, list(candidates))
     hard = [c for c in votes if c.hard]
     pool = hard or votes
-    totals: dict[str, float] = {}
-    strongest: dict[str, float] = {}
     display: dict[str, str] = {}
     for c in pool:
-        k = _key(c.value)
-        totals[k] = totals.get(k, 0.0) + c.weight
-        strongest[k] = max(strongest.get(k, 0.0), c.weight)
-        display.setdefault(k, c.value)
-    total = sum(totals.values())
-    best = max(totals, key=lambda k: (totals[k], strongest[k]))
-    likelihood = round(totals[best] / total, 2) if total else 0.0
-    best_source = max((c for c in pool if _key(c.value) == best), key=lambda c: c.weight).source
-    return ResolvedField(display[best], likelihood, list(candidates), source=best_source)
+        display.setdefault(_key(c.value), c.value)
+    t = tally([(_key(c.value), c.weight) for c in pool])
+    best_source = max((c for c in pool if _key(c.value) == t.winner), key=lambda c: c.weight).source
+    return ResolvedField(display[t.winner], t.share, list(candidates), source=best_source)

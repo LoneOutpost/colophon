@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from colophon.core.ballot import tally
 from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.models import WEAK_PROV, BookUnit, NodeOverride
 from colophon.core.normalize import collides_with_title
@@ -139,15 +140,11 @@ def resolve(
         )
     if not evidence:
         return Classification("container", None, 0.0, "", False, [])
-    totals: dict[str, float] = {}
-    for e in evidence:
-        totals[e.kind] = totals.get(e.kind, 0.0) + e.weight
-    total = sum(totals.values())
-    best = max(_KIND_ORDER, key=lambda k: (totals.get(k, 0.0), -_KIND_ORDER.index(k)))
-    confidence = round(totals.get(best, 0.0) / total, 2) if total else 0.0
+    t = tally([(e.kind, e.weight) for e in evidence], order=_KIND_ORDER)
+    best = t.winner
     return Classification(
         kind=best, value=_value_for(best, evidence, fallback_value),
-        confidence=confidence, source="", settled=False, evidence=list(evidence),
+        confidence=t.share, source="", settled=False, evidence=list(evidence),
         value_evidenced=_valued(best, evidence),
     )
 
