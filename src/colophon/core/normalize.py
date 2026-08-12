@@ -266,4 +266,18 @@ def normalize_key(name: str) -> str:
     s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
     s = " ".join(_split_pascal(tok) for tok in s.split())
     s = re.sub(r"[\W_]+", " ", s)          # drop punctuation and underscore; keep Unicode letters/digits
-    return re.sub(r"\s+", " ", s).strip().casefold()
+    s = re.sub(r"\s+", " ", s).strip().casefold()
+    # fold consecutive single-letter tokens so initial variants unify ("r r" == "rr", "e e" == "ee")
+    merged: list[str] = []
+    buf = ""
+    for tok in s.split():
+        if len(tok) == 1:
+            buf += tok
+        else:
+            if buf:
+                merged.append(buf)
+                buf = ""
+            merged.append(tok)
+    if buf:
+        merged.append(buf)
+    return " ".join(merged)

@@ -242,3 +242,12 @@ def test_normalize_author_leaves_a_normal_name():
 
 def test_normalize_author_blank_passthrough():
     assert normalize_author("") == ""
+
+
+def test_normalize_key_folds_initial_variants():
+    assert normalize_key("George R. R. Martin") == normalize_key("George RR Martin")
+    assert normalize_key("E.E. Cummings") == normalize_key("E E Cummings")
+
+
+def test_normalize_key_leaves_multiword_names():
+    assert normalize_key("Iain Banks") == "iain banks"
