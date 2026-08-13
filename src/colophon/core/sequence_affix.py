@@ -115,3 +115,71 @@ def strip_encoding_artifact(title: str) -> str:
         return title
     stripped = " ".join(_ENCODING_ARTIFACT.sub(" ", title).split()).strip(" -–—:.")  # noqa: RUF001
     return stripped if _HAS_LETTER.search(stripped) else title
+
+
+# --- Whole-title cleaning: strip the sequence/underscore/junk a filename leaves in the title, WITHOUT
+# touching a legitimate number (a bare unpadded trailing number is part of the title — 'Slaughterhouse
+# 5', 'Catch 22', 'Fahrenheit 451'). Surgical by design; validated 0 legit broken / 350 cleaned on the
+# real library. See the identity-first grouping thread.
+_CT_INT = r"\d{1,3}(?!\d)"                       # 1-3 digits, never a 4-digit year
+_CT_PAD = r"0\d{1,2}(?!\d)"                       # a zero-padded index (01, 001) — an index, not a title number
+_CT_MARK = r"(?:unb|una|ua|cd|disc|disk|pt|part|track|section)"
+# a parenthetical abridged/unabridged label — junk, remove whole
+_CT_PAREN = re.compile(r"\s*[(\[]\s*(?:un)?abr?(?:idged)?\s*[)\]]", re.IGNORECASE)
+# a mixed alpha+digit token >= 8 chars — an encoding hash ('A1I69YWSTVC2NT', 'mp332...')
+_CT_HASH = re.compile(r"\b(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z]*\d[A-Za-z0-9]{6,}\b")
+_CT_JUNK = re.compile(
+    r"\b(output|mp3|m4b|vbr|cbr|kbps|khz|joined|encoded|converted|ecd)\b", re.IGNORECASE)
+# a trailing abridged/unabridged edition marker, sans parens ('The Florians Unabridged' -> 'The
+# Florians'). Only the non-word forms — a bare 'Ua'/'Una' is too short to strip safely (a name).
+_CT_TRAIL_MARK = re.compile(r"[\s\-–_]+(?:unabridged|unabr|unab|unb|abridged)\s*$", re.IGNORECASE)  # noqa: RUF001
+# A bracket/brace/paren GROUP holding a series '#N' is a series-ref group — bounding symbols only
+# GROUP tokens, they carry no other meaning, so drop the whole group ('[Carrier #02]', '{Arcane
+# Society #1}', '(Deathlands #3)'). A group WITHOUT a '#N' ('[Special Edition]', '(We Are Bob)') is a
+# real subtitle, left alone. Permissive open/close pairing — real tags mismatch braces ('{Vanza #1]').
+_CT_REF_GROUP = re.compile(r"\s*[\[({][^\])}]*#\s*\d+[^\])}]*[\])}]")
+_CT_CURLY = re.compile(r"\s*\{[^}]*\}")                        # a bare curly annotation ('{R-Rated}')
+# an UNBRACKETED leading series ref, 'Name #N -' before the real title ('Deathlands #1 - Pilgrimage').
+_CT_SERIES_PREFIX = re.compile(r"^\s*\S.*?#\s*\d+\s*[-–:._]+\s*(?=\S)")  # noqa: RUF001
+# a MATCHED surrounding quote pair — bounding noise, unwrap it ('"Rides a Dread Legion"' -> the inside).
+# Only a pair (both ends) so an internal apostrophe ("Assassin's Creed") or a lone leading "'Twas" is kept.
+_CT_QUOTES = re.compile(r"""^["“”‘’'](.*)["“”‘’']$""")  # noqa: RUF001
+# a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
+# NOT a bare unpadded trailing number (a real title ending in a number).
+_CT_TRAIL = re.compile(
+    rf"(?:\s*[-–]\s*(?:{_CT_MARK}[\s-]*)?{_CT_INT}(?:-{_CT_INT})?"  # noqa: RUF001
+    rf"|\s+{_CT_MARK}[\s-]*{_CT_INT}|\s+{_CT_PAD}|\s+{_CT_INT}-{_CT_INT})\s*$", re.IGNORECASE)
+# a leading part-index: 'N of M', a zero-padded index, or a two-number 'NN MM' run (never a 4-digit year)
+_CT_LEAD = re.compile(
+    rf"^\s*(?:{_CT_INT}\s+of\s+{_CT_INT}|{_CT_PAD}(?:[\s._-]+{_CT_INT})?"
+    rf"|{_CT_INT}[\s._-]+{_CT_INT})[\s._-]+(?=\S)", re.IGNORECASE)
+
+
+def clean_title(title: str) -> str:
+    """Strip the filename cruft a title carries — encoding artifacts, underscores, glued PascalCase,
+    leading/trailing part-sequences, abridged labels — while preserving a legitimate title (a bare
+    unpadded trailing number, a real name). Returns the input unchanged when cleaning would leave no
+    letters (an all-junk title is left for MATCH/flagging, not blanked)."""
+    if not title:
+        return title
+    from colophon.core.normalize import _split_pascal
+    s = strip_encoding_artifact(title)
+    s = _CT_QUOTES.sub(r"\1", s.strip())  # unwrap a matched surrounding quote pair (bounding noise)
+    s = _CT_REF_GROUP.sub(" ", s)        # drop a bracketed series-ref group, wherever it sits
+    s = _CT_CURLY.sub(" ", s)            # drop a curly annotation
+    s = _CT_SERIES_PREFIX.sub("", s)     # drop an unbracketed leading 'Name #N -' ref
+    s = _CT_PAREN.sub("", s)
+    s = s.replace("_", " ")
+    s = _CT_HASH.sub(" ", s)
+    s = _CT_JUNK.sub(" ", s)
+    s = _CT_LEAD.sub("", s)
+    s = _CT_TRAIL.sub("", s)
+    if _HAS_LETTER.search(_CT_TRAIL_MARK.sub("", s)):   # strip a trailing edition marker unless it's the whole title
+        s = _CT_TRAIL_MARK.sub("", s)
+    s = strip_series_book_suffix(strip_series_code_affix(s))
+    # Split PascalCase LAST, so a title left glued by the affix strip ('SB 01 - StarBridge' ->
+    # 'StarBridge') is split in the same pass — keeps clean_title idempotent.
+    if " " not in s.strip():
+        s = _split_pascal(s)
+    s = " ".join(s.split()).strip(" -–—:._")      # noqa: RUF001
+    return s if s and _HAS_LETTER.search(s) else title

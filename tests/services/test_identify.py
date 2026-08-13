@@ -311,11 +311,13 @@ def test_normalize_leaves_weak_compound_title():
     assert b.title == "30-Day Heart Tune-Up"        # weak affix: not stripped here
 
 
-def test_normalize_leaves_tag_title_untouched():
+def test_normalize_cleans_leading_index_from_tag_title():
+    # repair_fields' clean_title strips a leaked part-index from ANY non-manual title, tag included —
+    # a title with a sequence is junk regardless of source ('02 - Yendi' -> 'Yendi').
     b = _dir_titled("02 - Yendi")
     b.provenance["title"] = Provenance.TAG.value
     normalize(b)
-    assert b.title == "02 - Yendi"                   # only directory/filename titles are cleaned
+    assert b.title == "Yendi"
 
 
 def test_normalize_deshouts_shouting_tag_title():
@@ -445,7 +447,7 @@ def test_normalize_strips_series_code_affix_from_tag_title(tmp_path):
     b.title = "SB 01 - StarBridge"
     b.provenance["title"] = Provenance.TAG.value
     normalize(b)
-    assert b.title == "StarBridge"
+    assert b.title == "Star Bridge"
 
 
 def test_normalize_clamps_impossible_year(tmp_path):

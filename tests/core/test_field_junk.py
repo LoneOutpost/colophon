@@ -33,6 +33,15 @@ class TestAuthorJunk:
 
 
 class TestTitleJunk:
+    def test_whole_series_reference_is_junk(self):
+        assert title_junk("[Pip & Flinx #12]") == 1.0          # bracketed
+        assert title_junk("Scot Harvath #9") == 1.0            # UNBRACKETED name #N
+        assert title_junk("{Arcane Society #1}") == 1.0        # curly
+
+    def test_series_reference_with_a_real_title_is_not_junk(self):
+        assert title_junk("Viper Strike") == 0.0
+        assert title_junk("We Are Legion (We Are Bob)") == 0.0
+
     def test_bare_parenthesized_number_is_junk(self):
         assert title_junk("(5)") == 1.0
 

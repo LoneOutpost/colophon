@@ -46,6 +46,11 @@ W_A_FILENAME = 1.5         # filename $Author (positional pattern parse)
 W_A_CONSENSUS_BASE = 0.5   # sibling tag/match consensus: BASE + STEP*n, capped
 W_A_CONSENSUS_STEP = 0.5
 W_A_CONSENSUS_MAX = 3.0
+# Intra-book tag agreement: the grouped files' artist tags agreeing is corroboration. A tag vote is
+# W_A_TAG for one file and rises with each agreeing file, capped so "one tagger's copy x9" stays
+# strong-but-bounded and never overpowers a confident author folder (W_A_FOLDER_STRONG).
+W_A_TAG_STEP = 0.25
+W_A_TAG_MAX = 4.0
 
 # --- grouping (Book-bucket one-vs-many election) — provisional, tuned against the real library ---
 W_G_PRIOR = 6.0                  # baseline "many" prior; one-evidence must exceed it to merge

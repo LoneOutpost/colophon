@@ -16,6 +16,7 @@ from colophon.core.identity_tokens import title_candidates
 from colophon.core.metadata_quality import title_junk
 from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
 from colophon.core.normalize import normalize_key, normalize_text
+from colophon.core.sequence_affix import clean_title
 
 _SETTLE_PROV = AUTHORITATIVE_PROV
 _RECOVER = {
@@ -87,8 +88,20 @@ def resolve_title(book: BookUnit) -> ResolvedField:
     if book.title and book.provenance.get("title") in _SETTLE_PROV:
         return ResolvedField(book.title, 1.0, [])
     r = resolve_field(collect_title_evidence(book))
-    if r.value is None or r.value == book.title:
+    if r.value is None:
         return r
-    book.title = normalize_text(r.value)
+    if r.value == book.title:
+        # The committed title re-wins: clean cruft off it in place (an encoding tail / part index a
+        # folder token carries never passed through repair_fields, which runs BEFORE this graph pass),
+        # but do NOT re-normalize its case — it is already the committed value.
+        cleaned = clean_title(book.title)
+        if cleaned and cleaned != book.title:
+            book.title = cleaned
+        return r
+    # An overturn: normalize + clean the new winner.
+    cleaned = clean_title(normalize_text(r.value))
+    if not cleaned or cleaned == book.title:
+        return r
+    book.title = cleaned
     book.provenance["title"] = _PROV_FOR.get(r.source, book.provenance.get("title") or Provenance.FILENAME.value)
     return r
