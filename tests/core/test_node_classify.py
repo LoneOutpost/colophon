@@ -885,10 +885,12 @@ def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
                                      duration_seconds=0.0, ext="opus", tags=EmbeddedTags(artist=artist))]
         return b
 
-    # three books corroborate the folder author; one dissents with a narrator-style tag
+    # three books corroborate the folder author; one dissents with a narrator-style tag; one adds a
+    # co-author (a superset of the folder author, not a different person -> must NOT flag)
     corroborate = [tagged("Isaac Asimov") for _ in range(3)]
     dissent = tagged("Some Narrator")
-    g = _graph_with({folder: corroborate + [dissent]}, root)
+    coauthor = tagged("Isaac Asimov & Robert Silverberg")
+    g = _graph_with({folder: corroborate + [dissent, coauthor]}, root)
     classify_graph(g, root=root)
     classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})
 
@@ -897,3 +899,5 @@ def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
                for f in dissent.findings), dissent.findings
     # a corroborating book (tag == folder author) is NOT a conflict
     assert not any(f.code == FindingCode.METADATA_CONFLICT for f in corroborate[0].findings)
+    # a co-author superset (same primary, extra name) is format/completeness, not a conflict
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in coauthor.findings)

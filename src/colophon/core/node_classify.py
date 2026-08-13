@@ -908,8 +908,16 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         # noise we overcame, not a conflict. We cannot always pick right, so flag it for review.
         tag_artist = (book.source_files[0].tags.artist
                       if book.source_files and book.source_files[0].tags else None)
+        # Compare PEOPLE-sets, not raw strings: a real conflict names a different person, not the same
+        # people in a different format ('Clarke, Baxter' vs 'Clarke and Baxter') or a dropped co-author
+        # ('McCaffrey & Scarborough' vs 'McCaffrey'). Suppress when the sets match or one contains the
+        # other; flag only a genuine disagreement.
+        tag_people = {normalize_key(p) for p in split_people(tag_artist or "")}
+        folder_people = {normalize_key(p) for p in split_people(classified or "")}
+        disagree = bool(tag_people and folder_people) and not (
+            tag_people <= folder_people or folder_people <= tag_people)
         if (tag_artist and classified and author_junk(tag_artist) == 0 and author_junk(classified) == 0
-                and normalize_key(tag_artist) != normalize_key(classified)
+                and disagree
                 and not any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
                             for f in book.findings)):
             book.findings.append(Finding(
