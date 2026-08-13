@@ -133,6 +133,10 @@ _CT_JUNK = re.compile(
 # a trailing abridged/unabridged edition marker, sans parens ('The Florians Unabridged' -> 'The
 # Florians'). Only the non-word forms — a bare 'Ua'/'Una' is too short to strip safely (a name).
 _CT_TRAIL_MARK = re.compile(r"[\s\-–_]+(?:unabridged|unabr|unab|unb|abridged)\s*$", re.IGNORECASE)  # noqa: RUF001
+# a leading bracketed series REFERENCE ('[Carrier #02] - Viper Strike' -> 'Viper Strike') and a
+# curly annotation ('{R-Rated}') — a series tag, never title text.
+_CT_SERIES_REF = re.compile(r"^\s*[\[(][^\])]*#\s*\d+[^\])]*[\])]\s*[-–:._]*\s*")  # noqa: RUF001
+_CT_CURLY = re.compile(r"\s*\{[^}]*\}")
 # a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
 # NOT a bare unpadded trailing number (a real title ending in a number).
 _CT_TRAIL = re.compile(
@@ -153,6 +157,8 @@ def clean_title(title: str) -> str:
         return title
     from colophon.core.normalize import _split_pascal
     s = strip_encoding_artifact(title)
+    s = _CT_SERIES_REF.sub("", s)
+    s = _CT_CURLY.sub("", s)
     s = _CT_PAREN.sub("", s)
     s = s.replace("_", " ")
     s = _CT_HASH.sub(" ", s)

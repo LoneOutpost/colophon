@@ -88,6 +88,19 @@ _BARE_PAREN_NUM = re.compile(r"^\s*[(\[]\s*\d{1,3}\s*[)\]]\s*$")            # "(
 # author. High precision: the bracket convention is unambiguous, so a real author is not suppressed.
 _SERIES_LABEL = re.compile(r"[(\[]\s*series\b", re.IGNORECASE)
 _LEADING_INDEX = re.compile(r"^\s*\d{1,3}(?!\d)\s*[-_.)\]]")               # "07-", "01_", "18 -"; not "2001 -"
+# A bracketed series REFERENCE — "[Pip & Flinx #12]", "(Deathlands #3)" — a series+number tag, never a
+# title. Plus a "{R-Rated}"-style curly annotation.
+_SERIES_REF = re.compile(r"[\[(][^\])]*#\s*\d+[^\])]*[\])]")
+_CURLY = re.compile(r"\{[^}]*\}")
+
+
+def _is_whole_series_ref(value: str) -> bool:
+    """The value is nothing but bracketed series references (+ curly annotations): '[Pip & Flinx #12]',
+    '[Deathlands #00]{R-Rated}' — a series tag masquerading as a title, no real title content."""
+    if not _SERIES_REF.search(value):
+        return False
+    residue = _CURLY.sub(" ", _SERIES_REF.sub(" ", value))
+    return not re.search(r"[^\W\d_]", residue)          # nothing but the ref(s) left -> junk
 
 
 def _has_enum_pair(value: str) -> bool:
@@ -122,7 +135,8 @@ def title_junk(value: str | None) -> float:
     if not value or not value.strip():
         return 1.0
     v = value.strip()
-    if is_structural_marker(v) or _BARE_PAREN_NUM.match(v) or _SEGMENT_SEP.search(v):
+    if (is_structural_marker(v) or _BARE_PAREN_NUM.match(v) or _SEGMENT_SEP.search(v)
+            or _is_whole_series_ref(v)):
         return 1.0
     if _has_enum_pair(v):
         return 0.8

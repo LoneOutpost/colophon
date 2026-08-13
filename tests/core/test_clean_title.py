@@ -39,3 +39,21 @@ def test_all_junk_title_is_left_not_blanked():
 
 def test_empty():
     assert clean_title("") == ""
+
+
+@pytest.mark.parametrize("dirty,expected", [
+    ("[Carrier #02] - Viper Strike", "Viper Strike"),
+    ("[Carrier #03]-Armageddon Mode", "Armageddon Mode"),
+    ("[Deathlands #00]{R-Rated} - Encounter", "Encounter"),
+])
+def test_leading_series_reference_is_stripped(dirty, expected):
+    assert clean_title(dirty) == expected
+
+
+def test_whole_series_reference_is_left_for_the_folder_title():
+    # nothing but a series ref -> clean_title keeps it (title_junk flags it so the folder title wins)
+    assert clean_title("[Pip & Flinx #12]") == "[Pip & Flinx #12]"
+
+
+def test_parenthetical_subtitle_is_not_a_series_ref():
+    assert clean_title("We Are Legion (We Are Bob)") == "We Are Legion (We Are Bob)"
