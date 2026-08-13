@@ -12,6 +12,7 @@ import re
 from colophon.core.cohort_constancy import _tokens
 from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.normalize import normalize_key
+from colophon.core.people import looks_like_person_name
 from colophon.core.sequence_affix import strip_encoding_artifact
 
 # A series marker: 'Book/Vol/Volume N' need a word boundary (so 'Textbook 1' is not a marker), but the
@@ -55,6 +56,29 @@ def _clean_token(tok: str) -> str | None:
     t = _TOK_TRAIL_MARK.sub("", _TOK_LEAD_MARK.sub("", tok))
     t = " ".join(t.split()).strip(" .-_")
     return t or None
+
+
+# Staging/format words that head a mis-formed leaf folder ('Audiobook.-.Isaac Asimov.-.…') — a person
+# name never IS one of these, so a lone such head is not the author (mirrors node_classify._BUCKET_WORDS,
+# kept tiny and local to avoid an import cycle).
+_LEAF_NON_AUTHOR = frozenset({"audiobook", "audiobooks", "unsorted", "misc", "media",
+                              "various", "va", "unknown", "books"})
+
+
+def leaf_folder_author(folder_name: str) -> str | None:
+    """The author declared by a leaf book folder that uses the `.-.` convention
+    (`Author.-.[Series BkNN.-.]Title`): its FIRST `.-.` segment, but only when that segment is
+    person-name-shaped and not a staging/format word (the guard against a folder that isn't
+    `Author.-.…`). Returns None for a folder with no `.-.` or a non-name first segment. The library's
+    leaf export convention puts the author first; a folder with a dedicated author-node ancestor already
+    gets that author from the graph, so this only supplies the author the depth logic misses when the
+    author lives inside the leaf name."""
+    if ".-." not in folder_name:
+        return None
+    head = folder_name.split(".-.", 1)[0].strip()
+    if head.casefold() in _LEAF_NON_AUTHOR:
+        return None
+    return head if looks_like_person_name(head) else None
 
 
 def title_candidates(name: str, *, authors: list[str], series: list[str]) -> list[str]:

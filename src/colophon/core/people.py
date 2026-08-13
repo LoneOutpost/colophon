@@ -50,3 +50,32 @@ def split_people(value: str | None, *, separators: list[str] | None = None) -> l
         else:
             out.append(chunk)
     return out
+
+
+# A single name token: an initial ('A', 'A.', 'AC', 'AJ'), a capitalized word ('Robinson', "O'Brien",
+# 'Jean-Luc'), or a lowercase name particle ('van', 'de', 'von', 'la', 'di'). No digits, brackets, '#'.
+_NAME_TOKEN = re.compile(r"^(?:[A-Z][A-Za-z'’.\-]*|van|von|de[rnl]?|del|di|la|le|du|da|dos)$")  # noqa: RUF001
+_NAME_PARTICLE = {"van", "von", "de", "der", "den", "del", "di", "la", "le", "du", "da", "dos"}
+
+
+def looks_like_person_name(value: str | None) -> bool:
+    """A conservative 'this string is shaped like a person's name (or names)' test — the guard for
+    reading the FIRST `.-.` leaf-folder segment as the author. It confirms NAME SHAPE only; it does not
+    (and cannot) tell an author from a same-shaped title. Each people-part (split on &/and/;/comma) must
+    be 1-4 tokens, every token an initial, a capitalized word, or a lowercase particle, with at least
+    one real letter-word — so 'AC Crispin', 'A. Lee Martinez', 'Kim Stanley Robinson', 'AJ Hartley and
+    David Hewson' pass; '[Ciaphas Cain 13] …', '1984', 'the collected works' are rejected."""
+    if not value or not value.strip():
+        return False
+    parts = split_people(value)
+    if not parts:
+        return False
+    for part in parts:
+        tokens = part.split()
+        if not (1 <= len(tokens) <= 4):
+            return False
+        if not all(_NAME_TOKEN.match(t) for t in tokens):
+            return False
+        if not any(t.lower() not in _NAME_PARTICLE and any(ch.isalpha() for ch in t) for t in tokens):
+            return False
+    return True

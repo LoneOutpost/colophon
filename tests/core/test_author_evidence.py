@@ -180,3 +180,25 @@ def test_tag_artist_agreement_across_files_reinforces_but_caps():
     ev1 = collect_author_evidence(s, author_depth_folder=None, classified_author_name=None,
                                   datafile_authors=[], filename_author=None, sibling_consensus={})
     assert [e for e in ev1 if e.source == "tag"][0].weight == W.W_A_TAG
+
+
+def test_leaf_folder_author_beats_filename_and_supplies_the_swapped_author():
+    # A `.-.` leaf folder (Kim Stanley Robinson.-.Galileos Dream.-.Unb) whose files are named
+    # 'Title - suffix' (no author): the filename $Author parse reads the TITLE as author. The leaf
+    # folder author must out-weigh it so the real author wins.
+    b = _book("/lib/R/Kim Stanley Robinson.-.Galileos Dream.-.Unb", "Galileos Dream - Unb-001.opus")
+    r = resolve_author(
+        b, author_depth_folder=None, classified_author_name=None, datafile_authors=[],
+        filename_author="Galileos Dream", sibling_consensus={},
+        leaf_folder_author="Kim Stanley Robinson")
+    assert r.value == "Kim Stanley Robinson"
+
+
+def test_leaf_folder_author_loses_to_a_real_tag():
+    # A tag author out-weighs the leaf `.-.` folder author (2.75 < 3.0): the leaf is a corrective
+    # prior, not an override of a tagged author.
+    b = _book("/lib/R/M C Beaton.-.Kissing Christmas Goodbye", "01.opus", artist="M. C. Beaton")
+    r = resolve_author(
+        b, author_depth_folder=None, classified_author_name=None, datafile_authors=[],
+        filename_author=None, sibling_consensus={}, leaf_folder_author="M C Beaton")
+    assert r.value == "M. C. Beaton"

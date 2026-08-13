@@ -93,3 +93,18 @@ def test_joined_author_form_is_dropped_but_ampersand_title_survives():
         == ["The Far Kingdoms"]
     # a real title that merely contains '&' is not an author
     assert title_candidates("Intro & Dedication", authors=a, series=[]) == ["Intro & Dedication"]
+
+
+def test_leaf_folder_author_extracts_first_dotdash_segment():
+    from colophon.core.identity_tokens import leaf_folder_author
+    assert leaf_folder_author("Kim Stanley Robinson.-.Galileos Dream.-.Unb") == "Kim Stanley Robinson"
+    assert leaf_folder_author("Kahlil Gibran.-.The Prophet") == "Kahlil Gibran"
+    assert leaf_folder_author("A. Lee Martinez.-.The Automatic Detective.-.UA  8@64.32m") == "A. Lee Martinez"
+
+
+def test_leaf_folder_author_returns_none_without_convention_or_a_stopword_head():
+    from colophon.core.identity_tokens import leaf_folder_author
+    assert leaf_folder_author("Some Title Without Dotdash") is None
+    assert leaf_folder_author("[Ciaphas Cain 13] Dead in the Water") is None
+    # a staging/format word heading a mis-formed leaf is not the author
+    assert leaf_folder_author("Audiobook.-.Isaac Asimov.-.Robot Visions") is None

@@ -33,6 +33,7 @@ def collect_author_evidence(
     book: BookUnit, *, author_depth_folder: str | None, classified_author_name: str | None,
     datafile_authors: list[str], filename_author: str | None,
     sibling_consensus: dict[str, int], classified_author_confidence: float = 1.0,
+    leaf_folder_author: str | None = None,
 ) -> list[FieldEvidence]:
     """Assemble the author ballot from the SOFT sources. `sibling_consensus` maps an author value to
     the count of sibling books independently asserting it (their own tag/match, never the shared
@@ -78,6 +79,16 @@ def collect_author_evidence(
         f = normalize_author(author_depth_folder)
         ev.append(FieldEvidence(f, _penalized(f, W.W_A_FOLDER),
                                 "folder", f"author-depth folder '{f}'"))
+
+    if leaf_folder_author:
+        # The book's OWN leaf folder declares its author via the `.-.` convention
+        # (`Author.-.[Series.-.]Title`). This is the author the depth logic misses when there is no
+        # dedicated author-node ancestor (the author lives inside the leaf name). Weighted above a
+        # bucket-depth folder guess and a filename $Author parse, but below a real tag — a ballot, not a
+        # veto, so a tag/match/manual author still wins.
+        lf = normalize_author(leaf_folder_author)
+        ev.append(FieldEvidence(lf, _penalized(lf, W.W_A_LEAF_FOLDER),
+                                "folder", f"leaf '.-.' folder author '{lf}'"))
 
     if filename_author:
         fn = normalize_author(filename_author)
