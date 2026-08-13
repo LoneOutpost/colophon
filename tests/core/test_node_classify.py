@@ -850,3 +850,16 @@ def test_author_resolves_from_folder_when_tag_is_blank(tmp_path):
     classify_nodes(g, books, root=root, overrides={}, filename_template="$Author - $Title")
     assert books[0].authors == ["Wendy Pini"]
     ctx.close()
+
+
+def test_value_for_rejects_junk_author_fallback():
+    # A '.-.'-spanning folder name reaching the author fallback (structural votes carry no value) is
+    # not an author name -> rejected, so the junk never fills down (the parent author folder wins).
+    from colophon.core.node_classify import Evidence, _value_for
+    structural = [Evidence("author", 2.0, "sits at the library's typical author depth")]
+    assert _value_for("author", structural, "Kahlil Gibran.-.The Prophet") is None
+    assert _value_for("author", structural, "Kahlil Gibran") == "Kahlil Gibran"
+    # a clean book-derived author value is kept; a series fallback is untouched by the author gate.
+    named = [Evidence("author", 3.0, "tag artist", value="Diana Gabaldon")]
+    assert _value_for("author", named, None) == "Diana Gabaldon"
+    assert _value_for("series", [Evidence("series", 2.0, "ramp")], "Outlander") == "Outlander"

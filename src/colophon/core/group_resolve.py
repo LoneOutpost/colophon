@@ -39,6 +39,38 @@ def ax_enumeration(group: list[FileFeatures]) -> list[GroupBallot]:
     return []
 
 
+def ax_number_pair_sequence(group: list[FileFeatures]) -> list[GroupBallot]:
+    """Every file carries a complete `N of count` part-of-total (any separator: of / out of / within /
+    `/` / `-` / `_` / space) — the N's enumerate exactly 1..count against a total that equals the file
+    count -> one book split into `count` numbered parts. Catches distinct-chapter-NAME books
+    ('01_28_The_Coming', '02_28_On_Love', ...) that `ax_enumeration` misses (its residue differs per
+    file). Cohort-validated (M constant == count, N's == {1..count}) so the permissive broad extractor
+    is safe; the duration safety axiom still overrides for whole-book-sized files (a short-book series)."""
+    from collections import defaultdict
+
+    from colophon.core.number_pair import extract_sequence_pairs
+    count = len(group)
+    if count < 2:
+        return []
+    # Whole-book-sized files are a series ('Book N of 5', hours each), not one book's parts — defer to
+    # ax_series_of_books. Without this guard the number-pair 'one' vote (esp. stacked with
+    # ax_enumeration) would overpower the duration safety and false-merge a short numbered series.
+    durs = [f.duration_seconds for f in group if f.duration_seconds]
+    if durs and median(durs) >= W.W_G_SERIES_MIN_SECONDS:
+        return []
+    positions: dict[int, set[int]] = defaultdict(set)   # total M -> the N positions seen with it
+    files_with: dict[int, set[int]] = defaultdict(set)   # total M -> file indices presenting it
+    for i, f in enumerate(group):
+        for pair in extract_sequence_pairs(f.path.stem):
+            positions[pair.m].add(pair.n)
+            files_with[pair.m].add(i)
+    if (len(files_with[count]) == count                  # every file carries an 'N of count'
+            and positions[count] == set(range(1, count + 1))):   # and the N's are the complete 1..count
+        return [GroupBallot("one", W.W_G_NUMBER_PAIR,
+                            f"every file carries a distinct N of {count} (complete numbered sequence)")]
+    return []
+
+
 def ax_index_titles(group: list[FileFeatures]) -> list[GroupBallot]:
     """Every per-file title is a structural marker (chaptering, not distinct books)."""
     titles = [f.tags.title for f in group]
@@ -105,8 +137,8 @@ def ax_uniform_album_chapters(group: list[FileFeatures]) -> list[GroupBallot]:
 
 
 _ONE_AXIOMS = (
-    ax_enumeration, ax_index_titles, ax_cohort_constancy, ax_uniform_work_key, ax_uniform_author,
-    ax_uniform_album_chapters,
+    ax_enumeration, ax_number_pair_sequence, ax_index_titles, ax_cohort_constancy,
+    ax_uniform_work_key, ax_uniform_author, ax_uniform_album_chapters,
 )
 
 

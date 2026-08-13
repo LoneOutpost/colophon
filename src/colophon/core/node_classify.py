@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # Fixed candidate order — used to break exact soft ties deterministically. `title` is the most
 # specific (a book-identity leaf) so it wins ties.
 _KIND_ORDER = ("title", "author", "series", "franchise", "container")
+_AUTHOR_JUNK_REJECT = 0.9   # a node author value at/above this junk magnitude is not a usable author name
 
 # --- Evidence weight ladder ------------------------------------------------------------------
 # Soft votes SUM; the highest-weighted kind wins. Hard votes (manual/match) settle outright.
@@ -103,11 +104,17 @@ def _valued(kind: str, evidence: list[Evidence]) -> bool:
 
 def _value_for(kind: str, evidence: list[Evidence], fallback_value: str | None) -> str | None:
     """The winning kind's name: the highest-weight evidence of that kind that carries a value, else
-    the folder-name fallback for author/series (container/franchise carry no fallback name)."""
+    the folder-name fallback for author/series (container/franchise carry no fallback name). A junk-
+    shaped AUTHOR value (a whole 'Author.-.Title' folder string, a structural marker) is rejected —
+    it is not an author name, so the node contributes none and the real author resolves from a cleaner
+    ancestor (the parent author folder) instead of filling the junk down."""
+    from colophon.core.metadata_quality import author_junk
     with_value = [e for e in evidence if e.kind == kind and e.value]
-    if with_value:
-        return max(with_value, key=lambda e: e.weight).value
-    return fallback_value if kind in ("author", "series") else None
+    value = (max(with_value, key=lambda e: e.weight).value if with_value
+             else (fallback_value if kind in ("author", "series") else None))
+    if kind == "author" and value and author_junk(value) >= _AUTHOR_JUNK_REJECT:
+        return None
+    return value
 
 
 def resolve(

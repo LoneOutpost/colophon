@@ -156,3 +156,34 @@ def test_resolve_chapter_named_uniform_album_book_is_one():
 def test_resolve_uniform_album_long_files_stays_many():
     # a whole-book-length uniform-album series folder stays split (series axiom wins).
     assert resolve_grouping(_album_chapters(12, dur=36000.0)).outcome == "many"
+
+
+_ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEF"
+
+
+def _prophet(n: int = 28, dur: float = 180.0):
+    # 'NN_28_<distinct chapter>' — a complete N-of-28 sequence with DISTINCT chapter names, which
+    # ax_enumeration misses (residue differs) but the number-pair axiom catches.
+    return [_feat(f"/lib/The Prophet/{i:02d}_{n}_{_ALPHA[i - 1] * 3}.mp3", dur=dur)
+            for i in range(1, n + 1)]
+
+
+def test_number_pair_sequence_collapses_distinct_chapter_names():
+    from colophon.core.group_resolve import ax_number_pair_sequence
+    ballots = ax_number_pair_sequence(_prophet())
+    assert [b.outcome for b in ballots] == ["one"]
+    assert resolve_grouping(_prophet()).outcome == "one"
+
+
+def test_number_pair_sequence_needs_a_total_matching_the_file_count():
+    from colophon.core.group_resolve import ax_number_pair_sequence
+    # total 99 != file count 3 -> not a complete sequence -> no vote from this axiom
+    files = [_feat(f"/lib/x/{i:02d}_99_{_ALPHA[i - 1] * 3}.mp3", dur=180.0) for i in (1, 2, 3)]
+    assert ax_number_pair_sequence(files) == []
+
+
+def test_whole_book_duration_safety_overrides_a_number_pair_series():
+    # 5 files each 'Book N of 5' but WHOLE-book-sized -> a short-book... no, long: the series-safety
+    # axiom must outvote the number-pair 'one' so a genuine series stays split.
+    series = [_feat(f"/lib/Series/Book {i} of 5.opus", dur=5.0 * 3600) for i in range(1, 6)]
+    assert resolve_grouping(series).outcome == "many"
