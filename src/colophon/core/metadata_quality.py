@@ -88,19 +88,23 @@ _BARE_PAREN_NUM = re.compile(r"^\s*[(\[]\s*\d{1,3}\s*[)\]]\s*$")            # "(
 # author. High precision: the bracket convention is unambiguous, so a real author is not suppressed.
 _SERIES_LABEL = re.compile(r"[(\[]\s*series\b", re.IGNORECASE)
 _LEADING_INDEX = re.compile(r"^\s*\d{1,3}(?!\d)\s*[-_.)\]]")               # "07-", "01_", "18 -"; not "2001 -"
-# A bracketed series REFERENCE — "[Pip & Flinx #12]", "(Deathlands #3)" — a series+number tag, never a
-# title. Plus a "{R-Rated}"-style curly annotation.
-_SERIES_REF = re.compile(r"[\[(][^\])]*#\s*\d+[^\])]*[\])]")
-_CURLY = re.compile(r"\{[^}]*\}")
+# A series REFERENCE keys on '#<number>', NOT on brackets (bounding symbols only group tokens): a
+# bracket/brace/paren group holding '#N' ('[Pip & Flinx #12]', '{Arcane Society #1}'), an unbracketed
+# leading 'Name #N -', or a bare 'Name #N' trailing the value are all series tags, never a title.
+_SERIES_REF_GROUP = re.compile(r"[\[({][^\])}]*#\s*\d+[^\])}]*[\])}]")
+_SERIES_REF_PREFIX = re.compile(r"^\s*\S.*?#\s*\d+\s*[-–:._]+\s*(?=\S)")  # noqa: RUF001
+_SERIES_REF_TRAIL = re.compile(r"#\s*\d+\s*$")
 
 
 def _is_whole_series_ref(value: str) -> bool:
-    """The value is nothing but bracketed series references (+ curly annotations): '[Pip & Flinx #12]',
-    '[Deathlands #00]{R-Rated}' — a series tag masquerading as a title, no real title content."""
-    if not _SERIES_REF.search(value):
+    """The value is nothing but a series reference — no real title content: '[Pip & Flinx #12]',
+    'Scot Harvath #9', '{Deathlands #00}'. A ref that PREFIXES a real title ('[Carrier #02] - Viper
+    Strike') is not whole (clean_title recovers the title). Bracket-agnostic — keys on '#N'."""
+    if not re.search(r"#\s*\d", value):
         return False
-    residue = _CURLY.sub(" ", _SERIES_REF.sub(" ", value))
-    return not re.search(r"[^\W\d_]", residue)          # nothing but the ref(s) left -> junk
+    residue = _SERIES_REF_PREFIX.sub("", _SERIES_REF_GROUP.sub(" ", value)).strip(" -–:._")  # noqa: RUF001
+    # junk if nothing real remains, or what remains is a name ending in a trailing series index
+    return not re.search(r"[^\W\d_]", residue) or bool(_SERIES_REF_TRAIL.search(residue))
 
 
 def _has_enum_pair(value: str) -> bool:

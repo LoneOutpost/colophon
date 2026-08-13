@@ -133,10 +133,14 @@ _CT_JUNK = re.compile(
 # a trailing abridged/unabridged edition marker, sans parens ('The Florians Unabridged' -> 'The
 # Florians'). Only the non-word forms — a bare 'Ua'/'Una' is too short to strip safely (a name).
 _CT_TRAIL_MARK = re.compile(r"[\s\-–_]+(?:unabridged|unabr|unab|unb|abridged)\s*$", re.IGNORECASE)  # noqa: RUF001
-# a leading bracketed series REFERENCE ('[Carrier #02] - Viper Strike' -> 'Viper Strike') and a
-# curly annotation ('{R-Rated}') — a series tag, never title text.
-_CT_SERIES_REF = re.compile(r"^\s*[\[(][^\])]*#\s*\d+[^\])]*[\])]\s*[-–:._]*\s*")  # noqa: RUF001
-_CT_CURLY = re.compile(r"\s*\{[^}]*\}")
+# A bracket/brace/paren GROUP holding a series '#N' is a series-ref group — bounding symbols only
+# GROUP tokens, they carry no other meaning, so drop the whole group ('[Carrier #02]', '{Arcane
+# Society #1}', '(Deathlands #3)'). A group WITHOUT a '#N' ('[Special Edition]', '(We Are Bob)') is a
+# real subtitle, left alone. Permissive open/close pairing — real tags mismatch braces ('{Vanza #1]').
+_CT_REF_GROUP = re.compile(r"\s*[\[({][^\])}]*#\s*\d+[^\])}]*[\])}]")
+_CT_CURLY = re.compile(r"\s*\{[^}]*\}")                        # a bare curly annotation ('{R-Rated}')
+# an UNBRACKETED leading series ref, 'Name #N -' before the real title ('Deathlands #1 - Pilgrimage').
+_CT_SERIES_PREFIX = re.compile(r"^\s*\S.*?#\s*\d+\s*[-–:._]+\s*(?=\S)")  # noqa: RUF001
 # a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
 # NOT a bare unpadded trailing number (a real title ending in a number).
 _CT_TRAIL = re.compile(
@@ -157,8 +161,9 @@ def clean_title(title: str) -> str:
         return title
     from colophon.core.normalize import _split_pascal
     s = strip_encoding_artifact(title)
-    s = _CT_SERIES_REF.sub("", s)
-    s = _CT_CURLY.sub("", s)
+    s = _CT_REF_GROUP.sub(" ", s)        # drop a bracketed series-ref group, wherever it sits
+    s = _CT_CURLY.sub(" ", s)            # drop a curly annotation
+    s = _CT_SERIES_PREFIX.sub("", s)     # drop an unbracketed leading 'Name #N -' ref
     s = _CT_PAREN.sub("", s)
     s = s.replace("_", " ")
     s = _CT_HASH.sub(" ", s)
