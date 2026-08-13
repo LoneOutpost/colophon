@@ -869,3 +869,24 @@ def test_value_for_rejects_junk_author_fallback():
     assert _value_for("series", [Evidence("series", 2.0, "ramp")], "Outlander") == "Outlander"
     # a series-labelled folder name is not an author value either -> rejected to the parent author
     assert _value_for("author", structural, "Acorna (Series) r") is None
+
+
+def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.models import FindingCode
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Isaac Asimov")
+    # three books corroborate the folder author; one dissents with a narrator-style tag
+    corroborate = [_book(folder, authors=["Isaac Asimov"], prov="tag") for _ in range(3)]
+    dissent = _book(folder, authors=["Some Narrator"], prov="tag")
+    g = _graph_with({folder: corroborate + [dissent]}, root)
+    classify_graph(g, root=root)
+    classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})
+
+    # the dissenting book: its tag disagrees with the corroborated folder author -> flagged for review
+    assert any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+               for f in dissent.findings), dissent.findings
+    # a corroborating book (tag == folder author) is NOT a conflict
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in corroborate[0].findings)

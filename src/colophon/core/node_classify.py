@@ -809,8 +809,8 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
-    from colophon.core.models import Provenance
-    from colophon.core.normalize import proper_case_if_shouting
+    from colophon.core.models import Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.normalize import normalize_key, proper_case_if_shouting
     from colophon.core.people import split_people
     from colophon.core.reconcile import _demote_numeric_author
     pattern = compile_template(filename_template) if filename_template else None
@@ -879,8 +879,12 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         # tag/datafile skip above preserves. Re-reading the raw sidecar would resurrect a handle the
         # hard stage deliberately dropped, so the ballot's datafile vote stays empty.
         prior_authors, prior_prov = list(book.authors), book.provenance.get("authors")
+        # The confidence boost applies only to an EVIDENCE-NAMED author node (its name is corroborated
+        # by the books' own tags/matches), not a bare folder-name fallback — so a misfiled or
+        # misspelled folder name stays at the floor and cannot overwrite a clean tag.
+        node_evidenced = chosen is not None and bool(evidenced.get(chosen.id))
         r = resolve_author(book, author_depth_folder=adf, classified_author_name=classified,
-                           classified_author_confidence=(chosen.kind_confidence if chosen is not None else 1.0),
+                           classified_author_confidence=(chosen.kind_confidence if node_evidenced else 0.0),
                            datafile_authors=[], filename_author=filename_author,
                            sibling_consensus={})
         # Provenance of a "folder"-sourced win. resolve_author collapses the classified-author-node
@@ -896,3 +900,16 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             elif chosen is not None and classified is not None \
                     and book.authors == split_people(classified):
                 book.provenance["authors"] = Provenance.GRAPHING.value
+        # Conflict flag: the ballot weighed >= 2 DISTINCT non-junk author values (a tag naming one
+        # person, the folder/classified node another) — a real disagreement (a misfiled folder, a
+        # narrator tag), not junk we overcame (a junk loser is weight 0, excluded here). We cannot
+        # always pick right, so surface it via METADATA_CONFLICT for human review.
+        distinct = {normalize_key(e.value): e.value for e in r.evidence if e.weight > 0 and e.value}
+        if len(distinct) >= 2 and not any(
+            f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+            for f in book.findings
+        ):
+            book.findings.append(Finding(
+                code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail="author: " + " vs ".join(f"'{v}'" for v in sorted(distinct.values())),
+            ))
