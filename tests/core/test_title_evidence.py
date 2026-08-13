@@ -77,3 +77,35 @@ def test_resolve_title_cleans_a_folder_title_with_cruft():
               title="Blue Remembered Earth Ua 3@64.44m", title_prov=Provenance.DIRECTORY.value)
     resolve_title(b)
     assert b.title == "Blue Remembered Earth"
+
+
+def test_cohort_constant_title_wins_when_per_file_titles_disagree():
+    from pathlib import Path
+
+    from colophon.core.models import EmbeddedTags, SourceFile
+    b = BookUnit.new(source_folder=Path("/lib/O/George Orwell/1984"))
+    b.authors = ["George Orwell"]
+    b.title, b.provenance["title"] = "1984 - 1-9", Provenance.TAG.value   # a single file's per-part tag
+    b.source_files = [
+        SourceFile(path=Path(f"/lib/O/George Orwell/1984/George Orwell - 1984 - {i} of 9.opus"),
+                   size=1, duration_seconds=0.0, ext="opus",
+                   tags=EmbeddedTags(artist="George Orwell", title=f"1984 - {i}-9"))
+        for i in range(1, 10)]
+    resolve_title(b)
+    # the files disagree on the full title but agree on the constant '1984' -> the book title, and a
+    # bare number survives because cross-file agreement proves it real
+    assert b.title == "1984"
+
+
+def test_uniform_multifile_title_is_not_demoted():
+    from pathlib import Path
+
+    from colophon.core.models import EmbeddedTags, SourceFile
+    b = BookUnit.new(source_folder=Path("/lib/T/Tolkien/The Hobbit"))
+    b.authors = ["J. R. R. Tolkien"]
+    b.title, b.provenance["title"] = "The Hobbit", Provenance.TAG.value
+    b.source_files = [
+        SourceFile(path=Path(f"/lib/T/Tolkien/The Hobbit/{i}.opus"), size=1, duration_seconds=0.0,
+                   ext="opus", tags=EmbeddedTags(title="The Hobbit")) for i in range(1, 5)]
+    resolve_title(b)
+    assert b.title == "The Hobbit"   # files agree -> committed stays dominant, unchanged

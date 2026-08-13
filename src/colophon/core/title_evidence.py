@@ -9,6 +9,9 @@ candidate earns a bonus; a manual/match title settles. See tasks/2026-08-12-titl
 
 from __future__ import annotations
 
+import re
+from collections import Counter
+
 from colophon.core import evidence_weights as W
 from colophon.core.cohort_constancy import cohort_constant_tokens
 from colophon.core.field_resolve import FieldEvidence, ResolvedField, resolve_field
@@ -43,6 +46,20 @@ def _penalized(value: str, weight: float, author_keys: set[str]) -> float:
     return weight * (1.0 - title_junk(value))
 
 
+_BARE_NUMBER = re.compile(r"^\s*\d{1,4}\s*$")
+
+
+def _cohort_penalized(value: str, weight: float, author_keys: set[str]) -> float:
+    """Penalty for a cohort-constant candidate: like `_penalized`, but a bare-number value SURVIVES —
+    agreement across the grouped files proves a numeric title ('1984') is real. An author match or a
+    genuine junk shape (a '.-.' span, a structural marker) still scales it down."""
+    if not value or not value.strip() or normalize_key(value) in author_keys:
+        return 0.0
+    if _BARE_NUMBER.match(value):
+        return weight
+    return weight * (1.0 - title_junk(value))
+
+
 def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
     ev: list[FieldEvidence] = []
     authors = list(book.authors)
@@ -54,15 +71,37 @@ def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
         src, w = ("tag", W.W_T_TAG) if dw.label_prov == Provenance.TAG.value else ("filename", W.W_T_FILENAME)
         ev.append(FieldEvidence(dw.label, _penalized(dw.label, w, akeys), src, f"{src} label '{dw.label}'"))
 
-    # The committed title (already decided by reconcile) votes at a DOMINANT weight: it wins the
-    # election unless the junk/author penalty zeros it, at which point a token wins instead. This is
-    # the canonical, in-election form of "only overturn a title on clear evidence it is wrong" — a
-    # scorer, not a gate around the ballot.
+    # The committed title votes at a DOMINANT weight so a decided title is only overturned on clear
+    # evidence it is wrong. EXCEPTION: for a multi-file book whose files DISAGREE on the title, the
+    # committed value is one chapter's title (from a single file), not the book's — demote it so the
+    # cohort-constant book title can win.
+    files = book.source_files
+    per_file_titles = [sf.tags.title for sf in files if sf.tags and sf.tags.title] if files else []
+    files_disagree = len({_norm(t) for t in per_file_titles}) > 1
     prov = book.provenance.get("title", "")
     if book.title and prov in _RECOVER:
         _, src = _RECOVER[prov]
-        ev.append(FieldEvidence(book.title, _penalized(book.title, W.W_T_COMMITTED, akeys), src,
+        committed_w = W.W_T_TAG if files_disagree else W.W_T_COMMITTED
+        ev.append(FieldEvidence(book.title, _penalized(book.title, committed_w, akeys), src,
                                 f"committed {src} title '{book.title}'"))
+
+    # Cohort-constant book title: the title TOKEN constant across the grouped files' title tags is the
+    # book's identity (the varying part is the chapter index). Built from each file's `title_candidates`
+    # (a clean token cut — authors/series/index/disc/refs already dropped), so only a real title token
+    # can be the constant. Reinforced by agreement, numeric-aware (agreement proves '1984' is real).
+    if len(per_file_titles) > 1:
+        w = min(W.W_T_COHORT_MAX, W.W_T_TAG + W.W_T_COHORT_STEP * (len(per_file_titles) - 1))
+        display: dict[str, str] = {}
+        file_count: Counter[str] = Counter()
+        for tt in per_file_titles:
+            for k, tok in {normalize_key(t): t
+                           for t in title_candidates(tt, authors=authors, series=series)}.items():
+                file_count[k] += 1
+                display.setdefault(k, tok)
+        for k, cnt in file_count.items():
+            if cnt == len(per_file_titles):        # constant across every tagged file
+                ev.append(FieldEvidence(display[k], _cohort_penalized(display[k], w, akeys), "cohort",
+                                        f"'{display[k]}' constant across {len(per_file_titles)} files"))
 
     for tok in title_candidates(book.source_folder.name, authors=authors, series=series):
         ev.append(FieldEvidence(tok, _penalized(tok, W.W_T_FOLDER, akeys), "folder", f"folder title '{tok}'"))
