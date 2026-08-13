@@ -83,3 +83,27 @@ def test_concat_encode_joins_heterogeneous_mp3_and_opus(make_audio, tmp_path):
     assert out.exists() and probe_codec(out) == "aac"
     assert 3.4 < probe_duration_seconds(out) < 4.6   # BOTH 2s parts present, not just the mp3
     assert probe_chapter_count(out) == 2             # chapters preserved through the filter path
+
+
+def test_parse_progress_us_reads_out_time_us_and_timestamp():
+    from colophon.adapters.ffmpeg import _parse_progress_us
+    assert _parse_progress_us("out_time_us=1500000") == 1_500_000
+    assert _parse_progress_us("out_time=00:00:02.500000") == 2_500_000
+    assert _parse_progress_us("out_time=01:02:03") == (3600 + 120 + 3) * 1_000_000
+    assert _parse_progress_us("frame=12") is None
+    assert _parse_progress_us("out_time_us=N/A") is None
+
+
+def test_concat_encode_streams_progress(make_audio, tmp_path):
+    a = make_audio("01.mp3", seconds=2)
+    b = make_audio("02.mp3", seconds=2)
+    meta = tmp_path / "m.ffmeta"
+    meta.write_text(to_ffmetadata(file_boundary_chapters([("01.mp3", 2.0), ("02.mp3", 2.0)])))
+    out = tmp_path / "out.m4b"
+    seen: list[float] = []
+    concat_encode([a, b], out, metadata_path=meta, codec="aac", bitrate="64k",
+                  total_seconds=4.0, on_progress=seen.append)
+    assert out.exists()
+    assert seen, "expected at least one progress callback"
+    assert all(0.0 <= f <= 1.0 for f in seen)
+    assert max(seen) > 0.0

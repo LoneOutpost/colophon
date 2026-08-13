@@ -295,7 +295,7 @@ def test_process_book_catches_unexpected_error_and_records_reason(tmp_path, make
     ctx.books.upsert(book)
     ctrl = AppController(ctx)
 
-    def _boom(_book, _opts):
+    def _boom(_book, _opts, _progress=None):
         raise PermissionError("disk is read-only")
 
     monkeypatch.setattr(ctrl, "_persist_book", _boom)

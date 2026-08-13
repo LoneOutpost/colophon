@@ -3008,13 +3008,15 @@ class AppController:
         targets = build_reorg_targets(library_root, patterns, cbook, ordered)
         return [(sf.path, dst) for sf, dst in zip(ordered, targets, strict=True)]
 
-    def _process_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
+    def _process_book(self, book: BookUnit, options: EncodeJobOptions,
+                      encode_progress: Callable[[float], None] | None = None) -> BookProcessResult:
         """Persist one book, guaranteeing a readable reason on any failure. Wraps the worker so an
         unexpected error (permissions, disk, a bad path, a tag-write blow-up) is caught and recorded
         as a FAILED phase with its message — surfaced on At a Glance — instead of escaping the run
-        and leaving the persist with no explanation."""
+        and leaving the persist with no explanation. `encode_progress` receives the ffmpeg completion
+        fraction [0, 1] while the encode runs."""
         try:
-            return self._persist_book(book, options)
+            return self._persist_book(book, options, encode_progress)
         except Exception as exc:  # persist must always report a reason, never crash the run
             logger.exception(f"persist failed for book {book.id} [{book.title!r}]")
             # Fail whichever phase was mid-flight (encode marks ENCODE running), else the organize
@@ -3031,7 +3033,8 @@ class AppController:
         self.ctx.books.upsert(book)
         return BookProcessResult(book_id=book.id, status="failed", detail=reason)
 
-    def _persist_book(self, book: BookUnit, options: EncodeJobOptions) -> BookProcessResult:
+    def _persist_book(self, book: BookUnit, options: EncodeJobOptions,
+                      encode_progress: Callable[[float], None] | None = None) -> BookProcessResult:
         """Run the selected operations for one book: encode (in place, untagged) ->
         organize (move) -> tag once at the resting path -> optional source delete."""
         # Backstop: a book with a blocking error (missing/corrupt files) can't be persisted — no
@@ -3116,7 +3119,7 @@ class AppController:
         enc = encode_book(
             book, target, bitrate=self.ctx.config.transcode_bitrate,
             delete_sources=options.delete_sources, confirm_delete=options.delete_sources,
-            chapters=book.chapters or None,
+            chapters=book.chapters or None, progress=encode_progress,
         )
         if not enc.verified or enc.output_path is None:
             return self._fail_persist(book, Phase.ENCODE, f"encode failed: {enc.error or 'unknown error'}")
@@ -3220,7 +3223,16 @@ class AppController:
                     _emit(book.id, "encoding" if options.encode else "organizing")
                     if options.encode:
                         await self.ensure_cover_cached(book)
-                    result = await asyncio.to_thread(self._process_book, book, options)
+
+                    # Surface the running book's ffmpeg completion on the shared job panel, so a long
+                    # single-book encode shows live progress instead of a frozen "encoding".
+                    def _encode_progress(frac: float, _bid: str = book.id) -> None:
+                        job.progress(counted["n"], len(books), f"encoding {_bid[:8]} {int(frac * 100)}%")
+
+                    result = await asyncio.to_thread(
+                        self._process_book, book, options,
+                        _encode_progress if options.encode else None,
+                    )
                     _emit(book.id, result.status)
                     return result
 

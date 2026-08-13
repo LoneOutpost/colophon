@@ -96,3 +96,17 @@ def test_encode_book_produces_untagged_output(make_audio, tmp_path):
 
     assert result.verified and result.output_path == out
     assert read_embedded_tags(out).title != "Tagged Title"
+
+
+def test_encode_book_reports_progress(make_audio, tmp_path):
+    a = make_audio("01.mp3", seconds=2)
+    b = make_audio("02.mp3", seconds=2)
+    book = _book_from([(a, 2.0), (b, 2.0)])
+    out = tmp_path / "out" / "book.m4b"
+    fracs: list[float] = []
+
+    result = encode_book(book, out, bitrate="64k", progress=fracs.append)
+
+    assert result.verified is True
+    assert fracs, "expected progress callbacks during the encode"
+    assert all(0.0 <= f <= 1.0 for f in fracs)

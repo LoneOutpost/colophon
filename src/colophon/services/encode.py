@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 
 from colophon.adapters.ffmpeg import (
     FFmpegError,
@@ -16,9 +18,13 @@ from colophon.core.chapters import Chapter, file_boundary_chapters, to_ffmetadat
 from colophon.core.models import BookUnit, _Base
 
 logger = logging.getLogger(__name__)
+# Live encode progress rides the always-on `colophon.progress` logger (same channel as `step`).
+progress_logger = logging.getLogger("colophon.progress")
 
 # Output duration must be within this tolerance of the summed inputs to verify.
 _TOLERANCE_S = 2.0
+# Log an encode-progress line each time completion advances by this many percent.
+_PCT_STEP = 5
 
 
 class EncodeResult(_Base):
@@ -49,12 +55,17 @@ def encode_book(
     delete_sources: bool = False,
     confirm_delete: bool = False,
     chapters: list[Chapter] | None = None,
+    progress: Callable[[float], None] | None = None,
 ) -> EncodeResult:
     """Build one chaptered M4B at `output_path` from `book.source_files`, verify it,
     and (only if verified AND delete_sources AND confirm_delete) delete the originals.
 
     `chapters`, if given, overrides the default file-boundary chapters (the seam for
     caller-supplied chapters, e.g. from Audnexus).
+
+    Encode progress is reported two ways as ffmpeg runs: a completion fraction in [0, 1] to the
+    optional `progress` callback (for the UI), and throttled percentage lines on the `colophon.progress`
+    logger (so a long transcode is no longer silent in the log).
     """
     if not book.source_files:
         return EncodeResult(book_id=book.id, error="no source files")
@@ -71,14 +82,33 @@ def encode_book(
         mf.write(to_ffmetadata(chapters))
         meta_path = Path(mf.name)
 
+    label = book.title or book.id
+    t0 = perf_counter()
+    logged_pct = -_PCT_STEP   # force a log at the first tick
+    progress_logger.info(
+        f"encode {label!r}: starting ({len(inputs)} file(s), ~{expected_s / 60:.0f} min)"
+    )
+
+    def _on_progress(frac: float) -> None:
+        nonlocal logged_pct
+        if progress is not None:
+            progress(frac)
+        pct = int(frac * 100)
+        if pct >= logged_pct + _PCT_STEP:
+            logged_pct = pct
+            progress_logger.info(f"encode {label!r}: {pct}% ({perf_counter() - t0:.0f}s)")
+
     try:
-        concat_encode(inputs, output_path, metadata_path=meta_path, codec=codec, bitrate=bitrate)
+        concat_encode(inputs, output_path, metadata_path=meta_path, codec=codec, bitrate=bitrate,
+                      total_seconds=expected_s, on_progress=_on_progress)
         actual_s = probe_duration_seconds(output_path)
     except FFmpegError as e:
         logger.warning(f"encode failed for {book.id}: {e}")
+        progress_logger.warning(f"encode {label!r}: failed after {perf_counter() - t0:.0f}s: {e}")
         return EncodeResult(book_id=book.id, error=str(e))
     finally:
         meta_path.unlink(missing_ok=True)
+    progress_logger.info(f"encode {label!r}: done in {perf_counter() - t0:.0f}s")
 
     verified = abs(actual_s - expected_s) <= max(_TOLERANCE_S, 0.05 * expected_s)
     if not verified:
