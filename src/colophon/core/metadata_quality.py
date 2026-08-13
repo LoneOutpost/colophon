@@ -94,15 +94,19 @@ _LEADING_INDEX = re.compile(r"^\s*\d{1,3}(?!\d)\s*[-_.)\]]")               # "07
 _SERIES_REF_GROUP = re.compile(r"[\[({][^\])}]*#\s*\d+[^\])}]*[\])}]")
 _SERIES_REF_PREFIX = re.compile(r"^\s*\S.*?#\s*\d+\s*[-–:._]+\s*(?=\S)")  # noqa: RUF001
 _SERIES_REF_TRAIL = re.compile(r"#\s*\d+\s*$")
+_REF_RESIDUE_JUNK = re.compile(  # a curly annotation or a part marker left beside a ref is not a title
+    r"\{[^}]*\}|\b(?:pt|part|track|cd|disc|disk|section|vol|volume)\s*\d+\b", re.IGNORECASE)
 
 
 def _is_whole_series_ref(value: str) -> bool:
-    """The value is nothing but a series reference — no real title content: '[Pip & Flinx #12]',
-    'Scot Harvath #9', '{Deathlands #00}'. A ref that PREFIXES a real title ('[Carrier #02] - Viper
-    Strike') is not whole (clean_title recovers the title). Bracket-agnostic — keys on '#N'."""
+    """The value is nothing but a series reference (+ annotations/part markers) — no real title:
+    '[Pip & Flinx #12]', 'Scot Harvath #9', '[demon Wars #3] Pt 1', '[Deathlands #00]{R-Rated}'. A ref
+    that PREFIXES a real title ('[Carrier #02] - Viper Strike') is not whole (clean_title recovers the
+    title). Bracket-agnostic — keys on '#N'."""
     if not re.search(r"#\s*\d", value):
         return False
-    residue = _SERIES_REF_PREFIX.sub("", _SERIES_REF_GROUP.sub(" ", value)).strip(" -–:._")  # noqa: RUF001
+    residue = _SERIES_REF_PREFIX.sub("", _SERIES_REF_GROUP.sub(" ", value))
+    residue = _REF_RESIDUE_JUNK.sub(" ", residue).strip(" -–:._")  # noqa: RUF001
     # junk if nothing real remains, or what remains is a name ending in a trailing series index
     return not re.search(r"[^\W\d_]", residue) or bool(_SERIES_REF_TRAIL.search(residue))
 

@@ -67,3 +67,13 @@ def test_good_committed_directory_title_outweighs_noisy_folder_token():
               title="The Gunslinger", title_prov=Provenance.DIRECTORY.value)
     resolve_title(b)
     assert b.title == "The Gunslinger"
+
+
+def test_resolve_title_cleans_a_folder_title_with_cruft():
+    # a committed folder title carrying an encoding tail is cleaned by resolve_title (which runs in
+    # the graph pass, after repair_fields) so folder-derived titles don't escape cleaning.
+    b = _book(folder="Alastair Reynolds.-.Blue Remembered Earth",
+              stems=["Blue Remembered Earth - 01"], authors=["Alastair Reynolds"],
+              title="Blue Remembered Earth Ua 3@64.44m", title_prov=Provenance.DIRECTORY.value)
+    resolve_title(b)
+    assert b.title == "Blue Remembered Earth"
