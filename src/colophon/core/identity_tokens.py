@@ -14,7 +14,11 @@ from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.normalize import normalize_key
 from colophon.core.sequence_affix import strip_encoding_artifact
 
-_SERIES_MARKER = re.compile(r"\b(?:bk|book|vol|volume)\s*\d", re.IGNORECASE)
+# A series marker: 'Book/Vol/Volume N' need a word boundary (so 'Textbook 1' is not a marker), but the
+# 'bk' abbreviation is matched even when glued ('P&FBk 12', 'Flinx Bk12') — no English word ends in a
+# 'bk' followed by a digit, so no boundary is needed and 'Textbook'/'Notebook' stay safe (they carry
+# 'book', not 'bk').
+_SERIES_MARKER = re.compile(r"(?:\bbook|\bvol|\bvolume|bk)\s*\d", re.IGNORECASE)
 
 # A token that is NOTHING but an index or disc marker ('1/9', '01-12', '001 of 153', 'CD01') — never a
 # title, drop it whole.
@@ -60,6 +64,8 @@ def title_candidates(name: str, *, authors: list[str], series: list[str]) -> lis
     Author/series removal MAY return [] (an author-only folder has no title here); structural removal
     is skipped when it would remove the last token, so a bare-number title like "1984" survives."""
     akeys = {normalize_key(a) for a in authors}
+    if len(authors) > 1:                        # also drop the JOINED author form, not just each name
+        akeys.update(normalize_key(sep.join(authors)) for sep in (" & ", " and ", ", "))
     skeys = {normalize_key(s) for s in series}
     kept: list[str] = []
     for raw in _tokens(name):

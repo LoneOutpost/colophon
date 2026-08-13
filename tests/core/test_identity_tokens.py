@@ -78,3 +78,18 @@ def test_clean_token_drops_a_lone_curly_ref_fragment():
 
 def test_clean_token_keeps_a_word_that_merely_contains_ua():
     assert _clean_token("Ultramarine") == "Ultramarine"     # \bua\b does not match mid-word
+
+
+def test_glued_bk_series_marker_is_dropped_but_textbook_survives():
+    # 'P&FBk 12' is a glued series abbreviation -> dropped; 'Textbook 1' is a real word -> kept
+    assert title_candidates("Trouble Magnet - P&FBk 12", authors=["Alan Dean Foster"], series=[]) \
+        == ["Trouble Magnet"]
+    assert "Textbook 1" in title_candidates("Textbook 1", authors=[], series=[])
+
+
+def test_joined_author_form_is_dropped_but_ampersand_title_survives():
+    a = ["Allan Cole", "Chris Bunch"]
+    assert title_candidates("Allan Cole & Chris Bunch - The Far Kingdoms", authors=a, series=[]) \
+        == ["The Far Kingdoms"]
+    # a real title that merely contains '&' is not an author
+    assert title_candidates("Intro & Dedication", authors=a, series=[]) == ["Intro & Dedication"]
