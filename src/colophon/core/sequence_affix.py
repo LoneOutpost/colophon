@@ -141,6 +141,9 @@ _CT_REF_GROUP = re.compile(r"\s*[\[({][^\])}]*#\s*\d+[^\])}]*[\])}]")
 _CT_CURLY = re.compile(r"\s*\{[^}]*\}")                        # a bare curly annotation ('{R-Rated}')
 # an UNBRACKETED leading series ref, 'Name #N -' before the real title ('Deathlands #1 - Pilgrimage').
 _CT_SERIES_PREFIX = re.compile(r"^\s*\S.*?#\s*\d+\s*[-–:._]+\s*(?=\S)")  # noqa: RUF001
+# a MATCHED surrounding quote pair — bounding noise, unwrap it ('"Rides a Dread Legion"' -> the inside).
+# Only a pair (both ends) so an internal apostrophe ("Assassin's Creed") or a lone leading "'Twas" is kept.
+_CT_QUOTES = re.compile(r"""^["“”‘’'](.*)["“”‘’']$""")  # noqa: RUF001
 # a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
 # NOT a bare unpadded trailing number (a real title ending in a number).
 _CT_TRAIL = re.compile(
@@ -161,6 +164,7 @@ def clean_title(title: str) -> str:
         return title
     from colophon.core.normalize import _split_pascal
     s = strip_encoding_artifact(title)
+    s = _CT_QUOTES.sub(r"\1", s.strip())  # unwrap a matched surrounding quote pair (bounding noise)
     s = _CT_REF_GROUP.sub(" ", s)        # drop a bracketed series-ref group, wherever it sits
     s = _CT_CURLY.sub(" ", s)            # drop a curly annotation
     s = _CT_SERIES_PREFIX.sub("", s)     # drop an unbracketed leading 'Name #N -' ref

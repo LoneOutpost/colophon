@@ -62,3 +62,17 @@ def test_bounding_symbols_without_a_hash_number_are_left_alone():
     # a group is only a series ref when it holds '#N' — otherwise it is a real subtitle/edition
     assert clean_title("We Are Legion (We Are Bob)") == "We Are Legion (We Are Bob)"
     assert clean_title("The Girl [Special Edition]") == "The Girl [Special Edition]"
+
+
+@pytest.mark.parametrize("wrapped,inner", [
+    ('"Rides a Dread Legion"', "Rides a Dread Legion"),
+    ("“The Hobbit”", "The Hobbit"),          # curly double quotes
+    ('"Slaughterhouse 5"', "Slaughterhouse 5"),
+])
+def test_matched_surrounding_quotes_are_unwrapped(wrapped, inner):
+    assert clean_title(wrapped) == inner
+
+
+def test_internal_or_lone_quote_is_kept():
+    assert clean_title("Assassin's Creed") == "Assassin's Creed"       # internal apostrophe
+    assert clean_title("‘Twas the Night") == "‘Twas the Night"  # lone leading, unmatched
