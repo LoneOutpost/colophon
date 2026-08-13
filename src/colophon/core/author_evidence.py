@@ -7,6 +7,8 @@ is authoritative and settles (never overturned)."""
 
 from __future__ import annotations
 
+from collections import Counter
+
 from colophon.core import evidence_weights as W
 from colophon.core.field_resolve import FieldEvidence, ResolvedField, resolve_field
 from colophon.core.metadata_quality import author_junk
@@ -37,12 +39,19 @@ def collect_author_evidence(
     folder). A manual/match author is handled by `resolve_author`'s settle-guard, not here."""
     ev: list[FieldEvidence] = []
 
-    tags = book.source_files[0].tags if book.source_files else None
-    artist = tags.artist if tags else None
+    # Aggregate the artist tag across EVERY grouped file, not just the first: agreement is
+    # corroboration. Each distinct artist votes once, its weight rising with the number of files that
+    # assert it (capped) — so a book whose 9 files all say the same author reinforces it.
     prov = book.provenance.get("authors")
-    if artist:
-        a = normalize_author(artist)
-        ev.append(FieldEvidence(a, _penalized(a, W.W_A_TAG), "tag", f"tag artist '{a}'"))
+    artist_counts: Counter[str] = Counter(
+        normalize_author(sf.tags.artist)
+        for sf in book.source_files if sf.tags and sf.tags.artist
+    )
+    if artist_counts:
+        for a, n in artist_counts.items():
+            w = min(W.W_A_TAG_MAX, W.W_A_TAG + W.W_A_TAG_STEP * (n - 1))
+            ev.append(FieldEvidence(a, _penalized(a, w), "tag",
+                                    f"tag artist '{a}' ({n} file{'s' if n != 1 else ''})"))
     elif book.authors and prov in (Provenance.TAG.value, Provenance.DATAFILE.value):
         # No cached file tag on this in-memory SourceFile, but reconcile committed the file's author
         # with tag/datafile provenance — recover it so the ballot weighs it as an overturnable vote.

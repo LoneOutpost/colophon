@@ -159,3 +159,24 @@ def test_weak_classified_author_node_loses_to_a_tag():
         classified_author_confidence=0.3, datafile_authors=[], filename_author=None,
         sibling_consensus={})
     assert r.value == "Recorded Books"
+
+
+def test_tag_artist_agreement_across_files_reinforces_but_caps():
+    from colophon.core import evidence_weights as W
+    from colophon.core.models import EmbeddedTags, SourceFile
+
+    d = Path("/lib/G/George Orwell/1984")
+    b = BookUnit.new(source_folder=d)
+    b.source_files = [SourceFile(path=d / f"1984 - {i}.opus", size=1, duration_seconds=0.0, ext="opus",
+                                 tags=EmbeddedTags(artist="George Orwell")) for i in range(1, 10)]
+    ev = collect_author_evidence(b, author_depth_folder=None, classified_author_name=None,
+                                 datafile_authors=[], filename_author=None, sibling_consensus={})
+    tag = [e for e in ev if e.source == "tag"]
+    assert len(tag) == 1 and tag[0].value == "George Orwell"
+    assert W.W_A_TAG < tag[0].weight <= W.W_A_TAG_MAX          # 9-file agreement reinforces, capped
+
+    # a single-file book is unchanged (one file -> exactly W_A_TAG)
+    s = _book("/lib/x", "a.opus", artist="Solo")
+    ev1 = collect_author_evidence(s, author_depth_folder=None, classified_author_name=None,
+                                  datafile_authors=[], filename_author=None, sibling_consensus={})
+    assert [e for e in ev1 if e.source == "tag"][0].weight == W.W_A_TAG
