@@ -24,3 +24,34 @@ def test_bare_number_title_survives():
 
 def test_author_only_folder_yields_no_title():
     assert title_candidates("Alexei Panshin", authors=["Alexei Panshin"], series=[]) == []
+
+
+import pytest
+from colophon.core.identity_tokens import _clean_token, title_candidates
+
+
+@pytest.mark.parametrize("junk", ["1/9", "01-12", "001 of 153", "CD01", "cd1", "1 of 8", "01 of 6"])
+def test_clean_token_drops_a_whole_index_or_disc_marker(junk):
+    assert _clean_token(junk) is None
+
+
+@pytest.mark.parametrize("dirty,clean", [
+    ("Innocence In Death CD03-01", "Innocence In Death"),   # CD-track compound
+    ("Red Storm Rising CD 01 of 40", "Red Storm Rising"),   # CD N of M
+    ("BSLC01 China Trade CD1of8", "BSLC01 China Trade"),     # glued CDNofM (leading code kept)
+    ("The Spiderwick Chronicles CD01", "The Spiderwick Chronicles"),
+    ("01 The Coming of the Ship", "The Coming of the Ship"), # leading padded index
+])
+def test_clean_token_strips_index_disc_affixes(dirty, clean):
+    assert _clean_token(dirty) == clean
+
+
+@pytest.mark.parametrize("legit", ["1984", "Slaughterhouse 5", "Catch 22", "Fahrenheit 451", "Apollo 13", "The Hobbit"])
+def test_clean_token_keeps_a_legit_title_incl_bare_number(legit):
+    assert _clean_token(legit) == legit
+
+
+def test_title_candidates_cleans_disc_and_index_tokens():
+    # a filename with author paren + a CD-track title token -> just the clean title
+    assert title_candidates("(JD Robb) Innocence In Death CD03-01", authors=["J. D. Robb"], series=[]) \
+        == ["Innocence In Death"]
