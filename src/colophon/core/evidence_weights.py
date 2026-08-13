@@ -72,6 +72,11 @@ W_T_DATAFILE = 3.0          # authored sidecar title
 W_T_FOLDER = 2.5            # folder title token
 W_T_FILENAME = 1.5          # filename title token
 W_T_CONSTANCY_BONUS = 1.0   # corroboration: candidate constant across the cohort (< every source)
+# The title TOKEN constant across the grouped files' tags is the BOOK title (per-file variation is the
+# chapter index). Reinforced by agreement, capped. Strong enough to beat a demoted committed per-file
+# title but below a real committed book title.
+W_T_COHORT_STEP = 0.6
+W_T_COHORT_MAX = 6.0
 W_T_COMMITTED = 10.0        # the committed (already-decided) title votes at a dominant weight: it wins
                             # unless the junk/author penalty zeros it (the canonical form of "only
                             # overturn a title on clear evidence it is wrong")
