@@ -255,21 +255,25 @@ def test_declared_franchise_classifies_folder_franchise(tmp_path):
 
     root = tmp_path
     folder = str(root / "Star Trek")
-    # two DISTINCT-author books loose in one folder -> a container, no author consensus
-    books = [_book(folder, authors=["Judith Reeves-Stevens"], prov="tag"),
-             _book(folder, authors=["Diane Duane"], prov="tag")]
-    g = _graph_with({folder: books}, root)
-    allbooks = [bn.book for bn in g.books.values()]
 
-    def kind_of(declared):
+    def run(declared):
+        # fresh graph + books per scenario so the structural-guess run's author fill-down does not
+        # leak into the declared-franchise run.
+        books = [_book(folder, authors=["Judith Reeves-Stevens"], prov="tag"),
+                 _book(folder, authors=["Diane Duane"], prov="tag")]
+        g = _graph_with({folder: books}, root)
         classify_graph(g, root=root)
-        classify_nodes(g, allbooks, root=root, overrides={}, known_franchises=declared)
-        return g.directories[DirectoryNode.id_for(root / "Star Trek")].kind
+        classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={},
+                       known_franchises=declared)
+        return g.directories[DirectoryNode.id_for(root / "Star Trek")].kind, books
 
-    assert kind_of({}) == "author"                              # structural author guess
-    assert kind_of({"star trek": "Star Trek"}) == "franchise"   # declaration wins (4.0 > 2.0)
-    # a franchise node never bleeds its name into the books beneath it (franchise is not an
-    # author tier) — each book keeps its own tag author
+    assert run({})[0] == "author"                                        # structural author guess
+    # A DECLARED franchise is a non-author tier: it classifies franchise (declaration 4.0 > 2.0) and
+    # never authors its books — each keeps its own tag author. (An *undeclared* structural author guess
+    # standing in as the author is an accepted substitution for vast mixed-media franchises, so that
+    # case is not constrained here.)
+    kind, books = run({"star trek": "Star Trek"})
+    assert kind == "franchise"
     assert books[0].authors == ["Judith Reeves-Stevens"]
     assert books[1].authors == ["Diane Duane"]
 

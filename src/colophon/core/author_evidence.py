@@ -30,7 +30,7 @@ def _penalized(value: str, weight: float) -> float:
 def collect_author_evidence(
     book: BookUnit, *, author_depth_folder: str | None, classified_author_name: str | None,
     datafile_authors: list[str], filename_author: str | None,
-    sibling_consensus: dict[str, int],
+    sibling_consensus: dict[str, int], classified_author_confidence: float = 1.0,
 ) -> list[FieldEvidence]:
     """Assemble the author ballot from the SOFT sources. `sibling_consensus` maps an author value to
     the count of sibling books independently asserting it (their own tag/match, never the shared
@@ -58,8 +58,13 @@ def collect_author_evidence(
 
     if classified_author_name:
         c = normalize_author(classified_author_name)
-        ev.append(FieldEvidence(c, _penalized(c, W.W_A_FOLDER),
-                                "folder", f"classified author node '{c}'"))
+        # A classified author node ALWAYS casts a ballot (floor W_A_FOLDER) and scales UP with its
+        # classification strength to W_A_FOLDER_STRONG, so a confident, well-populated author folder
+        # out-weighs a lone tag while a shaky node stays near the floor. Never a veto — still a vote.
+        conf = max(0.0, min(1.0, classified_author_confidence))
+        w = W.W_A_FOLDER + conf * (W.W_A_FOLDER_STRONG - W.W_A_FOLDER)
+        ev.append(FieldEvidence(c, _penalized(c, w),
+                                "folder", f"classified author node '{c}' (conf {conf:.2f})"))
     elif author_depth_folder:
         f = normalize_author(author_depth_folder)
         ev.append(FieldEvidence(f, _penalized(f, W.W_A_FOLDER),

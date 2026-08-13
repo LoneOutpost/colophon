@@ -880,17 +880,18 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         # hard stage deliberately dropped, so the ballot's datafile vote stays empty.
         prior_authors, prior_prov = list(book.authors), book.provenance.get("authors")
         r = resolve_author(book, author_depth_folder=adf, classified_author_name=classified,
+                           classified_author_confidence=(chosen.kind_confidence if chosen is not None else 1.0),
                            datafile_authors=[], filename_author=filename_author,
                            sibling_consensus={})
         # Provenance of a "folder"-sourced win. resolve_author collapses the classified-author-node
         # and the raw author-depth folder into one "folder" source, so restore the intended tier here:
-        #   - value unchanged from the book's own weak (directory/filename) decompose -> keep it, so a
-        #     book already correctly attributed by its scheme does not churn to GRAPHING;
-        #   - inherited from a classified AUTHOR node (an evidence-named consensus/match OR a
-        #     structural author grouping) -> GRAPHING, the graph named this author;
+        #   - value UNCHANGED from the book's prior author -> the folder only corroborated; keep the
+        #     original provenance tier (a confident author node now out-weighs an agreeing tag, but a
+        #     tag/datafile/scheme that already named this author correctly must not churn to folder);
+        #   - value CHANGED, inherited from a classified AUTHOR node -> GRAPHING, the graph named it;
         #   - otherwise the raw author-depth folder-name fallback stays DIRECTORY.
         if r.source == "folder" and book.provenance.get("authors") == Provenance.DIRECTORY.value:
-            if book.authors == prior_authors and prior_prov in WEAK_PROV:
+            if book.authors == prior_authors and prior_prov:
                 book.provenance["authors"] = prior_prov
             elif chosen is not None and classified is not None \
                     and book.authors == split_people(classified):
