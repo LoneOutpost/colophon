@@ -17,7 +17,7 @@ def _book(title=None, prov="tag", year=None):
 def test_strips_series_code_affix_from_tag_title():
     b = _book("SB 01 - StarBridge", prov=Provenance.TAG.value)
     assert repair_fields(b) is True
-    assert b.title == "StarBridge"
+    assert b.title == "Star Bridge"
     assert b.provenance["title"] == Provenance.TAG.value  # source preserved
 
 
@@ -42,7 +42,7 @@ def test_strips_trailing_series_book_affix():
 def test_strips_both_leading_and_trailing_affixes():
     b = _book("SB 01 - StarBridge - Book 3", prov=Provenance.TAG.value)
     assert repair_fields(b) is True
-    assert b.title == "StarBridge"
+    assert b.title == "Star Bridge"
 
 
 def test_clamps_low_year():
@@ -67,4 +67,4 @@ def test_idempotent():
     b = _book("SB 01 - StarBridge", prov=Provenance.TAG.value, year=1)
     assert repair_fields(b) is True
     assert repair_fields(b) is False   # second pass finds nothing
-    assert b.title == "StarBridge" and b.publish_year is None
+    assert b.title == "Star Bridge" and b.publish_year is None

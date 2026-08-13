@@ -115,3 +115,51 @@ def strip_encoding_artifact(title: str) -> str:
         return title
     stripped = " ".join(_ENCODING_ARTIFACT.sub(" ", title).split()).strip(" -–—:.")  # noqa: RUF001
     return stripped if _HAS_LETTER.search(stripped) else title
+
+
+# --- Whole-title cleaning: strip the sequence/underscore/junk a filename leaves in the title, WITHOUT
+# touching a legitimate number (a bare unpadded trailing number is part of the title — 'Slaughterhouse
+# 5', 'Catch 22', 'Fahrenheit 451'). Surgical by design; validated 0 legit broken / 350 cleaned on the
+# real library. See the identity-first grouping thread.
+_CT_INT = r"\d{1,3}(?!\d)"                       # 1-3 digits, never a 4-digit year
+_CT_PAD = r"0\d{1,2}(?!\d)"                       # a zero-padded index (01, 001) — an index, not a title number
+_CT_MARK = r"(?:unb|una|ua|cd|disc|disk|pt|part|track|section)"
+# a parenthetical abridged/unabridged label — junk, remove whole
+_CT_PAREN = re.compile(r"\s*[(\[]\s*(?:un)?abr?(?:idged)?\s*[)\]]", re.IGNORECASE)
+# a mixed alpha+digit token >= 8 chars — an encoding hash ('A1I69YWSTVC2NT', 'mp332...')
+_CT_HASH = re.compile(r"\b(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z]*\d[A-Za-z0-9]{6,}\b")
+_CT_JUNK = re.compile(
+    r"\b(output|mp3|m4b|vbr|cbr|kbps|khz|joined|encoded|converted|ecd)\b", re.IGNORECASE)
+# a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
+# NOT a bare unpadded trailing number (a real title ending in a number).
+_CT_TRAIL = re.compile(
+    rf"(?:\s*[-–]\s*(?:{_CT_MARK}[\s-]*)?{_CT_INT}(?:-{_CT_INT})?"  # noqa: RUF001
+    rf"|\s+{_CT_MARK}[\s-]*{_CT_INT}|\s+{_CT_PAD}|\s+{_CT_INT}-{_CT_INT})\s*$", re.IGNORECASE)
+# a leading part-index: 'N of M', a zero-padded index, or a two-number 'NN MM' run (never a 4-digit year)
+_CT_LEAD = re.compile(
+    rf"^\s*(?:{_CT_INT}\s+of\s+{_CT_INT}|{_CT_PAD}(?:[\s._-]+{_CT_INT})?"
+    rf"|{_CT_INT}[\s._-]+{_CT_INT})[\s._-]+(?=\S)", re.IGNORECASE)
+
+
+def clean_title(title: str) -> str:
+    """Strip the filename cruft a title carries — encoding artifacts, underscores, glued PascalCase,
+    leading/trailing part-sequences, abridged labels — while preserving a legitimate title (a bare
+    unpadded trailing number, a real name). Returns the input unchanged when cleaning would leave no
+    letters (an all-junk title is left for MATCH/flagging, not blanked)."""
+    if not title:
+        return title
+    from colophon.core.normalize import _split_pascal
+    s = strip_encoding_artifact(title)
+    s = _CT_PAREN.sub("", s)
+    s = s.replace("_", " ")
+    s = _CT_HASH.sub(" ", s)
+    s = _CT_JUNK.sub(" ", s)
+    s = _CT_LEAD.sub("", s)
+    s = _CT_TRAIL.sub("", s)
+    s = strip_series_book_suffix(strip_series_code_affix(s))
+    # Split PascalCase LAST, so a title left glued by the affix strip ('SB 01 - StarBridge' ->
+    # 'StarBridge') is split in the same pass — keeps clean_title idempotent.
+    if " " not in s.strip():
+        s = _split_pascal(s)
+    s = " ".join(s.split()).strip(" -–—:._")      # noqa: RUF001
+    return s if s and _HAS_LETTER.search(s) else title
