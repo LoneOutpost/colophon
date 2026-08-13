@@ -21,19 +21,20 @@ from colophon.core.sequence_affix import strip_encoding_artifact
 # 'book', not 'bk').
 _SERIES_MARKER = re.compile(r"(?:\bbook|\bvol|\bvolume|bk)\s*\d", re.IGNORECASE)
 
-# A token that is NOTHING but an index or disc marker ('1/9', '01-12', '001 of 153', 'CD01') — never a
-# title, drop it whole.
+# A token that is NOTHING but an index or disc/part marker ('1/9', '01-12', '001 of 153', 'CD01',
+# 'Part 3') — never a title, drop it whole.
 _TOK_PURE_INDEX = re.compile(
-    r"^\s*(?:cd|disc|disk|dvd)?\s*\.?\s*\d{1,3}(?:\s*(?:of|/|[-–])\s*\d{1,3})?\s*$", re.IGNORECASE)  # noqa: RUF001
-# A leading disc/CD marker or a padded / 'N of M' index prefix glued to the title ('CD01 Some Title',
-# '01 The Coming') — strip it, keep the title after.
+    r"^\s*(?:cd|disc|disk|dvd|part|pt)?\s*\.?\s*\d{1,3}(?:\s*(?:of|/|[-–])\s*\d{1,3})?\s*$", re.IGNORECASE)  # noqa: RUF001
+# A leading disc/CD/part marker or a padded / 'N of M' index prefix glued to the title ('CD01 Some
+# Title', '01 The Coming') — strip it, keep the title after.
 _TOK_LEAD_MARK = re.compile(
-    r"^(?:(?:cd|disc|disk|dvd)\s*\.?\s*\d+|0\d{1,2}(?!\d)|\d{1,3}(?!\d)\s*(?:of|/)\s*\d{1,3})[\s.\-_]+(?=\S)",
+    r"^(?:(?:cd|disc|disk|dvd|part|pt)\s*\.?\s*\d+|0\d{1,2}(?!\d)|\d{1,3}(?!\d)\s*(?:of|/)\s*\d{1,3})[\s.\-_]+(?=\S)",
     re.IGNORECASE)
-# A trailing padded index / N-N range / disc marker — strip it (NOT a bare unpadded number, which is
-# part of the title: 'Slaughterhouse 5').
+# A trailing padded index / N-N range / disc / part marker — strip it (NOT a bare unpadded number,
+# which is part of the title: 'Slaughterhouse 5'). 'Dark Jenny-Part01' -> 'Dark Jenny' so the cohort
+# can see the constant title under a glued per-file part index.
 _TOK_TRAIL_MARK = re.compile(
-    r"[\s.\-_]+(?:(?:cd|disc|disk|dvd)\s*\.?\s*\d+(?:\s*(?:of|[-./])\s*\d+)?"
+    r"[\s.\-_]+(?:(?:cd|disc|disk|dvd|part|pt)\s*\.?\s*\d+(?:\s*(?:of|[-./])\s*\d+)?"
     r"|0\d{1,2}(?!\d)|\d{1,3}[-/]\d{1,3})\s*$", re.IGNORECASE)
 
 

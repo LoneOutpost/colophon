@@ -57,6 +57,15 @@ def test_title_candidates_cleans_disc_and_index_tokens():
         == ["Innocence In Death"]
 
 
+def test_title_candidates_strips_a_glued_part_index():
+    # a per-file chapter part index glued to the title ('Dark Jenny-Part01') is stripped, so the
+    # grouped files share the constant title 'Dark Jenny' for the cohort to recover.
+    assert title_candidates("Dark Jenny-Part01", authors=[], series=[]) == ["Dark Jenny"]
+    assert title_candidates("Dark Jenny - Part 12", authors=[], series=[]) == ["Dark Jenny"]
+    # a real word 'Part' not followed by a number is untouched
+    assert title_candidates("Part of the Pattern", authors=[], series=[]) == ["Part of the Pattern"]
+
+
 @pytest.mark.parametrize("junk", ["Unb", "UA 1@64.44m", "UA 1-64.44m"])
 def test_clean_token_drops_a_bare_encoding_marker(junk):
     assert _clean_token(junk) is None
