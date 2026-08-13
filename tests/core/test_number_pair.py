@@ -41,3 +41,14 @@ def test_no_pair_returns_value_unchanged():
 def test_empty():
     assert extract_enumeration("") == ("", [])
     assert extract_enumeration(None) == ("", [])
+
+
+def test_sequence_pairs_broad_separators_and_underscores():
+    from colophon.core.number_pair import extract_sequence_pairs
+    # the Gibran glued form '01_28_...' -> (1, 28); distinct chapter text ignored
+    assert [(p.n, p.m) for p in extract_sequence_pairs("01_28_The_Coming_of_the_Ship")] == [(1, 28)]
+    assert [(p.n, p.m) for p in extract_sequence_pairs("Disk 1 within 22 discs")] == [(1, 22)]
+    assert [(p.n, p.m) for p in extract_sequence_pairs("1-22")] == [(1, 22)]
+    assert [(p.n, p.m) for p in extract_sequence_pairs("3 out of 8")] == [(3, 8)]
+    # 4-digit years never participate
+    assert extract_sequence_pairs("2001 2010") == []

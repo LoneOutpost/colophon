@@ -19,6 +19,11 @@ from dataclasses import dataclass
 
 _INT = r"\d{1,3}(?!\d)"                                       # 1-3 digits, never a 4-digit year
 _ENUM = re.compile(rf"\b({_INT})\s*(?:of|/)\s*({_INT})\b", re.IGNORECASE)
+# Broad separator for COHORT-VALIDATED callers only: of / out of / within / slash / hyphen / bare
+# space (underscores are folded to space first). Too permissive for a lone string — the grouping
+# axiom disambiguates with sibling context (M constant across the cohort == the file count).
+_SEQ_SEP = r"(?:\s*(?:of|out\s+of|within|[/-])\s*|\s+)"
+_SEQ_PAIR = re.compile(rf"\b({_INT}){_SEQ_SEP}({_INT})\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -40,3 +45,15 @@ def extract_enumeration(value: str | None) -> tuple[str, list[Enumeration]]:
         return value, []
     residue = " ".join(_ENUM.sub(" ", value).split())
     return residue, pairs
+
+
+def extract_sequence_pairs(value: str | None) -> list[Enumeration]:
+    """Every `N <sep> M` pair in `value` under the BROAD separator set (of / out of / within / `/` /
+    `-` / bare space; underscores folded to space first). For cohort-validated callers only (the
+    grouping number-pair axiom) — do NOT use on a lone string to judge junk, it is too permissive;
+    `extract_enumeration` is the strict field-junk form. 4-digit numbers never participate."""
+    if not value:
+        return []
+    s = value.replace("_", " ")
+    return [Enumeration(int(m.group(1)), int(m.group(2)), (m.start(), m.end()))
+            for m in _SEQ_PAIR.finditer(s)]
