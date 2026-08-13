@@ -55,3 +55,26 @@ def test_title_candidates_cleans_disc_and_index_tokens():
     # a filename with author paren + a CD-track title token -> just the clean title
     assert title_candidates("(JD Robb) Innocence In Death CD03-01", authors=["J. D. Robb"], series=[]) \
         == ["Innocence In Death"]
+
+
+@pytest.mark.parametrize("junk", ["Unb", "UA 1@64.44m", "UA 1-64.44m"])
+def test_clean_token_drops_a_bare_encoding_marker(junk):
+    assert _clean_token(junk) is None
+
+
+@pytest.mark.parametrize("dirty,clean", [
+    ("The Hive UA 1@64.22m", "The Hive"),               # trailing UA@bitrate
+    ("The Florians UA", "The Florians"),                 # trailing bare UA
+    ("{Arcane Society #1} Second Sight", "Second Sight"),  # title after the ref close-brace
+    ("Tobias March #1} Slightly Shady", "Slightly Shady"),
+])
+def test_clean_token_strips_encoding_and_curly_ref(dirty, clean):
+    assert _clean_token(dirty) == clean
+
+
+def test_clean_token_drops_a_lone_curly_ref_fragment():
+    assert _clean_token("{Lavinia Lake") is None
+
+
+def test_clean_token_keeps_a_word_that_merely_contains_ua():
+    assert _clean_token("Ultramarine") == "Ultramarine"     # \bua\b does not match mid-word

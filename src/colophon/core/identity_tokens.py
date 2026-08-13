@@ -12,6 +12,7 @@ import re
 from colophon.core.cohort_constancy import _tokens
 from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.normalize import normalize_key
+from colophon.core.sequence_affix import strip_encoding_artifact
 
 _SERIES_MARKER = re.compile(r"\b(?:bk|book|vol|volume)\s*\d", re.IGNORECASE)
 
@@ -31,9 +32,20 @@ _TOK_TRAIL_MARK = re.compile(
     r"|0\d{1,2}(?!\d)|\d{1,3}[-/]\d{1,3})\s*$", re.IGNORECASE)
 
 
+# A bare/trailing abridged-edition marker ('Unb', 'UA', 'UA 1-64.44m') — encoding noise, strip it.
+_TOK_ENCODING = re.compile(
+    r"(?i)\b(?:ua|unb|una|unabr(?:idged)?|abridged)\b\s*\d*\s*(?:[@\-]\s*[\w.]+)?")
+
+
 def _clean_token(tok: str) -> str | None:
-    """Strip a leading/trailing index or disc marker off a title token; return None if the token is
-    nothing but such a marker. A bare unpadded number or a 4-digit year survives (part of the title)."""
+    """Clean a title token: unwrap a curly series-ref fragment (the title follows the closing brace),
+    strip encoding artifacts and a leading/trailing index or disc marker. Returns None if nothing but a
+    marker is left. A bare unpadded number or a 4-digit year survives (part of the title)."""
+    if "}" in tok:                      # '{Arcane Society #1} Second Sight' -> 'Second Sight'
+        tok = tok.rsplit("}", 1)[-1]
+    elif "{" in tok:                     # a lone '{Lavinia Lake' fragment -> the ref, keep nothing
+        tok = tok.split("{", 1)[0]
+    tok = _TOK_ENCODING.sub(" ", strip_encoding_artifact(tok))
     if _TOK_PURE_INDEX.match(tok):
         return None
     t = _TOK_TRAIL_MARK.sub("", _TOK_LEAD_MARK.sub("", tok))
