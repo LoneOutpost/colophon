@@ -1024,9 +1024,10 @@ async def scan_dialog(
                     value="scan",
                 ).props("dense")
                 ui.label(
-                    "Scan reads your files. Re-identify refreshes identification from tags already "
-                    "read, without re-reading your audio files. Repair fixes authors that were "
-                    "mistagged with a title (changes fields)."
+                    "Scan reads your audio files from disk and is the only mode that re-groups files "
+                    "into books. Re-identify re-runs identification from tags already read, without "
+                    "re-reading your audio, and leaves grouping unchanged. Repair applies reviewed "
+                    "author fixes to flagged books."
                 ).classes("text-caption colophon-muted")
 
                 disk = ui.column().classes("w-full")
@@ -1067,8 +1068,11 @@ async def scan_dialog(
                         value="new_changed",
                     ).props("dense")
                     ui.label(
-                        "New & changed: add new books and re-process changed folders. "
-                        "Rebuild all: force a full re-derive of everything in scope."
+                        "New & changed: add new books and re-derive only folders whose files changed "
+                        "on disk; untouched books and their grouping are left as-is. Fastest. "
+                        "Rebuild all: re-read every file and re-derive everything in scope, including "
+                        "re-grouping files into books, so it is the only mode that can un-fragment a "
+                        "book that was split into parts. Slowest."
                     ).classes("text-caption colophon-muted")
 
                     with ui.row().classes("w-full justify-end q-gutter-sm q-mt-sm"):
@@ -1121,8 +1125,10 @@ async def scan_dialog(
                 with recompute:
                     ui.label("Scope: entire library").classes("text-caption colophon-muted")
                     ui.label(
-                        "Re-runs identification from the tags we already read, without re-reading "
-                        "your audio files. To re-read files from disk, use Scan then Rebuild all."
+                        "Re-runs identification for every book (authors, titles, series, confidence, "
+                        "and review flags) from the tags already read, without re-reading your audio "
+                        "files. Manual edits and matched results are preserved, and files are not "
+                        "re-grouped. To re-group split books, use Scan with Rebuild all."
                     ).classes("text-caption colophon-muted")
 
                     async def _run_recompute() -> None:
