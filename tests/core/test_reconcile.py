@@ -153,8 +153,9 @@ def test_datafile_title_used_when_no_embedded_title():
 
 def test_reconcile_without_datafile_still_works():
     book = _unit()
-    reconcile(book, embedded=EmbeddedTags(title="T", artist="A"), datafile=None, dir_title=None, filename_fields={})
-    assert book.title == "T" and book.authors == ["A"]
+    reconcile(book, embedded=EmbeddedTags(title="The Title", artist="Ann Author"),
+              datafile=None, dir_title=None, filename_fields={})
+    assert book.title == "The Title" and book.authors == ["Ann Author"]
 
 
 def test_comma_joined_embedded_artist_splits_into_authors():

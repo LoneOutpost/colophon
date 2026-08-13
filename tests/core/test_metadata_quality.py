@@ -37,7 +37,8 @@ def test_is_structural_marker_true_cases():
     from colophon.core.metadata_quality import is_structural_marker as m
     for v in ["Chapter 01", "Chapter", "chapter", "Part 3", "Part", "Disc", "Disc 2", "CD 1",
               "Track 7", "Track 007 - Opening Theme", "Volume 1", "Vol 2", "", "   ", "15",
-              "01 of 15", "Unknown Album", "Untitled"]:
+              "01 of 15", "Unknown Album", "Untitled",
+              "R", "G", "A", "z"]:   # a single-char A-Z index-bucket folder is not an identity value
         assert m(v) is True, v
 
 
