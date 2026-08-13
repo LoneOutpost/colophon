@@ -873,14 +873,21 @@ def test_value_for_rejects_junk_author_fallback():
 
 def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
     from colophon.core.graph_classify import classify_graph
-    from colophon.core.models import FindingCode
+    from colophon.core.models import EmbeddedTags, FindingCode, SourceFile
     from colophon.core.node_classify import classify_nodes
 
     root = tmp_path
     folder = str(root / "Isaac Asimov")
+
+    def tagged(artist):
+        b = _book(folder, authors=[artist], prov="tag")
+        b.source_files = [SourceFile(path=Path(folder) / f"{artist}.opus", size=1,
+                                     duration_seconds=0.0, ext="opus", tags=EmbeddedTags(artist=artist))]
+        return b
+
     # three books corroborate the folder author; one dissents with a narrator-style tag
-    corroborate = [_book(folder, authors=["Isaac Asimov"], prov="tag") for _ in range(3)]
-    dissent = _book(folder, authors=["Some Narrator"], prov="tag")
+    corroborate = [tagged("Isaac Asimov") for _ in range(3)]
+    dissent = tagged("Some Narrator")
     g = _graph_with({folder: corroborate + [dissent]}, root)
     classify_graph(g, root=root)
     classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})

@@ -809,6 +809,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
+    from colophon.core.metadata_quality import author_junk
     from colophon.core.models import Finding, FindingCode, FindingSeverity, Provenance
     from colophon.core.normalize import normalize_key, proper_case_if_shouting
     from colophon.core.people import split_people
@@ -900,16 +901,18 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             elif chosen is not None and classified is not None \
                     and book.authors == split_people(classified):
                 book.provenance["authors"] = Provenance.GRAPHING.value
-        # Conflict flag: the ballot weighed >= 2 DISTINCT non-junk author values (a tag naming one
-        # person, the folder/classified node another) — a real disagreement (a misfiled folder, a
-        # narrator tag), not junk we overcame (a junk loser is weight 0, excluded here). We cannot
-        # always pick right, so surface it via METADATA_CONFLICT for human review.
-        distinct = {normalize_key(e.value): e.value for e in r.evidence if e.weight > 0 and e.value}
-        if len(distinct) >= 2 and not any(
-            f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
-            for f in book.findings
-        ):
+        # Conflict flag: the book's own embedded tag artist and the classified folder author name
+        # DIFFERENT people (a misfiled folder, a narrator/misspelled tag) — both real (non-junk). We
+        # compare the committed sources directly, not the transient ballot, so it fires the same on a
+        # reload (where the ballot may carry only one side) as on a rebuild. Junk on either side is
+        # noise we overcame, not a conflict. We cannot always pick right, so flag it for review.
+        tag_artist = (book.source_files[0].tags.artist
+                      if book.source_files and book.source_files[0].tags else None)
+        if (tag_artist and classified and author_junk(tag_artist) == 0 and author_junk(classified) == 0
+                and normalize_key(tag_artist) != normalize_key(classified)
+                and not any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+                            for f in book.findings)):
             book.findings.append(Finding(
                 code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
-                detail="author: " + " vs ".join(f"'{v}'" for v in sorted(distinct.values())),
+                detail=f"author: tag '{tag_artist}' vs folder '{classified}'",
             ))
