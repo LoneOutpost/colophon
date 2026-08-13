@@ -47,7 +47,8 @@ def is_index_title(value: str | None) -> bool:
 
 
 def is_structural_marker(value: str | None) -> bool:
-    """A positional/structural marker, not an identity value: blank, a rip placeholder ("Track 3",
+    """A positional/structural marker, not an identity value: blank, a single character (an A-Z
+    alphabetical index-bucket folder like "R"/"G", never a title/author), a rip placeholder ("Track 3",
     "Unknown Album"), a leading track/chapter marker ("Track 007 - Opening"), a bare/track-of-total
     index ("15", "01 of 15"), or a bare marker word ("Chapter", "Part"). The universal gate wherever a
     tag value would name an IDENTITY (work-grouping, series, title, author). A structural marker still
@@ -56,7 +57,7 @@ def is_structural_marker(value: str | None) -> bool:
     if not value or not value.strip():
         return True
     v = value.strip()
-    return (is_placeholder_title(v) or bool(_TRACK_PREFIX.match(v))
+    return (len(v) == 1 or is_placeholder_title(v) or bool(_TRACK_PREFIX.match(v))
             or is_index_title(v) or bool(_MARKER_WORD.match(v)))
 
 
