@@ -130,6 +130,9 @@ _CT_PAREN = re.compile(r"\s*[(\[]\s*(?:un)?abr?(?:idged)?\s*[)\]]", re.IGNORECAS
 _CT_HASH = re.compile(r"\b(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z]*\d[A-Za-z0-9]{6,}\b")
 _CT_JUNK = re.compile(
     r"\b(output|mp3|m4b|vbr|cbr|kbps|khz|joined|encoded|converted|ecd)\b", re.IGNORECASE)
+# a trailing abridged/unabridged edition marker, sans parens ('The Florians Unabridged' -> 'The
+# Florians'). Only the non-word forms — a bare 'Ua'/'Una' is too short to strip safely (a name).
+_CT_TRAIL_MARK = re.compile(r"[\s\-–_]+(?:unabridged|unabr|unab|unb|abridged)\s*$", re.IGNORECASE)  # noqa: RUF001
 # a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
 # NOT a bare unpadded trailing number (a real title ending in a number).
 _CT_TRAIL = re.compile(
@@ -156,6 +159,8 @@ def clean_title(title: str) -> str:
     s = _CT_JUNK.sub(" ", s)
     s = _CT_LEAD.sub("", s)
     s = _CT_TRAIL.sub("", s)
+    if _HAS_LETTER.search(_CT_TRAIL_MARK.sub("", s)):   # strip a trailing edition marker unless it's the whole title
+        s = _CT_TRAIL_MARK.sub("", s)
     s = strip_series_book_suffix(strip_series_code_affix(s))
     # Split PascalCase LAST, so a title left glued by the affix strip ('SB 01 - StarBridge' ->
     # 'StarBridge') is split in the same pass — keeps clean_title idempotent.
