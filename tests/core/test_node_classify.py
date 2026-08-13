@@ -867,3 +867,5 @@ def test_value_for_rejects_junk_author_fallback():
     named = [Evidence("author", 3.0, "tag artist", value="Diana Gabaldon")]
     assert _value_for("author", named, None) == "Diana Gabaldon"
     assert _value_for("series", [Evidence("series", 2.0, "ramp")], "Outlander") == "Outlander"
+    # a series-labelled folder name is not an author value either -> rejected to the parent author
+    assert _value_for("author", structural, "Acorna (Series) r") is None

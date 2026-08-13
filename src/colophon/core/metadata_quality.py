@@ -84,6 +84,9 @@ def is_title_shaped_author(author: str | None, title: str | None = None) -> bool
 # value can be clean for one field and junk for another, so the scorers are per-field.
 _SEGMENT_SEP = re.compile(r"\.\s*-\s*\.")                    # a ".-." folder separator smuggled in whole
 _BARE_PAREN_NUM = re.compile(r"^\s*[(\[]\s*\d{1,3}\s*[)\]]\s*$")            # "(5)", "[12]"
+# A bracketed "series" label ("Acorna (Series) r", "[Series]") — a series folder's name, never an
+# author. High precision: the bracket convention is unambiguous, so a real author is not suppressed.
+_SERIES_LABEL = re.compile(r"[(\[]\s*series\b", re.IGNORECASE)
 _LEADING_INDEX = re.compile(r"^\s*\d{1,3}(?!\d)\s*[-_.)\]]")               # "07-", "01_", "18 -"; not "2001 -"
 
 
@@ -102,8 +105,8 @@ def author_junk(value: str | None) -> float:
     if not value or not value.strip():
         return 1.0
     v = value.strip()
-    if (is_structural_marker(v) or is_title_shaped_author(v)
-            or _SEGMENT_SEP.search(v) or _BARE_PAREN_NUM.match(v)):
+    if (is_structural_marker(v) or is_title_shaped_author(v) or _SEGMENT_SEP.search(v)
+            or _BARE_PAREN_NUM.match(v) or _SERIES_LABEL.search(v)):
         return 1.0
     if _has_enum_pair(v):
         return 0.9
