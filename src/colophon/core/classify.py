@@ -501,9 +501,19 @@ def classify(
         content_kind = ContentKind.SINGLE
     elif _fully_untagged(features):
         cr = cluster([f.path for f in features])
-        works = cr.detected_works
-        group_signals = cr.signals
-        content_kind = cr.content_kind
+        if len(cr.detected_works) > 1 and resolve_grouping(features).outcome == "one":
+            # The clusterer shattered a numbered single book into per-chapter works (its per-file
+            # signatures differ, e.g. '01_28_The_Coming', '02_28_On_Love', ...), but the one-vs-many
+            # election recognizes the complete numbered sequence as ONE book split into parts. Collapse
+            # to a single work. The clusterer's own labels are kept whenever it already returns one work
+            # (a glued '01Cujo' residue), so this only fires on genuine shatter.
+            works = [_to_work(features)]
+            group_signals = [_signal("grouping_one_book", 2, "files form one numbered book")]
+            content_kind = ContentKind.SINGLE
+        else:
+            works = cr.detected_works
+            group_signals = cr.signals
+            content_kind = cr.content_kind
     else:
         works, group_signals = group_works(features)
         content_kind = content_kind_for(works, group_signals)

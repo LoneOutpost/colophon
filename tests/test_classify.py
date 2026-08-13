@@ -146,6 +146,25 @@ def test_untagged_distinct_files_are_multi():
     assert content_kind_for(works, signals) is CK.MULTI
 
 
+def test_untagged_numbered_sequence_distinct_titles_is_one_book():
+    # A fully-untagged folder whose files carry a complete 'NN_28_<distinct chapter title>' sequence
+    # is ONE book split into parts (Kahlil Gibran / The Prophet). The number-pair grouping axiom must
+    # apply on the untagged classify() path too — the filename clusterer alone shatters the distinct
+    # per-chapter titles into 28 works because it never consults the one-vs-many election.
+    titles = ["The_Coming_of_the_Ship", "On_Love", "On_Marriage", "On_Children", "On_Giving",
+              "On_Eating", "On_Work", "On_Joy", "On_Houses", "On_Clothes", "On_Buying", "On_Crime",
+              "On_Laws", "On_Freedom", "On_Reason", "On_Pain", "On_Self", "On_Teaching", "On_Friend",
+              "On_Talking", "On_Time", "On_Good", "On_Prayer", "On_Pleasure", "On_Beauty",
+              "On_Religion", "On_Death", "The_Farewell"]
+    feats = [_feat(f"/a/d/{i:02d}_28_{t}.mp3") for i, t in enumerate(titles, 1)]
+    for f in feats:  # short chapters, not whole books — keep the duration-safety axiom from firing
+        object.__setattr__(f, "duration_seconds", 180.0)
+    r = classify(Path("/a/Kahlil Gibran.-.The Prophet"), Path("/a"), feats,
+                 template_pattern=TEMPLATE, scheme_patterns=SCHEME)
+    assert len(r.detected_works) == 1
+    assert r.content_kind is CK.SINGLE
+
+
 def test_single_file_prefers_title_tag_over_album_for_label():
     # A single-file book where the Album tag holds the *series* ("Thrawn Ascendancy") and the Title
     # tag holds the real book title ("Chaos Rising"). The work must be labeled from the Title tag,
