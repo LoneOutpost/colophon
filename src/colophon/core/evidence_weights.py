@@ -42,6 +42,10 @@ W_A_FOLDER = 2.5           # a raw author-depth folder name (structural, unclass
 # (a well-populated author folder) this exceeds W_A_TAG, so a confident author folder beats a lone tag
 # — but it stays a ballot, so a tag plus corroboration can still overturn a shakier node.
 W_A_FOLDER_STRONG = 4.0
+# The book's own leaf folder naming its author via the `.-.` convention (`Author.-.Title`). Above a
+# bucket-depth folder guess (W_A_FOLDER) and the filename $Author parse, below a real tag (W_A_TAG) —
+# it supplies the author the depth logic misses, without overriding a tagged author.
+W_A_LEAF_FOLDER = 2.75
 W_A_FILENAME = 1.5         # filename $Author (positional pattern parse)
 W_A_CONSENSUS_BASE = 0.5   # sibling tag/match consensus: BASE + STEP*n, capped
 W_A_CONSENSUS_STEP = 0.5

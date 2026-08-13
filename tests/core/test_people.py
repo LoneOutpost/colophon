@@ -59,3 +59,17 @@ def test_hint_separator_absent_returns_single_element():
 
 def test_hint_multiple_separators():
     assert split_people("A; B & C", separators=[";", "&"]) == ["A", "B", "C"]
+
+
+def test_looks_like_person_name_accepts_real_author_shapes():
+    from colophon.core.people import looks_like_person_name
+    for s in ["Kim Stanley Robinson", "AC Crispin", "A D Trosper", "A. Lee Martinez",
+              "A Wrighton", "Agatha Christie", "AJ Hartley and David Hewson", "L. Frank Baum"]:
+        assert looks_like_person_name(s), s
+
+
+def test_looks_like_person_name_rejects_non_names():
+    from colophon.core.people import looks_like_person_name
+    for s in ["1984", "[Ciaphas Cain 13] Dead in the Water", "the collected works",
+              "The Complete Works of Someone Big Long", "", None]:
+        assert not looks_like_person_name(s), s

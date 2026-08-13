@@ -809,6 +809,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
+    from colophon.core.identity_tokens import leaf_folder_author
     from colophon.core.metadata_quality import author_junk
     from colophon.core.models import Finding, FindingCode, FindingSeverity, Provenance
     from colophon.core.normalize import normalize_key, proper_case_if_shouting
@@ -868,6 +869,17 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         classified = (proper_case_if_shouting(chosen.author)
                       if (chosen is not None and chosen.author) else None)
         adf = proper_case_if_shouting(layout.path.name) if layout is not None else None
+        # The book's own leaf folder may declare its author via the `.-.` convention
+        # (`Author.-.Title`) — the case the depth logic misses when there is no author-node ancestor.
+        # Only supply it as a CORRECTIVE vote: if the committed author already names the same person
+        # (any shared name), skip it so a well-formatted 'Robert A. Heinlein' is not churned down to the
+        # leaf's 'Robert A Heinlein'. It fires only when the current author is genuinely different (a
+        # title smuggled in as the author) or absent.
+        leaf_author = leaf_folder_author(book.source_folder.name)
+        if leaf_author and book.authors:
+            cur_keys = {normalize_key(a) for a in book.authors}
+            if any(normalize_key(p) in cur_keys for p in split_people(leaf_author)):
+                leaf_author = None
         # Filename $Author (positional pattern parse).
         filename_author = None
         if pattern is not None and book.source_files:
@@ -887,7 +899,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         r = resolve_author(book, author_depth_folder=adf, classified_author_name=classified,
                            classified_author_confidence=(chosen.kind_confidence if node_evidenced else 0.0),
                            datafile_authors=[], filename_author=filename_author,
-                           sibling_consensus={})
+                           sibling_consensus={}, leaf_folder_author=leaf_author)
         # Provenance of a "folder"-sourced win. resolve_author collapses the classified-author-node
         # and the raw author-depth folder into one "folder" source, so restore the intended tier here:
         #   - value UNCHANGED from the book's prior author -> the folder only corroborated; keep the
