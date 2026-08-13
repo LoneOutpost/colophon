@@ -255,21 +255,25 @@ def test_declared_franchise_classifies_folder_franchise(tmp_path):
 
     root = tmp_path
     folder = str(root / "Star Trek")
-    # two DISTINCT-author books loose in one folder -> a container, no author consensus
-    books = [_book(folder, authors=["Judith Reeves-Stevens"], prov="tag"),
-             _book(folder, authors=["Diane Duane"], prov="tag")]
-    g = _graph_with({folder: books}, root)
-    allbooks = [bn.book for bn in g.books.values()]
 
-    def kind_of(declared):
+    def run(declared):
+        # fresh graph + books per scenario so the structural-guess run's author fill-down does not
+        # leak into the declared-franchise run.
+        books = [_book(folder, authors=["Judith Reeves-Stevens"], prov="tag"),
+                 _book(folder, authors=["Diane Duane"], prov="tag")]
+        g = _graph_with({folder: books}, root)
         classify_graph(g, root=root)
-        classify_nodes(g, allbooks, root=root, overrides={}, known_franchises=declared)
-        return g.directories[DirectoryNode.id_for(root / "Star Trek")].kind
+        classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={},
+                       known_franchises=declared)
+        return g.directories[DirectoryNode.id_for(root / "Star Trek")].kind, books
 
-    assert kind_of({}) == "author"                              # structural author guess
-    assert kind_of({"star trek": "Star Trek"}) == "franchise"   # declaration wins (4.0 > 2.0)
-    # a franchise node never bleeds its name into the books beneath it (franchise is not an
-    # author tier) — each book keeps its own tag author
+    assert run({})[0] == "author"                                        # structural author guess
+    # A DECLARED franchise is a non-author tier: it classifies franchise (declaration 4.0 > 2.0) and
+    # never authors its books — each keeps its own tag author. (An *undeclared* structural author guess
+    # standing in as the author is an accepted substitution for vast mixed-media franchises, so that
+    # case is not constrained here.)
+    kind, books = run({"star trek": "Star Trek"})
+    assert kind == "franchise"
     assert books[0].authors == ["Judith Reeves-Stevens"]
     assert books[1].authors == ["Diane Duane"]
 
@@ -863,3 +867,37 @@ def test_value_for_rejects_junk_author_fallback():
     named = [Evidence("author", 3.0, "tag artist", value="Diana Gabaldon")]
     assert _value_for("author", named, None) == "Diana Gabaldon"
     assert _value_for("series", [Evidence("series", 2.0, "ramp")], "Outlander") == "Outlander"
+    # a series-labelled folder name is not an author value either -> rejected to the parent author
+    assert _value_for("author", structural, "Acorna (Series) r") is None
+
+
+def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.models import EmbeddedTags, FindingCode, SourceFile
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Isaac Asimov")
+
+    def tagged(artist):
+        b = _book(folder, authors=[artist], prov="tag")
+        b.source_files = [SourceFile(path=Path(folder) / f"{artist}.opus", size=1,
+                                     duration_seconds=0.0, ext="opus", tags=EmbeddedTags(artist=artist))]
+        return b
+
+    # three books corroborate the folder author; one dissents with a narrator-style tag; one adds a
+    # co-author (a superset of the folder author, not a different person -> must NOT flag)
+    corroborate = [tagged("Isaac Asimov") for _ in range(3)]
+    dissent = tagged("Some Narrator")
+    coauthor = tagged("Isaac Asimov & Robert Silverberg")
+    g = _graph_with({folder: corroborate + [dissent, coauthor]}, root)
+    classify_graph(g, root=root)
+    classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})
+
+    # the dissenting book: its tag disagrees with the corroborated folder author -> flagged for review
+    assert any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+               for f in dissent.findings), dissent.findings
+    # a corroborating book (tag == folder author) is NOT a conflict
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in corroborate[0].findings)
+    # a co-author superset (same primary, extra name) is format/completeness, not a conflict
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in coauthor.findings)

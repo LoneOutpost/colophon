@@ -22,6 +22,11 @@ class TestAuthorJunk:
         # census false positive: the parens are a nickname, not a series number
         assert author_junk("E. E. (Doc) Smith") == 0.0
 
+    def test_bracketed_series_label_is_not_an_author(self):
+        # a series folder's name ('Acorna (Series) r') must never stand in as an author
+        assert author_junk("Acorna (Series) r") == 1.0
+        assert author_junk("Series of Unfortunate Events") == 0.0   # no bracket -> a real name, spared
+
     def test_a_lone_number_is_not_junk(self):
         # "Top 100" / a year: the pair is the signal, not the digit
         assert author_junk("Top 100 Sci-Fi Books") == 0.0

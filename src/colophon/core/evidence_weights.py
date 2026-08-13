@@ -36,7 +36,12 @@ W_BUCKET_PER_CHILD = 0.5
 # --- Author field-value resolution (this slice) ---
 W_A_TAG = 3.0              # embedded artist tag — a prior, not a guarantee
 W_A_DATAFILE = 3.0         # datafile sidecar author
-W_A_FOLDER = 2.5           # the author-depth folder name (structural)
+W_A_FOLDER = 2.5           # a raw author-depth folder name (structural, unclassified)
+# A CLASSIFIED author node scales from the W_A_FOLDER floor up to W_A_FOLDER_STRONG with its
+# kind_confidence (weight = W_A_FOLDER + conf * (W_A_FOLDER_STRONG - W_A_FOLDER)). At full confidence
+# (a well-populated author folder) this exceeds W_A_TAG, so a confident author folder beats a lone tag
+# — but it stays a ballot, so a tag plus corroboration can still overturn a shakier node.
+W_A_FOLDER_STRONG = 4.0
 W_A_FILENAME = 1.5         # filename $Author (positional pattern parse)
 W_A_CONSENSUS_BASE = 0.5   # sibling tag/match consensus: BASE + STEP*n, capped
 W_A_CONSENSUS_STEP = 0.5

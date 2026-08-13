@@ -809,8 +809,9 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
-    from colophon.core.models import Provenance
-    from colophon.core.normalize import proper_case_if_shouting
+    from colophon.core.metadata_quality import author_junk
+    from colophon.core.models import Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.normalize import normalize_key, proper_case_if_shouting
     from colophon.core.people import split_people
     from colophon.core.reconcile import _demote_numeric_author
     pattern = compile_template(filename_template) if filename_template else None
@@ -879,19 +880,47 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         # tag/datafile skip above preserves. Re-reading the raw sidecar would resurrect a handle the
         # hard stage deliberately dropped, so the ballot's datafile vote stays empty.
         prior_authors, prior_prov = list(book.authors), book.provenance.get("authors")
+        # The confidence boost applies only to an EVIDENCE-NAMED author node (its name is corroborated
+        # by the books' own tags/matches), not a bare folder-name fallback — so a misfiled or
+        # misspelled folder name stays at the floor and cannot overwrite a clean tag.
+        node_evidenced = chosen is not None and bool(evidenced.get(chosen.id))
         r = resolve_author(book, author_depth_folder=adf, classified_author_name=classified,
+                           classified_author_confidence=(chosen.kind_confidence if node_evidenced else 0.0),
                            datafile_authors=[], filename_author=filename_author,
                            sibling_consensus={})
         # Provenance of a "folder"-sourced win. resolve_author collapses the classified-author-node
         # and the raw author-depth folder into one "folder" source, so restore the intended tier here:
-        #   - value unchanged from the book's own weak (directory/filename) decompose -> keep it, so a
-        #     book already correctly attributed by its scheme does not churn to GRAPHING;
-        #   - inherited from a classified AUTHOR node (an evidence-named consensus/match OR a
-        #     structural author grouping) -> GRAPHING, the graph named this author;
+        #   - value UNCHANGED from the book's prior author -> the folder only corroborated; keep the
+        #     original provenance tier (a confident author node now out-weighs an agreeing tag, but a
+        #     tag/datafile/scheme that already named this author correctly must not churn to folder);
+        #   - value CHANGED, inherited from a classified AUTHOR node -> GRAPHING, the graph named it;
         #   - otherwise the raw author-depth folder-name fallback stays DIRECTORY.
         if r.source == "folder" and book.provenance.get("authors") == Provenance.DIRECTORY.value:
-            if book.authors == prior_authors and prior_prov in WEAK_PROV:
+            if book.authors == prior_authors and prior_prov:
                 book.provenance["authors"] = prior_prov
             elif chosen is not None and classified is not None \
                     and book.authors == split_people(classified):
                 book.provenance["authors"] = Provenance.GRAPHING.value
+        # Conflict flag: the book's own embedded tag artist and the classified folder author name
+        # DIFFERENT people (a misfiled folder, a narrator/misspelled tag) — both real (non-junk). We
+        # compare the committed sources directly, not the transient ballot, so it fires the same on a
+        # reload (where the ballot may carry only one side) as on a rebuild. Junk on either side is
+        # noise we overcame, not a conflict. We cannot always pick right, so flag it for review.
+        tag_artist = (book.source_files[0].tags.artist
+                      if book.source_files and book.source_files[0].tags else None)
+        # Compare PEOPLE-sets, not raw strings: a real conflict names a different person, not the same
+        # people in a different format ('Clarke, Baxter' vs 'Clarke and Baxter') or a dropped co-author
+        # ('McCaffrey & Scarborough' vs 'McCaffrey'). Suppress when the sets match or one contains the
+        # other; flag only a genuine disagreement.
+        tag_people = {normalize_key(p) for p in split_people(tag_artist or "")}
+        folder_people = {normalize_key(p) for p in split_people(classified or "")}
+        disagree = bool(tag_people and folder_people) and not (
+            tag_people <= folder_people or folder_people <= tag_people)
+        if (tag_artist and classified and author_junk(tag_artist) == 0 and author_junk(classified) == 0
+                and disagree
+                and not any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+                            for f in book.findings)):
+            book.findings.append(Finding(
+                code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail=f"author: tag '{tag_artist}' vs folder '{classified}'",
+            ))

@@ -137,3 +137,25 @@ def test_collect_author_evidence_canonicalizes_and_merges_variants():
         datafile_authors=[], filename_author=None, sibling_consensus={})
     vals = {e.value for e in ev if e.weight > 0}
     assert vals == {"George R. R. Martin"}
+
+
+def test_confident_classified_author_node_beats_a_lone_tag():
+    # A book whose only tag says one thing, sitting under a confidently-classified author folder that
+    # says another: the confident node (conf 1.0 -> weight 4.0) out-votes the lone tag (3.0).
+    b = _book("/lib/G/Diana Gabaldon", "01.opus", artist="Recorded Books")
+    r = resolve_author(
+        b, author_depth_folder=None, classified_author_name="Diana Gabaldon",
+        classified_author_confidence=1.0, datafile_authors=[], filename_author=None,
+        sibling_consensus={})
+    assert r.value == "Diana Gabaldon"
+
+
+def test_weak_classified_author_node_loses_to_a_tag():
+    # The same shape but a shaky node (conf 0.3 -> weight ~2.95, still below the tag 3.0): the tag wins,
+    # so the folder stays a ballot rather than a veto.
+    b = _book("/lib/G/Diana Gabaldon", "01.opus", artist="Recorded Books")
+    r = resolve_author(
+        b, author_depth_folder=None, classified_author_name="Diana Gabaldon",
+        classified_author_confidence=0.3, datafile_authors=[], filename_author=None,
+        sibling_consensus={})
+    assert r.value == "Recorded Books"
