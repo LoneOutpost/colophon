@@ -117,3 +117,20 @@ def test_leaf_folder_author_returns_none_without_convention_or_a_stopword_head()
     assert leaf_folder_author("[Ciaphas Cain 13] Dead in the Water") is None
     # a staging/format word heading a mis-formed leaf is not the author
     assert leaf_folder_author("Audiobook.-.Isaac Asimov.-.Robot Visions") is None
+
+
+def test_bare_name_number_series_prefix_dropped_when_a_title_follows():
+    # 'Renegades of Pern 08 - The Skies of Pern' — the bare 'Name NN' prefix (no Bk/#) is the series.
+    assert title_candidates("Renegades of Pern 08 - The Skies of Pern", authors=[], series=[]) \
+        == ["The Skies of Pern"]
+    assert title_candidates("Warlord 2 - Enemy of God", authors=[], series=[]) == ["Enemy of God"]
+    # a '.-.' middle segment is the series when a title segment follows it
+    assert title_candidates("J D Robb.-.Eve Dallas 11.-.Witness in Death",
+                            authors=["J D Robb"], series=[]) == ["Witness in Death"]
+
+
+def test_lone_name_number_is_kept_as_the_title():
+    # nothing plainer beside it -> a 'Name NN' IS the title, not a series ref.
+    assert title_candidates("Slaughterhouse 5", authors=[], series=[]) == ["Slaughterhouse 5"]
+    assert title_candidates("Apollo 13", authors=[], series=[]) == ["Apollo 13"]
+    assert title_candidates("Fahrenheit 451", authors=[], series=[]) == ["Fahrenheit 451"]

@@ -20,6 +20,11 @@ from colophon.core.sequence_affix import strip_encoding_artifact
 # 'bk' followed by a digit, so no boundary is needed and 'Textbook'/'Notebook' stay safe (they carry
 # 'book', not 'bk').
 _SERIES_MARKER = re.compile(r"(?:\bbook|\bvol|\bvolume|bk)\s*\d", re.IGNORECASE)
+# A bare `Name NN` series reference (no `Bk`/`#`): a letter-led segment ending in a space + a 1-3
+# digit number ('Eve Dallas 11', 'Renegades of Pern 08', 'Warlord 1'). Only DROPPED as a series
+# prefix when a plainer title segment sits beside it; a lone one ('Slaughterhouse 5', 'Apollo 13') is
+# kept as the title. A digit-led title ('2001 A Space Odyssey') never matches (must start with a letter).
+_BARE_SERIES_REF = re.compile(r"^[^\W\d].*\s\d{1,3}$")
 
 # A token that is NOTHING but an index or disc/part marker ('1/9', '01-12', '001 of 153', 'CD01',
 # 'Part 3') — never a title, drop it whole.
@@ -92,14 +97,19 @@ def title_candidates(name: str, *, authors: list[str], series: list[str]) -> lis
     if len(authors) > 1:                        # also drop the JOINED author form, not just each name
         akeys.update(normalize_key(sep.join(authors)) for sep in (" & ", " and ", ", "))
     skeys = {normalize_key(s) for s in series}
-    kept: list[str] = []
-    for raw in _tokens(name):
+    plain: list[str] = []       # clean title segments
+    bare_refs: list[str] = []   # a `Name NN` segment: a series prefix WHEN a plainer segment exists,
+    for raw in _tokens(name):   # else the title itself ('Slaughterhouse 5' with nothing plainer)
         if raw.startswith(("(", "[")):
             continue
         t = _clean_token(raw)
+        # Author, series-KEY, and an explicit `Bk/Vol/Book N` marker are always dropped.
         if t is None or normalize_key(t) in akeys or normalize_key(t) in skeys or _SERIES_MARKER.search(t):
             continue
-        kept.append(t)
+        # Test the bare `Name NN` shape on the RAW segment: _clean_token strips a padded trailing
+        # index ('Renegades of Pern 08' -> 'Renegades of Pern'), which would hide the number.
+        (bare_refs if _BARE_SERIES_REF.match(raw.strip()) else plain).append(t)
+    kept = plain or bare_refs
     if not kept:
         return []
     non_structural = [t for t in kept if not is_structural_marker(t)]
