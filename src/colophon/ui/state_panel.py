@@ -24,7 +24,7 @@ from colophon.core.models import (
     Phase,
     PhaseState,
 )
-from colophon.core.phases import LOCAL, state_of
+from colophon.core.phases import state_of
 from colophon.core.provenance import provenance_label, provenance_tooltip
 from colophon.core.review import review_reasons
 from colophon.core.state_labels import phase_state_description, state_description
@@ -272,20 +272,36 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                         ui.label(row.updated_at.strftime("%Y-%m-%d %H:%M")).classes(
                             "colophon-muted text-caption"
                         )
-                    if row.phase in LOCAL:
-                        rerun_btn = ui.button(icon="refresh").props(
-                            "flat dense round"
-                        ).tooltip(f"Re-run {row.label}")
-
-                        async def _rerun(p=row.phase, b=book, btn=rerun_btn) -> None:
-                            # The action's repaint rebuilds this panel (and button), so the
-                            # spinner clears itself; we only need to show it while it runs.
-                            btn.props("loading=true")
-                            await actions.rerun_phase(b, p)
-
-                        rerun_btn.on("click", _rerun)
                 if row.detail:
                     ui.label(row.detail).classes("colophon-muted text-caption q-pl-lg")
+
+        # Two re-run choices over THIS title's grouped files (the grouping is frozen either way, so
+        # nothing re-clusters). Re-read files goes back to disk; Re-derive re-runs identification from
+        # the cached files. Both run the full classify + identify flow, just with or without a disk read.
+        with ui.row().classes("items-center q-gutter-sm q-mt-xs"):
+            ui.label("Re-run:").classes("colophon-muted text-caption")
+            reread_btn = ui.button("Re-read files", icon="sync").props("flat dense no-caps")
+            reread_btn.tooltip(
+                "Re-read this title's files from disk, then re-classify and re-identify. "
+                "The grouping stays frozen."
+            )
+            rederive_btn = ui.button("Re-derive", icon="autorenew").props("flat dense no-caps")
+            rederive_btn.tooltip(
+                "Re-run classification and identification from the cached files, no disk read. "
+                "The grouping stays frozen."
+            )
+
+            async def _reread(b=book, btn=reread_btn) -> None:
+                # The action's repaint rebuilds this panel (and button), so the spinner clears itself.
+                btn.props("loading=true")
+                await actions.rerun_phase(b, Phase.SEARCH)
+
+            async def _rederive(b=book, btn=rederive_btn) -> None:
+                btn.props("loading=true")
+                await actions.rerun_phase(b, Phase.IDENTIFY)
+
+            reread_btn.on("click", _reread)
+            rederive_btn.on("click", _rederive)
 
         ui.label("Confidence").classes("colophon-seccap")
         if book.confidence_signals:
