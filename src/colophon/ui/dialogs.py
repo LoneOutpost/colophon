@@ -1564,6 +1564,10 @@ async def persist_dialog(
                     "Encoding re-encodes each book and can take a long time per book — minutes to "
                     "hours depending on length."
                 ).classes("text-caption text-warning").bind_visibility_from(enc, "value")
+                ui.label(
+                    "Encoding always places the finished M4B into the library using the pattern "
+                    "below, so Organize stays on."
+                ).classes("text-caption colophon-muted").bind_visibility_from(enc, "value")
 
                 folder_pat = ui.input("Folder pattern", value=cfg.organize_folder_pattern).props(
                     "outlined dense"
@@ -1576,8 +1580,8 @@ async def persist_dialog(
                     "value, e.g. [$SerNum - ]$Title. Use [[ and ]] for literal brackets."
                 ).classes("text-caption colophon-muted")
                 preview = ui.label("").classes("text-caption colophon-muted")
-                for el in (folder_pat, file_pat, pat_hint, preview):
-                    el.bind_visibility_from(org, "value")
+                # Visibility of the pattern fields is managed in _sync_op_visibility (shown whenever a
+                # book gets placed — Organize OR Encode), not a static bind to Organize alone.
 
                 def _preview() -> None:
                     preview.set_text("Structure: " + sample_target(folder_pat.value, file_pat.value))
@@ -1612,7 +1616,20 @@ async def persist_dialog(
                 rem_hint.bind_visibility_from(rem, "value")
 
                 def _sync_op_visibility() -> None:
-                    mode_box.set_visibility(bool(org.value) or bool(enc.value))
+                    # Encoding always places into the library, so it IMPLIES Organize: tick and lock
+                    # the box while Encode is on (its value still reads True for the no-encode path).
+                    if enc.value:
+                        if not org.value:
+                            org.set_value(True)
+                        org.disable()
+                    else:
+                        org.enable()
+                    # The pattern fields + destination preview belong to placement, which happens for
+                    # either Organize or Encode.
+                    places = bool(org.value) or bool(enc.value)
+                    for el in (folder_pat, file_pat, pat_hint, preview):
+                        el.set_visibility(places)
+                    mode_box.set_visibility(places)
                     rem_visible = bool(org.value) and mode.value == "copy"
                     rem.set_visibility(rem_visible)
                     # Never let a hidden "Remove from library" stay checked — otherwise switching
