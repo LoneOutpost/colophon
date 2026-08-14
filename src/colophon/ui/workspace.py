@@ -1076,11 +1076,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         show_detail(b.id)
 
                     async def _rerun_one(b: BookUnit, phase: Phase) -> None:
-                        result = await asyncio.to_thread(controller.rerun_phase, [b], phase)
+                        # Pregrouped, targeted re-run over this title's grouped files: the full flow
+                        # (Search re-reads the files off disk, Categorize/Identify re-derive from the
+                        # cached ones) with the folder's grouping frozen so nothing re-clusters.
+                        result = await asyncio.to_thread(controller.rerun_book_pipeline, [b], phase)
                         _rerun_notify(result)
-                        # An IDENTIFY re-run re-resolves the whole folder; a multi-book re-group can
-                        # churn b's id, so follow the book to its surviving id (fall back to b.id,
-                        # which renders the empty state if it truly vanished).
+                        # The re-run can churn b's id, so follow the book to its surviving id (fall
+                        # back to b.id, which renders the empty state if it truly vanished).
                         target = await asyncio.to_thread(controller.resolve_detail_target, b)
                         repaint(list=True, status=True, detail_book_id=target or b.id)
 
@@ -1236,7 +1238,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 async def _rerun_selection(phase: Phase) -> None:
                     _ui_safe(lambda: rerun_btn.props("loading=true"))
                     try:
-                        result = await asyncio.to_thread(controller.rerun_phase, books, phase)
+                        result = await asyncio.to_thread(controller.rerun_book_pipeline, books, phase)
                     finally:
                         _ui_safe(lambda: rerun_btn.props(remove="loading"))
                     _rerun_notify(result)

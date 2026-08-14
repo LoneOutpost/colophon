@@ -459,11 +459,14 @@ class AppController:
         *, template: str | None = None, directory_scheme: str | None = None,
         options: ScanOptions | None = None,
         progress: Callable[[int, int, str], None] | None = None,
+        extra_partitions: dict[str, list[list[str]]] | None = None,
     ) -> ScanPlan:
         """Compute, without persisting, what a scan of `roots` (default: the configured
         scan paths) would do across all roots. `template`/`directory_scheme` override the
         saved defaults for this run (None = use config). `progress(done, total, label)`
-        fires per folder (per root)."""
+        fires per folder (per root). `extra_partitions` (selection-scoped rebuild only) imposes an
+        extra folder->groups split on top of the stored ones, used to FREEZE a folder's current
+        grouping so a targeted re-run re-derives over the same groups instead of re-clustering."""
         template = template if template is not None else self.ctx.config.filename_template
         directory_scheme = (
             directory_scheme if directory_scheme is not None else self.ctx.config.directory_scheme
@@ -473,6 +476,9 @@ class AppController:
             # full graph scan, so a book in a multi-book folder is re-clustered and identified in
             # context instead of ballooning to own its whole folder.
             books = [b for b in (self.get_book(i) for i in options.book_ids) if b is not None]
+            partitions = self.ctx.grouping.partitioned_folders()
+            if extra_partitions:
+                partitions = {**partitions, **extra_partitions}
             return plan_rescan_folders(
                 self.ctx.books, [b.source_folder for b in books],
                 options=options, template=template, directory_scheme=directory_scheme,
@@ -480,7 +486,7 @@ class AppController:
                 node_overrides=self.ctx.overrides.all(),
                 known_franchises=self.ctx.franchises.active(),
                 single_book_folders=self.ctx.grouping.single_folders(),
-                partitioned_folders=self.ctx.grouping.partitioned_folders(),
+                partitioned_folders=partitions,
                 progress=progress,
             )
         roots = roots or self.ctx.config.scan_paths
@@ -1244,36 +1250,92 @@ class AppController:
                     out[phase].append(book)
         return out
 
-    def _resolve_rebuild(self, books: list[BookUnit], *, template: str | None = None) -> list[BookUnit]:
-        """Re-apply the full local resolving walk for `books`' folders via the selection-scoped
-        rebuild, then persist it. Reuses the exact path behind "Rescan selected": rebuild each
-        folder's graph (grouping + classify_nodes + propagate_overrides + fill-down), reconcile,
-        and refresh auto-derived (folder/filename) fields only — tag/datafile/match/manual survive
-        (`_adopt_and_identify._refreshable`). `template` overrides the filename pattern for this
-        run (None = the saved default). Returns the hydrated input books. Note: this re-resolves
-        the whole folder, so a sibling in a multi-book folder re-derives its auto fields too.
+    def _frozen_folder_partitions(self, folders: set[Path]) -> dict[str, list[list[str]]]:
+        """Each folder's CURRENT grouping as an imposed partition (one filename-list per book that
+        lives in it). Passed as `extra_partitions` to freeze the grouping across a targeted re-run so
+        classify re-derives over the same groups instead of re-clustering. A single-book folder yields
+        one group; the split is by file *name*, so a file that has since vanished on disk simply drops."""
+        by_folder: dict[str, list[list[str]]] = {}
+        for b in self.ctx.books.list_all():
+            if b.source_folder in folders and b.source_files:
+                by_folder.setdefault(str(b.source_folder), []).append(
+                    [sf.path.name for sf in b.source_files])
+        return by_folder
 
-        The selected books' auto-derived (weak folder/filename) identity is cleared first so the
-        walk re-derives it from scratch — "clear auto-derived only, then re-run", the deliberate
-        hard-rerun the At-a-Glance buttons ask for. Without it the rebuild's fill-empty refresh
-        would keep a stale-but-present weak name. Hard identity (tag/datafile/match/manual) and
-        every sibling are untouched."""
+    def _resolve_rebuild(
+        self, books: list[BookUnit], *, template: str | None = None,
+        phases: frozenset[Phase] = frozenset(LOCAL), pregrouped: bool = False,
+    ) -> list[BookUnit]:
+        """Re-apply the local resolving walk for `books`' folders via the selection-scoped rebuild,
+        then persist it. Reuses the exact path behind "Rescan selected": rebuild each folder's graph
+        (grouping + classify_nodes + propagate_overrides + fill-down), reconcile, resolve the title,
+        and refresh auto-derived (folder/filename) fields only — tag/datafile/match/manual survive
+        (`_adopt_and_identify._refreshable`). `template` overrides the filename pattern for this run
+        (None = the saved default). `phases` selects which local phases run (the re-run LEVEL); default
+        all. `pregrouped=True` freezes each folder's current grouping (via `extra_partitions`) so a
+        targeted re-run re-derives over exactly the files already grouped in each title and never
+        re-clusters or re-splits. Returns the hydrated input books. Note: without `pregrouped` this
+        re-resolves the whole folder, so a sibling in a multi-book folder re-derives its auto fields too.
+
+        The selected books' auto-derived (weak folder/filename) identity is cleared first so the walk
+        re-derives it from scratch — "clear auto-derived only, then re-run". Hard identity
+        (tag/datafile/match/manual) and every sibling are untouched."""
         # Reload each book fresh from the store: the caller may pass objects captured before a
         # reclassify/edit that has since persisted (e.g. set_node_classification upserts a manual
         # author). Clearing+upserting a stale object here would clobber that persisted identity
         # before the rebuild runs, so a reclassify would not survive the re-run.
         hydrated = self._hydrate([self.get_book(b.id) or b for b in books])
-        for book in hydrated:
-            _clear_weak_identity(book)
-            self.ctx.books.upsert(book)
+        # Freeze the grouping BEFORE clearing weak identity (both read the stored source_files).
+        extra = (self._frozen_folder_partitions({b.source_folder for b in hydrated})
+                 if pregrouped else None)
+        if Phase.IDENTIFY in phases:
+            for book in hydrated:
+                _clear_weak_identity(book)
+                self.ctx.books.upsert(book)
         options = ScanOptions(
             scope=ScanScope.REFRESH,
-            phases=frozenset(LOCAL),
+            phases=phases,
             book_ids={b.id for b in hydrated},
         )
-        plan = self.scan_preview(options=options, template=template)
+        plan = self.scan_preview(options=options, template=template, extra_partitions=extra)
         self.apply_scan(plan)
         return hydrated
+
+    def rerun_book_pipeline(self, books: list[BookUnit], from_level: Phase) -> RerunResult:
+        """Re-run the local pipeline from `from_level` forward over each title's ALREADY-GROUPED files
+        — targeted and pregrouped. It runs the full disk-scan flow (so grouping-classification, title
+        resolution, and confidence all run exactly as a Rebuild would) but imposes each folder's
+        current grouping as a partition, so the title's files stay a fixed unit: nothing re-clusters,
+        re-splits, or absorbs a sibling. A grouped file that has vanished on disk drops out (disk is
+        truth) and surfaces via the usual missing-file findings. `from_level` picks the depth —
+        SEARCH re-reads the files, CATEGORIZE re-classifies them, IDENTIFY re-derives identity — each
+        running the chain forward from there. Mirrors `rerun_phase`'s downstream cascade."""
+        if from_level not in LOCAL:
+            raise NotImplementedError(f"pregrouped re-run only covers local phases, not {from_level.value}")
+        # CATEGORIZE always runs so the folder scan reconstitutes the frozen multi-book split (skipping
+        # it collapses a multi-book folder into one); IDENTIFY always re-derives. SEARCH is the real
+        # toggle: from SEARCH re-reads the files off disk, otherwise the cached files are reused.
+        phases = frozenset({Phase.CATEGORIZE, Phase.IDENTIFY}
+                           | ({Phase.SEARCH} if from_level is Phase.SEARCH else set()))
+        hydrated = self._resolve_rebuild(books, phases=phases, pregrouped=True)
+        staled: set[Phase] = set()
+        failed = 0
+        for book in hydrated:
+            reloaded = self.get_book(book.id) or book
+            book_staled = [p for p in phases_from(from_level)[1:]
+                           if state_of(reloaded, p) is not PhaseState.PENDING
+                           and invalidates(from_level, p)]
+            if book_staled:
+                for p in book_staled:
+                    mark(reloaded, p, PhaseState.STALE)
+                resync_state(reloaded, ready_threshold=self.ctx.config.review_threshold)
+                self.ctx.books.upsert(reloaded)
+                staled.update(book_staled)
+            if state_of(reloaded, from_level) is PhaseState.FAILED:
+                failed += 1
+        return RerunResult(
+            ran=from_level, book_count=len(hydrated), staled=frozenset(staled), failed=failed,
+        )
 
     def rerun_phase(self, books: list[BookUnit], phase: Phase) -> RerunResult:
         """Re-run `phase` for each book and report the cascade.
