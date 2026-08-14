@@ -752,3 +752,22 @@ def test_group_works_collapses_a_disc_split_book_to_one_work():
     works, _ = group_works(_disc_split(12))
     assert len(works) == 1
     assert works[0].label.lower() == "voyager"
+
+
+def test_metadata_conflict_ignores_dotdash_author_prefix():
+    # A '.-.' leaf folder ('Alex Kava.-.Damaged') and a bare title tag ('Damaged') agree on the
+    # title -- the author prefix must not make them look like different books. Regression: the raw
+    # 'Author.-.Title' string shared no token with the tag, false-flagging every '.-.' book.
+    from colophon.core.classify import _metadata_conflict_finding
+    from colophon.core.models import FolderKind
+
+    root = Path("/audio")
+    folder = Path("/audio/K/Alex Kava/Alex Kava.-.Damaged")
+
+    def _f(album):
+        return _feat(str(folder / "01.mp3"), album=album, artist="Alex Kava")
+
+    assert _metadata_conflict_finding(folder, root, [_f("Damaged")], FolderKind.TITLE) is None
+    # a genuinely different album still flags, now naming the clean folder title
+    f = _metadata_conflict_finding(folder, root, [_f("The Reckoning")], FolderKind.TITLE)
+    assert f is not None and 'folder "Damaged"' in f.detail and "The Reckoning" in f.detail
