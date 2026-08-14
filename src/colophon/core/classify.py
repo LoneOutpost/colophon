@@ -19,6 +19,7 @@ from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.group_resolve import resolve_grouping
+from colophon.core.identity_tokens import title_candidates
 from colophon.core.metadata_quality import (
     is_junk_title,
     is_placeholder_title,
@@ -374,9 +375,13 @@ def _metadata_conflict_finding(
     conflicts: list[str] = []
     album = _uniform_tag(f.tags.album for f in features)
     if folder_kind is FolderKind.TITLE and album and not is_placeholder_title(album):
-        folder_title = parse_folder_title(folder.name).title or folder.name
-        if folder_title and not shares_token(folder_title, album):
-            conflicts.append(f'folder "{folder_title}" vs tag "{album}"')
+        # Compare the tag against the folder's `.-.`-split TITLE segment(s), not the whole
+        # 'Author.-.Title' string: the raw folder name shares no token with a bare title tag, which
+        # false-flagged every '.-.' book (folder 'Alex Kava.-.Damaged' vs tag 'Damaged' agree).
+        cands = title_candidates(folder.name, authors=[], series=[]) \
+            or [parse_folder_title(folder.name).title or folder.name]
+        if not any(shares_token(c, album) for c in cands):
+            conflicts.append(f'folder "{cands[-1]}" vs tag "{album}"')
     artist = _uniform_tag(f.tags.artist for f in features)
     if artist and not _artist_in_path(artist, folder, root):
         conflicts.append(f'author "{artist}" not in the folder path')
