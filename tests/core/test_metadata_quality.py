@@ -16,6 +16,18 @@ def test_is_placeholder_title():
     assert is_placeholder_title(None) is False
 
 
+def test_literal_field_name_placeholders_are_junk():
+    # A tagger that leaves the ID3 field NAME as its value ("Artist", "Album", ...) is not an identity
+    # for any field, so the folder/filename wins instead (the R. A. Salvatore case).
+    from colophon.core.metadata_quality import author_junk, title_junk
+    for v in ["Artist", "Album", "Title", "Composer", "Album Artist", "artist", "ALBUM"]:
+        assert is_placeholder_title(v) is True, v
+        assert author_junk(v) == 1.0 and title_junk(v) == 1.0, v
+    # real values are untouched
+    for v in ["The Artist's Way", "Album of the Damned", "R. A. Salvatore"]:
+        assert is_placeholder_title(v) is False, v
+
+
 def test_is_index_title():
     assert is_index_title("15") is True
     assert is_index_title("01 of 15") is True          # NN of MM (the gap being closed)
