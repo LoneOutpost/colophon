@@ -13,9 +13,11 @@ from colophon.core.number_pair import extract_enumeration
 from colophon.core.sequence_affix import parse_sequence_affix
 
 # Generic placeholder tag values a rip leaves in: "Track 3", "Disc 1", "CD 2", "Chapter 5",
-# "Volume 1", "Unknown Album …", "Untitled".
+# "Volume 1", "Unknown Album …", "Untitled", plus the literal ID3 FIELD NAMES a tagger leaves as the
+# value ("Artist", "Album", "Title", "Composer", "Album Artist") — never a real identity for any field.
 _PLACEHOLDER = re.compile(
-    r"^(?:(?:track|disc|cd|chapter|volume|vol|part)\s*\d+|unknown(?:\s.*)?|untitled)$", re.IGNORECASE
+    r"^(?:(?:track|disc|cd|chapter|volume|vol|part)\s*\d+|unknown(?:\s.*)?|untitled"
+    r"|artist|album|title|composer|album\s*artist)$", re.IGNORECASE
 )
 # A leading per-file structural marker ("Track 001 - Opening Theme", "Disk 2 …"): a track/chapter
 # label, not a book title, even with trailing text the anchored placeholder wouldn't catch.
