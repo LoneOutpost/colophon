@@ -87,6 +87,42 @@ def leaf_folder_author(folder_name: str) -> str | None:
     return head if looks_like_person_name(head) else None
 
 
+# A series reference: 'Name [Bk|Book|Vol|Volume] [#]NN' — the name plus a 1-3 digit sequence, the
+# marker word optional (so a bare 'Eve Dallas 11' parses too). Lazy name so the marker is consumed,
+# not kept ('Halfblood Chronicles Bk1' -> name 'Halfblood Chronicles').
+_SERIES_REF = re.compile(
+    r"^(?P<name>.+?)(?:\s+(?:bk|book|vol|volume))?\s*#?\s*(?P<seq>\d{1,3})$", re.IGNORECASE)
+
+
+def parse_series_ref(segment: str) -> tuple[str, float] | None:
+    """Parse a `Name NN` / `Name Bk NN` / `Name #NN` reference into (series name, sequence), or None.
+    'Eve Dallas 11' -> ('Eve Dallas', 11.0); 'Flinx Bk03' -> ('Flinx', 3.0). The name must contain a
+    letter, so a bare number / encoding tail does not parse as a series."""
+    m = _SERIES_REF.match(segment.strip())
+    if not m:
+        return None
+    name = m.group("name").strip(" .-_#")
+    return (name, float(m.group("seq"))) if name and re.search(r"[^\W\d]", name) else None
+
+
+def leaf_folder_series(folder_name: str) -> tuple[str, float] | None:
+    """The series a `.-.` leaf folder declares in a MIDDLE segment
+    (`Author.-.Series NN.-.Title[.-.suffix]`): the first middle segment (between the author-first and
+    the title-last) that parses as a series reference. Returns None for a folder with fewer than three
+    `.-.` segments or no series-shaped middle — so `Author.-.Title` and `Author.-.Title.-.UA…` yield
+    nothing."""
+    if ".-." not in folder_name:
+        return None
+    segs = [s.strip() for s in folder_name.split(".-.")]
+    if len(segs) < 3:
+        return None
+    for seg in segs[1:-1]:                      # skip the author (first) and the title (last)
+        ref = parse_series_ref(seg)
+        if ref:
+            return ref
+    return None
+
+
 def title_candidates(name: str, *, authors: list[str], series: list[str]) -> list[str]:
     """The title token(s) in `name`: its ` - ` / `.-.` segments, each cleaned of index/disc affixes,
     minus tokens playing other roles.
