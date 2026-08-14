@@ -1244,12 +1244,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     _rerun_notify(result)
                     repaint(nav=True, list=True, status=True)
 
+                # Two choices over the selection's grouped files (grouping frozen either way):
+                # Re-read goes back to disk; Re-derive re-runs identification from the cached files.
                 with rerun_btn, ui.menu():
-                    for _p in (Phase.SEARCH, Phase.CATEGORIZE, Phase.IDENTIFY):
-                        ui.menu_item(
-                            f"Re-run {state_panel.phase_label(_p)}",
-                            lambda p=_p: _rerun_selection(p),
-                        )
+                    ui.menu_item("Re-read files", lambda: _rerun_selection(Phase.SEARCH))
+                    ui.menu_item("Re-derive", lambda: _rerun_selection(Phase.IDENTIFY))
                 ui.button(
                     "Re-identify…", icon="badge", on_click=lambda: _reidentify_dialog(),
                 ).props("outline").tooltip(
