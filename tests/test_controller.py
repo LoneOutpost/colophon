@@ -3803,3 +3803,64 @@ def test_encode_without_organize_still_places_into_library(tmp_path, make_audio)
     assert ctx.config.library_root in persisted.output_path.parents  # under the library, not in-place
     assert not (a.parent / "Dune.m4b").exists()                      # not dumped beside the sources
     ctx.close()
+
+
+def test_rerun_book_pipeline_is_pregrouped_and_targeted(tmp_path):
+    # A targeted re-run over a title's grouped files must run the full flow but FREEZE the grouping:
+    # a multi-book folder keeps its exact split (no re-cluster / merge / absorb), and only the
+    # target's identity re-derives.
+    from colophon.core.models import Phase, PhaseState
+    from colophon.core.phases import state_of
+
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    ctx.config.scan_paths = [ingest]
+    loose = ingest / "Loose"
+    loose.mkdir(parents=True)
+    (loose / "Alpha Tale.mp3").write_bytes(b"")
+    (loose / "Bravo Story.mp3").write_bytes(b"")
+
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    books = ctx.books.list_all()
+    assert len(books) == 2  # a multi-book folder: two distinct untagged works
+
+    def _groups(bs):
+        return sorted(sorted(sf.path.name for sf in b.source_files) for b in bs)
+
+    before = _groups(books)
+    result = ctrl.rerun_book_pipeline([books[0]], Phase.IDENTIFY)
+    assert result.ran is Phase.IDENTIFY and result.book_count == 1
+
+    after = ctx.books.list_all()
+    assert len(after) == 2            # grouping frozen: still two books
+    assert _groups(after) == before   # each still owns exactly the same files
+    for b in after:
+        assert state_of(b, Phase.IDENTIFY) is PhaseState.FRESH  # the flow ran
+    ctx.close()
+
+
+def test_rerun_book_pipeline_reapplies_identity_rules(tmp_path):
+    # The targeted re-run must actually run the identity flow: a stale weak title is re-derived away
+    # (proves current rules were applied, not just the grouping preserved).
+    from colophon.core.models import Phase, Provenance
+
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    ctx.config.scan_paths = [ingest]
+    d = ingest / "Loose"
+    d.mkdir(parents=True)
+    (d / "The Real Title.mp3").write_bytes(b"")
+
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = ctx.books.list_all()[0]
+
+    book.title = "STALE WRONG TITLE"
+    book.provenance["title"] = Provenance.DIRECTORY.value  # a weak title, cleared + re-derived on re-run
+    ctx.books.upsert(book)
+
+    ctrl.rerun_book_pipeline([book], Phase.SEARCH)
+    after = next(b for b in ctx.books.list_all())
+    assert after.title != "STALE WRONG TITLE"   # the flow re-derived it
+    ctx.close()
