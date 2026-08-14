@@ -117,3 +117,41 @@ def test_leaf_folder_author_returns_none_without_convention_or_a_stopword_head()
     assert leaf_folder_author("[Ciaphas Cain 13] Dead in the Water") is None
     # a staging/format word heading a mis-formed leaf is not the author
     assert leaf_folder_author("Audiobook.-.Isaac Asimov.-.Robot Visions") is None
+
+
+def test_bare_name_number_series_prefix_dropped_when_a_title_follows():
+    # 'Renegades of Pern 08 - The Skies of Pern' — the bare 'Name NN' prefix (no Bk/#) is the series.
+    assert title_candidates("Renegades of Pern 08 - The Skies of Pern", authors=[], series=[]) \
+        == ["The Skies of Pern"]
+    assert title_candidates("Warlord 2 - Enemy of God", authors=[], series=[]) == ["Enemy of God"]
+    # a '.-.' middle segment is the series when a title segment follows it
+    assert title_candidates("J D Robb.-.Eve Dallas 11.-.Witness in Death",
+                            authors=["J D Robb"], series=[]) == ["Witness in Death"]
+
+
+def test_lone_name_number_is_kept_as_the_title():
+    # nothing plainer beside it -> a 'Name NN' IS the title, not a series ref.
+    assert title_candidates("Slaughterhouse 5", authors=[], series=[]) == ["Slaughterhouse 5"]
+    assert title_candidates("Apollo 13", authors=[], series=[]) == ["Apollo 13"]
+    assert title_candidates("Fahrenheit 451", authors=[], series=[]) == ["Fahrenheit 451"]
+
+
+def test_parse_series_ref():
+    from colophon.core.identity_tokens import parse_series_ref
+    assert parse_series_ref("Eve Dallas 11") == ("Eve Dallas", 11.0)
+    assert parse_series_ref("Flinx Bk03") == ("Flinx", 3.0)
+    assert parse_series_ref("Renegades of Pern 08") == ("Renegades of Pern", 8.0)
+    assert parse_series_ref("Halfblood Chronicles Bk1") == ("Halfblood Chronicles", 1.0)  # marker consumed
+    assert parse_series_ref("Arcane Society #2") == ("Arcane Society", 2.0)
+    assert parse_series_ref("Witness in Death") is None   # no trailing number
+    assert parse_series_ref("11") is None                 # no name (letters)
+
+
+def test_leaf_folder_series_reads_the_middle_dotdash_segment():
+    from colophon.core.identity_tokens import leaf_folder_series
+    assert leaf_folder_series("J D Robb.-.Eve Dallas 11.-.Witness in Death") == ("Eve Dallas", 11.0)
+    assert leaf_folder_series("Alan Dean Foster.-.Flinx Bk03.-.Orphan Star") == ("Flinx", 3.0)
+    # no middle segment / no series-shaped middle -> None
+    assert leaf_folder_series("A E Van Vogt.-.Slan") is None
+    assert leaf_folder_series("A. Lee Martinez.-.The Automatic Detective.-.UA  8@64.32m") is None
+    assert leaf_folder_series("Kahlil Gibran.-.The Prophet") is None

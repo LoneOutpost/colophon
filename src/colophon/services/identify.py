@@ -143,15 +143,23 @@ def _reconcile_from(book: BookUnit, evidence: Evidence, *, tiers: str = "all") -
     ``"hard"`` for embedded + datafile only; ``"weak"`` for directory + filename only;
     ``"all"`` (default) for all tiers."""
     from colophon.core.folder_title import parse_folder_title
+    from colophon.core.identity_tokens import leaf_folder_series
 
     parsed = parse_folder_title(book.source_folder.name)
     dirf = dict(evidence.directory_fields)
     if parsed.year is not None:
         dirf.setdefault("year", str(parsed.year))
-    if parsed.series is not None:
-        dirf.setdefault("series", parsed.series)
     if parsed.sequence is not None:
         dirf.setdefault("sequence", str(parsed.sequence))
+    if parsed.series is not None:
+        dirf.setdefault("series", parsed.series)
+    else:
+        # A bare 'Name NN' series in a `.-.` leaf folder's MIDDLE segment
+        # ('Author.-.Eve Dallas 11.-.Witness in Death') that parse_folder_title's paren rule misses.
+        lfs = leaf_folder_series(book.source_folder.name)
+        if lfs is not None:
+            dirf.setdefault("series", lfs[0])
+            dirf.setdefault("sequence", str(lfs[1]))
     reconcile(
         book,
         embedded=evidence.embedded,
