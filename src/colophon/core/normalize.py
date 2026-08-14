@@ -238,6 +238,12 @@ def _as_initials(token: str) -> str | None:
     return None
 
 
+# A narrow set of edge characters that are never part of a name and only ever a broken-filename-split
+# artifact ('J. D. Robb=' -> 'J. D. Robb'). Deliberately excludes '&' (a co-author separator), '(' '#'
+# (which title-shaped-author detection reads), and name punctuation ('.', "'", '-').
+_STRAY_EDGE = re.compile(r"^[=|~^*]+|[=|~^*]+$")
+
+
 def normalize_author(name: str) -> str:
     """Canonical author display form: de-shout an all-caps name, split underscores + glued PascalCase,
     canonicalize initial clusters to 'J. D.' form. Unifies punctuation/spacing variants of one author
@@ -250,6 +256,9 @@ def normalize_author(name: str) -> str:
     out: list[str] = []
     for raw in deshouted.replace("_", " ").split():
         for tok in _split_pascal(raw).split():
+            tok = _STRAY_EDGE.sub("", tok)   # strip stray non-name edge punctuation: 'Robb=' -> 'Robb'
+            if not tok:
+                continue
             out.append(_as_initials(tok) or tok)
     return " ".join(out)
 

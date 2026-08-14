@@ -244,6 +244,16 @@ def test_normalize_author_blank_passthrough():
     assert normalize_author("") == ""
 
 
+def test_normalize_author_strips_stray_edge_punctuation():
+    # A broken filename split leaves a stray '=' on the author token ('J. D. Robb= - Bk10 - ...').
+    assert normalize_author("J. D. Robb=") == "J. D. Robb"
+    assert normalize_author("Stephen King*") == "Stephen King"
+    # name punctuation and co-author separators are NOT touched
+    assert normalize_author("Neil Gaiman & Terry Pratchett") == "Neil Gaiman & Terry Pratchett"
+    assert normalize_author("O'Brien") == "O'Brien"
+    assert normalize_author("Jean-Luc Picard") == "Jean-Luc Picard"
+
+
 def test_normalize_key_folds_initial_variants():
     assert normalize_key("George R. R. Martin") == normalize_key("George RR Martin")
     assert normalize_key("E.E. Cummings") == normalize_key("E E Cummings")
