@@ -2107,11 +2107,14 @@ def test_encode_job_types_defaults():
     assert tok.cancelled is True
 
 
-def test_process_book_encode_only_in_place_sets_encoded(tmp_path, make_audio):
+def test_process_book_encode_only_places_into_library(tmp_path, make_audio):
+    # An encoded book always rests at its settings-derived library path, even with Organize off:
+    # the encode is staged in-place then moved once verified, so it never lingers beside the sources.
     from colophon.controller import EncodeJobOptions
     from colophon.core.models import SourceFile
 
     ctx = _ctx(tmp_path)
+    ctx.config.library_root = tmp_path / "lib"
     a = make_audio("Dune/01.mp3", seconds=1)
     book = BookUnit.new(source_folder=a.parent)
     book.title = "Dune"
@@ -2123,9 +2126,10 @@ def test_process_book_encode_only_in_place_sets_encoded(tmp_path, make_audio):
     result = AppController(ctx)._process_book(book, EncodeJobOptions(encode=True, organize=False))
     assert result.status == "done"
     persisted = ctx.books.get(book.id)
-    assert persisted.state == BookState.ENCODED
+    assert persisted.state == BookState.ORGANIZED
     assert persisted.output_path is not None
-    assert persisted.output_path.parent == a.parent  # in-place, beside the sources
+    assert ctx.config.library_root in persisted.output_path.parents  # placed in the library
+    assert persisted.output_path.parent != a.parent                  # not left beside the sources
     assert persisted.output_path.exists()
     ctx.close()
 
@@ -3772,4 +3776,30 @@ def test_fix_extension_renames_mislabeled_file(tmp_path, make_audio):
     assert n == 1
     assert (mislabeled.parent / "chapter.mp3").exists()
     assert not mislabeled.exists()
+    ctx.close()
+
+
+def test_encode_without_organize_still_places_into_library(tmp_path, make_audio):
+    # Persisting with Encode on but Organize off must still place the encoded m4b at its
+    # settings-derived library path (folder pattern + naming) -- not leave a bare <title>.m4b in the
+    # source folder. An encoded book's home is the library; Organize only governs no-encode reorg.
+    from colophon.controller import EncodeJobOptions
+    from colophon.core.models import SourceFile
+
+    ctx = _ctx(tmp_path)
+    ctx.config.library_root = tmp_path / "lib"
+    a = make_audio("Dune/01.mp3", seconds=1)
+    book = BookUnit.new(source_folder=a.parent)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.state = BookState.READY
+    book.source_files = [SourceFile(path=a, size=a.stat().st_size, duration_seconds=1.0, ext="mp3")]
+    ctx.books.upsert(book)
+
+    res = AppController(ctx)._persist_book(book, EncodeJobOptions(encode=True, organize=False))
+    persisted = ctx.books.get(book.id)
+    assert res.status == "done", res.detail
+    assert persisted.output_path is not None and persisted.output_path.exists()
+    assert ctx.config.library_root in persisted.output_path.parents  # under the library, not in-place
+    assert not (a.parent / "Dune.m4b").exists()                      # not dumped beside the sources
     ctx.close()

@@ -3088,25 +3088,28 @@ class AppController:
                 book_id=book.id, status="done", output_folder=targets[0].parent
             )
 
-        # Encode path: transcode all source files into a single output, then organize + tag.
-        # Gate on the LIBRARY target's disposition before encoding: a clash is a benign skip (don't
-        # encode an unplaceable m4b); an already-placed m4b needs no re-encode, just a tag refresh.
-        org_target = None
-        if options.organize:
-            library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
-            org_target = build_target_path(
-                library_root, options.patterns or self.ctx.patterns, self._canonical_book(book)
-            )
-            disp = organize_disposition([(book.output_path, org_target)])
-            if disp == "clash":
-                return BookProcessResult(book_id=book.id, status="skipped",
-                                         detail="destination occupied by a different file")
-            if disp == "placed":
-                mark(book, Phase.ORGANIZE, PhaseState.FRESH)
-                resync_state(book)
-                book.touch()
-                self.ctx.books.upsert(book)
-                return self._tag_and_finish(book, book.output_path)
+        # Encode path: transcode all source files into a single VERIFIED m4b, then place it at its
+        # settings-derived library path (folder pattern + naming) and tag it. An encoded book ALWAYS
+        # rests at that path -- the same location Organize computes -- because an .m4b's home is the
+        # library; the Organize toggle only governs the no-encode reorg of the original files above.
+        # We still stage the encode in-place and move the verified file, so the library only ever
+        # receives a complete, duration-verified m4b.
+        # Gate on the target's disposition before encoding: a clash is a benign skip (don't encode an
+        # unplaceable m4b); an already-placed m4b needs no re-encode, just a tag refresh.
+        library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
+        org_target = build_target_path(
+            library_root, options.patterns or self.ctx.patterns, self._canonical_book(book)
+        )
+        disp = organize_disposition([(book.output_path, org_target)])
+        if disp == "clash":
+            return BookProcessResult(book_id=book.id, status="skipped",
+                                     detail="destination occupied by a different file")
+        if disp == "placed":
+            mark(book, Phase.ORGANIZE, PhaseState.FRESH)
+            resync_state(book)
+            book.touch()
+            self.ctx.books.upsert(book)
+            return self._tag_and_finish(book, book.output_path)
 
         target = self._encode_target(book)
         if target.exists() and target != book.output_path:
@@ -3129,12 +3132,14 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
-        if options.organize and org_target is not None:
-            org = organize_book(self.ctx.books, book, book.output_path, target=org_target)
-            if not org.moved or org.target_path is None:
-                # a race collision after the pre-encode disposition check -> skip, don't fail
-                return BookProcessResult(book_id=book.id, status="skipped",
-                                         detail=_organize_fail_detail(org))
+        # Always place the verified m4b at its library home (honor the settings path + naming), even
+        # when Organize was not ticked -- an encoded book belongs in the library, not beside its
+        # sources. organize_book is a no-op when the file is already at the target.
+        org = organize_book(self.ctx.books, book, book.output_path, target=org_target)
+        if not org.moved or org.target_path is None:
+            # a race collision after the pre-encode disposition check -> skip, don't fail
+            return BookProcessResult(book_id=book.id, status="skipped",
+                                     detail=_organize_fail_detail(org))
 
         return self._tag_and_finish(book, book.output_path)
 
