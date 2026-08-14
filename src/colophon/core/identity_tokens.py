@@ -20,6 +20,11 @@ from colophon.core.sequence_affix import strip_encoding_artifact
 # 'bk' followed by a digit, so no boundary is needed and 'Textbook'/'Notebook' stay safe (they carry
 # 'book', not 'bk').
 _SERIES_MARKER = re.compile(r"(?:\bbook|\bvol|\bvolume|bk)\s*\d", re.IGNORECASE)
+# A bare `Name NN` series reference (no `Bk`/`#`): a letter-led segment ending in a space + a 1-3
+# digit number ('Eve Dallas 11', 'Renegades of Pern 08', 'Warlord 1'). Only DROPPED as a series
+# prefix when a plainer title segment sits beside it; a lone one ('Slaughterhouse 5', 'Apollo 13') is
+# kept as the title. A digit-led title ('2001 A Space Odyssey') never matches (must start with a letter).
+_BARE_SERIES_REF = re.compile(r"^[^\W\d].*\s\d{1,3}$")
 
 # A token that is NOTHING but an index or disc/part marker ('1/9', '01-12', '001 of 153', 'CD01',
 # 'Part 3') — never a title, drop it whole.
@@ -82,6 +87,42 @@ def leaf_folder_author(folder_name: str) -> str | None:
     return head if looks_like_person_name(head) else None
 
 
+# A series reference: 'Name [Bk|Book|Vol|Volume] [#]NN' — the name plus a 1-3 digit sequence, the
+# marker word optional (so a bare 'Eve Dallas 11' parses too). Lazy name so the marker is consumed,
+# not kept ('Halfblood Chronicles Bk1' -> name 'Halfblood Chronicles').
+_SERIES_REF = re.compile(
+    r"^(?P<name>.+?)(?:\s+(?:bk|book|vol|volume))?\s*#?\s*(?P<seq>\d{1,3})$", re.IGNORECASE)
+
+
+def parse_series_ref(segment: str) -> tuple[str, float] | None:
+    """Parse a `Name NN` / `Name Bk NN` / `Name #NN` reference into (series name, sequence), or None.
+    'Eve Dallas 11' -> ('Eve Dallas', 11.0); 'Flinx Bk03' -> ('Flinx', 3.0). The name must contain a
+    letter, so a bare number / encoding tail does not parse as a series."""
+    m = _SERIES_REF.match(segment.strip())
+    if not m:
+        return None
+    name = m.group("name").strip(" .-_#")
+    return (name, float(m.group("seq"))) if name and re.search(r"[^\W\d]", name) else None
+
+
+def leaf_folder_series(folder_name: str) -> tuple[str, float] | None:
+    """The series a `.-.` leaf folder declares in a MIDDLE segment
+    (`Author.-.Series NN.-.Title[.-.suffix]`): the first middle segment (between the author-first and
+    the title-last) that parses as a series reference. Returns None for a folder with fewer than three
+    `.-.` segments or no series-shaped middle — so `Author.-.Title` and `Author.-.Title.-.UA…` yield
+    nothing."""
+    if ".-." not in folder_name:
+        return None
+    segs = [s.strip() for s in folder_name.split(".-.")]
+    if len(segs) < 3:
+        return None
+    for seg in segs[1:-1]:                      # skip the author (first) and the title (last)
+        ref = parse_series_ref(seg)
+        if ref:
+            return ref
+    return None
+
+
 def title_candidates(name: str, *, authors: list[str], series: list[str]) -> list[str]:
     """The title token(s) in `name`: its ` - ` / `.-.` segments, each cleaned of index/disc affixes,
     minus tokens playing other roles.
@@ -92,14 +133,19 @@ def title_candidates(name: str, *, authors: list[str], series: list[str]) -> lis
     if len(authors) > 1:                        # also drop the JOINED author form, not just each name
         akeys.update(normalize_key(sep.join(authors)) for sep in (" & ", " and ", ", "))
     skeys = {normalize_key(s) for s in series}
-    kept: list[str] = []
-    for raw in _tokens(name):
+    plain: list[str] = []       # clean title segments
+    bare_refs: list[str] = []   # a `Name NN` segment: a series prefix WHEN a plainer segment exists,
+    for raw in _tokens(name):   # else the title itself ('Slaughterhouse 5' with nothing plainer)
         if raw.startswith(("(", "[")):
             continue
         t = _clean_token(raw)
+        # Author, series-KEY, and an explicit `Bk/Vol/Book N` marker are always dropped.
         if t is None or normalize_key(t) in akeys or normalize_key(t) in skeys or _SERIES_MARKER.search(t):
             continue
-        kept.append(t)
+        # Test the bare `Name NN` shape on the RAW segment: _clean_token strips a padded trailing
+        # index ('Renegades of Pern 08' -> 'Renegades of Pern'), which would hide the number.
+        (bare_refs if _BARE_SERIES_REF.match(raw.strip()) else plain).append(t)
+    kept = plain or bare_refs
     if not kept:
         return []
     non_structural = [t for t in kept if not is_structural_marker(t)]
