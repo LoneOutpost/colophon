@@ -14,6 +14,7 @@ from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.normalize import normalize_key
 from colophon.core.people import looks_like_person_name
 from colophon.core.sequence_affix import strip_encoding_artifact
+from colophon.core.sequence_marker import parse_part
 
 # A series marker: 'Book/Vol/Volume N' need a word boundary (so 'Textbook 1' is not a marker), but the
 # 'bk' abbreviation is matched even when glued ('P&FBk 12', 'Flinx Bk12') — no English word ends in a
@@ -57,11 +58,16 @@ def _clean_token(tok: str) -> str | None:
     elif "{" in tok:                     # a lone '{Lavinia Lake' fragment -> the ref, keep nothing
         tok = tok.split("{", 1)[0]
     tok = _TOK_ENCODING.sub(" ", strip_encoding_artifact(tok))
-    if _TOK_PURE_INDEX.match(tok):
+    # A token that is nothing but an index/marker is never a title: the local shapes plus any canonical
+    # PART marker (`parse_part`) — which adds the hyphen-glued 'cd-3'/'trk01' and 'Ch01'/'01a' forms the
+    # local regexes miss, the same leaks grouping had.
+    if _TOK_PURE_INDEX.match(tok) or parse_part(tok.strip()) is not None:
         return None
     t = _TOK_TRAIL_MARK.sub("", _TOK_LEAD_MARK.sub("", tok))
     t = " ".join(t.split()).strip(" .-_")
-    return t or None
+    if not t or parse_part(t) is not None:   # a marker can surface AFTER a lead/trail strip ('Pt1 Trk01'
+        return None                          # -> 'Trk01', '01. Track 1' -> 'Track 1') — drop it too
+    return t
 
 
 # Staging/format words that head a mis-formed leaf folder ('Audiobook.-.Isaac Asimov.-.…') — a person

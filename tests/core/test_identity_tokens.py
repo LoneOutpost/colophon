@@ -27,7 +27,8 @@ def test_author_only_folder_yields_no_title():
 
 
 import pytest
-from colophon.core.identity_tokens import _clean_token, title_candidates
+
+from colophon.core.identity_tokens import _clean_token
 
 
 @pytest.mark.parametrize("junk", ["1/9", "01-12", "001 of 153", "CD01", "cd1", "1 of 8", "01 of 6"])
@@ -127,6 +128,18 @@ def test_bare_name_number_series_prefix_dropped_when_a_title_follows():
     # a '.-.' middle segment is the series when a title segment follows it
     assert title_candidates("J D Robb.-.Eve Dallas 11.-.Witness in Death",
                             authors=["J D Robb"], series=[]) == ["Witness in Death"]
+
+
+def test_part_markers_never_leak_as_a_title_token():
+    # a token that IS a part marker (incl. hyphen-glued/glued forms, or one that surfaces after a
+    # lead/trail strip) is dropped from the title candidates, not kept as a title word.
+    assert title_candidates("Eoin Colfer - And Another Thing - Pt1 Trk01",
+                            authors=["Eoin Colfer"], series=[]) == ["And Another Thing"]
+    assert title_candidates("The Switch - Ch01", authors=[], series=[]) == ["The Switch"]
+    assert title_candidates("01. Track 1", authors=[], series=[]) == []
+    # a real title with a trailing number is NOT a part marker and stays
+    assert title_candidates("Slaughterhouse 5", authors=[], series=[]) == ["Slaughterhouse 5"]
+    assert title_candidates("Apollo 13", authors=[], series=[]) == ["Apollo 13"]
 
 
 def test_lone_name_number_is_kept_as_the_title():
