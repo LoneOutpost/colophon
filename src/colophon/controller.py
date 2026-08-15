@@ -56,6 +56,7 @@ from colophon.core.graph_resolve import (
 )
 from colophon.core.graph_view import grouping_cohort
 from colophon.core.jobs import Job
+from colophon.core.known_entity import build_known_series
 from colophon.core.library_graph import reconcile
 from colophon.core.models import (
     SUPPRESSED_FINDINGS,
@@ -471,6 +472,9 @@ class AppController:
         directory_scheme = (
             directory_scheme if directory_scheme is not None else self.ctx.config.directory_scheme
         )
+        # Series the library graph already knows: a still-series-less book whose tokens name one of
+        # these adopts it (cross-reference identification, junk-filtered so 'Book'/'01 of' can't seed).
+        known_series = build_known_series(self.known_series())
         if options is not None and options.book_ids:
             # A selection-scoped rebuild re-scans the distinct FOLDERS its books live in through the
             # full graph scan, so a book in a multi-book folder is re-clustered and identified in
@@ -487,6 +491,7 @@ class AppController:
                 known_franchises=self.ctx.franchises.active(),
                 single_book_folders=self.ctx.grouping.single_folders(),
                 partitioned_folders=partitions,
+                known_series=known_series,
                 progress=progress,
             )
         roots = roots or self.ctx.config.scan_paths
@@ -499,6 +504,7 @@ class AppController:
                 known_franchises=self.ctx.franchises.active(),
                 single_book_folders=self.ctx.grouping.single_folders(),
                 partitioned_folders=self.ctx.grouping.partitioned_folders(),
+                known_series=known_series,
             )
             combined.units.extend(plan.units)
             combined.new_books += plan.new_books

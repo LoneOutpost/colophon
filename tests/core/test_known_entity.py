@@ -6,6 +6,12 @@ def test_build_known_series_drops_junk():
     assert set(known.values()) == {"Quiller", "Pern", "Culture"}   # junk dropped
 
 
+def test_build_known_series_drops_bare_sequence_markers():
+    # a shattered folder segment can leave a bare 'Bk'/'Vol'/'Disc' that is never a series name
+    known = build_known_series(["Eve Dallas", "Bk", "Vol", "Volume", "Disc", "CD"])
+    assert set(known.values()) == {"Eve Dallas"}
+
+
 def test_match_known_series_normalized_exact():
     known = build_known_series(["Quiller", "Rogue Angel"])
     assert match_known_series(["Adam Hall.-.Quiller Bk03.-.The Striker Portfolio"], known) == "Quiller"

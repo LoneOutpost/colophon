@@ -456,6 +456,7 @@ def plan_rescan_folders(
     known_franchises: dict[str, str] | None = None,
     single_book_folders: frozenset[str] = frozenset(),
     partitioned_folders: dict[str, list[list[str]]] | None = None,
+    known_series: dict[str, str] | None = None,
     progress: Callable[[int, int, str], None] | None = None,
 ) -> ScanPlan:
     """Selection-scoped rebuild: re-scan each distinct `folder` through the full graph scan, so a
@@ -473,7 +474,7 @@ def plan_rescan_folders(
             options=options, inference_root=inference_root_for(folder),
             node_overrides=node_overrides, known_franchises=known_franchises,
             single_book_folders=single_book_folders,
-            partitioned_folders=partitioned_folders, progress=progress,
+            partitioned_folders=partitioned_folders, known_series=known_series, progress=progress,
         )
         _merge_plan(combined, plan)
     return combined
@@ -610,7 +611,8 @@ def _adopt_and_identify_hard(
     return unit, evidence
 
 
-def _finish_identify_weak(unit: BookUnit, evidence: Evidence, *, role: str | None) -> None:
+def _finish_identify_weak(unit: BookUnit, evidence: Evidence, *, role: str | None,
+                          known_series: dict[str, str] | None = None) -> None:
     """Run the deferred WEAK identity stage for a leaf whose hard stage ran in
     `_adopt_and_identify_hard`, driven by its folder's classified `role`. Marks IDENTIFY
     FRESH and resyncs. A leaf whose hard stage failed carries no evidence and never reaches
@@ -622,6 +624,22 @@ def _finish_identify_weak(unit: BookUnit, evidence: Evidence, *, role: str | Non
         # candidate equal to the author, recovering a title that smuggled the author in.
         from colophon.core.title_evidence import resolve_title
         resolve_title(unit)
+        # Known-series cross-reference: a still-series-less book whose tokens name a series ALREADY
+        # known to the library graph adopts it. Runs AFTER resolve_title so the resolved title/author
+        # are excluded from series contention (a token playing another role is never the series).
+        # Skipped for a book whose committed title is itself junk ('G', '='): its identity is
+        # unreliable, so a stem/album token would attach a spurious series to a broken record.
+        from colophon.core.metadata_quality import is_junk_title
+        if known_series and not unit.series and not (unit.title and is_junk_title(unit.title)):
+            from colophon.core.known_entity import match_known_series
+            from colophon.core.models import SeriesRef
+            cands = ([unit.source_folder.name]
+                     + [sf.path.stem for sf in unit.source_files[:3]]
+                     + [sf.tags.album for sf in unit.source_files[:3] if sf.tags and sf.tags.album])
+            name = match_known_series(cands, known_series, exclude=[unit.title or "", *unit.authors])
+            if name:
+                unit.series = [SeriesRef(name=name)]
+                unit.provenance["series"] = Provenance.GRAPHING.value
         mark(unit, Phase.IDENTIFY, PhaseState.FRESH)
     except Exception as e:  # a leaf must persist even if IDENTIFY fails (minimal identity)
         logger.warning(f"leaf IDENTIFY(weak) failed for {unit.source_folder} [{unit.title!r}]: {e}")
@@ -638,6 +656,7 @@ def plan_scan_graph(
     known_franchises: dict[str, str] | None = None,
     single_book_folders: frozenset[str] = frozenset(),
     partitioned_folders: dict[str, list[list[str]]] | None = None,
+    known_series: dict[str, str] | None = None,
 ) -> ScanPlan:
     """Graph-routed planner: persist `project(build_graph(...))` — single containers and
     multi-book leaves — with per-leaf IDENTIFY and state preservation. `reconciled_folders`
@@ -733,7 +752,7 @@ def plan_scan_graph(
             continue
         node = graph.directories.get(DirectoryNode.id_for(unit.source_folder))
         role = node.kind if node is not None else None
-        _finish_identify_weak(unit, evidence, role=role)
+        _finish_identify_weak(unit, evidence, role=role, known_series=known_series)
     _phase("identify(weak)")
     for _b in plan.units:
         fill_book_franchise(graph, _b, root)

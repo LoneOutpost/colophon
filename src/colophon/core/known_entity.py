@@ -30,8 +30,11 @@ def _real_series_name(name: str) -> bool:
             and normalize_key(n) not in _NON_SERIES)
 
 
-# Single generic words that appear as a mis-derived 'series' but never name one.
-_NON_SERIES = {normalize_key(w) for w in ("book", "novel", "series", "collection", "audiobook", "part")}
+# Single generic words that appear as a mis-derived 'series' but never name one: bibliographic
+# nouns AND the bare sequence markers ('Bk', 'Vol') a shattered folder segment can leave behind.
+_NON_SERIES = {normalize_key(w) for w in (
+    "book", "novel", "series", "collection", "audiobook", "part",
+    "bk", "vol", "volume", "pt", "disc", "cd")}
 
 
 def build_known_series(series_names: Iterable[str]) -> dict[str, str]:
