@@ -20,6 +20,7 @@ from colophon.core.metadata_quality import title_junk
 from colophon.core.models import AUTHORITATIVE_PROV, BookUnit, Provenance
 from colophon.core.normalize import normalize_key, normalize_text
 from colophon.core.sequence_affix import clean_title
+from colophon.core.title_essence import title_essence_for_book
 
 _SETTLE_PROV = AUTHORITATIVE_PROV
 _RECOVER = {
@@ -136,11 +137,16 @@ def resolve_title(book: BookUnit) -> ResolvedField:
         cleaned = clean_title(book.title)
         if cleaned and cleaned != book.title:
             book.title = cleaned
-        return r
-    # An overturn: normalize + clean the new winner.
-    cleaned = clean_title(normalize_text(r.value))
-    if not cleaned or cleaned == book.title:
-        return r
-    book.title = cleaned
-    book.provenance["title"] = _PROV_FOR.get(r.source, book.provenance.get("title") or Provenance.FILENAME.value)
+    else:
+        # An overturn: normalize + clean the new winner.
+        cleaned = clean_title(normalize_text(r.value))
+        if cleaned and cleaned != book.title:
+            book.title = cleaned
+            book.provenance["title"] = _PROV_FOR.get(
+                r.source, book.provenance.get("title") or Provenance.FILENAME.value)
+    # Final pass: essence-clean a NOISY title by the token overlap across folder/filename/tag — the
+    # general reduction of an author/series/index/encoding prefix the ballot + clean_title left behind.
+    essence = title_essence_for_book(book)
+    if essence and essence != book.title:
+        book.title = essence
     return r

@@ -123,3 +123,19 @@ def test_trailing_glue_left_by_a_dropped_tail_is_trimmed():
                folder="Mo Hayder.-.The Red Dahlia",
                stems=["The Red Dahlia 01", "The Red Dahlia 02"], authors=["Mo Hayder"])
     assert out == "The Red Dahlia"
+
+
+def test_for_book_applies_on_noisy_title_and_skips_clean():
+    from pathlib import Path
+
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+    from colophon.core.title_essence import title_essence_for_book
+    d = Path("/lib/R/Kim Stanley Robinson.-.2312")
+    b = BookUnit.new(source_folder=d)
+    b.authors = ["Kim Stanley Robinson"]
+    b.source_files = [SourceFile(path=d / f"2312 - {i}.opus", size=1, duration_seconds=1.0, ext="opus",
+                                 tags=EmbeddedTags(title="2312")) for i in range(1, 3)]
+    b.title = "Kim Stanley Robinson - 2312"          # noisy: author prefix + ' - '
+    assert title_essence_for_book(b) == "2312"
+    b.title = "The Cat Who Sang for the Birds"        # clean, series-shaped prefix -> left alone
+    assert title_essence_for_book(b) is None

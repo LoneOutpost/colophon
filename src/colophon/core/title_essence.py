@@ -121,3 +121,30 @@ def title_essence(
     if [_key(w) for w in _SPLIT.split(result)] == [_key(w) for w in _SPLIT.split(committed)]:
         return None
     return result
+
+
+# Structure in a committed title that marks it worth cleaning: a ' - ' compound, a parenthetical, an
+# explicit series marker, or an encoding/edition tail. A plain title ('The Cat Who Sang for the
+# Birds') matches none of these, so the essence never runs on it (and cannot over-drop a series-shaped
+# title prefix). This is the APPLY policy: clean where cleaning is warranted, not everywhere.
+_NOISE = re.compile(
+    r" - | – |[()\[\]]|\b(?:bk|book|vol|volume)\s*\d"  # noqa: RUF001
+    r"|\b(?:ua|unb|una|unabr(?:idged)?|abridged)\b", re.IGNORECASE)
+
+
+def title_essence_for_book(book) -> str | None:
+    """Essence-clean a BookUnit's title, but only when it shows structural noise (or leads with the
+    author) — so already-clean titles are left untouched. Returns the cleaned title or None."""
+    title = book.title
+    if not title:
+        return None
+    authors = list(book.authors)
+    first = title.split()[0] if title.split() else ""
+    if not (_NOISE.search(title) or _key(first) in _author_word_keys(authors)):
+        return None
+    return title_essence(
+        title, folder_name=book.source_folder.name,
+        file_stems=[sf.path.stem for sf in book.source_files],
+        tag_titles=[sf.tags.title for sf in book.source_files if sf.tags and sf.tags.title],
+        authors=authors, series=[s.name for s in book.series],
+    )
