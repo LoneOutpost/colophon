@@ -19,6 +19,22 @@ def test_dot_dash_dot_is_normalized_to_space_dash_space():
     assert cohort_constant_tokens(names) == {"Alan Dean Foster", "Flinx Bk12"}
 
 
+def test_one_sided_and_boundary_hyphens_separate_intra_word_kept():
+    # A hyphen is a separator whenever a neighbour is non-alnum (or a boundary): one-sided
+    # ('Worlds- David Weber'), padded, and `.-.` all split; a true intra-word hyphen is kept.
+    from colophon.core.cohort_constancy import _tokens
+    assert _tokens("Worlds of Honor- David Weber - 27-60") == [
+        "Worlds of Honor", "David Weber", "27-60"]          # one-sided splits; '27-60' range kept
+    assert _tokens("A -B") == ["A", "B"] and _tokens("A- B") == ["A", "B"]
+    assert _tokens("Author_-_Title") == ["Author", "Title"]  # `_-_` is a separator run
+    # brackets and '#'/'&' beside a separator survive as their own token/marker
+    assert _tokens("Blow - #12 - X") == ["Blow", "#12", "X"]
+    assert _tokens("Clive Barker - Everville (HarperAud) - 6 of 8") == [
+        "Clive Barker", "(HarperAud)", "Everville", "6 of 8"]
+    # intra-word hyphens (ASCII and Unicode) are never split
+    assert _tokens("X-Wing Catch-22 Jean-Étienne") == ["X-Wing Catch-22 Jean-Étienne"]
+
+
 def test_bracketed_span_is_its_own_token_with_brackets_retained():
     names = [
         "Author - [Pip & Flinx 12] - 01-A",

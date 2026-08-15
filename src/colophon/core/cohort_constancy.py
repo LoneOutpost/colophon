@@ -9,6 +9,20 @@ from __future__ import annotations
 import re
 
 _BRACKET = re.compile(r"\([^()]*\)|\[[^\]]*\]")   # a (…) or […] span, non-nested
+# A SEPARATOR hyphen: one whose neighbours are not both alphanumeric. A hyphen delimits tokens when a
+# non-alnum character (or a string boundary) sits on either side; it is normalized to ` - `. Only a true
+# intra-word hyphen (`X-Wing`, `Catch-22`, `Jean-Étienne`, an `Anne-Marie` name, a `1-40` range) — alnum
+# on BOTH sides — survives (`[^\W_]` is "a Unicode letter/digit", so accented names are kept). Detection
+# spans any non-alnum neighbour, but only BENIGN padding (`[\s._-]`: whitespace, dot, underscore, extra
+# hyphens) is ABSORBED — a bracket / `#` / `&` beside the hyphen is a token or marker and must survive,
+# so `Voyager - (Outlander 3)` and `Blow - #12` keep their spans. This is why `.-.` is not special: it
+# is just one instance the rule catches.
+_SEP_HYPHEN = re.compile(
+    r"[\s._-]*-[\s._-]+"       # hyphen with benign padding on the right (`.-.`, `- `, `--`)
+    r"|[\s._-]+-[\s._-]*"      # ... or on the left (` -`, `_-`)
+    r"|(?<![^\W_])-[\s._-]*"   # ... or not preceded by a letter/digit (a boundary, `(`, `#`, `]` …)
+    r"|[\s._-]*-(?![^\W_])"    # ... or not followed by one
+)
 
 
 def _segment_tokens(segment: str) -> list[str]:
@@ -21,10 +35,11 @@ def _segment_tokens(segment: str) -> list[str]:
 
 
 def _tokens(name: str) -> list[str]:
-    """Tokenize a filename stem: normalize the `.-.` folder-variant to ` - `, split on ` - ` (never
-    bare `-`/`.`/`_`), then isolate bracketed spans within each segment."""
+    """Tokenize a filename stem: normalize every separator hyphen to ` - ` (see `_SEP_HYPHEN` — this
+    subsumes the `.-.` folder-variant and one-sided/boundary hyphens while keeping intra-word ones),
+    split on ` - `, then isolate bracketed spans within each segment."""
     out: list[str] = []
-    for seg in name.replace(".-.", " - ").split(" - "):
+    for seg in _SEP_HYPHEN.sub(" - ", name).split(" - "):
         out.extend(_segment_tokens(seg))
     return out
 
