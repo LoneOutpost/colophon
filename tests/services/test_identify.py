@@ -61,6 +61,28 @@ def test_seed_series_keeps_existing_series(tmp_path):
     assert book.series[0].name == "Existing"
 
 
+def test_run_identify_series_from_leaf_stem_in_container_folder(tmp_path):
+    # Each Joe Copp book is a single file whose STEM is a `.-.` leaf
+    # ('Author.-.Series BkNN.-.Title.-.Year') sitting in a shared 'Joe Copp series' container
+    # folder that is NOT itself a leaf. The series must be read from the stem, not lost.
+    from colophon.services.identify import run_identify
+
+    folder = tmp_path / "Don Pendleton" / "Joe Copp series"
+    folder.mkdir(parents=True)
+    f = folder / "Don Pendleton.-.Joe Copp Bk01.-.Copp for Hire.-.1987.mp3"
+    f.write_bytes(b"")
+
+    book = BookUnit.new(source_folder=folder)
+    book.source_files = [probe_audio_file(f)]
+    book.content_kind = ContentKind.SINGLE
+
+    run_identify(book, root=tmp_path, pattern=compile_template("$Author - $Title"),
+                 scheme=parse_scheme(""))
+
+    assert book.series and book.series[0].name == "Joe Copp"
+    assert book.series[0].sequence == 1.0
+
+
 def test_normalize_is_identity(tmp_path):
     book = BookUnit.new(source_folder=tmp_path / "Book")
     book.title = "1982 - The Gunslinger (DT1 - original edition)"

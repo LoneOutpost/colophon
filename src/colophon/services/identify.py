@@ -154,9 +154,16 @@ def _reconcile_from(book: BookUnit, evidence: Evidence, *, tiers: str = "all") -
     if parsed.series is not None:
         dirf.setdefault("series", parsed.series)
     else:
-        # A bare 'Name NN' series in a `.-.` leaf folder's MIDDLE segment
+        # A bare 'Name NN' series in a `.-.` leaf's MIDDLE segment
         # ('Author.-.Eve Dallas 11.-.Witness in Death') that parse_folder_title's paren rule misses.
-        lfs = leaf_folder_series(book.source_folder.name)
+        # The leaf convention lives in the FOLDER normally, but when each book is a single file in a
+        # shared container folder ('Joe Copp series/Don Pendleton.-.Joe Copp Bk01.-.Copp for Hire.-.
+        # .1987') it lives in the FILE STEM instead — so fall back to the stem when the folder is not
+        # itself a leaf.
+        leaf_name = book.source_folder.name
+        if ".-." not in leaf_name and book.source_files:
+            leaf_name = book.source_files[0].path.stem
+        lfs = leaf_folder_series(leaf_name)
         if lfs is not None:
             dirf.setdefault("series", lfs[0])
             dirf.setdefault("sequence", str(lfs[1]))
