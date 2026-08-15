@@ -34,12 +34,20 @@ class SeqMarker:
     index: int
     total: int | None = None
     subpart: str = ""
+    end: int | None = None      # a span's last part ('01-06 of 20' -> index 1, end 6); None = a point
+
+    def covers(self) -> set[int]:
+        """The part number(s) this marker accounts for: `{index}` for a point, `{index..end}` for a
+        span ('01-06 of 20' covers 1..6). Lets completeness treat a multi-part file as its whole run."""
+        return set(range(self.index, (self.end if self.end is not None else self.index) + 1))
 
     def render(self) -> str:
         """The single unmistakable token form the string passes key off (sentinel-wrapped so it can
-        never collide with title text): `‹p5/15›`, `‹p13b›`, `‹b16›`."""
+        never collide with title text): `‹p5/15›`, `‹p1-6/20›`, `‹p13b›`, `‹b16›`."""
         letter = "p" if self.kind is SeqKind.PART else "b"
         body = str(self.index)
+        if self.end is not None:
+            body += f"-{self.end}"
         if self.subpart:
             body += self.subpart
         if self.total is not None:
@@ -56,6 +64,7 @@ _PART_WORD = r"cd|dvd|disc|disk|dvds?|part|pt|tape|side|track|trk|chap(?:ter)?|c
 _PART = re.compile(
     rf"^\s*(?:(?P<word>{_PART_WORD})\s*[.\-_]?\s*)?"
     r"(?P<n>\d{1,3})(?!\d)"
+    r"(?:\s*-\s*(?P<end>\d{1,3})(?!\d))?"        # an optional span end ('01-06 of 20', 'Disc 1-3')
     r"(?:\s*of\s*(?P<m>\d{1,3})(?!\d))?"
     r"(?P<sub>[ab])?\s*$",
     re.IGNORECASE,
@@ -64,19 +73,21 @@ _PART = re.compile(
 
 def parse_part(token: str) -> SeqMarker | None:
     """Parse one token as a PART index, or None. Requires an unmistakable signal — a marker word, an
-    `of M` total, or an `a`/`b` half — so a bare number (ambiguous) never matches. Whitespace optional:
-    'Disc 05', 'CD02', '1of9', '01 of 15', '13b' all parse."""
+    `of M` total, or an `a`/`b` half — so a bare number (ambiguous) never matches (a bare `NN-NN` range
+    is ambiguous too and is left out). Whitespace optional: 'Disc 05', 'CD02', '1of9', '01 of 15',
+    '01-06 of 20', '13b' all parse."""
     m = _PART.match(token)
     if m is None:
         return None
-    word, total, sub = m.group("word"), m.group("m"), m.group("sub")
-    if not (word or total or sub):        # a bare number is ambiguous -> leave to context
+    word, total, sub, end = m.group("word"), m.group("m"), m.group("sub"), m.group("end")
+    if not (word or total or sub):        # a bare number/range is ambiguous -> leave to context
         return None
     return SeqMarker(
         kind=SeqKind.PART,
         index=int(m.group("n")),
         total=int(total) if total else None,
         subpart=(sub or "").lower(),
+        end=int(end) if end else None,
     )
 
 
@@ -85,8 +96,10 @@ def parse_part(token: str) -> SeqMarker | None:
 # needs a marker word, an `of M`, or an `a`/`b` half; a bare number is never scanned (too ambiguous
 # mid-title). Ordered longest-first so 'Disc 05 of 11' matches whole, not 'Disc 05' then '11'.
 _PART_SCAN = re.compile(
-    rf"(?<![\w])(?:(?P<word>{_PART_WORD})\s*[.\-_]?\s*)"   # marker word + N [of M] [a/b]
-    r"(?P<n>\d{1,3})(?!\d)(?:\s*of\s*(?P<m>\d{1,3})(?!\d))?(?P<sub>[ab])?(?![\w])"
+    rf"(?<![\w])(?:(?P<word>{_PART_WORD})\s*[.\-_]?\s*)"   # marker word + N [-end] [of M] [a/b]
+    r"(?P<n>\d{1,3})(?!\d)(?:\s*-\s*(?P<end>\d{1,3})(?!\d))?"
+    r"(?:\s*of\s*(?P<m>\d{1,3})(?!\d))?(?P<sub>[ab])?(?![\w])"
+    r"|(?<![\w])(?P<n4>\d{1,3})\s*-\s*(?P<end4>\d{1,3})(?!\d)\s*of\s*(?P<m4>\d{1,3})(?!\d)(?![\w])"  # NN-NN of M span
     rf"|(?<![\w])(?P<n2>\d{{1,3}})(?!\d)\s*of\s*(?P<m2>\d{{1,3}})(?!\d)(?![\w])"  # bare N of M
     r"|(?<![\w])(?P<n3>\d{1,3})(?!\d)(?P<sub3>[ab])(?![\w])",                     # bare NNa / NNb half
     re.IGNORECASE,
@@ -94,10 +107,12 @@ _PART_SCAN = re.compile(
 
 
 def _marker_from_scan(m: re.Match[str]) -> SeqMarker:
-    n = m.group("n") or m.group("n2") or m.group("n3")
-    total = m.group("m") or m.group("m2")
+    n = m.group("n") or m.group("n4") or m.group("n2") or m.group("n3")
+    total = m.group("m") or m.group("m4") or m.group("m2")
     sub = m.group("sub") or m.group("sub3") or ""
-    return SeqMarker(SeqKind.PART, int(n), int(total) if total else None, sub.lower())
+    end = m.group("end") or m.group("end4")
+    return SeqMarker(SeqKind.PART, int(n), int(total) if total else None, sub.lower(),
+                     int(end) if end else None)
 
 
 def find_parts(text: str) -> list[tuple[tuple[int, int], SeqMarker]]:

@@ -33,6 +33,15 @@ def test_render_is_a_single_unmistakable_token():
     assert parse_part("Disc 05").render() == "‹p5›"
 
 
+def test_span_covers_its_whole_run():
+    m = parse_part("01-06 of 20")
+    assert m is not None and m.index == 1 and m.end == 6 and m.total == 20
+    assert m.covers() == {1, 2, 3, 4, 5, 6}
+    assert parse_part("Disc 1-3").covers() == {1, 2, 3}
+    # a bare NN-NN range (no marker word / of-total) stays ambiguous and is not a part
+    assert parse_part("01-12") is None
+
+
 def test_find_parts_locates_markers_glued_to_title_text():
     assert [mk.render() for _, mk in find_parts("Hot Mahogany 7of7")] == ["‹p7/7›"]
     assert [mk.render() for _, mk in find_parts("The Skies of Pern Disc 08 of 11")] == ["‹p8/11›"]

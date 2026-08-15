@@ -7,15 +7,9 @@ Pure: no I/O. Takes plain parallel lists (one entry per file) so it never import
 
 from __future__ import annotations
 
-import re
-
 from colophon.core.models import Finding, FindingCode, FindingSeverity
 from colophon.core.sequence_marker import find_parts
 from colophon.core.track_index import parse_track_indices
-
-# 'NN-NN of M' is a track RANGE (one file spans parts NN..NN of M), not a single 'N of M' index — the
-# deferred range family. A book whose files carry ranges can't be part-counted this way, so we defer it.
-_RANGE_OF = re.compile(r"\d{1,3}\s*-\s*\d{1,3}\s+of\s+\d{1,3}", re.IGNORECASE)
 
 _MIN_FILES = 3        # too few files to assert a sequence
 _LEADING_MAX = 3      # infer a missing leading track only when the sequence starts at 2 or 3
@@ -55,28 +49,32 @@ def sequence_gaps(indices: list[int]) -> list[int]:
 
 
 def total_based_gaps(stems: list[str]) -> list[int] | None:
-    """Missing parts when every file carries a canonical `N of M` PART index sharing one total M: the
-    parts are exactly `{1..M}`, so any absent one — INCLUDING a trailing truncation (files 1..8 of 11)
-    the index-only guess cannot see — is a hole. Returns [] when complete, None when it does not apply
-    (a range file, no `N of M`, disagreeing totals, a duplicate/out-of-range index — e.g. a
-    multi-track-per-disc book whose files all read 'Disc 01 of 11')."""
-    idx: list[int] = []
+    """Missing parts when every file carries a canonical `N of M` PART marker sharing one total M: the
+    parts are exactly `{1..M}`, so any not covered — INCLUDING a trailing truncation (files 1..8 of 11)
+    the index-only guess cannot see — is a hole. A span file ('01-06 of 20') covers its whole run, so a
+    range-partitioned book counts correctly. Returns [] when complete, None when it does not apply (no
+    `N of M`, disagreeing totals, out-of-range, or OVERLAPPING coverage — e.g. a multi-track-per-disc
+    book whose files all read 'Disc 01 of 11', where the parts do not partition 1..M)."""
+    covered: set[int] = set()
+    span_total = 0
     totals: set[int] = set()
     for s in stems:
-        if _RANGE_OF.search(s):
-            return None
         marks = [m for _, m in find_parts(s) if m.total is not None]
         if not marks:
             return None
-        idx.append(marks[0].index)
+        c = marks[0].covers()
+        span_total += len(c)
+        covered |= c
         totals.add(marks[0].total)   # type: ignore[arg-type]
     if len(totals) != 1:
         return None
     total = next(iter(totals))
-    present = set(idx)
-    if len(present) != len(idx) or any(i > total for i in present):
-        return None
-    return sorted(set(range(1, total + 1)) - present)
+    if span_total != len(covered) or any(i > total for i in covered):
+        return None       # overlapping/duplicate coverage or an index past M -> not a clean partition
+    missing = sorted(set(range(1, total + 1)) - covered)
+    if len(missing) > len(covered):   # density gate: more missing than present is too uncertain to
+        return []                     # assert (a lone '1 of 20' file) -> [] = no gap asserted
+    return missing
 
 
 def missing_tracks_finding(tracks: list[int | None], stems: list[str]) -> Finding | None:
@@ -84,14 +82,12 @@ def missing_tracks_finding(tracks: list[int | None], stems: list[str]) -> Findin
     holes, else None. The caller restricts this to multi-file SINGLE books. A canonical `N of M` total
     settles the count when present (and catches trailing truncation); otherwise the index-only sequence
     is used."""
-    holes = total_based_gaps(stems)
+    holes = total_based_gaps(stems)      # its own density gate; covers spans + trailing truncation
     if holes is None:
         idx = index_sequence(tracks, stems)
         if idx is None:
             return None
         holes = sequence_gaps(idx)
-    elif len(holes) > len(stems):        # density gate (matches sequence_gaps): more missing than
-        holes = []                       # present is too uncertain to assert
     if not holes:
         return None
     shown = ", ".join(str(h) for h in holes[:10]) + (" …" if len(holes) > 10 else "")

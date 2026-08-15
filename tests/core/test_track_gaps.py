@@ -57,10 +57,23 @@ def test_n_of_m_total_complete_is_none():
     assert missing_tracks_finding([None] * 4, stems) is None
 
 
-def test_n_of_m_range_files_defer_no_false_positive():
-    # 'NN-NN of M' files each span many parts (a complete 2-file book), so the total-based count must
-    # NOT fire and wrongly report the un-listed parts as missing.
+def test_n_of_m_range_span_partitions_and_reports_complete():
+    # 'NN-NN of M' files each COVER a run of parts; 1-6 + 7-20 partitions 1..20, so the book is complete
+    # (no false 'missing' for the un-listed interior parts).
     stems = ["Dragonflight 01-06 of 20", "Dragonflight 07-20 of 20"]
+    assert missing_tracks_finding([None, None], stems) is None
+
+
+def test_n_of_m_range_span_detects_a_gap_between_runs():
+    # 1-6 then 12-20 of 20 leaves parts 7..11 uncovered.
+    stems = ["Book 01-06 of 20", "Book 12-20 of 20"]
+    f = missing_tracks_finding([None, None], stems)
+    assert f is not None and "7" in f.detail and "11" in f.detail
+
+
+def test_overlapping_coverage_defers():
+    # two files both claiming '01-10 of 20' overlap -> not a clean partition -> defer, no finding.
+    stems = ["Book 01-10 of 20", "Book 01-10 of 20"]
     assert missing_tracks_finding([None, None], stems) is None
 
 
