@@ -42,3 +42,29 @@ def test_missing_tracks_finding_flags_a_hole():
 
 def test_missing_tracks_finding_none_when_complete():
     assert missing_tracks_finding([1, 2, 3], ["01", "02", "03"]) is None
+
+
+def test_n_of_m_total_catches_trailing_truncation():
+    # files 1..3 of 5 with no embedded tracks: the index-only guess cannot see the truncation, but the
+    # 'N of M' total does -> parts 4 and 5 are missing.
+    stems = ["Book 1 of 5", "Book 2 of 5", "Book 3 of 5"]
+    f = missing_tracks_finding([None, None, None], stems)
+    assert f is not None and "4" in f.detail and "5" in f.detail
+
+
+def test_n_of_m_total_complete_is_none():
+    stems = [f"Book {i} of 4" for i in range(1, 5)]
+    assert missing_tracks_finding([None] * 4, stems) is None
+
+
+def test_n_of_m_range_files_defer_no_false_positive():
+    # 'NN-NN of M' files each span many parts (a complete 2-file book), so the total-based count must
+    # NOT fire and wrongly report the un-listed parts as missing.
+    stems = ["Dragonflight 01-06 of 20", "Dragonflight 07-20 of 20"]
+    assert missing_tracks_finding([None, None], stems) is None
+
+
+def test_multi_track_per_disc_does_not_false_flag():
+    # every file reads 'Disc 01 of 11' (duplicate index) -> the total-based check defers, no finding.
+    stems = [f"Book Disc 01 of 11 - Track {i:02d}" for i in range(1, 6)]
+    assert missing_tracks_finding([None] * 5, stems) is None
