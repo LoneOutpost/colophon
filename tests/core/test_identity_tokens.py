@@ -142,6 +142,17 @@ def test_part_markers_never_leak_as_a_title_token():
     assert title_candidates("Apollo 13", authors=[], series=[]) == ["Apollo 13"]
 
 
+def test_glued_series_code_segment_dropped_when_a_title_follows():
+    # a glued caps-code + book number ('PM03', 'TR02', 'B&M03') is a series prefix, dropped when a
+    # plainer title segment sits beside it — same rule as a bare 'Name NN'.
+    assert title_candidates("Raymond Chandler.-.PM03.-.The High Window",
+                            authors=["Raymond Chandler"], series=[]) == ["The High Window"]
+    assert title_candidates("Gregg Hurwitz - TR02 - The Program",
+                            authors=["Gregg Hurwitz"], series=[]) == ["The Program"]
+    # an ordinary capitalized title word is never mistaken for a code
+    assert title_candidates("2001 A Space Odyssey", authors=[], series=[]) == ["2001 A Space Odyssey"]
+
+
 def test_lone_name_number_is_kept_as_the_title():
     # nothing plainer beside it -> a 'Name NN' IS the title, not a series ref.
     assert title_candidates("Slaughterhouse 5", authors=[], series=[]) == ["Slaughterhouse 5"]

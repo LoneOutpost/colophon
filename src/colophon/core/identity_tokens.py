@@ -26,6 +26,10 @@ _SERIES_MARKER = re.compile(r"(?:\bbook|\bvol|\bvolume|bk)\s*\d", re.IGNORECASE)
 # prefix when a plainer title segment sits beside it; a lone one ('Slaughterhouse 5', 'Apollo 13') is
 # kept as the title. A digit-led title ('2001 A Space Odyssey') never matches (must start with a letter).
 _BARE_SERIES_REF = re.compile(r"^[^\W\d].*\s\d{1,3}$")
+# A GLUED series code: a 2-5 letter caps abbreviation (optionally joined by '&') stuck to a 1-3 digit
+# book number — 'SS7', 'HM04', 'TR02', 'B&M03', 'LOTD04'. Upper-case-anchored so an ordinary title
+# word never matches; a lone letter+number ('B12') needs >=2 letters and is not a code.
+_GLUED_SERIES_CODE = re.compile(r"^[A-Z](?:&?[A-Z]){1,4}\d{1,3}$")
 
 # A token that is NOTHING but an index or disc/part marker ('1/9', '01-12', '001 of 153', 'CD01',
 # 'Part 3') — never a title, drop it whole.
@@ -162,9 +166,13 @@ def title_candidates(name: str, *, authors: list[str], series: list[str]) -> lis
         # Author, series-KEY, and an explicit `Bk/Vol/Book N` marker are always dropped.
         if t is None or normalize_key(t) in akeys or normalize_key(t) in skeys or _SERIES_MARKER.search(t):
             continue
-        # Test the bare `Name NN` shape on the RAW segment: _clean_token strips a padded trailing
-        # index ('Renegades of Pern 08' -> 'Renegades of Pern'), which would hide the number.
-        (bare_refs if _BARE_SERIES_REF.match(raw.strip()) else plain).append(t)
+        # Test the series-prefix shape on the RAW segment: a bare `Name NN`, or a GLUED series code
+        # ('TR02', 'PM03', 'B&M03') — a caps abbreviation stuck to a book number. Both are a series
+        # prefix DROPPED when a plainer title segment sits beside them ('PM03 - The High Window' ->
+        # 'The High Window'), else kept as the title. (_clean_token would strip a padded index first.)
+        raw_s = raw.strip()
+        (bare_refs if _BARE_SERIES_REF.match(raw_s) or _GLUED_SERIES_CODE.match(raw_s)
+         else plain).append(t)
     kept = plain or bare_refs
     if not kept:
         return []
