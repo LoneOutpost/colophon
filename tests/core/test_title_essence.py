@@ -98,3 +98,28 @@ def test_result_is_always_a_subset_in_committed_order():
         authors=["B V Larson"], series=["Undying Mercenaries 1"],
     )
     assert out == "Steel World"
+
+
+def test_author_as_title_person_name_is_left_alone():
+    # the committed title IS the author (a mis-derivation) -> essence must not touch it
+    assert _ess("Chuck Klosterman", folder="Chuck Klosterrman.-.Downtown Owl.-.UA 135@64.44m",
+                stems=["001 - Chuck Klosterrman - Downtown Owl"], authors=["Chuck Klosterrman"]) is None
+    assert _ess("Anne McCaffrey and Elizabeth Ann Scarborough",
+                folder="Anne McCaffrey and Elizabeth Ann Scarborough.-.Barque Cats 1.-.Catalyst",
+                stems=["Catalyst 01"], authors=["Anne McCaffrey"]) is None
+
+
+def test_ampersand_and_articles_are_kept():
+    # '&' and articles are structural glue, never dropped as noise
+    assert _ess("Angels & Demons", folder="Dan Brown.-.Angels & Demons",
+                stems=["Angels and Demons 01", "Angels and Demons 02"], authors=["Dan Brown"]) is None
+    assert _ess("The Book of Fate", folder="Brad Meltzer.-.The Book of Fate",
+                stems=["The Book of Fate 01", "The Book of Fate 02"], authors=["Brad Meltzer"]) is None
+
+
+def test_trailing_glue_left_by_a_dropped_tail_is_trimmed():
+    # 'read by Janet' is not corroborated -> dropped; the dangling 'by' is trimmed, not left
+    out = _ess("The Red Dahlia read by Janet",
+               folder="Mo Hayder.-.The Red Dahlia",
+               stems=["The Red Dahlia 01", "The Red Dahlia 02"], authors=["Mo Hayder"])
+    assert out == "The Red Dahlia"

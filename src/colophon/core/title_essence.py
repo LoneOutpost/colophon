@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from difflib import SequenceMatcher
 
 from colophon.core.identity_tokens import title_candidates
+from colophon.core.people import looks_like_person_name
 
 # Split a title string into words on whitespace AND hyphens, so 'Tar-Aiym' and 'Tar Aiym' tokenize
 # identically. Rendering re-joins from the committed original, so the hyphen display is preserved.
@@ -21,6 +22,10 @@ _SPLIT = re.compile(r"[\s\-]+")
 # A committed word this similar to an essence word is treated as the same word (a cross-source typo,
 # e.g. 'Crome'/'Chrome', 'Weirdstone'/'Wierdstone').
 _FUZZY = 0.86
+# Glue tokens — connectives, articles, and the '&'/'+' symbols. Kept in the render regardless of
+# corroboration (they are structural, never the noise we remove) and trimmed off the result's edges.
+_GLUE = frozenset({"and", "the", "a", "an", "of", "or", "to", "in", "on", "with", "for", "at", "by",
+                   "&", "+"})
 
 
 def _key(word: str) -> str:
@@ -72,6 +77,12 @@ def title_essence(
     if not committed or not committed.strip():
         return None
     drop = _author_word_keys(authors)
+    # An author-as-title book (the committed title IS a person name, a mis-derivation): essence cannot
+    # help and the word-level author drop would mangle it ('Chuck Klosterman' -> 'Klosterman',
+    # 'Anne Mccaffrey and Elizabeth Ann Scarborough' -> 'and Elizabeth ...'). A real person-name title
+    # ('Jane Eyre') is equally left alone, which is correct — it needs no cleaning.
+    if looks_like_person_name(committed):
+        return None
     sources = [ks for ks in (
         _source_keys([folder_name], authors, series, drop),
         _source_keys(file_stems, authors, series, drop),
@@ -93,10 +104,20 @@ def title_essence(
         return None
     kept: list[str] = []
     for word in base.split():
-        subkeys = [k for k in (_key(sw) for sw in _SPLIT.split(word)) if k]
+        w = word.strip(":;,")                 # a colon/comma left when its subtitle got dropped
+        if not w:
+            continue
+        if w.casefold() in _GLUE:             # connectives/'&'/'+' are structural, always kept
+            kept.append(w)
+            continue
+        subkeys = [k for k in (_key(sw) for sw in _SPLIT.split(w)) if k]
         if subkeys and all(k in essence or _fuzzy_in(k, essence) for k in subkeys):
-            kept.append(word)
+            kept.append(w)
+    while kept and kept[-1].casefold() in _GLUE:   # a connective left dangling by a dropped tail
+        kept.pop()                                 # ('The Red Dahlia by' -> 'The Red Dahlia'); leading
+    if not any(w.casefold() not in _GLUE for w in kept):   # articles stay (glue only -> no real title)
+        return None
     result = " ".join(kept)
-    if not result or [_key(w) for w in _SPLIT.split(result)] == [_key(w) for w in _SPLIT.split(committed)]:
+    if [_key(w) for w in _SPLIT.split(result)] == [_key(w) for w in _SPLIT.split(committed)]:
         return None
     return result
