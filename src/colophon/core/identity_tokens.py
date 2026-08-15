@@ -14,7 +14,7 @@ from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.normalize import normalize_key
 from colophon.core.people import looks_like_person_name
 from colophon.core.sequence_affix import strip_encoding_artifact
-from colophon.core.sequence_marker import parse_part
+from colophon.core.sequence_marker import parse_part, strip_parts
 
 # A series marker: 'Book/Vol/Volume N' need a word boundary (so 'Textbook 1' is not a marker), but the
 # 'bk' abbreviation is matched even when glued ('P&FBk 12', 'Flinx Bk12') — no English word ends in a
@@ -64,7 +64,8 @@ def _clean_token(tok: str) -> str | None:
     if _TOK_PURE_INDEX.match(tok) or parse_part(tok.strip()) is not None:
         return None
     t = _TOK_TRAIL_MARK.sub("", _TOK_LEAD_MARK.sub("", tok))
-    t = " ".join(t.split()).strip(" .-_")
+    t = strip_parts(t)                       # remove a canonical PART marker embedded mid-token
+    t = " ".join(t.split()).strip(" .-_")    # ('Dead Connection Ch01 of 39' -> 'Dead Connection')
     if not t or parse_part(t) is not None:   # a marker can surface AFTER a lead/trail strip ('Pt1 Trk01'
         return None                          # -> 'Trk01', '01. Track 1' -> 'Track 1') — drop it too
     return t
