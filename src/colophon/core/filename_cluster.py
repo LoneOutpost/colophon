@@ -49,6 +49,9 @@ _LEADING_COMPOUND_GLUE = re.compile(r"^(\d{1,3}(?:[-/x]\d{1,3})+)-(.+)$", re.IGN
 # read as a sequence. (This chunk-local, space-separated form is why we can't just call
 # parse_sequence_affix, which needs a bracket or dash separator, not a bare space.)
 _TRAIL_NUM = re.compile(r"\s+\d{1,3}(?:\.\d{1,2})?\s*$")
+# A `N of M` total-count part index in display form ("1 of 9", "01 of 11") — the whole run is one
+# book's part marker, never a series+sequence. Bounded to 1-3 digits like the other index tokens.
+_OF_TOTAL = re.compile(r"\b\d{1,3}\s+of\s+\d{1,3}\b", re.IGNORECASE)
 # An explicit chapter/part marker chunk: a structural word plus its index ("Chap 01", "Track 3",
 # "Disc 2", "Part 1"), or a bare front/back-matter label ("Epilogue", "Prologue"). This is the one
 # signal that tells a single book's chapters apart from a numbered series shelf: both share a leading
@@ -175,9 +178,12 @@ def _signal(name: str, points: int, detail: str) -> ConfidenceSignal:
 
 
 def _series_and_seq(chunks: list[str]) -> tuple[str | None, float | None]:
-    """First chunk that ends in a number -> (series_name, sequence)."""
+    """First chunk that ends in a number -> (series_name, sequence). A `N of M` total-count run
+    ('1 of 9', '01 of 11') is a PART INDEX, not a series ref, so it is stripped first: otherwise its
+    total M reads as the sequence and the dangling 'Name N of' leaks in as a series name (the
+    'A Death In Vienna 1 of' / '01 of' partials)."""
     for chunk in chunks:
-        disp = _spaced(chunk)
+        disp = _OF_TOTAL.sub(" ", _spaced(chunk)).strip()
         seq = _trailing_number(disp)
         if seq is not None:
             return (_strip_trailing_number(disp) or None), seq

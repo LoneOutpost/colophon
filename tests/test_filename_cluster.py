@@ -77,6 +77,17 @@ def test_series_and_seq_from_chunks():
     assert _series_and_seq([]) == (None, None)
 
 
+def test_series_and_seq_ignores_n_of_m_part_index():
+    # a 'N of M' total-count is one book's part marker, never a series+sequence: the total M must
+    # not become the sequence nor the dangling 'Name N of' a series name.
+    assert _series_and_seq(["A Death In Vienna 1of9"]) == (None, None)
+    assert _series_and_seq(["1 Of 4"]) == (None, None)
+    assert _series_and_seq(["Second Deadly Sin 01of11"]) == (None, None)
+    assert _series_and_seq(["01 of 28"]) == (None, None)
+    # a genuine trailing series sequence is unaffected even when the title contains 'of'
+    assert _series_and_seq(["Wheel of Time 3"]) == ("Wheel of Time", 3.0)
+
+
 def test_multi_work_extracts_title_series_seq():
     w = _multi_work(Path("/a/Father of Lies (Darkly Disturbing Trilogy 1).mp3"),
                     ["Father of Lies", "Darkly Disturbing Trilogy 1"])
