@@ -65,3 +65,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B"]
+# The canonical sequence sentinel is an intentional non-ASCII token (‹…›), chosen precisely because it
+# cannot collide with filename text; the ambiguous-unicode lint targets prose, not internal sentinels.
+"src/colophon/core/sequence_marker.py" = ["RUF001", "RUF002"]
+"tests/core/test_sequence_marker.py" = ["RUF001"]
