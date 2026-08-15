@@ -127,6 +127,16 @@ def test_cluster_cd_tracks_are_single():
     assert r.detected_works[0].label == "girlblue"
 
 
+def test_cluster_hyphen_glued_disc_track_markers_are_single():
+    # 'CD-1'/'Track-01' keep their intra-word hyphen so they are one token each; the canonical PART
+    # marker recognizes them as an index, so the whole book clusters instead of shattering per file.
+    r = cluster(_paths(*(
+        f"Death to the French by C.S. Forester CD-{1 + i // 6} Track-{i % 6 + 1:02d}.mp3"
+        for i in range(12))))
+    assert r.content_kind is ContentKind.SINGLE
+    assert len(r.detected_works) == 1
+
+
 def test_cluster_series_of_separate_books_is_multi():
     r = cluster(_paths("Father of Lies (Darkly Disturbing Trilogy 1).mp3",
                        "Tanners Dell (Darkly Disturbing Trilogy 2).mp3"))

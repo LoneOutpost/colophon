@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from colophon.core.models import ConfidenceSignal, ContentKind, DetectedWork
+from colophon.core.sequence_marker import parse_part
 from colophon.core.track_index import parse_track_index
 
 # Top-level chunk separators, in two flavours chosen by filename style (see `_chunks`). Both split
@@ -110,10 +111,13 @@ def _is_num(tok: str) -> bool:
 
 
 def _is_index_token(tok: str) -> bool:
-    """True if `tok` is a pure number, a compound track-of-total/disc-track index, or a
-    number+letter part half — the tokens a filename varies across a book's parts, excluded
-    from the text signature."""
-    return _is_num(tok) or bool(_INDEX_COMPOUND.match(tok)) or bool(_INDEX_PART.match(tok))
+    """True if `tok` is a pure number, a compound track-of-total/disc-track index, a number+letter part
+    half, or any canonical PART marker (`parse_part`) — the tokens a filename varies across a book's
+    parts, excluded from the text signature. The `parse_part` arm adds the marker-glued forms a bare
+    number/compound misses: `cd-3`, `track-01`, `disc05`, `1of9` — which otherwise SHATTER a disc/track
+    book (each 'CD-1'/'CD-2' yields a different signature)."""
+    return (_is_num(tok) or bool(_INDEX_COMPOUND.match(tok)) or bool(_INDEX_PART.match(tok))
+            or parse_part(tok) is not None)
 
 
 def _is_chapter_marker(chunk: str) -> bool:
