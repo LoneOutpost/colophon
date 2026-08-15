@@ -25,6 +25,14 @@ _SEP_HYPHEN = re.compile(
 )
 
 
+def separator_segments(name: str) -> list[str]:
+    """`name` split into segments on the general separator (every non-intra-word hyphen normalized to
+    ` - ` first; see `_SEP_HYPHEN`), whitespace-trimmed, empties dropped. The delimiter-agnostic
+    replacement for a literal `.-.` split: `Author.-.Series - Title` and `Author - Series - Title`
+    segment identically. Segment-level (brackets NOT isolated); `_tokens` refines further."""
+    return [s.strip() for s in _SEP_HYPHEN.sub(" - ", name).split(" - ") if s.strip()]
+
+
 def _segment_tokens(segment: str) -> list[str]:
     """A ` - ` segment split into tokens: each (…)/[…] span is its own token (brackets retained) and
     the residual text is split around those spans."""
@@ -39,7 +47,7 @@ def _tokens(name: str) -> list[str]:
     subsumes the `.-.` folder-variant and one-sided/boundary hyphens while keeping intra-word ones),
     split on ` - `, then isolate bracketed spans within each segment."""
     out: list[str] = []
-    for seg in _SEP_HYPHEN.sub(" - ", name).split(" - "):
+    for seg in separator_segments(name):
         out.extend(_segment_tokens(seg))
     return out
 

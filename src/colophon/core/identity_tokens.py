@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from colophon.core.cohort_constancy import _tokens
+from colophon.core.cohort_constancy import _tokens, separator_segments
 from colophon.core.metadata_quality import is_structural_marker
 from colophon.core.normalize import normalize_key
 from colophon.core.people import looks_like_person_name
@@ -72,16 +72,17 @@ _LEAF_NON_AUTHOR = frozenset({"audiobook", "audiobooks", "unsorted", "misc", "me
 
 
 def leaf_folder_author(folder_name: str) -> str | None:
-    """The author declared by a leaf book folder that uses the `.-.` convention
-    (`Author.-.[Series BkNN.-.]Title`): its FIRST `.-.` segment, but only when that segment is
-    person-name-shaped and not a staging/format word (the guard against a folder that isn't
-    `Author.-.…`). Returns None for a folder with no `.-.` or a non-name first segment. The library's
-    leaf export convention puts the author first; a folder with a dedicated author-node ancestor already
-    gets that author from the graph, so this only supplies the author the depth logic misses when the
-    author lives inside the leaf name."""
-    if ".-." not in folder_name:
+    """The author declared by a leaf name (folder OR file stem) that PACKS author + title in one string
+    (`Author - [Series BkNN - ]Title`): its FIRST segment, when that segment is person-name-shaped and
+    not a staging/format word. Segments split on the GENERAL separator (any non-intra-word hyphen, so
+    `Author.-.Title`, `Author - Title`, and `Author_-_Title` behave identically — the `.-.` form is not
+    special). Returns None for a single-segment name or a non-name first segment. A leaf with a dedicated
+    author-node ancestor already gets that author from the graph; this supplies the one the depth logic
+    misses when the author lives inside the leaf name."""
+    segs = separator_segments(folder_name)
+    if len(segs) < 2:                          # one segment packs no title -> not an Author-Title leaf
         return None
-    head = folder_name.split(".-.", 1)[0].strip()
+    head = segs[0]
     if head.casefold() in _LEAF_NON_AUTHOR:
         return None
     return head if looks_like_person_name(head) else None
@@ -92,28 +93,40 @@ def leaf_folder_author(folder_name: str) -> str | None:
 # not kept ('Halfblood Chronicles Bk1' -> name 'Halfblood Chronicles').
 _SERIES_REF = re.compile(
     r"^(?P<name>.+?)(?:\s+(?:bk|book|vol|volume))?\s*#?\s*(?P<seq>\d{1,3})$", re.IGNORECASE)
+# A bibliographic noun / sequence marker that is never itself a series name ('Book 7' -> not series
+# 'Book'). `is_structural_marker` already rejects CD/Disc/Vol/Part; this covers the 'book'/'bk' words it
+# leaves — the gap that let 'Bk3' / 'Book 7' parse as a series.
+_NOT_SERIES_NAME = {normalize_key(w) for w in ("book", "bk", "novel", "series", "collection")}
+# An 'N of M' total-count run inside the segment ('Disc 08 of 11'): a part index, not a series ref.
+_OF_TOTAL = re.compile(r"\b\d{1,3}\s+of\s+\d{1,3}\b", re.IGNORECASE)
 
 
 def parse_series_ref(segment: str) -> tuple[str, float] | None:
     """Parse a `Name NN` / `Name Bk NN` / `Name #NN` reference into (series name, sequence), or None.
     'Eve Dallas 11' -> ('Eve Dallas', 11.0); 'Flinx Bk03' -> ('Flinx', 3.0). The name must contain a
-    letter, so a bare number / encoding tail does not parse as a series."""
-    m = _SERIES_REF.match(segment.strip())
+    letter and must not be a structural marker or bare sequence word ('Book'/'Bk'/'CD'), and an
+    'N of M' part index ('Disc 08 of 11') is never a series."""
+    seg = segment.strip()
+    if _OF_TOTAL.search(seg):
+        return None
+    m = _SERIES_REF.match(seg)
     if not m:
         return None
     name = m.group("name").strip(" .-_#")
-    return (name, float(m.group("seq"))) if name and re.search(r"[^\W\d]", name) else None
+    if not name or not re.search(r"[^\W\d]", name):
+        return None
+    if normalize_key(name) in _NOT_SERIES_NAME or is_structural_marker(name):
+        return None
+    return (name, float(m.group("seq")))
 
 
 def leaf_folder_series(folder_name: str) -> tuple[str, float] | None:
-    """The series a `.-.` leaf folder declares in a MIDDLE segment
-    (`Author.-.Series NN.-.Title[.-.suffix]`): the first middle segment (between the author-first and
-    the title-last) that parses as a series reference. Returns None for a folder with fewer than three
-    `.-.` segments or no series-shaped middle — so `Author.-.Title` and `Author.-.Title.-.UA…` yield
-    nothing."""
-    if ".-." not in folder_name:
-        return None
-    segs = [s.strip() for s in folder_name.split(".-.")]
+    """The series a leaf name (folder OR file stem) declares in a MIDDLE segment
+    (`Author - Series NN - Title[ - suffix]`): the first middle segment (between the author-first and
+    the title-last) that parses as a series reference. Segments split on the GENERAL separator, so the
+    `.-.` form is not special. Returns None for fewer than three segments or no series-shaped middle —
+    so `Author - Title` and `Author - Title - UA…` yield nothing (the title slot is never the series)."""
+    segs = separator_segments(folder_name)
     if len(segs) < 3:
         return None
     for seg in segs[1:-1]:                      # skip the author (first) and the title (last)

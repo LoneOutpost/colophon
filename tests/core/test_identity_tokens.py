@@ -145,6 +145,25 @@ def test_parse_series_ref():
     assert parse_series_ref("Arcane Society #2") == ("Arcane Society", 2.0)
     assert parse_series_ref("Witness in Death") is None   # no trailing number
     assert parse_series_ref("11") is None                 # no name (letters)
+    # a structural marker / bare sequence word is never a series name
+    assert parse_series_ref("Book 7") is None
+    assert parse_series_ref("Bk3") is None
+    assert parse_series_ref("CD02") is None
+    assert parse_series_ref("Disc 2") is None
+    # an 'N of M' part index is not a series ref
+    assert parse_series_ref("Disc 08 of 11") is None
+    assert parse_series_ref("Something 1 of 9") is None
+
+
+def test_leaf_functions_are_delimiter_agnostic():
+    # the `.-.` form is not special: a ` - ` or `_-_` delimited leaf parses identically.
+    from colophon.core.identity_tokens import leaf_folder_author, leaf_folder_series
+    assert leaf_folder_author("Don Pendleton - Joe Copp Bk01 - Copp for Hire - 1987") == "Don Pendleton"
+    assert leaf_folder_author("Don Pendleton.-.Joe Copp Bk01.-.Copp for Hire.-.1987") == "Don Pendleton"
+    assert leaf_folder_series("Don Pendleton - Joe Copp Bk01 - Copp for Hire - 1987") == ("Joe Copp", 1.0)
+    assert leaf_folder_series("Barry Sadler - Casca 05 - Casca The Barbarian") == ("Casca", 5.0)
+    # the junk guard reaches the leaf helper too: a disc/book marker middle is not a series
+    assert leaf_folder_series("Narnia - Book 7 - The Last Battle 1") is None
 
 
 def test_leaf_folder_series_reads_the_middle_dotdash_segment():
