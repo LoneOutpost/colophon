@@ -1698,7 +1698,12 @@ async def persist_dialog(
                             controller.record_organize_pattern(
                                 opts.patterns.folder, opts.patterns.single_file
                             )
-                            show_preview(books, bool(tag.value), opts, bool(rem.value))
+                            # Off the loop, with the button held busy: the preview stats every
+                            # file of every book in scope.
+                            with busy(persist_btn):
+                                await show_preview(
+                                    books, bool(tag.value), opts, bool(rem.value)
+                                )
                         else:
                             notready = sum(1 for b in books if not is_ready_to_persist(b))
                             if notready:
@@ -1706,7 +1711,8 @@ async def persist_dialog(
                             else:
                                 await run_persist(books, bool(tag.value), opts, False)
 
-                    ui.button("Persist", icon="save", on_click=_run).props("unelevated")
+                    persist_btn = ui.button("Persist", icon="save").props("unelevated")
+                    persist_btn.on_click(single_flight(_run))
 
         def _confirm(books, do_tag, opts, notready) -> None:
             body.clear()
@@ -1725,8 +1731,14 @@ async def persist_dialog(
                         on_click=lambda: run_persist(books, do_tag, opts, False),
                     ).props("unelevated color=warning")
 
-        def show_preview(books, do_tag, opts, remove_after) -> None:
-            rows = controller.organize_preview(books, patterns=opts.patterns, encode=opts.encode)
+        async def show_preview(books, do_tag, opts, remove_after) -> None:
+            # Every row resolves a destination and stats the files that would land there, so a
+            # whole-library preview is tens of thousands of filesystem calls. Run it in a worker
+            # thread: inline it starved the event loop long enough for NiceGUI to drop the client,
+            # and the reconnect reload took this dialog — and the pending persist — with it.
+            rows = await asyncio.to_thread(
+                controller.organize_preview, books, patterns=opts.patterns, encode=opts.encode
+            )
             body.clear()
             with body:
                 ui.label("Confirm destinations").classes("text-subtitle1")

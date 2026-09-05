@@ -238,3 +238,27 @@ def test_persist_already_placed_is_done_and_tags(tmp_path):
     assert (ingest / "Some Author" / "Dune" / "Dune.mp3").exists()   # not moved/removed
     assert state_of(ctx.books.get(book.id), Phase.ORGANIZE) is PhaseState.FRESH
     ctx.close()
+
+
+def test_reorg_orders_parts_from_the_tag_cache(tmp_path, monkeypatch):
+    # The executor orders multi-part reorgs from the cached tags SEARCH already stored, not by
+    # re-opening every file. Preview and executor must agree, so both read the same source.
+    library = tmp_path / "library"
+    ctx, ctrl, ingest = _ctrl(tmp_path, library)
+    for n in (1, 2):
+        _mp3(ingest / "Dune" / f"Dune - Part {n}.mp3")
+    ctrl.scan([ingest])
+    book = _book_in(ctx, ingest / "Dune")
+    assert all(sf.tags is not None for sf in book.source_files)  # SEARCH cached them
+
+    def _no_disk(path):
+        raise AssertionError(f"read tags from disk for {path}")
+
+    monkeypatch.setattr("colophon.controller.read_embedded_tags", _no_disk)
+
+    job = asyncio.run(ctrl.run_encode_job(
+        [book], EncodeJobOptions(encode=False, organize=True, delete_sources=True)))
+
+    assert [r.status for r in job.results] == ["done"]
+    assert len(_mp3s_under(library)) == 2
+    ctx.close()
