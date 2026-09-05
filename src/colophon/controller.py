@@ -192,6 +192,20 @@ _REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progr
 _GRAPH_AUTHOR_PROV = frozenset({Provenance.GRAPHING.value, Provenance.DIRECTORY.value})
 
 
+def _part_tracks(book: BookUnit) -> list[int | None]:
+    """Each source file's embedded track number, for `resolve_part_order`.
+
+    Reads the per-file tag cache SEARCH populated (see tag-cache) and only opens a file that has
+    no cached tags. Re-reading every file here is what made a Persist preview on a large library
+    block the event loop for minutes — ~40 ms per file over a network mount, times tens of
+    thousands of files — long enough for the browser to drop the socket and reload the page.
+    """
+    return [
+        (sf.tags.track if sf.tags is not None else read_embedded_tags(sf.path).track)
+        for sf in book.source_files
+    ]
+
+
 def _organize_fail_detail(org: OrganizeResult) -> str:
     """A readable reason for a failed organize move: a collision names the destination that already
     exists; otherwise the filesystem error (or a generic fallback)."""
@@ -3069,7 +3083,7 @@ class AppController:
         ambiguous (missing/duplicate track numbers) the per-file targets are unknown, so fall back to
         the book folder as a single pair so the preview still reads move/clash without crashing."""
         cbook = self._canonical_book(book)
-        tracks = [read_embedded_tags(sf.path).track for sf in book.source_files]
+        tracks = _part_tracks(book)
         ordered = resolve_part_order(book.source_files, tracks)
         if ordered is None:
             return [(None, build_target_path(library_root, patterns, cbook).parent)]
@@ -3119,7 +3133,7 @@ class AppController:
                 return BookProcessResult(book_id=book.id, status="done")
             library_root = self.ctx.config.library_root or (default_db_path().parent / "library")
             cbook = self._canonical_book(book)
-            tracks = [read_embedded_tags(sf.path).track for sf in book.source_files]
+            tracks = _part_tracks(book)
             ordered = resolve_part_order(book.source_files, tracks)
             if ordered is None:
                 reason = (f"couldn't order {len(book.source_files)} part(s) — track numbers are "

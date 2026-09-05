@@ -1,5 +1,5 @@
 from colophon.controller import AppController
-from colophon.core.models import BookUnit, SourceFile
+from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
 from tests.test_controller import _ctx
 
 
@@ -110,3 +110,62 @@ def test_remove_from_library_drops_record_keeps_output(tmp_path):
     assert ctx.books.get(book.id) is None       # record dropped
     assert out.exists()                          # output file NOT touched
     assert (src / "Dune.mp3").exists()           # source originals NOT touched (that's delete-sources)
+
+
+def _two_part_book(ctx, tmp_path, *, cached: bool) -> BookUnit:
+    """A two-file book whose parts carry (or lack) cached embedded tags."""
+    ctx.config.scan_paths = [tmp_path / "ingest"]
+    ctx.config.library_root = tmp_path / "library"
+    src = tmp_path / "ingest" / "Frank Herbert" / "Dune"
+    src.mkdir(parents=True)
+    book = BookUnit.new(source_folder=src)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    for n in (1, 2):
+        path = src / f"Dune - Part {n}.mp3"
+        path.write_bytes(b"")
+        book.source_files.append(
+            SourceFile(
+                path=path, size=1, duration_seconds=1.0, ext="mp3",
+                tags=EmbeddedTags(track=n) if cached else None,
+            )
+        )
+    ctx.books.upsert(book)
+    return book
+
+
+def test_reorg_preview_orders_parts_from_the_tag_cache(tmp_path, monkeypatch):
+    # The preview must not re-open every source file to learn its track number: on a large library
+    # that is tens of thousands of mutagen reads on the event loop, which drops the browser socket
+    # mid-persist. Cached tags (populated by SEARCH) already carry the track.
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _two_part_book(ctx, tmp_path, cached=True)
+
+    def _no_disk(path):
+        raise AssertionError(f"read tags from disk for {path}")
+
+    monkeypatch.setattr("colophon.controller.read_embedded_tags", _no_disk)
+
+    (row,) = ctrl.organize_preview([book], encode=False)
+    assert row.disposition == "move"
+    parts = ctrl._reorg_pairs(book, ctx.patterns, ctx.config.library_root)
+    assert [src.name for src, _dst in parts] == ["Dune - Part 1.mp3", "Dune - Part 2.mp3"]
+
+
+def test_reorg_preview_falls_back_to_disk_when_tags_are_not_cached(tmp_path, monkeypatch):
+    # A file scanned before the tag cache existed still has to be read — the cache is an
+    # optimization, not a new requirement.
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _two_part_book(ctx, tmp_path, cached=False)
+    reads: list[str] = []
+
+    def _count(path):
+        reads.append(path.name)
+        return EmbeddedTags(track=1 if path.name.endswith("1.mp3") else 2)
+
+    monkeypatch.setattr("colophon.controller.read_embedded_tags", _count)
+
+    ctrl._reorg_pairs(book, ctx.patterns, ctx.config.library_root)
+    assert reads == ["Dune - Part 1.mp3", "Dune - Part 2.mp3"]
