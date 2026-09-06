@@ -1956,6 +1956,27 @@ def test_mark_ready_forces_max_confidence_not_weak_value(tmp_path):
     ctx.close()
 
 
+def test_mark_ready_books_marks_every_book_and_skips_blocking_errors(tmp_path):
+    # The bulk action mirrors the single-book button, which is disabled on a blocking error —
+    # so a book with missing/corrupt files must not be confirmed by the bulk route either.
+    ctx = _ctx(tmp_path)
+    ok = BookUnit.new(source_folder=tmp_path / "ok")
+    ok.title = "Dune"
+    broken = BookUnit.new(source_folder=tmp_path / "broken")
+    broken.title = "Missing"
+    broken.missing = True
+    for book in (ok, broken):
+        ctx.books.upsert(book)
+
+    marked = AppController(ctx).mark_ready_books([ok, broken])
+
+    assert marked == 1
+    assert ctx.books.get(ok.id).state == BookState.READY
+    assert ctx.books.get(ok.id).manually_confirmed is True
+    assert ctx.books.get(broken.id).manually_confirmed is False
+    ctx.close()
+
+
 async def test_recheck_confidence_reverts_to_auto_and_clears_flag(tmp_path):
     src = _StubSource("audnexus", [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
     ctx = _ctx(tmp_path, sources=[src])

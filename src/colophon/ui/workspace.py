@@ -1121,6 +1121,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             return
         _clear_editor_state()
         detail_container.clear()
+        # Save / Write tags / Mark ready act on ONE book and live outside the scroll area, so
+        # clearing the container alone would strand them above the bulk editor.
+        detail_actions.clear()
         books = _selected_books()
         with detail_container:
             with ui.row().classes("items-center w-full"):
@@ -1233,6 +1236,28 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.row().classes("q-gutter-sm q-mt-sm"):
                 ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
                 ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
+
+                def _mark_ready_selection() -> None:
+                    marked = controller.mark_ready_books(books)
+                    skipped = len(books) - marked
+                    if not marked:
+                        ui.notify(
+                            "Nothing to mark ready — every selected book has a blocking error",
+                            type="negative",
+                        )
+                        return
+                    note = f"Marked {marked} book(s) ready"
+                    if skipped:
+                        note += f" — skipped {skipped} with a blocking error"
+                    ui.notify(note)
+                    # Repaint so the list badges flip to Ready; the bulk panel rebuilds with them.
+                    repaint(nav=True, list=True, status=True)
+
+                ui.button(
+                    "Mark ready", icon="check", on_click=_mark_ready_selection,
+                ).props("outline").tooltip(
+                    "Confirm the selection as reviewed; books with a blocking error are skipped"
+                )
                 rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline")
 
                 async def _rerun_selection(phase: Phase) -> None:

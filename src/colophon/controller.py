@@ -2203,6 +2203,15 @@ class AppController:
         in place. See confirm_confidence."""
         self.confirm_confidence(book)
 
+    def mark_ready_books(self, books: list[BookUnit]) -> int:
+        """Mark every book in `books` Ready by human approval, skipping any with a blocking error.
+        The single-book button is disabled on a blocking error (no in-app edit fixes missing or
+        corrupt files), so the bulk action must not confirm them either. Returns the number marked."""
+        marked = [b for b in books if not has_blocking_error(b)]
+        for book in marked:
+            self.confirm_confidence(book)
+        return len(marked)
+
     def confirm_confidence(self, book: BookUnit) -> None:
         """Manually confirm a book: force confidence to 100, mark it Ready, and
         flag it as manual so the badge/recheck know it was set by hand."""
