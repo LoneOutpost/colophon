@@ -351,24 +351,39 @@ def bulk_remap_dialog(
         mode.on_value_change(lambda _e: _sync())
         src.on_value_change(lambda _e: _sync())
 
-        def _apply() -> None:
+        async def _apply() -> None:
             tag = _embedded_src(str(src.value))
-            if tag is not None:
-                controller.bulk_remap_embedded(books, tag=tag, dst=dst.value)
-                ui.notify(f"Moved embedded {tag} to {dst.value} for {n} book(s)")
-            elif src.value == dst.value:
+            if tag is None and src.value == dst.value:
                 ui.notify("Pick two different fields")
                 return
+            # Every branch rewrites all n selected books, so the write goes off the event loop
+            # with the button showing it is working.
+            if tag is not None:
+                work, done = (
+                    lambda: controller.bulk_remap_embedded(books, tag=tag, dst=dst.value),
+                    f"Moved embedded {tag} to {dst.value} for {n} book(s)",
+                )
             elif mode.value == "swap":
-                controller.bulk_swap(books, field_a=src.value, field_b=dst.value)
-                ui.notify(f"Swapped {src.value} and {dst.value} for {n} book(s)")
+                work, done = (
+                    lambda: controller.bulk_swap(books, field_a=src.value, field_b=dst.value),
+                    f"Swapped {src.value} and {dst.value} for {n} book(s)",
+                )
             else:
-                controller.bulk_remap(books, src=src.value, dst=dst.value, clear_source=clear.value)
-                ui.notify(f"Moved {src.value} to {dst.value} for {n} book(s)")
+                work, done = (
+                    lambda: controller.bulk_remap(
+                        books, src=src.value, dst=dst.value, clear_source=clear.value),
+                    f"Moved {src.value} to {dst.value} for {n} book(s)",
+                )
+            with busy(apply_btn):
+                await asyncio.to_thread(work)
+            ui.notify(done)
             dialog.close()
             clear_selection()
 
-        dialog_actions(dialog, confirm_label="Apply", confirm_icon="swap_horiz", on_confirm=_apply)
+        apply_btn = dialog_actions(
+            dialog, confirm_label="Apply", confirm_icon="swap_horiz", on_confirm=lambda: None,
+        )
+        apply_btn.on("click", single_flight(_apply))
     dialog.open()
 
 
@@ -783,11 +798,14 @@ async def bulk_tag_dialog(
     books: list[BookUnit],
     *,
     clear_selection: Callable[[], None],
-    apply_pending_bulk: Callable[[], int],
+    apply_pending_bulk: Callable[[], Awaitable[int]],
 ) -> None:
     """Preview and write metadata tags across multiple selected books."""
-    apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
-    plans = [(b, controller.tag_plan(b)) for b in books]
+    await apply_pending_bulk()  # "Write" encompasses Save: apply pending edits first
+    # Planning opens every file of every selected book to diff its current tags — tens of
+    # thousands of reads on a big selection, so it runs in a worker thread rather than starving
+    # the event loop until the browser gives up on the page.
+    plans = await asyncio.to_thread(lambda: [(b, controller.tag_plan(b)) for b in books])
     total_files = sum(len(p.files) for _, p in plans)
     with modal() as dialog, ui.card().classes("w-96"):
         ui.label(f"Write tags to {len(books)} books ({total_files} files)").classes(
