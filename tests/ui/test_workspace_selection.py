@@ -68,7 +68,8 @@ class _Workspace:
         self._client = client
 
     def _of(self, kind: str) -> list:
-        return [e for e in self._client.elements.values() if type(e).__name__ == kind]
+        # Snapshot first: a handler fired from here rebuilds panes, which mutates the registry.
+        return [e for e in list(self._client.elements.values()) if type(e).__name__ == kind]
 
     def labels(self) -> list[str]:
         return [e.text for e in self._of("Label")]
@@ -84,7 +85,7 @@ class _Workspace:
 
     def click(self, text: str) -> None:
         button = next(e for e in self._of("Button") if e.text == text)
-        for listener in button._event_listeners.values():
+        for listener in list(button._event_listeners.values()):
             if listener.type == "click":
                 handle_event(
                     listener.handler,
@@ -94,7 +95,7 @@ class _Workspace:
     def action_bar(self) -> list[str]:
         """Button labels in the fixed action bar above the Details scroll area. These act on ONE
         book (Save / Write tags / Mark ready), so a multi-selection must leave it empty."""
-        bar = next(e for e in self._client.elements.values()
+        bar = next(e for e in list(self._client.elements.values())
                    if "colophon-actionbar" in e._classes)
         return [c.text for c in bar.default_slot.children if type(c).__name__ == "Button"]
 
@@ -110,6 +111,19 @@ class _Workspace:
         """Whether a button is showing its spinner and refusing further clicks."""
         props = self.button(text)._props
         return props.get("loading") == "true" and props.get("disable") is True
+
+    def click_row(self, title: str) -> None:
+        """Click a book row's title section, which opens it in the Details pane."""
+        label = next(e for e in self._of("Label") if e.text == title)
+        section = label.parent_slot.parent
+        while section is not None and type(section).__name__ != "ItemSection":
+            section = section.parent_slot.parent if section.parent_slot else None
+        for listener in list(section._event_listeners.values()):
+            if listener.type == "click":
+                handle_event(
+                    listener.handler,
+                    GenericEventArguments(sender=section, client=self._client, args={}),
+                )
 
     def bulk_actions(self) -> list[str]:
         """Button labels inside the bulk editor (everything the Details pane offers below the bar)."""
@@ -331,3 +345,25 @@ async def test_bulk_action_stays_responsive_and_shows_progress(
     beats = await _heartbeat_while(workspace, label)
 
     assert beats >= slow / 0.01 / 2, "the event loop stalled while the bulk action ran"
+
+
+async def test_an_opened_book_survives_a_repaint_that_left_the_selection_alone(
+    loop_registered, library, monkeypatch,
+):
+    # Opening one book while a bulk selection is live is a deliberate act. A repaint refreshes the
+    # panes after some unrelated mutation; it used to count the selection itself and snap the pane
+    # back to the bulk editor, discarding what the user had opened.
+    controller, ids = library
+    workspace = await _render(controller, restored=_restored(ids, None), monkeypatch=monkeypatch)
+    assert workspace.detail_pane() == "bulk"
+
+    workspace.click_row("Book 1")
+    await workspace.settle()
+    assert workspace.detail_pane() == "single"
+    assert workspace.detail_title() == "Book 1"
+
+    workspace.click("Undo")          # repaints nav/middle/status; the selection does not move
+    await workspace.settle()
+
+    assert workspace.detail_pane() == "single"
+    assert workspace.detail_title() == "Book 1"
