@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from nicegui import app, ui
 
 from colophon.controller import AppController
+from colophon.core import loop_watch
 from colophon.core.perf import span
 from colophon.ui.franchises import render_franchises
 from colophon.ui.graph_view import render_graph
@@ -38,6 +39,15 @@ def _audio_mime(path: Path) -> str:
 def create_app(controller: AppController) -> None:
     # Serve bundled static assets (self-hosted fonts, etc.) so the UI works offline.
     app.add_static_files("/assets", str(Path(__file__).parent / "assets"))
+
+    @app.on_startup
+    def _watch_the_loop() -> None:
+        """Warn when a handler blocks the event loop long enough to cost the browser its socket.
+
+        Started here because it needs the running loop. Cheap enough to leave on in production;
+        COLOPHON_LOOPWATCH=0 turns it off."""
+        if loop_watch.enabled():
+            app.on_shutdown(loop_watch.start_loop_watch())
 
     @app.get("/cover/{book_id}")
     async def cover(book_id: str, size: str = "") -> Response:

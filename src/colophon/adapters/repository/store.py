@@ -115,6 +115,29 @@ def migrate(conn: sqlite3.Connection) -> None:
 
 
 @dataclass
+class AppStateRepo:
+    """Key/value facts that must survive a restart.
+
+    Used for "this expensive whole-library pass already ran against exactly this catalog" markers:
+    the in-memory `generation` counters reset every boot, so they cannot answer that question across
+    processes, and a fingerprint stored here can."""
+
+    conn: sqlite3.Connection
+
+    def get(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO app_state (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        self.conn.commit()
+
+
+@dataclass
 class BookUnitRepo:
     conn: sqlite3.Connection
     # Memoized full-table read keyed by id. A workspace refresh calls list_all()

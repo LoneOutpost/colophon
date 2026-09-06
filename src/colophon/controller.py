@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 from collections import Counter
@@ -864,15 +865,52 @@ class AppController:
             self.ctx.books.upsert(book, commit=(i == len(changed) - 1))
         return len(changed)
 
-    def recompute_all_identity(self) -> int:
+    _IDENTITY_MARKER = "identity_backfill_fingerprint"
+
+    def _catalog_fingerprint(self) -> str:
+        """A cheap digest of everything the identity backfill reads: the books, the graph, and the
+        overrides that steer classification.
+
+        Column aggregates only — no JSON is parsed — so this costs milliseconds where the backfill
+        it guards costs seconds. Persisted, because the in-memory `generation` counters restart at
+        zero every boot and so cannot answer "is this the catalog we already harmonized?".
+        """
+        parts: list[str] = []
+        for sql in (
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0), COALESCE(MAX(updated_at), '') "
+            "FROM book_units",
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(attrs)), 0) FROM nodes",
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(props)), 0) FROM edges",
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(COALESCE(value, ''))), 0) FROM node_overrides",
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(COALESCE(snapshot, ''))), 0) "
+            "FROM grouping_overrides",
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(canonical)), 0) FROM entity_aliases",
+        ):
+            parts.append("|".join(str(v) for v in tuple(self.ctx.conn.execute(sql).fetchone())))
+        return hashlib.sha256("/".join(parts).encode()).hexdigest()[:32]
+
+    def recompute_all_identity(self, *, force: bool = False) -> int:
         """One-time backfill: re-derive every scan root's classification and stamp
         identity_confidence + BookState onto the stored books, writing back only the movers.
-        Returns the number of books updated. Idempotent — a harmonized library writes nothing."""
+        Returns the number of books updated. Idempotent — a harmonized library writes nothing.
+
+        Skipped entirely when the catalog has not changed since the last run (see
+        `_catalog_fingerprint`). It runs at every startup, and re-deriving an unchanged 3,000-book
+        library cost ~12s of boot to write nothing. `force` re-derives regardless.
+        """
+        fingerprint = self._catalog_fingerprint()
+        if not force and self.ctx.state.get(self._IDENTITY_MARKER) == fingerprint:
+            logger.debug("identity backfill: catalog unchanged since the last pass, skipping")
+            return 0
         with step("rebuilding graph classification"):
             roots = {
                 self._scan_root_for_path(b.source_folder) for b in self.ctx.books.list_all()
             }
-            return self._resync_roots(roots)
+            updated = self._resync_roots(roots)
+        # Fingerprint AFTER the pass: it just rewrote the movers, so the catalog we harmonized is
+        # the one that exists now, not the one we started from.
+        self.ctx.state.set(self._IDENTITY_MARKER, self._catalog_fingerprint())
+        return updated
 
     def reprobe_durations(self, *, only_missing: bool = True) -> int:
         """Re-read source-file durations from disk and reconcile the EMPTY_AUDIO finding, persisting
