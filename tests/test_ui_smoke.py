@@ -395,8 +395,8 @@ def test_graph_to_library_open_deeplink():
     assert 'open: str = ""' in isrc          # index route accepts ?open=
     assert "open_book_id=open" in isrc        # ...and passes it to render_workspace
     assert "open_book_id" in inspect.signature(ws.render_workspace).parameters
-    wsrc = inspect.getsource(ws.render_workspace)
-    assert "open_book_id or _restored.open_book_id" in wsrc  # explicit param wins over snapshot
+    # That ?open= beats a remembered book *and* a remembered selection is behaviour, and is
+    # covered by tests/ui/test_workspace_selection.py rather than by matching an expression here.
     lsrc = inspect.getsource(gi._links_for)
     assert "/?open=" in lsrc                  # book node deep-links to the exact book
 
