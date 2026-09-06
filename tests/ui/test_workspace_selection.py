@@ -6,6 +6,7 @@ selection control), and every one of them has to land on the same rule.
 """
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,14 @@ class _Workspace:
         """Tick the leading checkbox on the index-th book row."""
         rows = [c for c in self._of("Checkbox") if not c.text]
         rows[index].set_value(True)
+
+    def button(self, text: str):
+        return next(e for e in self._of("Button") if e.text == text)
+
+    def is_busy(self, text: str) -> bool:
+        """Whether a button is showing its spinner and refusing further clicks."""
+        props = self.button(text)._props
+        return props.get("loading") == "true" and props.get("disable") is True
 
     def bulk_actions(self) -> list[str]:
         """Button labels inside the bulk editor (everything the Details pane offers below the bar)."""
@@ -275,3 +284,50 @@ async def test_bulk_editor_offers_mark_ready(loop_registered, library):
     await workspace.settle()
     assert "Mark ready" not in workspace.action_bar()   # not the stranded single-book button...
     assert "Mark ready" in workspace.bulk_actions()      # ...a real one in the bulk editor
+
+
+async def _heartbeat_while(workspace: _Workspace, label: str) -> int:
+    """Click `label` and count event-loop ticks until the click's work finishes."""
+    beats = {"n": 0}
+
+    async def pulse() -> None:
+        while True:
+            beats["n"] += 1
+            await asyncio.sleep(0.01)
+
+    task = asyncio.create_task(pulse())
+    try:
+        workspace.click(label)
+        await asyncio.sleep(0.01)
+        assert workspace.is_busy(label), f"{label} gives no sign it is working"
+        await workspace.settle()
+    finally:
+        task.cancel()
+    return beats["n"]
+
+
+@pytest.mark.parametrize(
+    ("label", "method"),
+    [("Mark ready", "mark_ready_books"), ("Normalize", "bulk_normalize")],
+)
+async def test_bulk_action_stays_responsive_and_shows_progress(
+    loop_registered, library, monkeypatch, label, method,
+):
+    # Every bulk action writes once per selected book, which is seconds of work on a real
+    # library. Run on the event loop it starves the socket and the browser drops the page; the
+    # user also deserves to see that something is happening.
+    controller, ids = library
+    slow = 0.3
+
+    def _blocking(*_args, **_kwargs):
+        time.sleep(slow)
+        return "batch" if method == "bulk_normalize" else 1
+
+    monkeypatch.setattr(controller, method, _blocking)
+    monkeypatch.setattr(controller, "batch_changes", lambda _b: [])
+    workspace = await _render(controller, restored=_restored(ids, None), monkeypatch=monkeypatch)
+    assert workspace.detail_pane() == "bulk"
+
+    beats = await _heartbeat_while(workspace, label)
+
+    assert beats >= slow / 0.01 / 2, "the event loop stalled while the bulk action ran"

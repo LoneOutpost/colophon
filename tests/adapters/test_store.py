@@ -241,6 +241,48 @@ def test_list_all_cache_reflects_upsert_and_delete(tmp_path: Path):
     assert repo.list_all() == []
 
 
+def test_get_many_reads_through_the_warm_cache(tmp_path: Path):
+    # Resolving a big selection one `get` at a time re-deserializes every row (~0.5 ms each),
+    # which is seconds of blocked event loop for a library-sized selection. get_many reads the
+    # same cache list_all builds.
+    repo = _repo(tmp_path)
+    ids = []
+    for i in range(3):
+        book = BookUnit.new(source_folder=tmp_path / f"b{i}")
+        book.title = f"Book {i}"
+        repo.upsert(book)
+        ids.append(book.id)
+    repo.list_all()  # populate the cache
+    # Write directly to the DB, bypassing the repo so the cache is NOT invalidated.
+    repo.conn.execute("DELETE FROM book_units")
+    repo.conn.commit()
+
+    assert [b.title for b in repo.get_many(ids)] == ["Book 0", "Book 1", "Book 2"]
+
+
+def test_get_many_keeps_the_requested_order_and_drops_unknown_ids(tmp_path: Path):
+    repo = _repo(tmp_path)
+    ids = []
+    for i in range(3):
+        book = BookUnit.new(source_folder=tmp_path / f"b{i}")
+        book.title = f"Book {i}"
+        repo.upsert(book)
+        ids.append(book.id)
+
+    got = repo.get_many([ids[2], "gone", ids[0]])
+    assert [b.title for b in got] == ["Book 2", "Book 0"]
+
+
+def test_get_many_works_from_cold(tmp_path: Path):
+    repo = _repo(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Cold"
+    repo.upsert(book)
+    repo._cache = None  # nothing warmed yet, as on a fresh page load
+
+    assert [b.title for b in repo.get_many([book.id])] == ["Cold"]
+
+
 def test_list_all_returns_independent_list(tmp_path: Path):
     repo = _repo(tmp_path)
     repo.upsert(BookUnit.new(source_folder=tmp_path / "x"))

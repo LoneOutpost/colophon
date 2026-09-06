@@ -1906,12 +1906,19 @@ class AppController:
         return book.source_folder.name
 
     def embedded_tags(self, book: BookUnit) -> EmbeddedTags | None:
-        """The raw tags embedded in the book's first readable source file, so the UI can show
-        what the files actually carry alongside what we detected. Returns None when the book has
-        no source files on disk (identity then comes wholly from the folder/filename)."""
+        """The tags embedded in the book's first source file, so the UI can show what the files
+        actually carry alongside what we detected. Returns None when the book has no source files
+        on disk (identity then comes wholly from the folder/filename).
+
+        Served from the per-file cache SEARCH populated (see tag-cache) and only read from disk
+        for a file that has none: remap-from-embedded asks this once per selected book, and a
+        disk read per book is minutes of blocked event loop across a large selection.
+        """
         from colophon.adapters.audio import read_audio_metadata
 
         for sf in book.source_files:
+            if sf.tags is not None:
+                return sf.tags
             if sf.path.exists():
                 try:
                     return read_audio_metadata(sf.path)[1]
@@ -3001,6 +3008,11 @@ class AppController:
         return {"ready": by_state.get(ready_state.value, 0), "total": sum(by_state.values())}
 
     @timed("books_for_scope")
+    def books_by_ids(self, ids: Iterable[str]) -> list[BookUnit]:
+        """The books for `ids` (hydrated), skipping any that are gone. Batched through the store's
+        warm cache — the bulk editor resolves the whole selection every time it rebuilds."""
+        return self._hydrate(self.ctx.books.get_many(ids))
+
     def books_for_scope(
         self, scope: str, selected_ids: set[str] | None = None,
         *, ready_state: BookState = BookState.READY,

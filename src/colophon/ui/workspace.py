@@ -58,6 +58,7 @@ from colophon.ui.dialogs import (
     attach_history_menu,
     bulk_remap_dialog,
     bulk_tag_dialog,
+    busy,
     chapter_edit_dialog,
     compare_dialog,
     cover_dialog,
@@ -69,6 +70,7 @@ from colophon.ui.dialogs import (
     remap_dialog,
     remove_from_library_dialog,
     scan_dialog,
+    single_flight,
     tag_dialog,
 )
 from colophon.ui.filter_input import filter_input
@@ -455,7 +457,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     view["sort"] = "title"
 
     def _selected_books() -> list:
-        return [b for b in (controller.get_book(i) for i in selected_ids) if b is not None]
+        # Batched, cache-backed: show_bulk runs this on every selection change, and one query +
+        # JSON parse per id costs ~0.5 ms a book — seconds of blocked loop on a full selection.
+        return controller.books_by_ids(selected_ids)
 
     def _in_folder(book) -> bool:
         """True when `book` is within the active folder filter (or none is set)."""
@@ -1169,28 +1173,39 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         inp.props('placeholder="(multiple values)"')
                     inputs[field] = inp
 
-            def _apply_pending_bulk() -> int:
-                """Apply pending bulk-field edits silently, advancing the baseline.
-                Returns the number of fields applied across the selection."""
-                applied = 0
+            def _pending_bulk_edits() -> dict[str, str]:
+                """The field -> text the form is holding for fields the user actually changed. Read
+                from the widgets, so it must run on the event loop; the writing does not."""
+                pending: dict[str, str] = {}
                 for field, inp in inputs.items():
                     current = _editor_text(inp)
                     original = originals[field]
                     if original is _MIXED:
-                        if not current:  # only touch a mixed field if the user set something
-                            continue
-                        value: str | None = current
+                        if current:  # only touch a mixed field if the user set something
+                            pending[field] = current
                     elif current != original:
-                        value = current or None
-                    else:
-                        continue
-                    controller.bulk_edit(books, field, value)
-                    originals[field] = current  # baseline now matches the applied value
-                    applied += 1
-                return applied
+                        pending[field] = current
+                return pending
 
-            def _apply_bulk() -> None:
-                n = _apply_pending_bulk()
+            async def _apply_pending_bulk() -> int:
+                """Apply pending bulk-field edits silently, advancing the baseline. Returns the
+                number of fields applied across the selection. Each field rewrites every selected
+                book, so the writes go to a worker thread."""
+                pending = _pending_bulk_edits()
+                if not pending:
+                    return 0
+
+                def _write() -> None:
+                    for field, current in pending.items():
+                        controller.bulk_edit(books, field, current or None)
+
+                await asyncio.to_thread(_write)
+                originals.update(pending)  # baseline now matches the applied values
+                return len(pending)
+
+            async def _apply_bulk() -> None:
+                with busy(apply_btn):
+                    n = await _apply_pending_bulk()
                 if not n:
                     ui.notify("No changes")
                     return
@@ -1206,11 +1221,16 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     norm_options, value="__all__"
                 ).props("dense outlined").classes("col")
 
-                def _normalize() -> None:
+                async def _normalize() -> None:
                     chosen = norm_field.value
                     fields = NORMALIZABLE_FIELDS if chosen == "__all__" else [chosen]
-                    batch = controller.bulk_normalize(books, fields)
-                    changed = len({c.book_id for c in controller.batch_changes(batch)})
+
+                    def _run() -> tuple[str, int]:
+                        batch_id = controller.bulk_normalize(books, fields)
+                        return batch_id, len({c.book_id for c in controller.batch_changes(batch_id)})
+
+                    with busy(norm_btn):
+                        batch, changed = await asyncio.to_thread(_run)
                     if not changed:
                         ui.notify("Nothing to normalize")
                         return
@@ -1226,19 +1246,41 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     )
                     _clear_selection()
 
-                ui.button("Normalize", icon="text_format", on_click=_normalize).props("outline")
+                norm_btn = ui.button("Normalize", icon="text_format").props("outline")
+                norm_btn.on_click(single_flight(_normalize))
 
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Quick Match", icon="bolt", on_click=lambda: quick_match_dialog(controller, books, clear_selection=_clear_selection)).props("outline")
-                ui.button("Remap", icon="swap_horiz", on_click=lambda: bulk_remap_dialog(controller, books, clear_selection=_clear_selection)).props("outline").tooltip("Move one field's value to another across the selection")
+                ui.button(
+                    "Quick Match", icon="bolt",
+                    on_click=lambda: quick_match_dialog(
+                        controller, books, clear_selection=_clear_selection),
+                ).props("outline")
+                ui.button(
+                    "Remap", icon="swap_horiz",
+                    on_click=lambda: bulk_remap_dialog(
+                        controller, books, clear_selection=_clear_selection),
+                ).props("outline").tooltip(
+                    "Move one field's value to another across the selection")
 
             with ui.row().classes("q-gutter-sm q-mt-sm"):
-                ui.button("Apply to selection", icon="done_all", on_click=_apply_bulk)
-                ui.button("Write tags", icon="sell", on_click=lambda: bulk_tag_dialog(controller, books, clear_selection=_clear_selection, apply_pending_bulk=_apply_pending_bulk)).props("outline")
+                apply_btn = ui.button("Apply to selection", icon="done_all")
+                apply_btn.on_click(single_flight(_apply_bulk))
+                tags_btn = ui.button("Write tags", icon="sell").props("outline")
 
-                def _mark_ready_selection() -> None:
-                    marked = controller.mark_ready_books(books)
+                async def _write_tags() -> None:
+                    # Held busy across the dialog: planning reads every selected book's files.
+                    with busy(tags_btn):
+                        await bulk_tag_dialog(
+                            controller, books, clear_selection=_clear_selection,
+                            apply_pending_bulk=_apply_pending_bulk,
+                        )
+
+                tags_btn.on_click(single_flight(_write_tags))
+
+                async def _mark_ready_selection() -> None:
+                    with busy(ready_btn):
+                        marked = await asyncio.to_thread(controller.mark_ready_books, books)
                     skipped = len(books) - marked
                     if not marked:
                         ui.notify(
@@ -1253,11 +1295,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     # Repaint so the list badges flip to Ready; the bulk panel rebuilds with them.
                     repaint(nav=True, list=True, status=True)
 
-                ui.button(
-                    "Mark ready", icon="check", on_click=_mark_ready_selection,
-                ).props("outline").tooltip(
+                ready_btn = ui.button("Mark ready", icon="check").props("outline").tooltip(
                     "Confirm the selection as reviewed; books with a blocking error are skipped"
                 )
+                ready_btn.on_click(single_flight(_mark_ready_selection))
                 rerun_btn = ui.button("Re-run phase", icon="refresh").props("outline")
 
                 async def _rerun_selection(phase: Phase) -> None:
@@ -1272,8 +1313,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 # Two choices over the selection's grouped files (grouping frozen either way):
                 # Re-read goes back to disk; Re-derive re-runs identification from the cached files.
                 with rerun_btn, ui.menu():
-                    ui.menu_item("Re-read files", lambda: _rerun_selection(Phase.SEARCH))
-                    ui.menu_item("Re-derive", lambda: _rerun_selection(Phase.IDENTIFY))
+                    # single_flight, not busy: the menu items are the clickable things here, and a
+                    # second pick mid-run would start a second pass over the whole selection.
+                    ui.menu_item(
+                        "Re-read files", single_flight(lambda: _rerun_selection(Phase.SEARCH)))
+                    ui.menu_item(
+                        "Re-derive", single_flight(lambda: _rerun_selection(Phase.IDENTIFY)))
                 ui.button(
                     "Re-identify…", icon="badge", on_click=lambda: _reidentify_dialog(),
                 ).props("outline").tooltip(

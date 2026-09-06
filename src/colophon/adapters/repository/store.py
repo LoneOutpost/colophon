@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -178,6 +179,19 @@ class BookUnitRepo:
         if row is None:
             return None
         return BookUnit.model_validate_json(row["data"])
+
+    def get_many(self, ids: Iterable[str]) -> list[BookUnit]:
+        """The books for `ids`, in the order given, skipping any that are gone.
+
+        Reads through the same warm cache `list_all` builds. Resolving a selection one `get` at a
+        time re-deserializes each row (~0.5 ms of JSON per book), so a library-sized selection
+        costs seconds of blocked event loop every time the bulk editor rebuilds.
+        """
+        with self._lock:
+            if self._cache is None:
+                self.list_all()   # one bulk read instead of a query per id
+            cache = self._cache or {}
+            return [b for b in (cache.get(i) for i in ids) if b is not None]
 
     def delete(self, id: str, commit: bool = True) -> None:
         """Remove a book unit. No-op if the id is absent."""

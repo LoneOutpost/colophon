@@ -6,7 +6,7 @@ from mutagen.id3 import ID3, TPE1
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
-from colophon.core.models import BookState, BookUnit, Provenance
+from colophon.core.models import BookState, BookUnit, EmbeddedTags, Provenance, SourceFile
 from colophon.core.sources import SourceResult
 
 
@@ -1953,6 +1953,30 @@ def test_mark_ready_forces_max_confidence_not_weak_value(tmp_path):
     assert book.state == BookState.READY
     assert any(s.name == "manual_confirmation" for s in book.confidence_signals)
     assert ctx.books.get(book.id).confidence == 100.0
+    ctx.close()
+
+
+def test_embedded_tags_prefers_the_cache_over_re_reading_the_file(tmp_path, monkeypatch):
+    # Remap-from-embedded asks this for every selected book. Re-opening a file per book is ~40 ms
+    # over a network mount — minutes of blocked event loop across a large selection — and SEARCH
+    # already cached what the file carries.
+    ctx = _ctx(tmp_path)
+    src = tmp_path / "Dune"
+    src.mkdir()
+    path = src / "a.mp3"
+    path.write_bytes(b"")
+    book = BookUnit.new(source_folder=src)
+    book.source_files = [SourceFile(
+        path=path, size=1, duration_seconds=1.0, ext="mp3",
+        tags=EmbeddedTags(artist="Frank Herbert"),
+    )]
+
+    def _no_disk(_path):
+        raise AssertionError("read audio metadata from disk")
+
+    monkeypatch.setattr("colophon.adapters.audio.read_audio_metadata", _no_disk)
+
+    assert AppController(ctx).embedded_tags(book).artist == "Frank Herbert"
     ctx.close()
 
 
