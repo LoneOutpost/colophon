@@ -1544,6 +1544,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             selected_ids.add(book_id)
         repaint(list=True, nav=True, status=True)
         _update_count()
+        _after_select()   # the pane follows the selection, exactly as the row checkbox does
 
     def _on_key(e) -> None:
         # NiceGUI's `ignore` list keeps these keys from firing while a text
@@ -2668,10 +2669,17 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
-    _open_target = open_book_id or _restored.open_book_id
-    if _open_target:
-        _ensure_rendered(_open_target)
-        show_detail(_open_target)  # ?open= deep-link wins over the tab's remembered book
+    # Opening rule, in precedence order. A restored selection has to own the pane exactly as a
+    # live one does (see _after_select), or reloading a tab with several books selected comes
+    # back showing one book's details — or the empty state — while the footer says "N selected".
+    if open_book_id:                        # ?open= names a book outright: explicit intent wins
+        _ensure_rendered(open_book_id)
+        show_detail(open_book_id)
+    elif len(selected_ids) >= 2:            # a remembered multi-selection beats a remembered book
+        show_bulk()
+    elif _restored.open_book_id:
+        _ensure_rendered(_restored.open_book_id)
+        show_detail(_restored.open_book_id)
     else:
         show_detail("")  # initial empty-state in the detail pane
 
