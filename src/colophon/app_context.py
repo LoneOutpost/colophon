@@ -12,6 +12,7 @@ from colophon.adapters.audiobookshelf import AbsClient
 from colophon.adapters.config import Config, default_config_path
 from colophon.adapters.lazylibrarian import PathPatterns
 from colophon.adapters.repository.store import (
+    AppStateRepo,
     BookUnitRepo,
     EntityAliasRepo,
     GraphStore,
@@ -54,6 +55,7 @@ class AppContext:
     config: Config
     conn: sqlite3.Connection
     books: BookUnitRepo
+    state: AppStateRepo
     history: HistoryRepo
     operations: OperationRepo
     overrides: NodeOverrideRepo
@@ -98,6 +100,7 @@ class AppContext:
             config=config,
             conn=conn,
             books=BookUnitRepo(conn),
+            state=AppStateRepo(conn),
             history=HistoryRepo(conn),
             operations=OperationRepo(conn),
             overrides=NodeOverrideRepo(conn),

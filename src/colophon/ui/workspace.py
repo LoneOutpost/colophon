@@ -30,6 +30,7 @@ from colophon.core.book_search import (
     parse_query,
 )
 from colophon.core.chapters import file_boundary_chapters
+from colophon.core.detail_pane import DetailPane, Pane
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
 from colophon.core.graph_resolve import _name_key
@@ -347,6 +348,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         "})();"
     )
     selected_ids: set[str] = set()
+    # The one place that decides what the Details column shows. Reads `selected_ids` live; every
+    # site below asks it rather than re-deriving the rule (see core/detail_pane.py).
+    detail_pane = DetailPane(selected_ids)
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
     # list and the navigator (author/series list) respect the folder filter, and
@@ -1117,7 +1121,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         selected_ids.clear()
         repaint(nav=True, list=True, status=True)
         _update_count()
-        show_detail("")
+        _render_pane(detail_pane.open(None))
 
     # --- bulk editor (shown when 2+ books are selected) ---
     def show_bulk() -> None:
@@ -1596,7 +1600,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             ui.run_javascript(
                 f'getElement({row_elements[book_id].id}).$el.scrollIntoView({{block:"nearest"}})'
             )
-        show_detail(book_id)
+        _open_book(book_id)
 
     def _nav_focus(delta: int) -> None:
         ids = [b.id for b in _visible_books()]
@@ -2384,14 +2388,21 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         _render_middle()
         _persist_view()
 
-    def _after_select() -> None:
-        n = len(selected_ids)
-        if n >= 2:
+    def _render_pane(pane: Pane) -> None:
+        """Put the Details column into the state the model asked for."""
+        if pane.is_bulk:
             show_bulk()
-        elif n == 1:
-            show_detail(next(iter(selected_ids)))
         else:
-            show_detail("")
+            show_detail(pane.book_id or "")
+
+    def _after_select() -> None:
+        """The selection moved; the pane follows it."""
+        _render_pane(detail_pane.selection_changed())
+
+    def _open_book(book_id: str) -> None:
+        """Explicitly open one book — a row click, a deep link, an action on that book. Outranks a
+        live bulk selection, because the user asked for this book."""
+        _render_pane(detail_pane.open(book_id))
 
     def _toggle_node(book_ids: list[str], on: bool) -> None:
         # Multiselect operates on navigator entries (authors/series): checking a
@@ -2453,9 +2464,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         if status:
             refresh_status()
         if detail_book_id is not None:
-            show_detail(detail_book_id)
+            _render_pane(detail_pane.open(detail_book_id))
         _stepper_refresh["fn"]()
-        if detail_book_id is None and len(selected_ids) >= 2:
+        # A repaint refreshes the bulk editor with the mutation's results. It must not stomp a book
+        # the user deliberately opened, which is why it asks the model rather than counting.
+        if detail_book_id is None and detail_pane.current().is_bulk:
             show_bulk()
 
     def _rerun_notify(result: RerunResult) -> None:
@@ -2739,19 +2752,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             status_container = ui.row().classes("items-center w-full no-wrap q-gutter-sm")
 
     _refresh_all()
-    # Opening rule, in precedence order. A restored selection has to own the pane exactly as a
-    # live one does (see _after_select), or reloading a tab with several books selected comes
-    # back showing one book's details — or the empty state — while the footer says "N selected".
-    if open_book_id:                        # ?open= names a book outright: explicit intent wins
-        _ensure_rendered(open_book_id)
-        show_detail(open_book_id)
-    elif len(selected_ids) >= 2:            # a remembered multi-selection beats a remembered book
-        show_bulk()
-    elif _restored.open_book_id:
-        _ensure_rendered(_restored.open_book_id)
-        show_detail(_restored.open_book_id)
-    else:
-        show_detail("")  # initial empty-state in the detail pane
+    # A restored multi-selection is a bulk edit, exactly as a live one is; a book is only opened
+    # when one was actually asked for. `?open=` is an explicit request, the tab's remembered book
+    # only counts when the restored selection does not already imply the bulk editor.
+    _open_target = open_book_id or (None if len(selected_ids) >= 2 else _restored.open_book_id)
+    if _open_target:
+        _ensure_rendered(_open_target)
+    _render_pane(detail_pane.open(_open_target))
 
     # Lazily bootstrap an unscanned library on first open (no-op if already scanned).
     ui.timer(0.1, _maybe_auto_scan, once=True)

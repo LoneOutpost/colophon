@@ -35,6 +35,13 @@ def _seed_author_library(tmp_path):
     return ctx
 
 
+def _reopen(tmp_path):
+    """Reopen the same database, as a restarted process would."""
+    return AppContext.create(Config(
+        db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib",
+        scan_paths=[tmp_path / "ingest"]))
+
+
 def test_resync_rederives_directory_classification_in_memory(tmp_path):
     ingest = tmp_path / "ingest"
     for t in ["Elantris", "Warbreaker"]:
@@ -80,6 +87,58 @@ def test_recompute_backfills_identity_confidence_and_state(tmp_path):
     stored = ctx.books.list_all()
     assert all(b.identity_confidence > 0 for b in stored)  # rolled up from the 0.9 author node
     assert all(b.state is BookState.IDENTIFIED for b in stored)  # locally confident, unmatched
+    ctx.close()
+
+
+def test_recompute_skips_the_whole_pass_when_nothing_changed(tmp_path):
+    # The backfill is a one-time harmonization but ran on every boot — 12s at 3,000 books,
+    # recomputing the same answer and writing nothing. It must remember, across restarts, that
+    # the catalog it already harmonized has not changed since.
+    ctx = _seed_author_library(tmp_path)
+    AppController(ctx).recompute_all_identity()
+    ctx.close()
+
+    ctx = _reopen(tmp_path)                       # a fresh process, as at startup
+    controller = AppController(ctx)
+    calls: list[set] = []
+    controller._resync_roots = lambda roots: calls.append(roots) or 0
+
+    assert controller.recompute_all_identity() == 0
+    assert calls == [], "re-derived a catalog that had not changed"
+    ctx.close()
+
+
+def test_recompute_runs_again_once_a_book_changes(tmp_path):
+    ctx = _seed_author_library(tmp_path)
+    AppController(ctx).recompute_all_identity()
+    ctx.close()
+
+    ctx = _reopen(tmp_path)
+    book = ctx.books.list_all()[0]
+    book.title = "Something Else"
+    book.touch()
+    ctx.books.upsert(book)
+    controller = AppController(ctx)
+    calls: list[set] = []
+    controller._resync_roots = lambda roots: calls.append(roots) or 0
+
+    controller.recompute_all_identity()
+    assert calls, "skipped the backfill even though the catalog moved"
+    ctx.close()
+
+
+def test_recompute_force_ignores_the_marker(tmp_path):
+    ctx = _seed_author_library(tmp_path)
+    AppController(ctx).recompute_all_identity()
+    ctx.close()
+
+    ctx = _reopen(tmp_path)
+    controller = AppController(ctx)
+    calls: list[set] = []
+    controller._resync_roots = lambda roots: calls.append(roots) or 0
+
+    controller.recompute_all_identity(force=True)
+    assert calls, "force must re-derive regardless of the marker"
     ctx.close()
 
 
