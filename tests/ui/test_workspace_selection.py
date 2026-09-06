@@ -90,6 +90,22 @@ class _Workspace:
                     GenericEventArguments(sender=button, client=self._client, args={}),
                 )
 
+    def action_bar(self) -> list[str]:
+        """Button labels in the fixed action bar above the Details scroll area. These act on ONE
+        book (Save / Write tags / Mark ready), so a multi-selection must leave it empty."""
+        bar = next(e for e in self._client.elements.values()
+                   if "colophon-actionbar" in e._classes)
+        return [c.text for c in bar.default_slot.children if type(c).__name__ == "Button"]
+
+    def select_row(self, index: int) -> None:
+        """Tick the leading checkbox on the index-th book row."""
+        rows = [c for c in self._of("Checkbox") if not c.text]
+        rows[index].set_value(True)
+
+    def bulk_actions(self) -> list[str]:
+        """Button labels inside the bulk editor (everything the Details pane offers below the bar)."""
+        return [b.text for b in self._of("Button")]
+
     def detail_title(self) -> str | None:
         """The title in the single-book editor, i.e. which book the pane is showing."""
         for element in self._of("Input"):
@@ -222,3 +238,40 @@ async def test_space_deselecting_hands_the_pane_to_the_book_still_selected(
 
     assert workspace.detail_pane() == "single"
     assert workspace.detail_title() != dropped
+
+
+async def test_one_selected_book_keeps_the_single_book_action_bar(loop_registered, library):
+    controller, _ids = library
+    workspace = await _render(controller)
+    workspace.select_row(0)
+    await workspace.settle()
+    assert workspace.detail_pane() == "single"
+    assert workspace.action_bar() == ["Save", "Write tags", "Mark ready"]
+
+
+async def test_selecting_a_second_book_clears_the_single_book_action_bar(
+    loop_registered, library,
+):
+    # Save / Write tags / Mark ready act on one book, and the bar lives OUTSIDE the pane's scroll
+    # area — so switching to the bulk editor, which only rebuilt the scrolling part, used to leave
+    # the single-book buttons stranded above it.
+    controller, _ids = library
+    workspace = await _render(controller)
+    workspace.select_row(0)
+    await workspace.settle()
+    workspace.select_row(1)
+    await workspace.settle()
+
+    assert workspace.detail_pane() == "bulk"
+    assert workspace.action_bar() == []
+
+
+async def test_bulk_editor_offers_mark_ready(loop_registered, library):
+    # Every single-book action has a bulk counterpart except this one, which was simply missing.
+    controller, _ids = library
+    workspace = await _render(controller)
+    workspace.select_row(0)
+    workspace.select_row(1)
+    await workspace.settle()
+    assert "Mark ready" not in workspace.action_bar()   # not the stranded single-book button...
+    assert "Mark ready" in workspace.bulk_actions()      # ...a real one in the bulk editor
