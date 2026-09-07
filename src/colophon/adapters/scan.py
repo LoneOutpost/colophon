@@ -88,7 +88,12 @@ def collapse_child_folders(
     return sorted([*kept, *out], key=lambda u: u.folder.name.lower())
 
 
-def group_book_units(root: Path) -> list[BookUnitFiles]:
+def group_book_units(
+    root: Path, *, combined: dict[str, frozenset[str]] | None = None
+) -> list[BookUnitFiles]:
+    """Every folder holding audio, as one book unit each — then folded where a book was split
+    across child folders (see `collapse_child_folders`). Every scan, rescan and re-identify path
+    walks through here, so the fold applies everywhere at once."""
     units: list[BookUnitFiles] = []
     for dirpath, _dirnames, filenames in os.walk(root):
         folder = Path(dirpath)
@@ -99,5 +104,4 @@ def group_book_units(root: Path) -> list[BookUnitFiles]:
         if not audio:
             continue
         units.append(BookUnitFiles(folder=folder, files=audio))
-    units.sort(key=lambda u: u.folder.name.lower())
-    return units
+    return collapse_child_folders(units, combined=combined)
