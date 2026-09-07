@@ -3126,16 +3126,22 @@ def test_canonical_series_flows_into_organize_and_tag(tmp_path):
 
 
 def test_process_book_organizes_and_tags_with_canonical_name(tmp_path):
+    from mutagen.id3 import ID3
+
     from colophon.controller import EncodeJobOptions
     from colophon.core.models import SourceFile
 
     ctrl = _controller(tmp_path)
     src_dir = tmp_path / "ingest" / "a-book"
     src_dir.mkdir(parents=True)
-    src = src_dir / "a-book.m4b"
-    src.write_bytes(b"\x00")
+    # A genuinely taggable file: organize tags each part at its resting path, and a tag failure is
+    # now a failure of the whole book — so a stub that mutagen cannot write would fail this for a
+    # reason that has nothing to do with the canonical naming under test.
+    src = src_dir / "a-book.mp3"
+    src.write_bytes(b"")
+    ID3().save(src)
     book = _persist_book(ctrl, title="A Book", authors=["B. Sanderson"])
-    book.source_files = [SourceFile(path=src, size=1, duration_seconds=60.0, ext=".m4b")]
+    book.source_files = [SourceFile(path=src, size=1, duration_seconds=60.0, ext=".mp3")]
     ctrl.ctx.books.upsert(book)
     ctrl.set_entity_alias("author", "B. Sanderson", "Brandon Sanderson")
     result = ctrl._process_book(book, EncodeJobOptions(

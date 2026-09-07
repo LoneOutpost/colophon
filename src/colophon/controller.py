@@ -207,6 +207,15 @@ def _part_tracks(book: BookUnit) -> list[int | None]:
     ]
 
 
+def _untagged_detail(untagged: list[Path], total: int) -> str:
+    """The reason a book failed because some of its files could not be tagged. Names a few so the
+    failure is actionable — the real case was two corrupt MP3s among 56 parts."""
+    names = ", ".join(p.name for p in untagged[:3])
+    if len(untagged) > 3:
+        names += f", +{len(untagged) - 3} more"
+    return f"organized, but tagging failed for {len(untagged)} of {total} file(s): {names}"
+
+
 def _organize_fail_detail(org: OrganizeResult) -> str:
     """A readable reason for a failed organize move: a collision names the destination that already
     exists; otherwise the filesystem error (or a generic fallback)."""
@@ -3165,14 +3174,20 @@ class AppController:
             phase = Phase.ENCODE if state_of(book, Phase.ENCODE) is PhaseState.RUNNING else Phase.ORGANIZE
             return self._fail_persist(book, phase, f"{type(exc).__name__}: {exc}")
 
-    def _fail_persist(self, book: BookUnit, phase: Phase, reason: str) -> BookProcessResult:
+    def _fail_persist(self, book: BookUnit, phase: Phase, reason: str,
+                      *, output_folder: Path | None = None) -> BookProcessResult:
         """Record a persist failure: mark `phase` FAILED with `reason`, persist it (so the failed
-        step + its reason show on At a Glance), and return the matching failed result."""
+        step + its reason show on At a Glance), and return the matching failed result.
+
+        `output_folder` is set when the failure happened AFTER the files were placed — tagging is
+        the last step, so an organize can fail with its parts already at the destination. The
+        post-move bookkeeping keys on it, and dropping it would strand moved files."""
         mark(book, phase, PhaseState.FAILED, detail=reason)
         resync_state(book)
         book.touch()
         self.ctx.books.upsert(book)
-        return BookProcessResult(book_id=book.id, status="failed", detail=reason)
+        return BookProcessResult(book_id=book.id, status="failed", detail=reason,
+                                 output_folder=output_folder)
 
     def _persist_book(self, book: BookUnit, options: EncodeJobOptions,
                       encode_progress: Callable[[float], None] | None = None) -> BookProcessResult:
@@ -3215,6 +3230,7 @@ class AppController:
                                          detail=_organize_fail_detail(org))
             total = len(ordered)
             batch_id = new_batch_id()
+            untagged: list[Path] = []
             for idx, dst in enumerate(targets, start=1):
                 self.ctx.operations.record(OperationRecord(
                     batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
@@ -3224,7 +3240,18 @@ class AppController:
                     dst, cbook, operations=self.ctx.operations, batch_id=batch_id,
                     track=(idx if total > 1 else None),
                 ):
+                    # Keep going: the remaining parts should still get their tags. The verdict is
+                    # per BOOK, taken once every part has been attempted.
                     logger.warning(f"track tag write failed for {dst} (book {book.id})")
+                    untagged.append(dst)
+            if untagged:
+                # A failure on any file is a failure of the book. The parts are placed, so the
+                # result still carries output_folder and the post-move bookkeeping runs — but
+                # reporting "done" would hide a book whose files kept their old tags.
+                return self._fail_persist(
+                    book, Phase.TAG, _untagged_detail(untagged, total),
+                    output_folder=targets[0].parent,
+                )
             return BookProcessResult(
                 book_id=book.id, status="done", output_folder=targets[0].parent
             )
@@ -3291,24 +3318,29 @@ class AppController:
             batch_id=batch_id, book_id=book.id, op_type=_OP_ORGANIZE,
             target=str(resting), before=None, outcome="ok",
         ))
-        tag_file(
+        if not tag_file(
             resting, self._canonical_book(book),
             operations=self.ctx.operations, batch_id=batch_id,
-        )
+        ):
+            logger.warning(f"tag write failed for {resting} (book {book.id})")
+            return self._fail_persist(
+                book, Phase.TAG, _untagged_detail([resting], 1), output_folder=resting.parent,
+            )
         return BookProcessResult(
             book_id=book.id, status="done", output_folder=resting.parent
         )
 
     def _rederive_after_move(self, results: list[BookProcessResult]) -> None:
         """After a move (delete_sources) job, remove source book records and re-derive any
-        scan roots that received the moved files. Only books that were actually placed somewhere
-        (`done` with an `output_folder`) are touched — a failed organize kept its sources, and a
-        no-op combo (delete_sources without organize/encode) never moved anything, so both keep
-        their records."""
+        scan roots that received the moved files. Keyed on `output_folder` — "were the files
+        placed?" — not on the verdict: a book that organized but failed to tag still moved, and
+        skipping its bookkeeping would leave a record pointing at sources that no longer exist. A
+        failure BEFORE placement carries no output_folder, and a no-op combo (delete_sources
+        without organize/encode) never moved anything, so both keep their records."""
         done_ids: list[str] = []
         dest_folders: set[Path] = set()
         for res in results:
-            if res.status != "done" or res.output_folder is None:
+            if res.output_folder is None:
                 continue
             done_ids.append(res.book_id)
             if self.path_within_scan_paths(res.output_folder):
@@ -3327,7 +3359,7 @@ class AppController:
         folder still holding non-audio leftovers (cover art, .nfo) is left for an explicit delete."""
         by_id = {b.id: b for b in books}
         for res in results:
-            if res.status == "done" and res.output_folder is not None:
+            if res.output_folder is not None:
                 book = by_id.get(res.book_id)
                 if book is not None:
                     file_ops.remove_if_empty(book.source_folder)
