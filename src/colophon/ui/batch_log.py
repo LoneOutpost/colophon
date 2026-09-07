@@ -33,17 +33,27 @@ class BatchLog:
     """Render a per-item status list and own the action row. The caller drives the run and
     calls `update` per item, then `finish` with a summary it computes from `counts`."""
 
+    ROW_CAP = 200
+    """Rows rendered before the list elides. 3,000 items built 12,010 elements and an ~821 KB
+    single websocket push — near socket.io's 1 MB cap, and more than the browser can render while
+    still answering the ping, which costs it the page. Every item still has an outcome: only the
+    widgets are capped, so counts, the summary and Retry failed cover the whole run."""
+
     def __init__(self, items: Sequence[BatchItem]) -> None:
-        self._kinds: dict[str, str] = {}
+        self._kinds: dict[str, str] = {it.id: "queued" for it in items}
         self._captions: dict[str, ui.item_label] = {}
         with ui.scroll_area().classes("w-full").style("max-height: 50vh"):
             with ui.list().props("dense").classes("w-full"):
-                for it in items:
+                for it in items[: self.ROW_CAP]:
                     with ui.item(), ui.item_section():
                         ui.item_label(it.label)
                         cap = ui.item_label("queued").props("caption").classes("colophon-muted")
                         self._captions[it.id] = cap
-                        self._kinds[it.id] = "queued"
+            hidden = len(items) - self.ROW_CAP
+            if hidden > 0:
+                ui.label(
+                    f"…and {hidden} more — progress and the summary below cover every book"
+                ).classes("text-caption colophon-muted q-pa-sm")
         with ui.row().classes("w-full items-center q-gutter-xs q-mt-xs") as self._progress_row:
             self._progress = ui.label("").classes("text-caption colophon-muted")
             self._progress_fail = ui.label("").classes("text-caption text-negative")
@@ -51,12 +61,15 @@ class BatchLog:
         self._actions = ui.row().classes("w-full items-center q-gutter-sm q-mt-sm")
 
     def update(self, item_id: str, status: str, *, kind: str) -> None:
+        if item_id not in self._kinds:
+            return  # not part of this run
+        # Record the outcome first: an item past ROW_CAP has no widget but still counts.
+        self._kinds[item_id] = kind
         cap = self._captions.get(item_id)
         if cap is None:
             return
         cap.set_text(status)
         cap.classes(replace=_KIND_CLASS.get(kind, "colophon-muted"))
-        self._kinds[item_id] = kind
 
     def set_progress(self, done: int, total: int, *, failed: int = 0) -> None:
         """Show a live 'Processing job X of Y · Z failed' line while the run is in flight.

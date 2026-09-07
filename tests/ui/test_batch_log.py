@@ -36,3 +36,28 @@ def test_failed_rows_expose_ids_for_retry():
     log.update("b", "skipped: no source files", kind="skip")
     assert log.failed_ids() == ["a"]  # skipped books are not retried, only failures
     assert log.counts() == {"fail": 1, "skip": 1}
+
+
+def test_a_library_sized_run_caps_the_rows_it_renders():
+    # 3,000 items built 12,010 elements and an ~821 KB single push — near socket.io's 1 MB cap and
+    # more than the browser renders while still answering the ping. Measured 2026-09-06.
+    log = BatchLog([BatchItem(str(i), f"Book {i}") for i in range(3000)])
+    assert len(log._captions) <= BatchLog.ROW_CAP
+
+
+def test_capped_rows_still_count_toward_the_summary():
+    # Windowing must not lose results: an item past the cap has no widget but still has an outcome,
+    # and "Retry failed" has to find it.
+    log = BatchLog([BatchItem(str(i), f"Book {i}") for i in range(3000)])
+    log.update("2999", "failed: no source files", kind="fail")
+    log.update("0", "tagged", kind="ok")
+
+    assert log.counts()["fail"] == 1
+    assert log.counts()["ok"] == 1
+    assert log.failed_ids() == ["2999"]
+
+
+def test_an_unknown_id_is_still_ignored():
+    log = BatchLog([BatchItem("a", "A")])
+    log.update("not-a-book", "done", kind="ok")
+    assert log.counts() == {"queued": 1}
