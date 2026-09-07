@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from colophon.adapters.audio_formats import format_for
-from colophon.core.errors import TagWriteError
+from colophon.core.errors import TagWriteError, describe
 from colophon.core.models import EmbeddedTags
 
 
@@ -35,7 +35,7 @@ def write_embedded_tags(path: Path, tags: EmbeddedTags) -> None:
     except TagWriteError:
         raise
     except Exception as e:
-        raise TagWriteError(f"write tags to {path} failed: {e}") from e
+        raise TagWriteError(f"write tags to {path} failed: {describe(e)}") from e
 
 
 def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
@@ -49,4 +49,4 @@ def embed_cover(path: Path, image_bytes: bytes, mime: str) -> None:
     except TagWriteError:
         raise
     except Exception as e:
-        raise TagWriteError(f"embed cover into {path} failed: {e}") from e
+        raise TagWriteError(f"embed cover into {path} failed: {describe(e)}") from e

@@ -17,6 +17,7 @@ import httpx
 from PIL import Image, UnidentifiedImageError
 
 from colophon.adapters.cover import ext_for_mime, fetch_cover
+from colophon.core.errors import describe
 from colophon.core.models import BookUnit
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def thumbnail_bytes(source: Path, *, max_px: int = THUMB_MAX_PX) -> tuple[bytes,
                 rgb.thumbnail((max_px, max_px))
                 rgb.save(thumb, "JPEG", quality=82)
         except (OSError, UnidentifiedImageError, ValueError) as e:
-            logger.warning(f"thumbnailing {source} failed: {e}")
+            logger.warning(f"thumbnailing {source} failed: {describe(e)}")
             return None
     return thumb.read_bytes(), "image/jpeg"
 
@@ -69,7 +70,7 @@ async def ensure_cached_cover(
         dest_dir.mkdir(parents=True, exist_ok=True)
         path.write_bytes(cover.data)
     except OSError as e:  # disk full / read-only / bad path — degrade like a failed download
-        logger.warning(f"caching cover to {path} failed: {e}")
+        logger.warning(f"caching cover to {path} failed: {describe(e)}")
         return None
     book.cover_path = path
     return path
