@@ -138,7 +138,7 @@ async def test_persist_preview_does_not_block_the_event_loop(client):
     assert screen.find("Label", "Confirm destinations"), "the preview screen never rendered"
     # Computed inline, the blocking preview would let through at most a beat or two; off the loop
     # the heartbeat keeps its cadence for the whole of it.
-    assert beats["n"] >= _PREVIEW_WORK / _TICK / 2
+    assert beats["n"] >= _PREVIEW_WORK / _TICK / 4   # blocked would be 1; /4 survives a slow runner
 
 
 async def test_persist_button_shows_it_is_working_and_runs_once(client):

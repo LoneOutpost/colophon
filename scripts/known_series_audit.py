@@ -45,5 +45,5 @@ print(f"DB {db}")
 print(f"matches from a MIDDLE/series segment (trust): {trust}")
 print(f"matches ONLY from last-segment/stem (suspect): {suspect}")
 print("\n== suspect (title/last-segment misread as series?) ==")
-for folder, title, authors, name in suspect_ex:
+for folder, title, _authors, name in suspect_ex:
     print(f"   {folder[:50]!r:52} t={title[:26]!r:28} -> {name!r}")

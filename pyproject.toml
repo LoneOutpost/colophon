@@ -68,4 +68,6 @@ ignore = ["E501"]
 # The canonical sequence sentinel is an intentional non-ASCII token (‹…›), chosen precisely because it
 # cannot collide with filename text; the ambiguous-unicode lint targets prose, not internal sentinels.
 "src/colophon/core/sequence_marker.py" = ["RUF001", "RUF002"]
+# Curly quotes are the fixture here: these cases assert how clean_title treats a lone leading ‘.
+"tests/core/test_clean_title.py" = ["RUF001"]
 "tests/core/test_sequence_marker.py" = ["RUF001"]
