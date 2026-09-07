@@ -16,7 +16,7 @@ from pathlib import Path
 
 from colophon.adapters.audio import read_audio_metadata
 from colophon.adapters.repository.store import BookUnitRepo, GraphStore
-from colophon.adapters.scan import group_book_units
+from colophon.adapters.scan import BookUnitFiles, group_book_units
 from colophon.core.audio_quality import mixed_quality_finding
 from colophon.core.classify import FileFeatures, classify
 from colophon.core.dirinfer import parse_scheme
@@ -257,6 +257,20 @@ def refresh_local(book: BookUnit, *, root: Path, template: str, directory_scheme
     )
 
 
+def _forced_single(units: list[BookUnitFiles], single_book_folders: frozenset[str]) -> frozenset[str]:
+    """The folders CATEGORIZE must treat as exactly one book.
+
+    A folded unit — a book whose discs each sat in their own folder — is one book by structure, and
+    structure is much harder evidence than the embedded tags. A real six-disc rip carried
+    `Tom Chancy`/`Shadow Warriors`, then no artist and album `Disk3`, then
+    `Tom Clancy Shadow Warriors Last Disk`: the grouping election read three different albums and
+    split the folded book straight back apart along the tag boundary.
+
+    So a fold makes the same assertion a user's manual Combine does, through the same input.
+    """
+    return single_book_folders | {str(u.folder) for u in units if u.folded}
+
+
 def _scan_label(folder: Path, root: Path) -> str:
     """A readable per-folder progress label: the folder path relative to the scan root,
     or its bare name when it is not under root."""
@@ -277,6 +291,7 @@ def _plan_scan_all(repo: BookUnitRepo, root: Path, *, template: str, directory_s
     scheme = parse_scheme(directory_scheme)
     plan = ScanPlan()
     units = group_book_units(root)
+    single_book_folders = _forced_single(units, single_book_folders)
     total = len(units)
     for i, unit in enumerate(units, start=1):
         if progress is not None:
@@ -365,6 +380,7 @@ def _plan_scan_new_only(repo: BookUnitRepo, root: Path, phases: frozenset[Phase]
     inf_root = inference_root or root
     plan = ScanPlan()
     units = group_book_units(root)
+    single_book_folders = _forced_single(units, single_book_folders)
     total = len(units)
     for i, unit in enumerate(units, start=1):
         if progress is not None:
@@ -399,6 +415,7 @@ def _plan_scan_reprocess(repo: BookUnitRepo, root: Path, phases: frozenset[Phase
     inf_root = inference_root or root
     plan = ScanPlan()
     units = group_book_units(root)
+    single_book_folders = _forced_single(units, single_book_folders)
     total = len(units)
     for i, unit in enumerate(units, start=1):
         if progress is not None:

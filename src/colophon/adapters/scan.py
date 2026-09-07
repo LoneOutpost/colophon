@@ -19,6 +19,9 @@ from colophon.core.disc_folder import disc_number
 class BookUnitFiles:
     folder: Path
     files: list[Path]
+    # True when this unit was folded from child folders (a disc split, or an explicit combine).
+    # Structure said "one book", which the classifier needs to know — see `collapse_child_folders`.
+    folded: bool = False
 
 
 def _natural_key(path: Path) -> list[object]:
@@ -82,7 +85,7 @@ def collapse_child_folders(
         for member in sorted(members, key=lambda c: ordering[c.folder]):
             files.extend(member.files)
             consumed.add(member.folder)
-        out.append(BookUnitFiles(folder=parent, files=files))
+        out.append(BookUnitFiles(folder=parent, files=files, folded=True))
 
     kept = [u for u in units if u.folder not in consumed]
     return sorted([*kept, *out], key=lambda u: u.folder.name.lower())
