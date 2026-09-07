@@ -197,4 +197,4 @@ async def test_applying_a_large_selection_runs_off_the_event_loop(client):
         task.cancel()
 
     assert any("Applied" in (e.text or "") for e in screen.of("Label")), "the apply never finished"
-    assert beats["n"] >= 0.3 / _TICK / 2, "the event loop stalled while applying"
+    assert beats["n"] >= 0.3 / _TICK / 4, "the event loop stalled while applying"

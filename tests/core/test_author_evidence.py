@@ -179,7 +179,7 @@ def test_tag_artist_agreement_across_files_reinforces_but_caps():
     s = _book("/lib/x", "a.opus", artist="Solo")
     ev1 = collect_author_evidence(s, author_depth_folder=None, classified_author_name=None,
                                   datafile_authors=[], filename_author=None, sibling_consensus={})
-    assert [e for e in ev1 if e.source == "tag"][0].weight == W.W_A_TAG
+    assert next(e for e in ev1 if e.source == "tag").weight == W.W_A_TAG
 
 
 def test_leaf_folder_author_beats_filename_and_supplies_the_swapped_author():

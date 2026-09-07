@@ -890,7 +890,7 @@ def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
     corroborate = [tagged("Isaac Asimov") for _ in range(3)]
     dissent = tagged("Some Narrator")
     coauthor = tagged("Isaac Asimov & Robert Silverberg")
-    g = _graph_with({folder: corroborate + [dissent, coauthor]}, root)
+    g = _graph_with({folder: [*corroborate, dissent, coauthor]}, root)
     classify_graph(g, root=root)
     classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})
 

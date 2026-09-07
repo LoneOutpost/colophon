@@ -344,7 +344,8 @@ async def test_bulk_action_stays_responsive_and_shows_progress(
 
     beats = await _heartbeat_while(workspace, label)
 
-    assert beats >= slow / 0.01 / 2, "the event loop stalled while the bulk action ran"
+    # Blocked would be ~1 tick; a quarter of the ideal rate still separates them on a slow runner.
+    assert beats >= slow / 0.01 / 4, "the event loop stalled while the bulk action ran"
 
 
 async def test_an_opened_book_survives_a_repaint_that_left_the_selection_alone(

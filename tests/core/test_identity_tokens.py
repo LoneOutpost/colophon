@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from colophon.core.identity_tokens import title_candidates
+import pytest
+
+from colophon.core.identity_tokens import _clean_token, title_candidates
 
 
 def test_drops_author_and_series_marker():
@@ -24,11 +26,6 @@ def test_bare_number_title_survives():
 
 def test_author_only_folder_yields_no_title():
     assert title_candidates("Alexei Panshin", authors=["Alexei Panshin"], series=[]) == []
-
-
-import pytest
-
-from colophon.core.identity_tokens import _clean_token
 
 
 @pytest.mark.parametrize("junk", ["1/9", "01-12", "001 of 153", "CD01", "cd1", "1 of 8", "01 of 6"])
