@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel
 
 from colophon.adapters.http import HTTP_RETRY
+from colophon.core.errors import describe
 
 
 class AbsError(RuntimeError):
@@ -46,7 +47,7 @@ class AbsClient:
         try:
             resp = await self._get("/api/libraries")
         except httpx.HTTPError as e:
-            raise AbsError(f"list_libraries failed: {e}") from e
+            raise AbsError(f"list_libraries failed: {describe(e)}") from e
         if resp.status_code >= 400:
             raise AbsError(f"list_libraries returned {resp.status_code}")
         libs = (resp.json() or {}).get("libraries") or []
@@ -56,7 +57,7 @@ class AbsClient:
         try:
             resp = await self._post(f"/api/libraries/{library_id}/scan")
         except httpx.HTTPError as e:
-            raise AbsError(f"scan_library failed: {e}") from e
+            raise AbsError(f"scan_library failed: {describe(e)}") from e
         if resp.status_code >= 400:
             raise AbsError(f"scan_library returned {resp.status_code}: {resp.text[:200]}")
         return resp.text.strip()

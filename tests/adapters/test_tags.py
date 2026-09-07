@@ -260,3 +260,29 @@ def test_trck_frame_with_total_is_parsed_correctly(tmp_path: Path):
     id3.add(TRCK(encoding=3, text=["3/12"]))
     id3.save(path)
     assert read_embedded_tags(path).track == 3
+
+
+def test_a_wordless_mutagen_failure_still_names_itself(tmp_path: Path):
+    # mutagen raises `mutagen.id3.error` with no message on a corrupt file, so interpolating only
+    # the exception produced "…failed:" and nothing — a real Stand on Zanzibar persist logged
+    # exactly that, and said nothing about what went wrong.
+    from mutagen.id3 import error as ID3Error
+
+    path = tmp_path / "corrupt.mp3"
+    path.write_bytes(b"")
+
+    def _boom(*_args, **_kwargs):
+        raise ID3Error()
+
+    import colophon.adapters.audio_formats as fmts
+    original = fmts.Mp3Format.write_tags
+    fmts.Mp3Format.write_tags = _boom
+    try:
+        with pytest.raises(TagWriteError) as excinfo:
+            write_embedded_tags(path, EmbeddedTags(title="Dune"))
+    finally:
+        fmts.Mp3Format.write_tags = original
+
+    message = str(excinfo.value)
+    assert "error" in message                  # the exception type is named
+    assert not message.rstrip().endswith(":")  # never a dangling colon with nothing after it
