@@ -1,8 +1,16 @@
 name: CI
 
+# The Python version comes from `.python-version` (3.12) — the same one the Docker image and the
+# deployed venv run — so CI cannot drift onto whatever ubuntu-latest ships.
+#
+# One workflow, three jobs. Lint and test run in parallel so a formatting nit can never hide a
+# test result — that ordering, in a single job, kept the suite from running at all between
+# 2026-08-13 and 2026-09-06. The image is published only when both are green.
+
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -13,8 +21,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --frozen, not a bare sync: CI must fail when uv.lock is stale rather than quietly
+      # resolving something the lockfile does not describe.
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -23,12 +51,60 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync
-
-      - name: Lint
-        run: uv run ruff check .
+        run: uv sync --frozen
 
       - name: Test
-        run: uv run pytest
+        run: uv run pytest -q
+
+  docker:
+    # The gate that was missing: these workflows used to be independent, so every red CI run
+    # still published ghcr.io/loneoutpost/colophon:edge. Images went out for a month built from
+    # code whose tests had not run.
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/loneoutpost/colophon
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=edge,branch=main
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
