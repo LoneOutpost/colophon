@@ -165,11 +165,19 @@ def _confidence_color(value: float) -> str:
     return "negative"
 
 
+# Proposal rows rendered per chunk in the Quick Match preview. 180 books built ~3,100 elements and
+# a ~400 KB single push, with one remote cover fetch each — more than the browser could render while
+# still answering the socket ping, so the server dropped the client and the reload took the
+# un-accepted matches with it. Mirrors the book list's _PAGE windowing.
+_MATCH_PAGE = 40
+
+
 def _cover_thumb(url: str | None) -> None:
     """A small cover thumbnail for a match row; a placeholder when there's no art,
     so every row keeps the same left gutter."""
     if url:
-        ui.image(url).classes("rounded").style(
+        # loading=lazy so a long list does not open one connection per row the moment it renders.
+        ui.image(url).props("loading=lazy").classes("rounded").style(
             "width: 36px; height: 54px; object-fit: cover"
         )
     else:
@@ -942,53 +950,107 @@ async def quick_match_dialog(
             body.clear()
             title.set_text(f"Quick Match {len(books)} books")
             threshold = controller.review_threshold()
+            # Selection is keyed by book id and seeded for EVERY proposal up front, not just the
+            # rendered ones — windowing must never quietly drop a match from the apply set.
             checks: dict[str, ui.checkbox] = {}
-            with body:
-                with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
-                    with ui.column().classes("w-full gap-0"):
-                        for p in proposals:
-                            cur = p.book.title or "(untitled)"
-                            if p.best is None:
-                                with ui.row().classes("w-full items-center no-wrap q-py-xs"):
-                                    ui.icon("block").classes("text-grey-5 q-mr-sm")
-                                    with ui.column().classes("gap-0"):
-                                        ui.label(cur)
-                                        ui.label("no match").classes("text-caption colophon-muted")
-                                continue
-                            with ui.row().classes("w-full items-center no-wrap"):
-                                checks[p.book.id] = ui.checkbox(value=p.confidence >= threshold)
-                                exp = ui.expansion().classes("w-full")
-                                with exp.add_slot("header"):
-                                    with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
-                                        _cover_thumb(p.best.cover_url)
-                                        with ui.column().classes("gap-0"):
-                                            ui.label(f"{cur} → {p.best.title or '?'}")
-                                            ui.label(
-                                                controller.source_label(p.best.provider)
-                                            ).classes("text-caption colophon-muted")
-                                        ui.space()
-                                        ui.badge(f"{p.confidence:.0f}").props(
-                                            f"color={_confidence_color(p.confidence)}"
-                                        ).tooltip(
-                                            "Match confidence: how closely this candidate "
-                                            "matches the book. Higher means a closer match."
-                                        )
-                                with exp:
-                                    _candidate_meta(
-                                        p.best, p.book,
-                                        source_label=controller.source_label(p.best.provider),
-                                    )
+            checked: dict[str, bool] = {
+                p.book.id: p.confidence >= threshold for p in proposals if p.best is not None
+            }
+            rendered = {"n": 0}
 
-                def _apply() -> None:
-                    keep_ids = {bid for bid, c in checks.items() if c.value}
-                    chosen = [p for p in proposals if p.book.id in keep_ids]
+            def _render_row(p) -> None:
+                cur = p.book.title or "(untitled)"
+                if p.best is None:
+                    with ui.row().classes("w-full items-center no-wrap q-py-xs"):
+                        ui.icon("block").classes("text-grey-5 q-mr-sm")
+                        with ui.column().classes("gap-0"):
+                            ui.label(cur)
+                            ui.label("no match").classes("text-caption colophon-muted")
+                    return
+                with ui.row().classes("w-full items-center no-wrap"):
+                    box = ui.checkbox(
+                        value=checked[p.book.id],
+                        on_change=lambda e, bid=p.book.id: checked.__setitem__(bid, e.value),
+                    )
+                    checks[p.book.id] = box
+                    exp = ui.expansion().classes("w-full")
+                    with exp.add_slot("header"):
+                        with ui.row().classes("w-full items-center no-wrap q-gutter-sm"):
+                            _cover_thumb(p.best.cover_url)
+                            with ui.column().classes("gap-0"):
+                                ui.label(f"{cur} → {p.best.title or '?'}")
+                                ui.label(
+                                    controller.source_label(p.best.provider)
+                                ).classes("text-caption colophon-muted")
+                            ui.space()
+                            ui.badge(f"{p.confidence:.0f}").props(
+                                f"color={_confidence_color(p.confidence)}"
+                            ).tooltip(
+                                "Match confidence: how closely this candidate "
+                                "matches the book. Higher means a closer match."
+                            )
+                    # The detail block is built on first expand, not up front: nobody sees a
+                    # collapsed one, and eagerly rendering all of them was a third of the payload.
+                    filled = {"done": False}
+
+                    def _fill(_e=None, exp=exp, p=p) -> None:
+                        if filled["done"]:
+                            return
+                        filled["done"] = True
+                        with exp:
+                            _candidate_meta(
+                                p.best, p.book,
+                                source_label=controller.source_label(p.best.provider),
+                            )
+
+                    exp.on_value_change(_fill)
+
+            with body:
+                ui.label(
+                    f"{sum(1 for p in proposals if p.best is not None)} of {len(proposals)} "
+                    f"books matched. Untick any you do not want."
+                ).classes("text-caption colophon-muted")
+                with ui.scroll_area().classes("w-full").style("max-height: 45vh"):
+                    rows = ui.column().classes("w-full gap-0")
+                more_row = ui.row().classes("w-full items-center q-gutter-sm")
+
+                def _render_more() -> None:
+                    start, end = rendered["n"], min(rendered["n"] + _MATCH_PAGE, len(proposals))
+                    with rows:
+                        for p in proposals[start:end]:
+                            _render_row(p)
+                    rendered["n"] = end
+                    more_row.clear()
+                    if end < len(proposals):
+                        with more_row:
+                            ui.label(f"Showing {end} of {len(proposals)}").classes(
+                                "text-caption colophon-muted"
+                            )
+                            ui.button("Show more", icon="expand_more", on_click=_render_more).props(
+                                "flat dense no-caps"
+                            )
+
+                _render_more()
+
+                async def _apply() -> None:
+                    chosen = [
+                        p for p in proposals
+                        if p.best is not None and checked.get(p.book.id)
+                    ]
                     if not chosen:
                         ui.notify("Nothing selected")
                         return
-                    summary = controller.quick_match_apply(chosen)
+                    # Writes every matched book, so it goes off the loop with the button busy —
+                    # blocking here loses the result the moment the user confirms it.
+                    with busy(apply_btn):
+                        summary = await asyncio.to_thread(controller.quick_match_apply, chosen)
                     show_summary(summary)
 
-                dialog_actions(dialog, confirm_label="Apply selected", confirm_icon="done_all", on_confirm=_apply, confirm_props="")
+                apply_btn = dialog_actions(
+                    dialog, confirm_label="Apply selected", confirm_icon="done_all",
+                    on_confirm=lambda: None, confirm_props="",
+                )
+                apply_btn.on("click", single_flight(_apply))
 
         def show_summary(summary) -> None:
             body.clear()
