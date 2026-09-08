@@ -77,3 +77,40 @@ def test_a_genuine_multi_book_folder_is_still_split(tmp_path):
 
     assert len(plan.units) == 2, "a real multi-book folder stopped splitting"
     ctx.close()
+
+
+def test_upgrading_a_library_prunes_the_old_per_disc_books(tmp_path):
+    # The upgrade path, which a fresh-database test cannot exercise: a library scanned BEFORE the
+    # fold holds one book per disc folder. After the fold those folders produce no unit, so the
+    # scan reconcile never visited them and their rows survived — leaving the real book plus a
+    # ghost per disc, every file counted twice, and cleanup unable to see them because the files
+    # exist and are inside a scan path.
+    from colophon.core.models import BookUnit, SourceFile
+
+    ctx, ctrl, ingest = _ctrl(tmp_path)
+    book = ingest / "Innocent in Death"
+    for disc in ("CD01", "CD02", "CD03"):
+        for track in ("01.mp3", "02.mp3"):
+            _mp3(book / disc / track, artist="J D Robb")
+    # Seed the pre-fold state: one book per disc folder.
+    for disc in ("CD01", "CD02", "CD03"):
+        folder = book / disc
+        stale = BookUnit.new(source_folder=folder)
+        stale.title = disc.title()
+        stale.source_files = [
+            SourceFile(path=folder / t, size=1, duration_seconds=60.0, ext="mp3")
+            for t in ("01.mp3", "02.mp3")
+        ]
+        ctx.books.upsert(stale)
+    assert len(ctx.books.list_all()) == 3
+
+    ctrl.scan([ingest])
+
+    rows = ctx.books.list_all()
+    assert len(rows) == 1, (
+        "per-disc books survived the upgrade: "
+        f"{sorted(str(b.source_folder.name) for b in rows)}"
+    )
+    assert rows[0].source_folder == book
+    assert len(rows[0].source_files) == 6
+    ctx.close()

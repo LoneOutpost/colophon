@@ -804,7 +804,20 @@ def commit_scan(
         keep_by_folder: dict[Path, set[str]] = {}
         for book in plan.units:
             keep_by_folder.setdefault(book.source_folder, set()).add(book.id)
-        for folder in plan.reconciled_folders:
+        # Folders a fold absorbed. A file sitting BELOW its own book's source_folder only happens
+        # when `collapse_child_folders` folded that subfolder in — before the fold every file sat
+        # directly in its book's folder. Those subfolders produce no unit of their own now, so the
+        # normal reconcile never visits them, and a library scanned before the fold keeps one stale
+        # book per disc: the right book plus a ghost per disc, every file counted twice, invisible
+        # to cleanup because the files exist and are inside a scan path. Derived from the plan, so
+        # nothing has to be threaded through the walk.
+        absorbed = {
+            sf.path.parent
+            for book in plan.units
+            for sf in book.source_files
+            if sf.path.parent != book.source_folder
+        }
+        for folder in plan.reconciled_folders | absorbed:
             keep = keep_by_folder.get(folder, set())
             for stale_id in repo.ids_in_folder(folder) - keep:
                 repo.delete(stale_id)
