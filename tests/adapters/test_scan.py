@@ -52,3 +52,35 @@ def test_mixed_mp3_and_opus_parts_are_one_book(tmp_path: Path):
     units = group_book_units(tmp_path)
     (unit,) = units
     assert [p.name for p in unit.files] == ["01.opus", "02.opus", "08.mp3"]
+
+
+def test_a_cd_split_book_walks_as_one_unit(tmp_path: Path):
+    for disc, tracks in (("CD1", ["01.mp3", "02.mp3"]), ("CD2", ["01.mp3"])):
+        for name in tracks:
+            _touch(tmp_path / "Innocent in Death" / disc / name)
+
+    units = group_book_units(tmp_path)
+
+    assert [u.folder.name for u in units] == ["Innocent in Death"]
+    assert [p.parent.name for p in units[0].files] == ["CD1", "CD1", "CD2"]
+
+
+def test_an_explicit_combine_walks_as_one_unit(tmp_path: Path):
+    _touch(tmp_path / "Author" / "Part One" / "a.mp3")
+    _touch(tmp_path / "Author" / "Part Two" / "b.mp3")
+    combined = {
+        str(tmp_path / "Author"): frozenset({
+            str(tmp_path / "Author" / "Part One"), str(tmp_path / "Author" / "Part Two"),
+        })
+    }
+
+    units = group_book_units(tmp_path, combined=combined)
+
+    assert [u.folder.name for u in units] == ["Author"]
+    assert [p.name for p in units[0].files] == ["a.mp3", "b.mp3"]
+
+
+def test_ordinary_folders_still_walk_one_book_each(tmp_path: Path):
+    _touch(tmp_path / "Dune" / "01.mp3")
+    _touch(tmp_path / "Messiah" / "01.mp3")
+    assert {u.folder.name for u in group_book_units(tmp_path)} == {"Dune", "Messiah"}
