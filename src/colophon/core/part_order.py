@@ -2,14 +2,16 @@
 
 Order is never guessed. Embedded track numbers win when they form a complete 1..N; then a canonical
 `N of M` part index does the same (every file an `N of M`, consistent M, indices exactly 1..M);
-otherwise a numeric-aware filename sort is used; if even that is ambiguous (two files share a sort key)
-the book is blocked so a wrong part number is never written.
+otherwise a numeric-aware filename sort is used. When that is ambiguous because the files sit in
+per-disc folders whose numbering restarts, the folder's disc number is borrowed; if it is still
+ambiguous the book is blocked so a wrong part number is never written.
 """
 
 from __future__ import annotations
 
 import re
 
+from colophon.core.disc_folder import disc_number
 from colophon.core.models import SourceFile
 from colophon.core.sequence_marker import find_parts
 
@@ -26,6 +28,26 @@ def _natural_key(name: str) -> tuple:
         if i < len(nums):
             key.append(nums[i])
     return tuple(key)
+
+
+def _disc_disambiguated(
+    files: list[SourceFile], keys: list[tuple]
+) -> list[tuple] | None:
+    """`keys` with each file's containing-folder disc number prepended, or None if still ambiguous.
+
+    A rip whose every disc restarts at `01. Track 1` has colliding basenames, so the filename sort
+    alone cannot order it — but the disc number sits in the folder the file is in, which is exactly
+    the part the filename omits. Borrowing it makes the order unambiguous and disc-major. A rip whose
+    filenames already carry the disc (`… CD01-01.opus`) never reaches here.
+
+    Only applies when EVERY file's folder names a disc: two genuinely indistinguishable files must
+    still block rather than be ordered by a guess.
+    """
+    discs = [disc_number(f.path.parent.name) for f in files]
+    if any(d is None for d in discs):
+        return None
+    disambiguated = [(d, *k) for d, k in zip(discs, keys, strict=True)]
+    return disambiguated if len(set(disambiguated)) == len(files) else None
 
 
 def _complete_part_order(files: list[SourceFile]) -> list[SourceFile] | None:
@@ -69,5 +91,9 @@ def resolve_part_order(
         return by_part
     keys = [_natural_key(f.path.name) for f in files]
     if len(set(keys)) != len(files):
-        return None
+        # Colliding basenames: borrow the disc number from each file's folder before giving up.
+        disc_keys = _disc_disambiguated(files, keys)
+        if disc_keys is None:
+            return None
+        keys = disc_keys
     return [f for _, f in sorted(zip(keys, files, strict=True), key=lambda pair: pair[0])]

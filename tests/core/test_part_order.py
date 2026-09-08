@@ -81,3 +81,50 @@ def test_mixed_some_none_tracks_fall_through_to_filename_sort():
     tracks = [3, None, 2]
     ordered = resolve_part_order(files, tracks)
     assert [f.path.name for f in ordered] == ["Part 1.mp3", "Part 2.mp3", "Part 3.mp3"]
+
+
+def _in(folder: str, name: str) -> SourceFile:
+    return SourceFile(path=Path(folder) / name, size=1, duration_seconds=60.0, ext="mp3")
+
+
+def test_discs_that_restart_their_numbering_order_by_disc_then_name():
+    # A disc rip whose every disc restarts at "01. Track 1": the basenames collide, so the filename
+    # sort alone is ambiguous and the book used to be blocked from persisting entirely. The disc
+    # number is right there in the containing folder — the filename simply does not carry one.
+    files = [
+        _in("/lib/Shadow warriors/Shadow Warriors - Disk2", "01. Track 1.mp3"),
+        _in("/lib/Shadow warriors/Shadow Warriors - Disk1", "02. Track 2.mp3"),
+        _in("/lib/Shadow warriors/Shadow Warriors - Disk1", "01. Track 1.mp3"),
+        _in("/lib/Shadow warriors/Shadow Warriors - Disk2", "02. Track 2.mp3"),
+    ]
+    ordered = resolve_part_order(files, [None] * 4)
+    assert ordered is not None, "a disc-split book is still blocked from ordering"
+    assert [(f.path.parent.name[-5:], f.path.name[:2]) for f in ordered] == [
+        ("Disk1", "01"), ("Disk1", "02"), ("Disk2", "01"), ("Disk2", "02"),
+    ]
+
+
+def test_disc_two_precedes_disc_ten():
+    files = [
+        _in("/lib/Book/CD10", "01. Track 1.mp3"),
+        _in("/lib/Book/CD2", "01. Track 1.mp3"),
+        _in("/lib/Book/CD1", "01. Track 1.mp3"),
+    ]
+    ordered = resolve_part_order(files, [None] * 3)
+    assert [f.path.parent.name for f in ordered] == ["CD1", "CD2", "CD10"]
+
+
+def test_a_clash_with_no_disc_folders_is_still_refused():
+    # The disc number is only borrowed when the folders actually carry one. Two genuinely
+    # indistinguishable files must still block, rather than be ordered arbitrarily.
+    files = [_in("/lib/Book/Extras", "track.mp3"), _in("/lib/Book/Bonus", "track.mp3")]
+    assert resolve_part_order(files, [None, None]) is None
+
+
+def test_filenames_that_already_carry_the_disc_are_untouched():
+    files = [
+        _in("/lib/Innocent/CD02", "Innocence CD02-01.opus"),
+        _in("/lib/Innocent/CD01", "Innocence CD01-01.opus"),
+    ]
+    ordered = resolve_part_order(files, [None, None])
+    assert [f.path.name for f in ordered] == ["Innocence CD01-01.opus", "Innocence CD02-01.opus"]
