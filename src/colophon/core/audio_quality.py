@@ -101,14 +101,17 @@ def _audio_with_quality(source_files: list[SourceFile]) -> list[SourceFile]:
 
 
 def _is_uniform(known: list[SourceFile]) -> bool:
-    """True when every known-quality file shares one bitrate tier, codec, sample rate, and
-    channel count — i.e. they look like one edition. Assumes `known` is non-empty."""
+    """True when every known-quality file shares one bitrate tier, codec, and sample rate — i.e. they
+    look like one edition. Assumes `known` is non-empty.
+
+    Channel count is deliberately NOT part of this: a mono audiobook routinely carries a stereo intro,
+    outro, or credits track, and on a real library that shape accounted for the large majority of this
+    finding while telling the user nothing they could act on."""
     first = known[0]
     return all(
         _bitrate_tier(sf.bitrate) == _bitrate_tier(first.bitrate)
         and sf.codec == first.codec
         and sf.sample_rate == first.sample_rate
-        and sf.channels == first.channels
         for sf in known
     )
 
@@ -121,13 +124,21 @@ def mixed_quality_finding(source_files: list[SourceFile]) -> Finding | None:
     known = _audio_with_quality(source_files)
     if len(known) < 2 or _is_uniform(known):
         return None
+    # Name the dimension that actually disagreed. Reporting a bitrate span for a book that tripped on
+    # codec or sample rate sent readers looking for a difference that was not there, which is how the
+    # finding lost its credibility.
+    parts: list[str] = []
     codecs = sorted({sf.codec for sf in known if sf.codec})
-    kbps = sorted({round(sf.bitrate / 1000) for sf in known})
     if len(codecs) > 1:
-        detail = f"files mix formats ({' + '.join(codecs)})"
-    else:
-        detail = f"files span {kbps[0]}-{kbps[-1]} kbps"
-    return Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN, detail=detail)
+        parts.append(f"mixes formats ({' + '.join(codecs)})")
+    if len({_bitrate_tier(sf.bitrate) for sf in known}) > 1:
+        kbps = sorted({round(sf.bitrate / 1000) for sf in known})
+        parts.append(f"spans {kbps[0]}-{kbps[-1]} kbps")
+    rates = sorted({sf.sample_rate for sf in known if sf.sample_rate})
+    if len(rates) > 1:
+        parts.append(f"mixes sample rates ({'/'.join(f'{r // 1000}kHz' for r in rates)})")
+    return Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN,
+                   detail="files " + ", ".join(parts))
 
 
 def book_quality_summary(source_files: list[SourceFile]) -> str | None:

@@ -74,3 +74,19 @@ def test_is_title_shaped_author():
     assert is_title_shaped_author("Restoree", "Restoree") is True    # echoes the title
     assert is_title_shaped_author("Anne McCaffrey", "Restoree") is False
     assert is_title_shaped_author(None, None) is False
+
+
+def test_is_narrator_credit_bars_a_narrator_from_naming_the_author():
+    # A rip that writes "Narrated by X" into the Artist tag must not commit X as the author. Seen on
+    # a real library with identity_confidence 100, because no detector covered a credit line.
+    from colophon.core.metadata_quality import author_junk, is_narrator_credit
+    for v in ["Narrated by William Gaminara", "Read by Stephen Fry", "performed by Jim Dale"]:
+        assert is_narrator_credit(v) is True, v
+        assert author_junk(v) == 1.0, v
+
+
+def test_is_narrator_credit_keeps_real_names_and_titles():
+    from colophon.core.metadata_quality import author_junk, is_narrator_credit
+    for v in ["Bernard Cornwell", "Reading Lolita in Tehran", "Readers Digest", "Byron", "", None]:
+        assert is_narrator_credit(v) is False, v
+    assert author_junk("Bernard Cornwell") == 0.0

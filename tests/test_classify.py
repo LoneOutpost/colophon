@@ -602,9 +602,12 @@ def test_metadata_conflict_title_mismatch_flags():
     assert any(f.code is FC.METADATA_CONFLICT for f in r.findings)
 
 
-def test_metadata_conflict_author_absent_from_path_flags():
-    # Dream Eyes: album shares "Dream" so the title side is quiet, but the artist is a different
-    # person absent from the /audio/Amanda Quick/... path.
+def test_metadata_conflict_ignores_an_author_merely_absent_from_the_path():
+    # An author absent from the folder path is not a conflict: nothing disagrees, the layout simply
+    # does not name the author. On a real library this arm produced only false positives (a folder is
+    # free to be titled without its author). Genuine author disagreement — the same Amanda Quick vs
+    # George Prochnik shape — is node_classify's job, which compares the tag's people-set against the
+    # CLASSIFIED folder author instead of testing for mere presence.
     folder = Path("/audio/Amanda Quick/Dark Legacy/(Dark Legacy Book #2) Dream Eyes")
     feats = [
         _feat(str(folder / "Ch01-Dream Eyes.mp3"),
@@ -613,7 +616,8 @@ def test_metadata_conflict_author_absent_from_path_flags():
               album="I Dream with Open Eyes", artist="George Prochnik", title="Part 02"),
     ]
     r = classify(folder, Path("/audio"), feats, template_pattern=TEMPLATE, scheme_patterns=SCHEME)
-    assert any(f.code is FC.METADATA_CONFLICT for f in r.findings)
+    assert not any(f.code is FC.METADATA_CONFLICT and "not in the folder path" in (f.detail or "")
+                   for f in r.findings)
 
 
 def test_no_metadata_conflict_for_consistent_book():
@@ -761,13 +765,12 @@ def test_metadata_conflict_ignores_dotdash_author_prefix():
     from colophon.core.classify import _metadata_conflict_finding
     from colophon.core.models import FolderKind
 
-    root = Path("/audio")
     folder = Path("/audio/K/Alex Kava/Alex Kava.-.Damaged")
 
     def _f(album):
         return _feat(str(folder / "01.mp3"), album=album, artist="Alex Kava")
 
-    assert _metadata_conflict_finding(folder, root, [_f("Damaged")], FolderKind.TITLE) is None
+    assert _metadata_conflict_finding(folder, [_f("Damaged")], FolderKind.TITLE) is None
     # a genuinely different album still flags, now naming the clean folder title
-    f = _metadata_conflict_finding(folder, root, [_f("The Reckoning")], FolderKind.TITLE)
+    f = _metadata_conflict_finding(folder, [_f("The Reckoning")], FolderKind.TITLE)
     assert f is not None and 'folder "Damaged"' in f.detail and "The Reckoning" in f.detail

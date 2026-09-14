@@ -14,6 +14,11 @@ import re
 # whitespace-bounded 'and', and ';'. (Commas are handled separately.)
 _AUTO_SEPARATORS = re.compile(r"\s*&\s*|\s+and\s+|\s*;\s*")
 
+# A byline prefix is not part of anyone's name. Folders and tags routinely carry one ("By Bernard
+# Cornwell"), and leaving it attached made the same author compare unequal to its own bare spelling,
+# which surfaced as a false metadata conflict. The trailing \s+ keeps 'Byron' and 'Bywater' intact.
+_BYLINE_PREFIX = re.compile(r"^\s*(?:written\s+by|author:?|by)\s+", re.IGNORECASE)
+
 
 def _looks_like_full_name(part: str) -> bool:
     """A 'First Last' name has internal whitespace; 'Frank' or 'Jr.' does not."""
@@ -32,6 +37,9 @@ def split_people(value: str | None, *, separators: list[str] | None = None) -> l
     names (contain internal whitespace), so 'Last, First' and suffixes are kept.
     """
     if not value or not value.strip():
+        return []
+    value = _BYLINE_PREFIX.sub("", value)
+    if not value.strip():
         return []
 
     if separators is not None:
