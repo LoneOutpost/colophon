@@ -33,6 +33,8 @@ _SERIES_PAREN = re.compile(r"\(\s*.+?#?\s*\d", re.IGNORECASE)
 # _PLACEHOLDER/_TRACK_PREFIX patterns miss.
 _MARKER_WORD = re.compile(
     r"^(?:track|disc|disk|cd|chapter|chap|volume|vol|part|side)\s*\d*$", re.IGNORECASE)
+# A narrator credit line written into the Artist tag: the whole value is a credit, not a name.
+_NARRATOR_CREDIT = re.compile(r"^(?:narrated|read|performed)\s+by\b", re.IGNORECASE)
 
 
 def is_placeholder_title(value: str | None) -> bool:
@@ -114,6 +116,15 @@ def _is_whole_series_ref(value: str) -> bool:
     return not re.search(r"[^\W\d_]", residue) or bool(_SERIES_REF_TRAIL.search(residue))
 
 
+def is_narrator_credit(value: str | None) -> bool:
+    """A narrator credit standing where an author belongs: "Narrated by William Gaminara",
+    "Read by Stephen Fry". A rip that writes the narrator into the Artist tag makes the whole value a
+    credit line, not a person's name, so it can never name the author."""
+    if not value or not value.strip():
+        return False
+    return bool(_NARRATOR_CREDIT.match(value.strip()))
+
+
 def _has_enum_pair(value: str) -> bool:
     """True when an explicit "N of M" / "N/M" enumeration pair is embedded — the regex-utility signal,
     never a lone number. Underscores are folded first so "…_1_of_8" reads as "… 1 of 8"."""
@@ -129,8 +140,8 @@ def author_junk(value: str | None) -> float:
     if not value or not value.strip():
         return 1.0
     v = value.strip()
-    if (is_structural_marker(v) or is_title_shaped_author(v) or _SEGMENT_SEP.search(v)
-            or _BARE_PAREN_NUM.match(v) or _SERIES_LABEL.search(v)):
+    if (is_structural_marker(v) or is_title_shaped_author(v) or is_narrator_credit(v)
+            or _SEGMENT_SEP.search(v) or _BARE_PAREN_NUM.match(v) or _SERIES_LABEL.search(v)):
         return 1.0
     if _has_enum_pair(v):
         return 0.9

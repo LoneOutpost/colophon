@@ -9,6 +9,9 @@ match) composes the ones it needs; none are baked into a single process.
 - `is_index_title(value)` — a bare number or track-of-total ("15", "01 of 15").
 - `is_junk_title(value)` — the umbrella: empty / placeholder / track-marker / index.
 - `is_title_shaped_author(author, title=None)` — an author value that is really a title.
+- `is_narrator_credit(value)` — a narrator credit line standing where an author belongs
+  ("Narrated by X", "Read by Y"). Feeds `author_junk`, so such a value is rejected as an
+  author rather than merely flagged.
 
 ## Tokenize / signature
 - `filename_cluster._spaced / _tokens / _text_sig` — display/clustering tokenizer (drops index

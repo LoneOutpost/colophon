@@ -2268,12 +2268,20 @@ class AppController:
 
     def confirm_confidence(self, book: BookUnit) -> None:
         """Manually confirm a book: force confidence to 100, mark it Ready, and
-        flag it as manual so the badge/recheck know it was set by hand."""
+        flag it as manual so the badge/recheck know it was set by hand.
+
+        Confirming also acknowledges the book's open advisory findings: saying "this book is right"
+        settles the concerns that asked whether it was. Blocking findings can never arrive here (the
+        single-book button is disabled on one and the bulk path filters them out), so a corrupt file
+        or a missing folder is never cleared by a confirmation."""
         book.confidence = 100.0
         book.confidence_signals = [
             ConfidenceSignal(name="manual_confirmation", points=100, detail="Manually confirmed")
         ]
         book.manually_confirmed = True
+        for finding in self._active_findings(book):
+            if finding.code not in book.acknowledged_findings:
+                book.acknowledged_findings = [*book.acknowledged_findings, finding.code]
         mark(book, Phase.IDENTIFY, PhaseState.FRESH)
         resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         book.touch()

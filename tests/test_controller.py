@@ -6,7 +6,16 @@ from mutagen.id3 import ID3, TPE1
 from colophon.adapters.config import Config
 from colophon.app_context import AppContext
 from colophon.controller import AppController
-from colophon.core.models import BookState, BookUnit, EmbeddedTags, Provenance, SourceFile
+from colophon.core.models import (
+    BookState,
+    BookUnit,
+    EmbeddedTags,
+    Finding,
+    FindingCode,
+    FindingSeverity,
+    Provenance,
+    SourceFile,
+)
 from colophon.core.sources import SourceResult
 
 
@@ -1920,6 +1929,28 @@ def test_apply_match_fields_rescores_confidence(tmp_path):
     saved = ctx.books.get(b.id)
     assert saved.confidence > 0
     assert saved.confidence_signals  # signals recorded, not empty
+    ctx.close()
+
+
+def test_confirm_confidence_acknowledges_open_findings(tmp_path):
+    # Confirming a book says "this is right", which settles the advisory concerns that asked whether
+    # it was. Without this, a confirmed book kept surfacing in the attention list forever.
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.findings = [
+        Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail="author: a vs b"),
+        Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN, detail="files span 64-128 kbps"),
+    ]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    assert ctrl._active_findings(book)          # flagged before confirming
+    ctrl.confirm_confidence(book)
+    assert ctrl._active_findings(book) == []    # and settled after
+    assert FindingCode.METADATA_CONFLICT in book.acknowledged_findings
+    assert FindingCode.MIXED_QUALITY in book.acknowledged_findings
+    assert book not in ctrl.books_needing_attention()
     ctx.close()
 
 

@@ -99,3 +99,25 @@ def test_true_ext_from_container_reads_mutagen_type():
     assert true_ext_from_container(_FakeOpus()) == "opus"
     assert true_ext_from_container(_FakeMp3()) == "mp3"
     assert true_ext_from_container(None) is None
+
+
+def test_mixed_quality_finding_ignores_a_channel_mix():
+    # A mono audiobook routinely carries one stereo intro/credits track. That shape dominated this
+    # finding on a real library while telling the user nothing actionable, so it must not flag.
+    files = [_sf("1.opus", bitrate=30000, sample_rate=48000, channels=1, codec="Opus"),
+             _sf("2.opus", bitrate=30000, sample_rate=48000, channels=2, codec="Opus")]
+    assert mixed_quality_finding(files) is None
+
+
+def test_mixed_quality_detail_names_the_dimension_that_disagreed():
+    # Regression: the detail always reported a bitrate span, even when codec or sample rate was the
+    # real trigger, sending readers looking for a difference that was not there.
+    rate_mix = [_sf("1.mp3", bitrate=128000, sample_rate=44100, channels=2, codec="MP3"),
+                _sf("2.mp3", bitrate=128000, sample_rate=22050, channels=2, codec="MP3")]
+    f = mixed_quality_finding(rate_mix)
+    assert f is not None and "sample rates" in f.detail and "kbps" not in f.detail
+
+    bitrate_mix = [_sf("1.mp3", bitrate=64000, sample_rate=44100, channels=2, codec="MP3"),
+                   _sf("2.mp3", bitrate=128000, sample_rate=44100, channels=2, codec="MP3")]
+    f = mixed_quality_finding(bitrate_mix)
+    assert f is not None and "64-128 kbps" in f.detail

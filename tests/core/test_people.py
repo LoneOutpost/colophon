@@ -73,3 +73,19 @@ def test_looks_like_person_name_rejects_non_names():
     for s in ["1984", "[Ciaphas Cain 13] Dead in the Water", "the collected works",
               "The Complete Works of Someone Big Long", "", None]:
         assert not looks_like_person_name(s), s
+
+
+def test_split_people_strips_a_byline_prefix():
+    # A folder titled "By Bernard Cornwell" names the same author as the bare tag. Leaving the prefix
+    # attached made the two compare unequal and raised a false metadata conflict.
+    from colophon.core.people import split_people
+    assert split_people("By Bernard Cornwell") == ["Bernard Cornwell"]
+    assert split_people("Written by Alex Kava") == ["Alex Kava"]
+    assert split_people("Author: Anne McCaffrey") == ["Anne McCaffrey"]
+    assert split_people("By Clarke & Baxter") == ["Clarke", "Baxter"]
+
+
+def test_split_people_keeps_names_that_merely_start_with_by():
+    from colophon.core.people import split_people
+    assert split_people("Byron Preiss") == ["Byron Preiss"]
+    assert split_people("Bywater Smith") == ["Bywater Smith"]

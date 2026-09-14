@@ -353,25 +353,13 @@ def _extension_mismatch_finding(features: list[FileFeatures]) -> Finding | None:
     return Finding(code=FindingCode.EXTENSION_MISMATCH, severity=FindingSeverity.WARN, detail=detail)
 
 
-def _artist_in_path(artist: str, folder: Path, root: Path) -> bool:
-    """True when the embedded artist shares a word with some directory from `root` down to `folder`
-    -- the author lives in the path under an $Author/... layout. Absent everywhere -> the tag names
-    someone unrelated to where the book sits (a cross-wired author)."""
-    try:
-        segments = folder.relative_to(root).parts
-    except ValueError:
-        segments = folder.parts
-    return any(shares_token(artist, seg) for seg in segments)
-
-
 def _metadata_conflict_finding(
-    folder: Path, root: Path, features: list[FileFeatures], folder_kind: FolderKind
+    folder: Path, features: list[FileFeatures], folder_kind: FolderKind
 ) -> Finding | None:
     """Flag a single book whose embedded tags name a *different book* than the folder/path. Two
-    independent hard-contradiction checks (either fires): the parsed folder title vs a uniform Album
-    tag, and a uniform Artist tag vs the folder's ancestor path. Passive -- a bulk tagger wrote the
-    wrong record onto these files; a human confirms and edits. Assumes an author-organized library
-    ($Author/$Title); a flat library would over-flag the author side."""
+    hard-contradiction check: the parsed folder title vs a uniform Album tag. Passive -- a bulk
+    tagger wrote the wrong record onto these files; a human confirms and edits. Author disagreement
+    is node_classify's job, which compares people-sets rather than testing path presence."""
     conflicts: list[str] = []
     album = _uniform_tag(f.tags.album for f in features)
     if folder_kind is FolderKind.TITLE and album and not is_placeholder_title(album):
@@ -382,9 +370,11 @@ def _metadata_conflict_finding(
             or [parse_folder_title(folder.name).title or folder.name]
         if not any(shares_token(c, album) for c in cands):
             conflicts.append(f'folder "{cands[-1]}" vs tag "{album}"')
-    artist = _uniform_tag(f.tags.artist for f in features)
-    if artist and not _artist_in_path(artist, folder, root):
-        conflicts.append(f'author "{artist}" not in the folder path')
+    # An author absent from the folder path is NOT a conflict: nothing disagrees, the layout simply
+    # does not name the author. On a real library that arm produced only false positives, because a
+    # folder is free to be titled without its author. Genuine author disagreement is caught by
+    # node_classify, which compares the tag's people-set against the classified folder author instead
+    # of testing for mere presence.
     if not conflicts:
         return None
     return Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
@@ -547,7 +537,7 @@ def classify(
         if gaps is not None:
             findings.append(gaps)
     if content_kind is ContentKind.SINGLE:
-        conflict = _metadata_conflict_finding(folder, root, features, folder_kind)
+        conflict = _metadata_conflict_finding(folder, features, folder_kind)
         if conflict is not None:
             findings.append(conflict)
     ext_mismatch = _extension_mismatch_finding(features)
