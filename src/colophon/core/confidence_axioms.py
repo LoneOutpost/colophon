@@ -103,10 +103,13 @@ def axis_candidates(book: BookUnit, axis: str, node_confidence: float
     out: list[tuple[str, float, str]] = []
 
     def add(value: str | None, prov: str, name: str) -> None:
-        if _is_usable(axis, value, book):
-            weight = source_weight(prov, tags, node_confidence)
-            if weight > 0:
-                out.append((value.strip(), weight, name))
+        # `value` is narrowed here rather than inside _is_usable, which a type checker cannot see
+        # through: the blank/None rejection lives there, and this keeps both readers honest.
+        if not value or not _is_usable(axis, value, book):
+            return
+        weight = source_weight(prov, tags, node_confidence)
+        if weight > 0:
+            out.append((value.strip(), weight, name))
 
     if tags is not None:
         add({"author": tags.artist, "title": tags.album, "series": tags.series}.get(axis),
