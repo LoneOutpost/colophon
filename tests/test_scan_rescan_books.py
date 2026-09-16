@@ -65,6 +65,9 @@ def test_rescan_upgrades_a_stale_weak_leaf_author_to_the_tag(tmp_path):
     # library scanned before that was fixed still carries the author mislabeled as a weak FILENAME
     # guess, which forces its identity confidence to 0. A plain rescan (no removal) must upgrade the
     # stale weak value to the tag and restore the confidence — previously only remove + re-scan did.
+    # "Restore" is checked against whatever a fresh scan actually computes (captured as a baseline
+    # below), not a fixed number: the evidence-weighted identity score no longer certifies a lone,
+    # uncorroborated tag at a flat high number (see core/confidence_axioms.py).
     ingest = tmp_path / "ingest"
     dump = ingest / "Star Trek"
     dump.mkdir(parents=True)
@@ -75,7 +78,8 @@ def test_rescan_upgrades_a_stale_weak_leaf_author_to_the_tag(tmp_path):
     scan_ingest(repo, ingest, template="$Author - $Title")
     vh = next(b for b in repo.list_all() if b.authors == ["Vonda N. McIntyre"])
     assert vh.provenance["authors"] == "tag"          # baseline: a fresh scan gets it right
-    assert vh.identity_confidence >= 80
+    baseline_confidence = vh.identity_confidence
+    assert baseline_confidence > 0
 
     # Simulate a pre-fix library row: the tag author mislabeled as a weak filename guess, conf 0.
     vh.provenance["authors"] = "filename"
@@ -87,7 +91,7 @@ def test_rescan_upgrades_a_stale_weak_leaf_author_to_the_tag(tmp_path):
     reloaded = repo.get(vh.id)
     assert reloaded.authors == ["Vonda N. McIntyre"]
     assert reloaded.provenance["authors"] == "tag"    # weak value upgraded back to the tag
-    assert reloaded.identity_confidence >= 80          # and confidence restored
+    assert reloaded.identity_confidence == baseline_confidence   # restored to the fresh-scan value
 
 
 def test_rescan_keeps_a_manual_leaf_author(tmp_path):

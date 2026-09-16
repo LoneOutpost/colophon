@@ -5,6 +5,7 @@ from colophon.core.confidence_axioms import (
     CEIL_MATCH,
     FULL_SUPPORT,
     W_FOLDER,
+    W_GRAPH,
     W_MANUAL,
     W_MATCH,
     Cap,
@@ -46,19 +47,19 @@ def test_tag_completeness_treats_asin_and_isbn_as_one_field():
 def test_source_weight_ranks_visible_sources_above_tags():
     rich = EmbeddedTags(title="t", album="a", artist="x", narrator="n",
                         series="s", year=1, genre="g", description="d", asin="B")
-    assert source_weight("manual", rich, 0.0) == W_MANUAL
-    assert source_weight("audnexus", rich, 0.0) == W_MATCH
-    assert source_weight("directory", rich, 0.0) == W_FOLDER
+    assert source_weight("manual", rich) == W_MANUAL
+    assert source_weight("audnexus", rich) == W_MATCH
+    assert source_weight("directory", rich) == W_FOLDER
     # a folder outranks even a perfectly complete tag
-    assert source_weight("directory", rich, 0.0) >= source_weight("tag", rich, 0.0)
+    assert source_weight("directory", rich) >= source_weight("tag", rich)
 
 
 def test_source_weight_scales_a_tag_by_its_completeness():
     bare = EmbeddedTags(title="t")
     rich = EmbeddedTags(title="t", album="a", artist="x", narrator="n",
                         series="s", year=1, genre="g", description="d", asin="B")
-    assert source_weight("tag", bare, 0.0) < source_weight("tag", rich, 0.0)
-    assert source_weight("tag", rich, 0.0) == W_FOLDER          # 0.30 + 0.45 == 0.75
+    assert source_weight("tag", bare) < source_weight("tag", rich)
+    assert source_weight("tag", rich) == W_FOLDER          # 0.30 + 0.45 == 0.75
 
 
 def test_source_weight_treats_every_real_provider_as_a_match():
@@ -66,12 +67,22 @@ def test_source_weight_treats_every_real_provider_as_a_match():
     # field was scored as a folder guess.
     rich = EmbeddedTags()
     for provider in ("audnexus", "audible", "hardcover", "openlibrary", "googlebooks"):
-        assert source_weight(provider, rich, 0.0) == W_MATCH, provider
+        assert source_weight(provider, rich) == W_MATCH, provider
 
 
-def test_source_weight_falls_back_to_the_graph_node():
-    assert source_weight("graphing", EmbeddedTags(), 0.5) == 0.4      # 0.5 * 0.80
-    assert source_weight(None, EmbeddedTags(), 0.5) == 0.4
+def test_source_weight_gives_a_graph_resolved_value_a_flat_weight():
+    # Deliberately NOT the classifying node's kind_confidence: that reflects how much of the tree the
+    # classifier had just examined, so a scoped re-derive and a whole-root re-derive would score the
+    # same book differently. Scan scope is an artifact, not evidence about the book.
+    assert source_weight("graphing", EmbeddedTags()) == W_GRAPH
+    # and it equals the folder weight: both are the directory structure, resolved with different
+    # precision, so whichever one a given derivation path reaches must score the same.
+    assert W_GRAPH == W_FOLDER
+
+
+def test_source_weight_gives_an_unknown_provenance_no_vote():
+    assert source_weight(None, EmbeddedTags()) == 0.0
+    assert source_weight("something-new", EmbeddedTags()) == 0.0
 
 
 def _book(folder="/audio/Frank Herbert/Dune", stem="Dune", **kw):
@@ -85,7 +96,7 @@ def _book(folder="/audio/Frank Herbert/Dune", stem="Dune", **kw):
 
 def test_axis_candidates_collects_one_vote_per_source():
     b = _book(tags=EmbeddedTags(artist="Frank Herbert"), authors=["Frank Herbert"])
-    got = {name: value for value, _weight, name in axis_candidates(b, "author", 0.0)}
+    got = {name: value for value, _weight, name in axis_candidates(b, "author", None)}
     assert got["tag"] == "Frank Herbert"
     assert got["folder"] == "Frank Herbert"      # the parent directory of the book folder
 
@@ -93,19 +104,19 @@ def test_axis_candidates_collects_one_vote_per_source():
 def test_axis_candidates_drops_a_junk_author_so_it_cannot_vote():
     b = _book(tags=EmbeddedTags(artist="Narrated by William Gaminara"),
               authors=["Narrated by William Gaminara"])
-    names = {name for _v, _w, name in axis_candidates(b, "author", 0.0)}
+    names = {name for _v, _w, name in axis_candidates(b, "author", None)}
     assert "tag" not in names
 
 
 def test_axis_candidates_drops_an_author_that_echoes_the_title():
     b = _book(tags=EmbeddedTags(artist="Dune"), authors=["Dune"], title="Dune")
-    names = {name for _v, _w, name in axis_candidates(b, "author", 0.0)}
+    names = {name for _v, _w, name in axis_candidates(b, "author", None)}
     assert "tag" not in names
 
 
 def test_axis_candidates_uses_the_folder_name_for_title():
     b = _book(folder="/audio/Frank Herbert/Dune", tags=EmbeddedTags(album="Dune"), title="Dune")
-    got = {name: value for value, _weight, name in axis_candidates(b, "title", 0.0)}
+    got = {name: value for value, _weight, name in axis_candidates(b, "title", None)}
     assert got["tag"] == "Dune"
     assert got["folder"] == "Dune"
     assert got["filename"] == "Dune"
@@ -135,8 +146,12 @@ def test_axis_support_is_starved_when_the_sources_contradict_what_was_committed(
 
 def test_axis_support_does_not_reward_a_lone_unopposed_source():
     # Regression guard: tally().share is 1.0 for a single voter, so a share-based model would give an
-    # uncorroborated tag full credit. Support must come from summed agreeing WEIGHT.
-    assert axis_support([("Dune", 0.30, "tag")], "Dune") < 0.25
+    # uncorroborated tag full credit. Support must come from summed agreeing WEIGHT. Asserted as an
+    # invariant rather than a fixed number, because FULL_SUPPORT is tuned against real libraries.
+    lone_bare_tag = axis_support([("Dune", 0.30, "tag")], "Dune")
+    corroborated = axis_support([("Dune", 0.75, "folder"), ("Dune", 0.65, "filename")], "Dune")
+    assert lone_bare_tag < 0.5, "a lone bare tag is not half-way to full support"
+    assert lone_bare_tag < corroborated == 1.0
 
 
 def test_axis_support_is_zero_without_candidates_or_without_a_committed_value():
@@ -234,3 +249,14 @@ def test_agreement_survives_a_stripped_apostrophe():
     assert agreeing == 1.0
     # a genuinely different title still fails to agree
     assert axis_support([("Sharpes Honour", 0.75, "folder")], "Sharpe's Siege") == 0.0
+
+
+def test_a_peripheral_field_match_does_not_lift_the_ceiling():
+    # Measured on a real library: keying the raised ceiling on ANY matched field gave it to 100 of
+    # 167 books whose only match was genres/tags/subtitle. A provider filling in genres has not
+    # corroborated who wrote the book.
+    b = _book(title="Dune", authors=["Frank Herbert"])
+    b.provenance = {"genres": "audnexus", "subtitle": "audnexus", "tags": "audnexus"}
+    assert cf_match_ceiling(b, ScoreCtx()) == []
+    b.provenance = {"genres": "audnexus", "authors": "audnexus"}
+    assert cf_match_ceiling(b, ScoreCtx())[0].ceiling == CEIL_MATCH

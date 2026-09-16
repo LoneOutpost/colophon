@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from colophon.core.ballot import tally
 from colophon.core.graph import DirectoryNode, Graph
 from colophon.core.models import WEAK_PROV, BookUnit, NodeOverride
-from colophon.core.normalize import collides_with_title
 
 if TYPE_CHECKING:
     from colophon.core.sequence_affix import SequenceAffix
@@ -709,10 +708,6 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             book.provenance["series"] = Provenance.GRAPHING.value
 
 
-_STRONG_ID_PROV = frozenset({"manual", "match"})   # authoritative: a user or a source named it
-_TAG_ID_PROV = frozenset({"tag", "datafile"})       # the file itself says so
-
-
 def _nearest_author(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
     """The nearest ancestor (incl. `folder`) classified `author`, or None — walking to root."""
     cur = folder
@@ -725,54 +720,28 @@ def _nearest_author(graph: Graph, folder: Path, root: Path) -> DirectoryNode | N
         cur = cur.parent
 
 
-def _field_confidence(prov: str | None, node_conf: float) -> float:
-    """Confidence in one identity field (0-1) given how it was sourced. A user/match value is
-    authoritative; the file's own tags are strong; everything else (graph inference, folder, filename)
-    leans on the confidence of the graph node that backs it."""
-    if prov in _STRONG_ID_PROV:
-        return 1.0
-    if prov in _TAG_ID_PROV:
-        return 0.9
-    return node_conf
-
-
 def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
-    """A book's local-identification confidence (0-100): how sure we are, from the graph evidence and
-    the book's own provenance, that we've correctly identified it — pre-match, distinct from the
-    post-match `confidence`. The author axis dominates; a corroborating series adds a little. The
-    title factor is driven by the corroboration verdict: a title that agrees with (or abstains
-    against) the folder/filenames is neutral, one that contradicts them halves the score, a missing
-    title discounts. Graph/folder-sourced fields inherit the confidence of the classifying node, so a
-    book under a 0.9 author folder reads ~0.9 even with zero source matches — UNLESS the surviving
-    author value is itself junk-shaped, which discounts it toward the review threshold (the score is a
-    triage hint: below a threshold means get human eyes on it before tagging)."""
+    """A book's local-identification confidence (0-100): how much of the available evidence backs the
+    committed identity, and how well that evidence agrees with itself. Pre-match, distinct from the
+    post-match `confidence`.
+
+    It does NOT claim correctness. A collection that is genuinely mislabeled cannot be detected from
+    the data available, so evidence drawn entirely from the library's own labelling is capped — see
+    `core/confidence_axioms.py`, which owns the rules. This is the adapter: resolve the graph nodes a
+    book hangs from, then delegate.
+    """
+    from colophon.core.confidence_axioms import ScoreCtx, score_identity
     if not (book.authors or book.series):
         return 0.0
-    from colophon.core.metadata_quality import author_junk
-    from colophon.core.title_corroborate import book_title_verdict
     a_node = _nearest_author(graph, book.source_folder, root)
-    a = (_field_confidence(book.provenance.get("authors"), a_node.kind_confidence if a_node else 0.0)
-         if book.authors else 0.0)
-    # Honest triage: a junk-shaped author value cannot prop up the score however trusted its source (a
-    # tag reads 0.9 flat), so a SURVIVING '1 of 8 X' / 'Author.-.Title' / '(5)' author drops the record
-    # below the review threshold for human eyes. Subsumes the old title-shaped-author guard — a
-    # title-shaped author is author_junk == 1.0.
-    if book.authors:
-        a *= 1.0 - max(author_junk(x) for x in book.authors)
     s_node = _nearest_series(graph, book.source_folder, root)
-    s = (_field_confidence(book.provenance.get("series"), s_node.kind_confidence if s_node else 0.0)
-         if book.series else 0.0)
-    corroboration = 0.1 if (a > 0 and s > 0) else 0.0
-    verdict = book.title_corroboration or book_title_verdict(book).verdict
-    if not book.title:
-        title_factor = 0.7
-    elif verdict == "contradict":
-        title_factor = 0.5
-    else:
-        title_factor = 1.0
-    echo_factor = (0.5 if (len(book.authors) == 1 and collides_with_title(book.authors[0], book.title))
-                   else 1.0)
-    return round(min(1.0, max(a, s) + corroboration) * title_factor * echo_factor * 100)
+    ctx = ScoreCtx(
+        author_node_value=a_node.kind_value if a_node else None,
+        series_node_value=s_node.kind_value if s_node else None,
+    )
+    result = score_identity(book, ctx)
+    book.identity_signals = result.signals
+    return result.score
 
 
 def _fill_title_corroboration(books: list[BookUnit]) -> None:

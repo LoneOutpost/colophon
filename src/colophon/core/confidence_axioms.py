@@ -19,6 +19,7 @@ from colophon.core.folder_title import parse_folder_title
 from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
 from colophon.core.models import BookUnit, ConfidenceSignal, EmbeddedTags, Provenance
 from colophon.core.normalize import normalize_key
+from colophon.core.people import split_people
 
 # --- Tunable constants. Everything the scoring can be re-composed with lives in this block. ---
 
@@ -28,8 +29,19 @@ W_FOLDER = 0.75          # most visible, most consistent in bulk dumps
 W_FILENAME = 0.65        # visible, noisier than folders
 W_TAG_BASE = 0.30        # a bare tag: present, barely evidenced
 W_TAG_COMPLETE = 0.45    # added at full tag completeness, so a rich tag reaches folder-level trust
-W_GRAPH_FACTOR = 0.80    # graph inference is one step removed from a direct observation
-FULL_SUPPORT = 1.40      # folder (0.75) + filename (0.65) agreeing == complete local support
+# A graph-resolved value and a folder-name guess are the SAME evidence — the directory structure —
+# resolved with different precision. The graph's advantage is picking the RIGHT ancestor, not being a
+# stronger source, so they carry the same weight. Weighting them differently made a book's score
+# depend on how completely the graph happened to be derived: a scoped re-derive scored 68 where a
+# whole-root re-derive scored 70, for the same book.
+W_GRAPH = W_FOLDER
+# What complete local corroboration is worth: the directory structure (W_FOLDER) plus one
+# corroborating source (a reasonably complete tag). Two strong independent sources sum to 1.40 and
+# therefore exceed it, which is correct — they are more than fully corroborated. Calibrated against a
+# real 230-book library: at 1.40 a clean tagless Author/Title library scored 54 and sent every book
+# to review, which is its own kind of dishonesty; at 1.20 such a book reaches 62 while an
+# uncorroborated weak tag still scores 25.
+FULL_SUPPORT = 1.20
 
 CEIL_LOCAL = 0.70    # nothing drawn from the library's own labelling can exceed this
 CEIL_MATCH = 0.95    # an external source is independent, never infallible
@@ -69,11 +81,17 @@ def tag_completeness(tags: EmbeddedTags | None) -> float:
     return round(filled / (len(_COMPLETENESS_FIELDS) + 1), 4)
 
 
-def source_weight(prov: str | None, tags: EmbeddedTags | None, node_confidence: float) -> float:
+def source_weight(prov: str | None, tags: EmbeddedTags | None) -> float:
     """What one source's claim is worth, in [0, 1].
 
     Filenames and folders outrank tags because they are visible: a wrong folder name gets noticed and
     fixed, a wrong tag stays buried for years.
+
+    A graph-resolved value carries a FLAT weight, deliberately not the classifying node's
+    `kind_confidence`. That confidence reflects how much of the tree the classifier had just
+    examined, so a scoped re-derive and a whole-root re-derive produce different numbers for the same
+    book — scan scope is an artifact, not evidence about the book. What the graph RESOLVED is the
+    evidence; how sure the classifier was is its own business.
     """
     if prov == Provenance.MANUAL.value:
         return W_MANUAL
@@ -85,7 +103,9 @@ def source_weight(prov: str | None, tags: EmbeddedTags | None, node_confidence: 
         return W_FILENAME
     if prov in TAG_PROV:
         return round(W_TAG_BASE + W_TAG_COMPLETE * tag_completeness(tags), 4)
-    return round(node_confidence * W_GRAPH_FACTOR, 4)
+    if prov == Provenance.GRAPHING.value:
+        return W_GRAPH
+    return 0.0
 
 
 def _first_tags(book: BookUnit) -> EmbeddedTags | None:
@@ -104,7 +124,7 @@ def _is_usable(axis: str, value: str | None, book: BookUnit) -> bool:
     return True
 
 
-def axis_candidates(book: BookUnit, axis: str, node_confidence: float
+def axis_candidates(book: BookUnit, axis: str, node_value: str | None
                     ) -> list[tuple[str, float, str]]:
     """Every source's claim for one axis, as (value, weight, source_name).
 
@@ -120,14 +140,20 @@ def axis_candidates(book: BookUnit, axis: str, node_confidence: float
         # through: the blank/None rejection lives there, and this keeps both readers honest.
         if not value or not _is_usable(axis, value, book):
             return
-        weight = source_weight(prov, tags, node_confidence)
+        weight = source_weight(prov, tags)
         if weight > 0:
             out.append((value.strip(), weight, name))
 
     if tags is not None:
         add({"author": tags.artist, "title": tags.album, "series": tags.series}.get(axis),
             Provenance.TAG.value, "tag")
-    if folder is not None:
+    if axis in ("author", "series") and node_value:
+        # The graph already resolved which ancestor names this book's author/series and what it is
+        # called. Prefer that over guessing from the path: a graph-confirmed classification is
+        # corroborated across siblings, and the guess below assumes a two-level Author/Title layout
+        # that a single-level library does not have.
+        add(node_value, Provenance.GRAPHING.value, "graph")
+    elif folder is not None:
         if axis == "author":
             add(folder.parent.name, Provenance.DIRECTORY.value, "folder")
         elif axis == "title":
@@ -160,7 +186,22 @@ def _agreement_key(value: str) -> str:
     return normalize_key(value.replace("'", "").replace("\u2019", ""))
 
 
-def axis_support(candidates: list[tuple[str, float, str]], committed: str | None) -> float:
+def _candidate_key(value: str, committed_key: str, axis: str) -> str:
+    """The bucket a source's value falls into, given what the book committed to.
+
+    On the author axis a joint credit ("McCaffrey & Scarborough") agrees with a single committed
+    author named within it: the source is naming MORE people, not a different person. Restricted to
+    the author axis because splitting a title on " and " would invent agreement that is not there.
+    """
+    if _agreement_key(value) == committed_key:
+        return committed_key
+    if axis == "author" and any(_agreement_key(p) == committed_key for p in split_people(value)):
+        return committed_key
+    return _agreement_key(value)
+
+
+def axis_support(candidates: list[tuple[str, float, str]], committed: str | None,
+                 axis: str = "title") -> float:
     """Support for one axis, in [0, 1]: the summed weight of the sources that agree with the value
     the book actually committed to, normalised against what full local corroboration is worth.
 
@@ -177,7 +218,7 @@ def axis_support(candidates: list[tuple[str, float, str]], committed: str | None
     if not candidates or not committed or not committed.strip():
         return 0.0
     key = _agreement_key(committed)
-    result = tally([(_agreement_key(value), weight) for value, weight, _name in candidates])
+    result = tally([(_candidate_key(value, key, axis), weight) for value, weight, _name in candidates])
     agreeing = result.totals.get(key, 0.0)
     return round(min(1.0, agreeing / FULL_SUPPORT), 4)
 
@@ -209,8 +250,8 @@ class ScoreCtx:
     """Everything an axiom may read besides the book itself. The caller resolves graph nodes and
     passes their confidences in, so axioms stay pure and testable without building a Graph."""
 
-    author_node_confidence: float = 0.0
-    series_node_confidence: float = 0.0
+    author_node_value: str | None = None
+    series_node_value: str | None = None
 
 
 def committed_value(book: BookUnit, axis: str) -> str | None:
@@ -222,41 +263,54 @@ def committed_value(book: BookUnit, axis: str) -> str | None:
     return book.title
 
 
-def _support_for(book: BookUnit, axis: str, node_confidence: float) -> list[Support]:
+def _support_for(book: BookUnit, axis: str, node_value: str | None) -> list[Support]:
     committed = committed_value(book, axis)
     if not committed:
         return []
-    candidates = axis_candidates(book, axis, node_confidence)
-    weight = axis_support(candidates, committed)
+    candidates = axis_candidates(book, axis, node_value)
+    weight = axis_support(candidates, committed, axis)
     if weight <= 0:
         return []
+    key = _agreement_key(committed)
     agreeing = sorted({name for value, _w, name in candidates
-                       if _agreement_key(value) == _agreement_key(committed)})
+                       if _candidate_key(value, key, axis) == key})
     return [Support(axis, weight, f"{axis} supported by {', '.join(agreeing)}")]
 
 
 def cf_author_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
     """The author axis, corroborated across every source that names one."""
-    return list(_support_for(book, "author", ctx.author_node_confidence))
+    return list(_support_for(book, "author", ctx.author_node_value))
 
 
 def cf_title_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """The title axis. Replaces `max(a, s)`: an unevidenced title now costs part of the score
     instead of being ignored whenever the author happened to be strong."""
-    return list(_support_for(book, "title", 0.0))
+    return list(_support_for(book, "title", None))
 
 
 def cf_series_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """The series axis. Adds only — see the engine; a book legitimately without a series must not be
     penalised for a field it should not have."""
-    return list(_support_for(book, "series", ctx.series_node_confidence))
+    return list(_support_for(book, "series", ctx.series_node_value))
+
+
+# The fields whose provenance says something about IDENTITY. A provider filling in genres or a
+# subtitle has not corroborated who wrote the book or what it is called.
+IDENTITY_FIELDS = ("title", "authors", "series")
 
 
 def cf_match_ceiling(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """An external source is independent of the library's own labelling, so it lifts the ceiling —
-    but never to certainty, because a provider can return the wrong edition."""
-    if any(p in MATCH_PROV for p in book.provenance.values()):
-        return [Cap(CEIL_MATCH, "an external source match backs this identity")]
+    but never to certainty, because a provider can return the wrong edition.
+
+    Only a match on an IDENTITY field counts. Measured against a real library, keying on ANY matched
+    field handed the raised ceiling to 100 of 167 books whose only match was `genres`, `tags` or
+    `subtitle` — peripheral data that says nothing about whether the book is correctly identified.
+    That is the same false certainty this family exists to remove, arriving through a side door.
+    """
+    matched = [f for f in IDENTITY_FIELDS if book.provenance.get(f) in MATCH_PROV]
+    if matched:
+        return [Cap(CEIL_MATCH, f"an external source match backs the {', '.join(matched)}")]
     return []
 
 
