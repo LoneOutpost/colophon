@@ -147,6 +147,19 @@ def axis_candidates(book: BookUnit, axis: str, node_confidence: float
     return out
 
 
+def _agreement_key(value: str) -> str:
+    """The bucket key two sources must share to count as agreeing.
+
+    `normalize_key` turns an apostrophe into a SPACE, so "Sharpe's Siege" and the apostrophe-stripped
+    "Sharpes Siege" a tagger or filesystem routinely produces land in different buckets and read as a
+    contradiction. Titles carrying an apostrophe are common enough that this would depress scores
+    across a whole library. Dropping the apostrophe before keying fixes it HERE, in the scoring
+    ballot, rather than in `normalize_key` — that is the shared entity-dedup key for the whole
+    application, and loosening it could merge entities that must stay distinct.
+    """
+    return normalize_key(value.replace("'", "").replace("\u2019", ""))
+
+
 def axis_support(candidates: list[tuple[str, float, str]], committed: str | None) -> float:
     """Support for one axis, in [0, 1]: the summed weight of the sources that agree with the value
     the book actually committed to, normalised against what full local corroboration is worth.
@@ -163,8 +176,8 @@ def axis_support(candidates: list[tuple[str, float, str]], committed: str | None
     """
     if not candidates or not committed or not committed.strip():
         return 0.0
-    key = normalize_key(committed)
-    result = tally([(normalize_key(value), weight) for value, weight, _name in candidates])
+    key = _agreement_key(committed)
+    result = tally([(_agreement_key(value), weight) for value, weight, _name in candidates])
     agreeing = result.totals.get(key, 0.0)
     return round(min(1.0, agreeing / FULL_SUPPORT), 4)
 
@@ -218,7 +231,7 @@ def _support_for(book: BookUnit, axis: str, node_confidence: float) -> list[Supp
     if weight <= 0:
         return []
     agreeing = sorted({name for value, _w, name in candidates
-                       if normalize_key(value) == normalize_key(committed)})
+                       if _agreement_key(value) == _agreement_key(committed)})
     return [Support(axis, weight, f"{axis} supported by {', '.join(agreeing)}")]
 
 

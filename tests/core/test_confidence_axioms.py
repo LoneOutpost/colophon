@@ -223,3 +223,14 @@ def test_every_contribution_is_explained_in_the_signals():
     assert result.signals
     assert all(s.detail for s in result.signals)
     assert any("author" in s.detail for s in result.signals)
+
+
+def test_agreement_survives_a_stripped_apostrophe():
+    # normalize_key turns an apostrophe into a space, so "Sharpe's Siege" and the apostrophe-stripped
+    # "Sharpes Siege" that taggers and filesystems routinely produce would read as a contradiction.
+    # Titles with apostrophes are common enough to depress a whole library's scores.
+    agreeing = axis_support([("Sharpes Siege", 0.75, "folder"),
+                             ("Sharpe's Siege", 0.65, "filename")], "Sharpe's Siege")
+    assert agreeing == 1.0
+    # a genuinely different title still fails to agree
+    assert axis_support([("Sharpes Honour", 0.75, "folder")], "Sharpe's Siege") == 0.0
