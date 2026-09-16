@@ -3,7 +3,6 @@ from pathlib import Path
 from colophon.core.confidence_axioms import (
     CEIL_MANUAL,
     CEIL_MATCH,
-    FULL_SUPPORT,
     W_FOLDER,
     W_GRAPH,
     W_MANUAL,
@@ -85,12 +84,22 @@ def test_source_weight_gives_an_unknown_provenance_no_vote():
     assert source_weight("something-new", EmbeddedTags()) == 0.0
 
 
-def _book(folder="/audio/Frank Herbert/Dune", stem="Dune", **kw):
+def _book(folder="/audio/Frank Herbert/Dune", stem="Dune", prov="tag", **kw):
+    """A realistic book. `prov` records where the committed title/author came from, as every real
+    book does: `reconcile` always stamps provenance, and the scoring reads it rather than re-parsing
+    the folder itself."""
     b = BookUnit.new(source_folder=Path(folder))
     b.source_files = [SourceFile(path=Path(folder) / f"{stem}.mp3", size=1, duration_seconds=1.0,
                                  ext="mp3", tags=kw.pop("tags", EmbeddedTags()))]
     for k, v in kw.items():
         setattr(b, k, v)
+    if prov:
+        if b.authors:
+            b.provenance["authors"] = prov
+        if b.title:
+            b.provenance["title"] = prov
+        if b.series:
+            b.provenance["series"] = prov
     return b
 
 
@@ -131,9 +140,12 @@ def test_axis_support_rises_with_the_number_of_agreeing_sources():
 
 
 def test_axis_support_counts_only_the_sources_that_back_the_committed_value():
-    split = axis_support([("Frank Herbert", 0.75, "folder"), ("Someone Else", 0.65, "filename")],
-                         "Frank Herbert")
-    assert split == round(0.75 / FULL_SUPPORT, 4)
+    backed_by_one = axis_support([("Frank Herbert", 0.75, "folder")], "Frank Herbert")
+    contested = axis_support([("Frank Herbert", 0.75, "folder"), ("Someone Else", 0.65, "filename")],
+                             "Frank Herbert")
+    # A source naming someone else is evidence AGAINST, not merely absent support, so a contested
+    # value scores below the same value uncontested.
+    assert 0 < contested < backed_by_one
 
 
 def test_axis_support_is_starved_when_the_sources_contradict_what_was_committed():

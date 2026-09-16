@@ -12,10 +12,10 @@ the pipeline fills the graph in without needing a per-phase code path.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from colophon.core.ballot import tally
-from colophon.core.folder_title import parse_folder_title
 from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
 from colophon.core.models import BookUnit, ConfidenceSignal, EmbeddedTags, Provenance
 from colophon.core.normalize import normalize_key
@@ -42,6 +42,8 @@ W_GRAPH = W_FOLDER
 # to review, which is its own kind of dishonesty; at 1.20 such a book reaches 62 while an
 # uncorroborated weak tag still scores 25.
 FULL_SUPPORT = 1.20
+DISSENT_PENALTY = 1.0    # how hard a source naming something else counts against the committed value
+CONTRADICTION_COST = 0.5  # support removed when the pipeline judged the title contradicted    # how hard a source naming something else counts against the committed value
 
 CEIL_LOCAL = 0.70    # nothing drawn from the library's own labelling can exceed this
 CEIL_MATCH = 0.95    # an external source is independent, never infallible
@@ -124,52 +126,77 @@ def _is_usable(axis: str, value: str | None, book: BookUnit) -> bool:
     return True
 
 
+_FIELD_FOR_AXIS = {"author": "authors", "title": "title", "series": "series"}
+_SOURCE_NAME = {Provenance.DIRECTORY.value: "folder", Provenance.FILENAME.value: "filename",
+                Provenance.GRAPHING.value: "graph", Provenance.MANUAL.value: "manual"}
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _contains_value(name: str, value: str) -> bool:
+    """Does this raw folder or filename contain the committed value?
+
+    Matched by word containment, not equality. A library like `Author.-.Series BkNN.-.Title` packs
+    three fields into one flat name, so an equality test reads every such folder as a contradiction.
+    Containment corroborates without needing to parse an arbitrary naming scheme — which is the
+    pipeline's job, already done, and recorded in `provenance`.
+    """
+    words = {w for w in _WORD.findall(value.lower()) if len(w) >= 2 and not w.isdigit()}
+    if not words:
+        return False
+    return words <= set(_WORD.findall(name.lower()))
+
+
 def axis_candidates(book: BookUnit, axis: str, node_value: str | None
                     ) -> list[tuple[str, float, str]]:
     """Every source's claim for one axis, as (value, weight, source_name).
 
+    The committed value's OWN provenance is the first vote: the pipeline already parsed this
+    library's naming scheme and recorded which source supplied the value, so re-deriving it here
+    would be both redundant and worse. Measured against a real `.-.`-separated library, naive
+    re-parsing produced garbage — `folder.parent.name` was the letter-bucket `C` — and scored
+    correctly-identified books at zero.
+
     Folder and filename are two independent votes, not one: they are produced by different acts and
-    disagree in informative ways. In bulk dumps the folder is typically the steadier of the two.
+    disagree in informative ways.
     """
+    committed = committed_value(book, axis)
+    if not committed or not _is_usable(axis, committed, book):
+        return []
     tags = _first_tags(book)
-    folder = book.source_folder
+    prov = book.provenance.get(_FIELD_FOR_AXIS[axis])
     out: list[tuple[str, float, str]] = []
 
-    def add(value: str | None, prov: str, name: str) -> None:
-        # `value` is narrowed here rather than inside _is_usable, which a type checker cannot see
-        # through: the blank/None rejection lives there, and this keeps both readers honest.
+    def add(value: str | None, source_prov: str, name: str) -> None:
         if not value or not _is_usable(axis, value, book):
             return
-        weight = source_weight(prov, tags)
+        weight = source_weight(source_prov, tags)
         if weight > 0:
             out.append((value.strip(), weight, name))
 
-    if tags is not None:
+    if prov:
+        add(committed, prov, _SOURCE_NAME.get(prov, prov))
+    # No separate vote for `node_value`: when the directory supplied the committed author, the graph
+    # saying so too is the SAME evidence — the graph classified that very directory — so counting it
+    # again double-counts, and it makes the score depend on whether a given derivation path happened
+    # to resolve the node (a scoped re-derive scored 62 where a whole-root scored 70). Provenance
+    # already records when the graph itself was the source.
+    if tags is not None and prov not in TAG_PROV:
         add({"author": tags.artist, "title": tags.album, "series": tags.series}.get(axis),
             Provenance.TAG.value, "tag")
-    if axis in ("author", "series") and node_value:
-        # The graph already resolved which ancestor names this book's author/series and what it is
-        # called. Prefer that over guessing from the path: a graph-confirmed classification is
-        # corroborated across siblings, and the guess below assumes a two-level Author/Title layout
-        # that a single-level library does not have.
-        add(node_value, Provenance.GRAPHING.value, "graph")
-    elif folder is not None:
-        if axis == "author":
-            add(folder.parent.name, Provenance.DIRECTORY.value, "folder")
-        elif axis == "title":
-            add(parse_folder_title(folder.name).title or folder.name,
-                Provenance.DIRECTORY.value, "folder")
-    if axis == "title":
-        for sf in book.source_files[:1]:
-            add(parse_folder_title(sf.path.stem).title or sf.path.stem,
-                Provenance.FILENAME.value, "filename")
 
-    committed = {"author": book.authors[0] if book.authors else None,
-                 "title": book.title,
-                 "series": book.series[0].name if book.series else None}.get(axis)
-    prov = book.provenance.get({"author": "authors", "title": "title", "series": "series"}[axis])
-    if prov in MATCH_PROV or prov == Provenance.MANUAL.value:
-        add(committed, prov, "match" if prov in MATCH_PROV else "manual")
+    # Raw names corroborate by containment. They cannot DISSENT here: without parsing the scheme we
+    # cannot know what a folder claims, only whether it carries the committed value. Contradiction is
+    # title_corroborate's job, and it already raises METADATA_CONFLICT for it.
+    # Check the book's folder AND its parent: an `Author/Title/` layout carries the author one level
+    # up, while a flat `Author.-.Series.-.Title` folder carries all three in its own name.
+    folder = book.source_folder
+    if folder is not None and prov != Provenance.DIRECTORY.value and any(
+            _contains_value(name, committed) for name in (folder.name, folder.parent.name)):
+        out.append((committed, W_FOLDER, "folder"))
+    stem = book.source_files[0].path.stem if book.source_files else None
+    if stem and prov != Provenance.FILENAME.value and _contains_value(stem, committed):
+        out.append((committed, W_FILENAME, "filename"))
     return out
 
 
@@ -220,7 +247,12 @@ def axis_support(candidates: list[tuple[str, float, str]], committed: str | None
     key = _agreement_key(committed)
     result = tally([(_candidate_key(value, key, axis), weight) for value, weight, _name in candidates])
     agreeing = result.totals.get(key, 0.0)
-    return round(min(1.0, agreeing / FULL_SUPPORT), 4)
+    # A source naming something ELSE is not merely absent support, it is evidence against. Measured
+    # on a real library, counting only agreement left books carrying a known METADATA_CONFLICT
+    # averaging 70.9 against 77.4 for clean ones — the score barely noticed the problem it was
+    # supposed to surface, because enough agreement elsewhere hid the dissent.
+    dissenting = sum(w for k, w in result.totals.items() if k != key)
+    return round(max(0.0, min(1.0, (agreeing - DISSENT_PENALTY * dissenting) / FULL_SUPPORT)), 4)
 
 
 # --- The axiom family. Each returns Support (weight toward one axis) or Cap (permission to exceed
@@ -327,13 +359,32 @@ def cf_manual(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uni
     ]
 
 
+def cf_title_contradicted(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
+    """A title the pipeline judged CONTRADICTED by its own folder and filenames loses support.
+
+    `title_corroborate` already makes this judgement and stores it on the book, so the score defers to
+    it rather than inventing a second contradiction test. It is needed because raw folder and filename
+    names corroborate by containment here and cannot dissent: without parsing an arbitrary naming
+    scheme we can tell whether a folder CARRIES the committed title, never what it claims instead.
+    """
+    if book.title_corroboration == "contradict":
+        return [Support("title", -CONTRADICTION_COST, "title contradicted by folder/filenames")]
+    return []
+
+
 SCORING_AXIOMS = [
     cf_author_support,
     cf_title_support,
     cf_series_support,
+    cf_title_contradicted,
     cf_match_ceiling,
     cf_manual,
 ]
+
+
+def _clamped(value: float) -> float:
+    """An axis's summed support, held to [0, 1]: a contradiction can subtract, but never below zero."""
+    return max(0.0, min(1.0, value))
 
 
 @dataclass(frozen=True)
@@ -366,8 +417,8 @@ def score_identity(book: BookUnit, ctx: ScoreCtx) -> ScoredIdentity:
             signals.append(ConfidenceSignal(
                 name="ceiling", points=round(item.ceiling * 100), detail=item.reason))
 
-    core = AXIS_AUTHOR * min(1.0, per_axis.get("author", 0.0)) \
-        + AXIS_TITLE * min(1.0, per_axis.get("title", 0.0))
+    core = (AXIS_AUTHOR * _clamped(per_axis.get("author", 0.0))
+            + AXIS_TITLE * _clamped(per_axis.get("title", 0.0)))
     if per_axis.get("series", 0.0) > 0:
         core += SERIES_BONUS
     score = float(round(min(core, ceiling) * 100))

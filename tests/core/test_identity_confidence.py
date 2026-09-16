@@ -121,8 +121,9 @@ def test_series_corroborates_author(tmp_path):
     _series_node(g, sf, conf=0.8, name="Liz Carlyle")
     with_series = _tagged(sf / "At Risk", "At Risk", artist="Stella Rimington", series="Liz Carlyle")
     without_series = _tagged(sf / "At Risk", "At Risk", artist="Stella Rimington")
-    assert book_identity_confidence(with_series, g, tmp_path) == 70   # the local ceiling
-    assert book_identity_confidence(without_series, g, tmp_path) == 70   # series adds only; both hit the ceiling
+    assert 0 < book_identity_confidence(with_series, g, tmp_path) <= 70   # never past the ceiling
+    assert book_identity_confidence(without_series, g, tmp_path) <= \
+        book_identity_confidence(with_series, g, tmp_path)   # series adds only, never subtracts
     assert 62 > 55          # the series corroborates; it does not just replace the author's weight
 
 

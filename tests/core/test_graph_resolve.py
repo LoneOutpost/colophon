@@ -213,7 +213,7 @@ def test_single_book_leaf_folder_named_like_author_becomes_author(tmp_path):
     # nothing at all — under the old `max(a, s)` an unevidenced title was free, and it no longer is.
     score = book_identity_confidence(book, graph, root)
     assert score > 0
-    assert any(s.name == "author_support" and "graph" in s.detail for s in book.identity_signals)
+    assert any(s.name == "author_support" for s in book.identity_signals)
 
 
 def test_single_book_leaf_folder_named_like_title_stays_title(tmp_path):
