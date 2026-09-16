@@ -12,7 +12,9 @@ the pipeline fills the graph in without needing a per-phase code path.
 
 from __future__ import annotations
 
-from colophon.core.models import EmbeddedTags, Provenance
+from colophon.core.folder_title import parse_folder_title
+from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
+from colophon.core.models import BookUnit, EmbeddedTags, Provenance
 
 # --- Tunable constants. Everything the scoring can be re-composed with lives in this block. ---
 
@@ -71,3 +73,59 @@ def source_weight(prov: str | None, tags: EmbeddedTags | None, node_confidence: 
     if prov in TAG_PROV:
         return round(W_TAG_BASE + W_TAG_COMPLETE * tag_completeness(tags), 4)
     return round(node_confidence * W_GRAPH_FACTOR, 4)
+
+
+def _first_tags(book: BookUnit) -> EmbeddedTags | None:
+    return book.source_files[0].tags if book.source_files else None
+
+
+def _is_usable(axis: str, value: str | None, book: BookUnit) -> bool:
+    """A junk value does not get to vote. Excluding it here subsumes the old echo factor: an author
+    that echoes the book's title is `is_title_shaped_author`, not a second rule."""
+    if not value or not value.strip():
+        return False
+    if axis == "author":
+        return author_junk(value) == 0.0 and not is_title_shaped_author(value, book.title)
+    if axis == "title":
+        return not is_junk_title(value)
+    return True
+
+
+def axis_candidates(book: BookUnit, axis: str, node_confidence: float
+                    ) -> list[tuple[str, float, str]]:
+    """Every source's claim for one axis, as (value, weight, source_name).
+
+    Folder and filename are two independent votes, not one: they are produced by different acts and
+    disagree in informative ways. In bulk dumps the folder is typically the steadier of the two.
+    """
+    tags = _first_tags(book)
+    folder = book.source_folder
+    out: list[tuple[str, float, str]] = []
+
+    def add(value: str | None, prov: str, name: str) -> None:
+        if _is_usable(axis, value, book):
+            weight = source_weight(prov, tags, node_confidence)
+            if weight > 0:
+                out.append((value.strip(), weight, name))
+
+    if tags is not None:
+        add({"author": tags.artist, "title": tags.album, "series": tags.series}.get(axis),
+            Provenance.TAG.value, "tag")
+    if folder is not None:
+        if axis == "author":
+            add(folder.parent.name, Provenance.DIRECTORY.value, "folder")
+        elif axis == "title":
+            add(parse_folder_title(folder.name).title or folder.name,
+                Provenance.DIRECTORY.value, "folder")
+    if axis == "title":
+        for sf in book.source_files[:1]:
+            add(parse_folder_title(sf.path.stem).title or sf.path.stem,
+                Provenance.FILENAME.value, "filename")
+
+    committed = {"author": book.authors[0] if book.authors else None,
+                 "title": book.title,
+                 "series": book.series[0].name if book.series else None}.get(axis)
+    prov = book.provenance.get({"author": "authors", "title": "title", "series": "series"}[axis])
+    if prov in MATCH_PROV or prov == Provenance.MANUAL.value:
+        add(committed, prov, "match" if prov in MATCH_PROV else "manual")
+    return out

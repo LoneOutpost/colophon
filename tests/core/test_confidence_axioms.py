@@ -1,11 +1,14 @@
+from pathlib import Path
+
 from colophon.core.confidence_axioms import (
     W_FOLDER,
     W_MANUAL,
     W_MATCH,
+    axis_candidates,
     source_weight,
     tag_completeness,
 )
-from colophon.core.models import EmbeddedTags
+from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
 
 
 def test_tag_completeness_is_zero_for_empty_tags():
@@ -58,3 +61,40 @@ def test_source_weight_treats_every_real_provider_as_a_match():
 def test_source_weight_falls_back_to_the_graph_node():
     assert source_weight("graphing", EmbeddedTags(), 0.5) == 0.4      # 0.5 * 0.80
     assert source_weight(None, EmbeddedTags(), 0.5) == 0.4
+
+
+def _book(folder="/audio/Frank Herbert/Dune", stem="Dune", **kw):
+    b = BookUnit.new(source_folder=Path(folder))
+    b.source_files = [SourceFile(path=Path(folder) / f"{stem}.mp3", size=1, duration_seconds=1.0,
+                                 ext="mp3", tags=kw.pop("tags", EmbeddedTags()))]
+    for k, v in kw.items():
+        setattr(b, k, v)
+    return b
+
+
+def test_axis_candidates_collects_one_vote_per_source():
+    b = _book(tags=EmbeddedTags(artist="Frank Herbert"), authors=["Frank Herbert"])
+    got = {name: value for value, _weight, name in axis_candidates(b, "author", 0.0)}
+    assert got["tag"] == "Frank Herbert"
+    assert got["folder"] == "Frank Herbert"      # the parent directory of the book folder
+
+
+def test_axis_candidates_drops_a_junk_author_so_it_cannot_vote():
+    b = _book(tags=EmbeddedTags(artist="Narrated by William Gaminara"),
+              authors=["Narrated by William Gaminara"])
+    names = {name for _v, _w, name in axis_candidates(b, "author", 0.0)}
+    assert "tag" not in names
+
+
+def test_axis_candidates_drops_an_author_that_echoes_the_title():
+    b = _book(tags=EmbeddedTags(artist="Dune"), authors=["Dune"], title="Dune")
+    names = {name for _v, _w, name in axis_candidates(b, "author", 0.0)}
+    assert "tag" not in names
+
+
+def test_axis_candidates_uses_the_folder_name_for_title():
+    b = _book(folder="/audio/Frank Herbert/Dune", tags=EmbeddedTags(album="Dune"), title="Dune")
+    got = {name: value for value, _weight, name in axis_candidates(b, "title", 0.0)}
+    assert got["tag"] == "Dune"
+    assert got["folder"] == "Dune"
+    assert got["filename"] == "Dune"
