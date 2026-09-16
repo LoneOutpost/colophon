@@ -12,6 +12,8 @@ the pipeline fills the graph in without needing a per-phase code path.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from colophon.core.ballot import tally
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
@@ -28,6 +30,10 @@ W_TAG_BASE = 0.30        # a bare tag: present, barely evidenced
 W_TAG_COMPLETE = 0.45    # added at full tag completeness, so a rich tag reaches folder-level trust
 W_GRAPH_FACTOR = 0.80    # graph inference is one step removed from a direct observation
 FULL_SUPPORT = 1.40      # folder (0.75) + filename (0.65) agreeing == complete local support
+
+CEIL_LOCAL = 0.70    # nothing drawn from the library's own labelling can exceed this
+CEIL_MATCH = 0.95    # an external source is independent, never infallible
+CEIL_MANUAL = 1.00   # the user is the authority
 
 # Provenance values that name an EXTERNAL source. `Provenance` emits provider names, never the
 # string "match" that node_classify's _STRONG_ID_PROV tested for, which is why a matched field used
@@ -137,17 +143,123 @@ def axis_candidates(book: BookUnit, axis: str, node_confidence: float
     return out
 
 
-def axis_support(candidates: list[tuple[str, float, str]]) -> float:
-    """Support for one axis, in [0, 1]: the summed weight of the sources that agree on the winning
-    value, normalised against what full local corroboration is worth.
+def axis_support(candidates: list[tuple[str, float, str]], committed: str | None) -> float:
+    """Support for one axis, in [0, 1]: the summed weight of the sources that agree with the value
+    the book actually committed to, normalised against what full local corroboration is worth.
 
-    Uses `tally().totals[winner]`, NOT `share`. `share` reads 1.0 whenever a single source votes — a
-    lone voter trivially agrees with itself — so a share-based model would hand an uncorroborated tag
-    full credit, which is the exact defect this family exists to remove.
+    Support is measured against `committed`, not against whichever value happens to win the ballot.
+    Confidence answers "how well is THIS identity evidenced", so a book whose folder and filename
+    outvote its committed author must score LOW — under a winner-based reading it would score well
+    while being wrong, which is the same dishonesty this family exists to remove, one layer down.
+    A book with nothing committed on this axis has nothing to support, and scores 0.
+
+    The agreeing weight is summed, never `tally().share`: share reads 1.0 whenever a single source
+    votes, because a lone voter trivially agrees with itself, so a share-based model would hand an
+    uncorroborated tag full credit.
     """
-    if not candidates:
+    if not candidates or not committed or not committed.strip():
         return 0.0
+    key = normalize_key(committed)
     result = tally([(normalize_key(value), weight) for value, weight, _name in candidates])
-    if result.winner is None:
-        return 0.0
-    return round(min(1.0, result.totals[result.winner] / FULL_SUPPORT), 4)
+    agreeing = result.totals.get(key, 0.0)
+    return round(min(1.0, agreeing / FULL_SUPPORT), 4)
+
+
+# --- The axiom family. Each returns Support (weight toward one axis) or Cap (permission to exceed
+# the local ceiling) — never both meanings folded into one number. ---
+
+
+@dataclass(frozen=True)
+class Support:
+    """Weight toward one identity axis, with the reason it was granted."""
+
+    axis: str        # "author" | "title" | "series"
+    weight: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class Cap:
+    """Permission to exceed the local ceiling. A ceiling is a constraint, not weight: collapsing it
+    into arithmetic is how a flat 0.9 plus a 0.1 bonus used to reach certainty."""
+
+    ceiling: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class ScoreCtx:
+    """Everything an axiom may read besides the book itself. The caller resolves graph nodes and
+    passes their confidences in, so axioms stay pure and testable without building a Graph."""
+
+    author_node_confidence: float = 0.0
+    series_node_confidence: float = 0.0
+
+
+def committed_value(book: BookUnit, axis: str) -> str | None:
+    """The value the book actually holds on this axis — what confidence is being measured about."""
+    if axis == "author":
+        return book.authors[0] if book.authors else None
+    if axis == "series":
+        return book.series[0].name if book.series else None
+    return book.title
+
+
+def _support_for(book: BookUnit, axis: str, node_confidence: float) -> list[Support]:
+    committed = committed_value(book, axis)
+    if not committed:
+        return []
+    candidates = axis_candidates(book, axis, node_confidence)
+    weight = axis_support(candidates, committed)
+    if weight <= 0:
+        return []
+    agreeing = sorted({name for value, _w, name in candidates
+                       if normalize_key(value) == normalize_key(committed)})
+    return [Support(axis, weight, f"{axis} supported by {', '.join(agreeing)}")]
+
+
+def cf_author_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+    """The author axis, corroborated across every source that names one."""
+    return list(_support_for(book, "author", ctx.author_node_confidence))
+
+
+def cf_title_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+    """The title axis. Replaces `max(a, s)`: an unevidenced title now costs part of the score
+    instead of being ignored whenever the author happened to be strong."""
+    return list(_support_for(book, "title", 0.0))
+
+
+def cf_series_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+    """The series axis. Adds only — see the engine; a book legitimately without a series must not be
+    penalised for a field it should not have."""
+    return list(_support_for(book, "series", ctx.series_node_confidence))
+
+
+def cf_match_ceiling(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+    """An external source is independent of the library's own labelling, so it lifts the ceiling —
+    but never to certainty, because a provider can return the wrong edition."""
+    if any(p in MATCH_PROV for p in book.provenance.values()):
+        return [Cap(CEIL_MATCH, "an external source match backs this identity")]
+    return []
+
+
+def cf_manual(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+    """A confirmed book is as settled as anything gets: the user is the authority, so confirmation
+    grants full support on both axes AND lifts the ceiling. Granting only the ceiling would give a
+    book permission to score 100 with no evidence to get there."""
+    if not book.manually_confirmed:
+        return []
+    return [
+        Cap(CEIL_MANUAL, "manually confirmed"),
+        Support("author", 1.0, "manually confirmed"),
+        Support("title", 1.0, "manually confirmed"),
+    ]
+
+
+SCORING_AXIOMS = [
+    cf_author_support,
+    cf_title_support,
+    cf_series_support,
+    cf_match_ceiling,
+    cf_manual,
+]

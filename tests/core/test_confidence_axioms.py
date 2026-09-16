@@ -1,12 +1,20 @@
 from pathlib import Path
 
 from colophon.core.confidence_axioms import (
+    CEIL_MANUAL,
+    CEIL_MATCH,
     FULL_SUPPORT,
     W_FOLDER,
     W_MANUAL,
     W_MATCH,
+    Cap,
+    ScoreCtx,
+    Support,
     axis_candidates,
     axis_support,
+    cf_author_support,
+    cf_manual,
+    cf_match_ceiling,
     source_weight,
     tag_completeness,
 )
@@ -103,22 +111,65 @@ def test_axis_candidates_uses_the_folder_name_for_title():
 
 
 def test_axis_support_rises_with_the_number_of_agreeing_sources():
-    lone = axis_support([("Frank Herbert", 0.75, "folder")])
-    pair = axis_support([("Frank Herbert", 0.75, "folder"), ("Frank Herbert", 0.65, "filename")])
+    lone = axis_support([("Frank Herbert", 0.75, "folder")], "Frank Herbert")
+    pair = axis_support([("Frank Herbert", 0.75, "folder"), ("Frank Herbert", 0.65, "filename")],
+                        "Frank Herbert")
     assert lone < pair
     assert pair == 1.0                      # 0.75 + 0.65 == FULL_SUPPORT
 
 
-def test_axis_support_counts_only_the_winning_side_of_a_disagreement():
-    split = axis_support([("Frank Herbert", 0.75, "folder"), ("Someone Else", 0.65, "filename")])
+def test_axis_support_counts_only_the_sources_that_back_the_committed_value():
+    split = axis_support([("Frank Herbert", 0.75, "folder"), ("Someone Else", 0.65, "filename")],
+                         "Frank Herbert")
     assert split == round(0.75 / FULL_SUPPORT, 4)
+
+
+def test_axis_support_is_starved_when_the_sources_contradict_what_was_committed():
+    # Confidence measures how well THIS identity is evidenced. A book whose folder and filename both
+    # name someone else must score low, not inherit the dissenters' agreement with each other.
+    contradicted = axis_support(
+        [("Someone Else", 0.75, "folder"), ("Someone Else", 0.65, "filename")], "Frank Herbert")
+    assert contradicted == 0.0
 
 
 def test_axis_support_does_not_reward_a_lone_unopposed_source():
     # Regression guard: tally().share is 1.0 for a single voter, so a share-based model would give an
     # uncorroborated tag full credit. Support must come from summed agreeing WEIGHT.
-    assert axis_support([("Dune", 0.30, "tag")]) < 0.25
+    assert axis_support([("Dune", 0.30, "tag")], "Dune") < 0.25
 
 
-def test_axis_support_is_zero_without_candidates():
-    assert axis_support([]) == 0.0
+def test_axis_support_is_zero_without_candidates_or_without_a_committed_value():
+    assert axis_support([], "Dune") == 0.0
+    assert axis_support([("Dune", 0.75, "folder")], None) == 0.0
+
+
+def test_cf_author_support_emits_one_support_with_a_reason():
+    b = _book(tags=EmbeddedTags(artist="Frank Herbert"), authors=["Frank Herbert"])
+    out = cf_author_support(b, ScoreCtx())
+    assert len(out) == 1
+    assert isinstance(out[0], Support) and out[0].axis == "author"
+    assert out[0].weight > 0
+    assert "folder" in out[0].reason or "tag" in out[0].reason
+
+
+def test_cf_author_support_is_silent_without_an_author():
+    assert cf_author_support(_book(), ScoreCtx()) == []
+
+
+def test_cf_match_ceiling_grants_the_match_ceiling_only_with_a_provider_provenance():
+    b = _book(title="Dune", authors=["Frank Herbert"])
+    assert cf_match_ceiling(b, ScoreCtx()) == []
+    b.provenance = {"title": "audnexus"}
+    out = cf_match_ceiling(b, ScoreCtx())
+    assert out == [Cap(CEIL_MATCH, out[0].reason)] and out[0].ceiling == CEIL_MATCH
+
+
+def test_cf_manual_grants_both_the_ceiling_and_full_support():
+    b = _book()
+    assert cf_manual(b, ScoreCtx()) == []
+    b.manually_confirmed = True
+    out = cf_manual(b, ScoreCtx())
+    caps = [c for c in out if isinstance(c, Cap)]
+    supports = [c for c in out if isinstance(c, Support)]
+    assert caps[0].ceiling == CEIL_MANUAL
+    assert {s.axis for s in supports} == {"author", "title"}
