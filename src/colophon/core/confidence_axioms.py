@@ -49,8 +49,12 @@ CEIL_LOCAL = 0.70    # nothing drawn from the library's own labelling can exceed
 CEIL_MATCH = 0.95    # an external source is independent, never infallible
 CEIL_MANUAL = 1.00   # the user is the authority
 
-AXIS_AUTHOR = 0.60   # the author axis stays dominant, as it is today
-AXIS_TITLE = 0.40    # the replacement for max(a, s)
+# Author stays dominant, but not so dominant that it alone clears the review threshold: at 0.60 a
+# perfect author with a COMPLETELY unevidenced title scored exactly 60, the threshold boundary, so
+# books whose stored title was the publisher ("Random House Audio" in a folder named Sphere) read as
+# identified. A book needs some evidence for its title to count as identified.
+AXIS_AUTHOR = 0.55
+AXIS_TITLE = 0.45     # the replacement for max(a, s)
 SERIES_BONUS = 0.05  # series adds only; it never subtracts
 
 # Provenance values that name an EXTERNAL source. `Provenance` emits provider names, never the
