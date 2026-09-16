@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from colophon.core.ballot import tally
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
-from colophon.core.models import BookUnit, EmbeddedTags, Provenance
+from colophon.core.models import BookUnit, ConfidenceSignal, EmbeddedTags, Provenance
 from colophon.core.normalize import normalize_key
 
 # --- Tunable constants. Everything the scoring can be re-composed with lives in this block. ---
@@ -34,6 +34,10 @@ FULL_SUPPORT = 1.40      # folder (0.75) + filename (0.65) agreeing == complete 
 CEIL_LOCAL = 0.70    # nothing drawn from the library's own labelling can exceed this
 CEIL_MATCH = 0.95    # an external source is independent, never infallible
 CEIL_MANUAL = 1.00   # the user is the authority
+
+AXIS_AUTHOR = 0.60   # the author axis stays dominant, as it is today
+AXIS_TITLE = 0.40    # the replacement for max(a, s)
+SERIES_BONUS = 0.05  # series adds only; it never subtracts
 
 # Provenance values that name an EXTERNAL source. `Provenance` emits provider names, never the
 # string "match" that node_classify's _STRONG_ID_PROV tested for, which is why a matched field used
@@ -263,3 +267,44 @@ SCORING_AXIOMS = [
     cf_match_ceiling,
     cf_manual,
 ]
+
+
+@dataclass(frozen=True)
+class ScoredIdentity:
+    score: float
+    signals: list[ConfidenceSignal]
+
+
+def score_identity(book: BookUnit, ctx: ScoreCtx) -> ScoredIdentity:
+    """Run the scoring axiom family and combine what it returns.
+
+    Support sums per axis; the ceiling is the HIGHEST any axiom grants, defaulting to the local
+    ceiling, and it is applied last so no bonus can buy past a limit that exists for a different
+    reason.
+    """
+    contributions: list[Support | Cap] = []
+    for axiom in SCORING_AXIOMS:
+        contributions.extend(axiom(book, ctx))
+
+    per_axis: dict[str, float] = {}
+    signals: list[ConfidenceSignal] = []
+    ceiling = CEIL_LOCAL
+    for item in contributions:
+        if isinstance(item, Support):
+            per_axis[item.axis] = per_axis.get(item.axis, 0.0) + item.weight
+            signals.append(ConfidenceSignal(
+                name=f"{item.axis}_support", points=round(item.weight * 100), detail=item.reason))
+        else:
+            ceiling = max(ceiling, item.ceiling)
+            signals.append(ConfidenceSignal(
+                name="ceiling", points=round(item.ceiling * 100), detail=item.reason))
+
+    core = AXIS_AUTHOR * min(1.0, per_axis.get("author", 0.0)) \
+        + AXIS_TITLE * min(1.0, per_axis.get("title", 0.0))
+    if per_axis.get("series", 0.0) > 0:
+        core += SERIES_BONUS
+    score = float(round(min(core, ceiling) * 100))
+    signals.append(ConfidenceSignal(
+        name="ceiling_applied", points=round(ceiling * 100),
+        detail=f"evidence allows at most {round(ceiling * 100)}"))
+    return ScoredIdentity(score=score, signals=signals)

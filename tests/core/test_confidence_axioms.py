@@ -15,6 +15,7 @@ from colophon.core.confidence_axioms import (
     cf_author_support,
     cf_manual,
     cf_match_ceiling,
+    score_identity,
     source_weight,
     tag_completeness,
 )
@@ -173,3 +174,52 @@ def test_cf_manual_grants_both_the_ceiling_and_full_support():
     supports = [c for c in out if isinstance(c, Support)]
     assert caps[0].ceiling == CEIL_MANUAL
     assert {s.axis for s in supports} == {"author", "title"}
+
+
+def test_local_evidence_cannot_exceed_the_local_ceiling():
+    # Everything agreeing, richly tagged: still capped, because no evidence is independent of the
+    # library's own labelling.
+    rich = EmbeddedTags(title="Dune", album="Dune", artist="Frank Herbert", narrator="n",
+                        series="Dune", year=1965, genre="g", description="d", asin="B")
+    b = _book(folder="/audio/Frank Herbert/Dune", stem="Dune", tags=rich,
+              title="Dune", authors=["Frank Herbert"])
+    assert score_identity(b, ScoreCtx()).score == 70
+
+
+def test_an_uncorroborated_tag_scores_far_below_a_corroborated_one():
+    rich = EmbeddedTags(title="Dune", album="Dune", artist="Frank Herbert", narrator="n",
+                        series="Dune", year=1965, genre="g", description="d", asin="B")
+    corroborated = _book(folder="/audio/Frank Herbert/Dune", stem="Dune", tags=rich,
+                         title="Dune", authors=["Frank Herbert"])
+    alone = _book(folder="/audio/Assorted/Disc 1", stem="track01", tags=rich,
+                  title="Dune", authors=["Frank Herbert"])
+    assert score_identity(alone, ScoreCtx()).score < score_identity(corroborated, ScoreCtx()).score
+
+
+def test_a_narrator_as_author_costs_the_author_axis_its_strongest_vote():
+    # The narrator credit casts no author vote, so the axis keeps only whatever the folder supplies.
+    # Assert the DROP rather than an absolute number: the absolute depends on what else happens to
+    # vote, which is a tuning question, not a behavioural one.
+    narrator = _book(folder="/audio/Assorted/Sharpe", stem="01 - Sharpes Siege",
+                     tags=EmbeddedTags(artist="Narrated by William Gaminara", album="Sharpes Siege"),
+                     title="Sharpe's Siege", authors=["Narrated by William Gaminara"])
+    real = _book(folder="/audio/Bernard Cornwell/Sharpes Siege", stem="01 - Sharpes Siege",
+                 tags=EmbeddedTags(artist="Bernard Cornwell", album="Sharpes Siege"),
+                 title="Sharpe's Siege", authors=["Bernard Cornwell"])
+    assert score_identity(narrator, ScoreCtx()).score < score_identity(real, ScoreCtx()).score
+
+
+def test_manual_confirmation_reaches_full_score():
+    b = _book(folder="/audio/Frank Herbert/Dune", stem="Dune",
+              tags=EmbeddedTags(artist="Frank Herbert", album="Dune"),
+              title="Dune", authors=["Frank Herbert"])
+    b.manually_confirmed = True
+    assert score_identity(b, ScoreCtx()).score == 100
+
+
+def test_every_contribution_is_explained_in_the_signals():
+    b = _book(tags=EmbeddedTags(artist="Frank Herbert"), title="Dune", authors=["Frank Herbert"])
+    result = score_identity(b, ScoreCtx())
+    assert result.signals
+    assert all(s.detail for s in result.signals)
+    assert any("author" in s.detail for s in result.signals)
