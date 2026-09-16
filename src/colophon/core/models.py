@@ -294,6 +294,12 @@ class BookUnit(_Base):
     # Local-identification confidence (0-100) rolled up from the graph evidence: how sure we are we
     # know this book locally (pre-match). Distinct from `confidence`, which is the post-match score.
     identity_confidence: float = 0.0
+    # Why `identity_confidence` came out as it did: one entry per scoring axiom that contributed
+    # (see core/confidence_axioms). Deliberately NOT `confidence_signals`, which explains the
+    # post-match `confidence` and is owned by the match/confirm paths — writing identity reasons
+    # there would clobber the match explanation and be clobbered back on the next match. Re-derived
+    # with the score on every scan, so it is not preserved across re-association.
+    identity_signals: list[ConfidenceSignal] = []
     # Pre-match title-corroboration verdict: 'agree' | 'abstain' | 'contradict' | None. Computed from
     # the book's own title vs its folder/filenames (see core/title_corroborate). Persisted inside
     # book_units.data JSON — no schema migration.
