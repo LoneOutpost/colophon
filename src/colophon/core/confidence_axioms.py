@@ -12,9 +12,11 @@ the pipeline fills the graph in without needing a per-phase code path.
 
 from __future__ import annotations
 
+from colophon.core.ballot import tally
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
 from colophon.core.models import BookUnit, EmbeddedTags, Provenance
+from colophon.core.normalize import normalize_key
 
 # --- Tunable constants. Everything the scoring can be re-composed with lives in this block. ---
 
@@ -25,6 +27,7 @@ W_FILENAME = 0.65        # visible, noisier than folders
 W_TAG_BASE = 0.30        # a bare tag: present, barely evidenced
 W_TAG_COMPLETE = 0.45    # added at full tag completeness, so a rich tag reaches folder-level trust
 W_GRAPH_FACTOR = 0.80    # graph inference is one step removed from a direct observation
+FULL_SUPPORT = 1.40      # folder (0.75) + filename (0.65) agreeing == complete local support
 
 # Provenance values that name an EXTERNAL source. `Provenance` emits provider names, never the
 # string "match" that node_classify's _STRONG_ID_PROV tested for, which is why a matched field used
@@ -132,3 +135,19 @@ def axis_candidates(book: BookUnit, axis: str, node_confidence: float
     if prov in MATCH_PROV or prov == Provenance.MANUAL.value:
         add(committed, prov, "match" if prov in MATCH_PROV else "manual")
     return out
+
+
+def axis_support(candidates: list[tuple[str, float, str]]) -> float:
+    """Support for one axis, in [0, 1]: the summed weight of the sources that agree on the winning
+    value, normalised against what full local corroboration is worth.
+
+    Uses `tally().totals[winner]`, NOT `share`. `share` reads 1.0 whenever a single source votes — a
+    lone voter trivially agrees with itself — so a share-based model would hand an uncorroborated tag
+    full credit, which is the exact defect this family exists to remove.
+    """
+    if not candidates:
+        return 0.0
+    result = tally([(normalize_key(value), weight) for value, weight, _name in candidates])
+    if result.winner is None:
+        return 0.0
+    return round(min(1.0, result.totals[result.winner] / FULL_SUPPORT), 4)

@@ -1,10 +1,12 @@
 from pathlib import Path
 
 from colophon.core.confidence_axioms import (
+    FULL_SUPPORT,
     W_FOLDER,
     W_MANUAL,
     W_MATCH,
     axis_candidates,
+    axis_support,
     source_weight,
     tag_completeness,
 )
@@ -98,3 +100,25 @@ def test_axis_candidates_uses_the_folder_name_for_title():
     assert got["tag"] == "Dune"
     assert got["folder"] == "Dune"
     assert got["filename"] == "Dune"
+
+
+def test_axis_support_rises_with_the_number_of_agreeing_sources():
+    lone = axis_support([("Frank Herbert", 0.75, "folder")])
+    pair = axis_support([("Frank Herbert", 0.75, "folder"), ("Frank Herbert", 0.65, "filename")])
+    assert lone < pair
+    assert pair == 1.0                      # 0.75 + 0.65 == FULL_SUPPORT
+
+
+def test_axis_support_counts_only_the_winning_side_of_a_disagreement():
+    split = axis_support([("Frank Herbert", 0.75, "folder"), ("Someone Else", 0.65, "filename")])
+    assert split == round(0.75 / FULL_SUPPORT, 4)
+
+
+def test_axis_support_does_not_reward_a_lone_unopposed_source():
+    # Regression guard: tally().share is 1.0 for a single voter, so a share-based model would give an
+    # uncorroborated tag full credit. Support must come from summed agreeing WEIGHT.
+    assert axis_support([("Dune", 0.30, "tag")]) < 0.25
+
+
+def test_axis_support_is_zero_without_candidates():
+    assert axis_support([]) == 0.0
