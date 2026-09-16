@@ -240,19 +240,19 @@ def cf_author_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
     return list(_support_for(book, "author", ctx.author_node_confidence))
 
 
-def cf_title_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+def cf_title_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """The title axis. Replaces `max(a, s)`: an unevidenced title now costs part of the score
     instead of being ignored whenever the author happened to be strong."""
     return list(_support_for(book, "title", 0.0))
 
 
-def cf_series_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+def cf_series_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """The series axis. Adds only — see the engine; a book legitimately without a series must not be
     penalised for a field it should not have."""
     return list(_support_for(book, "series", ctx.series_node_confidence))
 
 
-def cf_match_ceiling(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+def cf_match_ceiling(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """An external source is independent of the library's own labelling, so it lifts the ceiling —
     but never to certainty, because a provider can return the wrong edition."""
     if any(p in MATCH_PROV for p in book.provenance.values()):
@@ -260,7 +260,7 @@ def cf_match_ceiling(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
     return []
 
 
-def cf_manual(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
+def cf_manual(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """A confirmed book is as settled as anything gets: the user is the authority, so confirmation
     grants full support on both axes AND lifts the ceiling. Granting only the ceiling would give a
     book permission to score 100 with no evidence to get there."""
