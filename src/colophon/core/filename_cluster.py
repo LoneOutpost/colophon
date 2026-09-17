@@ -102,7 +102,21 @@ def _spaced(chunk: str) -> str:
 
 
 def _tokens(chunk: str) -> list[str]:
-    """Lowercased word/number tokens for comparison."""
+    """Lowercased word/number tokens for comparison.
+
+    DELIBERATELY keeps its own tokenization rather than delegating to `normalize.canonical_words`,
+    which every other comparison in the application now shares. Measured on a real 502-book library,
+    delegating splits a glued index like "01-12" into two tokens, which changes what
+    `_glued_sequence_residue` returns and makes a clustered book's label read "01-12" instead of
+    "Chrome Yellow". This function feeds GROUPING — which files are one book — so a change here
+    alters how books are assembled, not merely how they are scored.
+
+    The same measurement found a large win waiting behind that risk: 11 books whose files are named
+    "Title-001-193.opus" were each shattered into up to 193 separate works because this tokenizer
+    cannot split on "-", and delegating collapses them correctly to one book. That fix is worth
+    having, but it needs `_glued_sequence_residue` reworked alongside it and belongs in its own slice
+    with its own before/after grouping measurement. Do not retry the one-line delegation on its own.
+    """
     return _spaced(chunk).lower().split()
 
 
