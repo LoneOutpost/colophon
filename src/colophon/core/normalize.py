@@ -263,6 +263,29 @@ def normalize_author(name: str) -> str:
     return " ".join(out)
 
 
+# An apostrophe is noise inside a word, never a boundary. Taggers and filesystems drop it constantly,
+# so "Sharpe's Siege" and "Sharpes Siege" must key alike; letting it become a space made every such
+# pair read as a contradiction. Covers the typographic and modifier-letter forms too.
+_APOSTROPHE = re.compile(r"['’ʼ‘]")
+
+
+def canonical_words(value: str) -> list[str]:
+    """The comparable word units of a string — the single place that decides what a WORD is.
+
+    Every comparison in the application builds on this: entity keys, title overlap, filename
+    clustering. They ask different questions and keep their own shapes, but they must agree on
+    whether two spellings are the same word, or a fix in one silently leaves the others wrong.
+
+    Folds Latin diacritics, splits guarded PascalCase, drops punctuation and underscores, removes
+    apostrophes, casefolds. Non-Latin scripts are preserved.
+    """
+    s = _APOSTROPHE.sub("", value.strip())
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    s = " ".join(_split_pascal(tok) for tok in s.split())
+    s = re.sub(r"[\W_]+", " ", s)
+    return s.casefold().split()
+
+
 def normalize_key(name: str) -> str:
     """Canonical comparison key for entity names (author/series/narrator/franchise): tolerant of
     'Last, First' order, case, spacing, punctuation, underscores, Latin diacritics, and guarded

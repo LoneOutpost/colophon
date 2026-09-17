@@ -261,3 +261,25 @@ def test_normalize_key_folds_initial_variants():
 
 def test_normalize_key_leaves_multiword_names():
     assert normalize_key("Iain Banks") == "iain banks"
+
+
+def test_canonical_words_treats_an_apostrophe_as_noise():
+    from colophon.core.normalize import canonical_words
+    # A tagger or filesystem that drops an apostrophe has not named a different book.
+    assert canonical_words("Sharpe's Siege") == canonical_words("Sharpes Siege") == ["sharpes", "siege"]
+    assert canonical_words("O'Brien") == ["obrien"]
+
+
+def test_canonical_words_keeps_the_existing_word_decisions():
+    from colophon.core.normalize import canonical_words
+    assert canonical_words("SueEllen") == ["sue", "ellen"]        # PascalCase splits
+    assert canonical_words("MacDonald") == ["macdonald"]          # ...except after a name particle
+    assert canonical_words("Béla Bartók") == ["bela", "bartok"]   # Latin diacritics fold
+    assert canonical_words("some_book_title") == ["some", "book", "title"]
+    assert canonical_words("Catch-22") == ["catch", "22"]
+    assert canonical_words("") == []
+
+
+def test_canonical_words_preserves_non_latin_scripts():
+    from colophon.core.normalize import canonical_words
+    assert canonical_words("村上春樹") == ["村上春樹"]
