@@ -12,13 +12,12 @@ the pipeline fills the graph in without needing a per-phase code path.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from colophon.core.ballot import tally
 from colophon.core.metadata_quality import author_junk, is_junk_title, is_title_shaped_author
 from colophon.core.models import BookUnit, ConfidenceSignal, EmbeddedTags, Provenance
-from colophon.core.normalize import normalize_key
+from colophon.core.normalize import canonical_words, normalize_key
 from colophon.core.people import split_people
 
 # --- Tunable constants. Everything the scoring can be re-composed with lives in this block. ---
@@ -134,8 +133,6 @@ _FIELD_FOR_AXIS = {"author": "authors", "title": "title", "series": "series"}
 _SOURCE_NAME = {Provenance.DIRECTORY.value: "folder", Provenance.FILENAME.value: "filename",
                 Provenance.GRAPHING.value: "graph", Provenance.MANUAL.value: "manual"}
 
-_WORD = re.compile(r"[a-z0-9]+")
-
 
 def _contains_value(name: str, value: str) -> bool:
     """Does this raw folder or filename contain the committed value?
@@ -144,11 +141,14 @@ def _contains_value(name: str, value: str) -> bool:
     three fields into one flat name, so an equality test reads every such folder as a contradiction.
     Containment corroborates without needing to parse an arbitrary naming scheme — which is the
     pipeline's job, already done, and recorded in `provenance`.
+
+    Word-level decisions belong to `canonical_words`: this is the comparison that gives a book credit
+    for a folder that carries its title, so an apostrophe difference must not break it.
     """
-    words = {w for w in _WORD.findall(value.lower()) if len(w) >= 2 and not w.isdigit()}
+    words = {w for w in canonical_words(value) if len(w) >= 2 and not w.isdigit()}
     if not words:
         return False
-    return words <= set(_WORD.findall(name.lower()))
+    return words <= {w for w in canonical_words(name) if len(w) >= 2 and not w.isdigit()}
 
 
 def axis_candidates(book: BookUnit, axis: str, node_value: str | None
@@ -204,19 +204,6 @@ def axis_candidates(book: BookUnit, axis: str, node_value: str | None
     return out
 
 
-def _agreement_key(value: str) -> str:
-    """The bucket key two sources must share to count as agreeing.
-
-    `normalize_key` turns an apostrophe into a SPACE, so "Sharpe's Siege" and the apostrophe-stripped
-    "Sharpes Siege" a tagger or filesystem routinely produces land in different buckets and read as a
-    contradiction. Titles carrying an apostrophe are common enough that this would depress scores
-    across a whole library. Dropping the apostrophe before keying fixes it HERE, in the scoring
-    ballot, rather than in `normalize_key` — that is the shared entity-dedup key for the whole
-    application, and loosening it could merge entities that must stay distinct.
-    """
-    return normalize_key(value.replace("'", "").replace("\u2019", ""))
-
-
 def _candidate_key(value: str, committed_key: str, axis: str) -> str:
     """The bucket a source's value falls into, given what the book committed to.
 
@@ -224,11 +211,11 @@ def _candidate_key(value: str, committed_key: str, axis: str) -> str:
     author named within it: the source is naming MORE people, not a different person. Restricted to
     the author axis because splitting a title on " and " would invent agreement that is not there.
     """
-    if _agreement_key(value) == committed_key:
+    if normalize_key(value) == committed_key:
         return committed_key
-    if axis == "author" and any(_agreement_key(p) == committed_key for p in split_people(value)):
+    if axis == "author" and any(normalize_key(p) == committed_key for p in split_people(value)):
         return committed_key
-    return _agreement_key(value)
+    return normalize_key(value)
 
 
 def axis_support(candidates: list[tuple[str, float, str]], committed: str | None,
@@ -248,7 +235,7 @@ def axis_support(candidates: list[tuple[str, float, str]], committed: str | None
     """
     if not candidates or not committed or not committed.strip():
         return 0.0
-    key = _agreement_key(committed)
+    key = normalize_key(committed)
     result = tally([(_candidate_key(value, key, axis), weight) for value, weight, _name in candidates])
     agreeing = result.totals.get(key, 0.0)
     # A source naming something ELSE is not merely absent support, it is evidence against. Measured
@@ -307,7 +294,7 @@ def _support_for(book: BookUnit, axis: str, node_value: str | None) -> list[Supp
     weight = axis_support(candidates, committed, axis)
     if weight <= 0:
         return []
-    key = _agreement_key(committed)
+    key = normalize_key(committed)
     agreeing = sorted({name for value, _w, name in candidates
                        if _candidate_key(value, key, axis) == key})
     return [Support(axis, weight, f"{axis} supported by {', '.join(agreeing)}")]
