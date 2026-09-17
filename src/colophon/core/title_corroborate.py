@@ -23,7 +23,7 @@ from colophon.core.filename_cluster import _spaced, _tokens
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.match import clean_match_title
 from colophon.core.metadata_quality import is_junk_title
-from colophon.core.normalize import collides_with_title
+from colophon.core.normalize import canonical_words, collides_with_title
 from colophon.core.sequence_affix import parse_sequence_affix, strip_series_code_affix
 
 if TYPE_CHECKING:
@@ -60,7 +60,10 @@ _WORD = re.compile(r"[a-z0-9]+")
 
 
 def _words(value: str) -> set[str]:
-    return {w for w in _WORD.findall(value.lower()) if len(w) >= 2 and not w.isdigit()}
+    """The comparable words of a title. Word-level decisions (apostrophes, diacritics, PascalCase,
+    punctuation) belong to `canonical_words`; this adds only the title-comparison filter — drop bare
+    numbers and single letters, which carry no title meaning."""
+    return {w for w in canonical_words(value) if len(w) >= 2 and not w.isdigit()}
 
 
 def _title_words(value: str) -> set[str]:
