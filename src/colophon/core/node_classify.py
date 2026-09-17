@@ -708,18 +708,6 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             book.provenance["series"] = Provenance.GRAPHING.value
 
 
-def _nearest_author(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
-    """The nearest ancestor (incl. `folder`) classified `author`, or None — walking to root."""
-    cur = folder
-    while True:
-        node = graph.directories.get(DirectoryNode.id_for(cur))
-        if node is not None and node.kind == "author":
-            return node
-        if cur == root or root not in cur.parents:
-            return None
-        cur = cur.parent
-
-
 def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     """A book's local-identification confidence (0-100): how much of the available evidence backs the
     committed identity, and how well that evidence agrees with itself. Pre-match, distinct from the
@@ -727,19 +715,19 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
 
     It does NOT claim correctness. A collection that is genuinely mislabeled cannot be detected from
     the data available, so evidence drawn entirely from the library's own labelling is capped — see
-    `core/confidence_axioms.py`, which owns the rules. This is the adapter: resolve the graph nodes a
-    book hangs from, then delegate.
+    `core/confidence_axioms.py`, which owns the rules. `graph` and `root` are part of the derive-path
+    call contract and are no longer read here: the graph's contribution reaches the score through
+    provenance instead (see the note below).
     """
     from colophon.core.confidence_axioms import ScoreCtx, score_identity
     if not (book.authors or book.series):
         return 0.0
-    a_node = _nearest_author(graph, book.source_folder, root)
-    s_node = _nearest_series(graph, book.source_folder, root)
-    ctx = ScoreCtx(
-        author_node_value=a_node.kind_value if a_node else None,
-        series_node_value=s_node.kind_value if s_node else None,
-    )
-    result = score_identity(book, ctx)
+    # No graph lookup here on purpose. The graph's contribution reaches the score through PROVENANCE:
+    # a value the graph supplied is stamped Provenance.GRAPHING and weighted accordingly. Passing the
+    # classifying node in as well double-counted it, and keying on that node's confidence made a
+    # book's score depend on how much of the tree a derivation path happened to walk — a scoped
+    # re-derive scored 62 where a whole-root re-derive scored 70 for the same book.
+    result = score_identity(book, ScoreCtx())
     book.identity_signals = result.signals
     return result.score
 

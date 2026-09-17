@@ -151,8 +151,7 @@ def _contains_value(name: str, value: str) -> bool:
     return words <= {w for w in canonical_words(name) if len(w) >= 2 and not w.isdigit()}
 
 
-def axis_candidates(book: BookUnit, axis: str, node_value: str | None
-                    ) -> list[tuple[str, float, str]]:
+def axis_candidates(book: BookUnit, axis: str) -> list[tuple[str, float, str]]:
     """Every source's claim for one axis, as (value, weight, source_name).
 
     The committed value's OWN provenance is the first vote: the pipeline already parsed this
@@ -273,8 +272,11 @@ class ScoreCtx:
     """Everything an axiom may read besides the book itself. The caller resolves graph nodes and
     passes their confidences in, so axioms stay pure and testable without building a Graph."""
 
-    author_node_value: str | None = None
-    series_node_value: str | None = None
+    # Currently carries nothing. The graph's contribution reaches the score through PROVENANCE —
+    # a value the graph supplied is stamped Provenance.GRAPHING and weighted as such — so a separate
+    # graph vote would double-count it, and keying on the classifying node's confidence made a book's
+    # score depend on how much of the tree a given derivation path happened to walk. Kept as the seam
+    # an axiom would read if it ever needs context beyond the book itself.
 
 
 def committed_value(book: BookUnit, axis: str) -> str | None:
@@ -286,11 +288,11 @@ def committed_value(book: BookUnit, axis: str) -> str | None:
     return book.title
 
 
-def _support_for(book: BookUnit, axis: str, node_value: str | None) -> list[Support]:
+def _support_for(book: BookUnit, axis: str) -> list[Support]:
     committed = committed_value(book, axis)
     if not committed:
         return []
-    candidates = axis_candidates(book, axis, node_value)
+    candidates = axis_candidates(book, axis)
     weight = axis_support(candidates, committed, axis)
     if weight <= 0:
         return []
@@ -302,19 +304,19 @@ def _support_for(book: BookUnit, axis: str, node_value: str | None) -> list[Supp
 
 def cf_author_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:
     """The author axis, corroborated across every source that names one."""
-    return list(_support_for(book, "author", ctx.author_node_value))
+    return list(_support_for(book, "author"))
 
 
 def cf_title_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """The title axis. Replaces `max(a, s)`: an unevidenced title now costs part of the score
     instead of being ignored whenever the author happened to be strong."""
-    return list(_support_for(book, "title", None))
+    return list(_support_for(book, "title"))
 
 
 def cf_series_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """The series axis. Adds only — see the engine; a book legitimately without a series must not be
     penalised for a field it should not have."""
-    return list(_support_for(book, "series", ctx.series_node_value))
+    return list(_support_for(book, "series"))
 
 
 # The fields whose provenance says something about IDENTITY. A provider filling in genres or a
