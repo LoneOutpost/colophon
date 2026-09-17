@@ -288,22 +288,20 @@ def canonical_words(value: str) -> list[str]:
 
 def normalize_key(name: str) -> str:
     """Canonical comparison key for entity names (author/series/narrator/franchise): tolerant of
-    'Last, First' order, case, spacing, punctuation, underscores, Latin diacritics, and guarded
-    run-together PascalCase. Non-Latin scripts are preserved. Answers 'are these the same name?' —
-    it is not a display value."""
+    'Last, First' order, case, spacing, punctuation, underscores, apostrophes, Latin diacritics, and
+    guarded run-together PascalCase. Non-Latin scripts are preserved. Answers 'are these the same
+    name?' — it is not a display value.
+
+    The word-level decisions live in `canonical_words`; this adds only what is specific to an ENTITY
+    name: 'Last, First' inversion and folding consecutive initials so "R. R." and "RR" unify.
+    """
     s = name.strip()
     if "," in s:
         last, _, first = s.partition(",")
         s = f"{first.strip()} {last.strip()}"
-    # fold Latin diacritics; non-Latin letters have no combining marks and are kept below
-    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-    s = " ".join(_split_pascal(tok) for tok in s.split())
-    s = re.sub(r"[\W_]+", " ", s)          # drop punctuation and underscore; keep Unicode letters/digits
-    s = re.sub(r"\s+", " ", s).strip().casefold()
-    # fold consecutive single-letter tokens so initial variants unify ("r r" == "rr", "e e" == "ee")
     merged: list[str] = []
     buf = ""
-    for tok in s.split():
+    for tok in canonical_words(s):
         if len(tok) == 1:
             buf += tok
         else:

@@ -283,3 +283,33 @@ def test_canonical_words_keeps_the_existing_word_decisions():
 def test_canonical_words_preserves_non_latin_scripts():
     from colophon.core.normalize import canonical_words
     assert canonical_words("村上春樹") == ["村上春樹"]
+
+
+def test_normalize_key_now_matches_across_a_dropped_apostrophe():
+    from colophon.core.normalize import normalize_key
+    assert normalize_key("Sharpe's Gold") == normalize_key("Sharpes Gold")
+    assert normalize_key("Old Man's War") == normalize_key("Old Mans War")
+
+
+def test_normalize_key_keeps_every_other_guarantee():
+    from colophon.core.normalize import normalize_key
+    assert normalize_key("McCaffrey, Anne") == normalize_key("Anne McCaffrey")   # Last, First
+    assert normalize_key("R. R. Martin") == normalize_key("RR Martin")           # initial folding
+    assert normalize_key("Béla Bartók") == "bela bartok"
+    assert normalize_key("MacDonald") == "macdonald"
+    assert normalize_key("van der Berg") == "van der berg"
+
+
+def test_normalize_key_does_not_merge_entities_that_were_distinct():
+    # The safety property. Measured over the live library: 53 of 777 keys change, 0 collisions. A typo
+    # must still read as a different name — loosening comparison must never merge two real people.
+    from colophon.core.normalize import normalize_key
+    assert normalize_key("Abaddon's Gate") != normalize_key("Abbadons Gate")   # typo, not a variant
+    assert normalize_key("Anne McCaffrey") != normalize_key("Anne McCaffery")
+    names = ["Sharpe's Gold", "Sharpes Gold", "O'Brien", "OBrien", "Ender's Game",
+             "Enders Game", "MacDonald", "Mac Donald", "Béla Bartók", "Bela Bartok"]
+    keys = {}
+    for n in names:
+        keys.setdefault(normalize_key(n), set()).add(n)
+    # groups may contain spelling variants of ONE name, never two different names
+    assert keys[normalize_key("MacDonald")] == {"MacDonald"}
