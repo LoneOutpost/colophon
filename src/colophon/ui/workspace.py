@@ -30,6 +30,7 @@ from colophon.core.book_search import (
     parse_query,
 )
 from colophon.core.chapters import file_boundary_chapters
+from colophon.core.confidence_axioms import identity_ceiling
 from colophon.core.detail_pane import DetailPane, Pane
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
@@ -192,21 +193,47 @@ def _confidence_tooltip(book: BookUnit, threshold: float) -> str:
     )
 
 
-_IDENTITY_TOOLTIP = (
-    "Identification confidence 0-100: how sure we are we've correctly identified this book from "
-    "your library's structure and file tags, before matching an online source."
-)
+def identity_badge(book: BookUnit) -> tuple[str, str, str]:
+    """The identity confidence as (label, colour, tooltip), read against its own ceiling.
+
+    Identity confidence is a score out of what its CLASS of evidence can prove, not out of 100.
+    Anything drawn from the library's own labelling is capped at 70, an external match at 95, a
+    confirmation at 100. Judging all three against one fixed threshold said a fully corroborated
+    book was mediocre: on a real 269-book library 238 of 269 badges rendered amber, 218 of them
+    books sitting exactly AT their ceiling with nothing left to prove locally. The 11 genuinely
+    short of it were indistinguishable in the noise.
+
+    So the colour asks "how close to the most this could be", and the label shows what the score is
+    out of, which is also the only honest way to read it.
+    """
+    score, ceiling = book.identity_confidence, identity_ceiling(book) * 100
+    if score >= ceiling:
+        colour, verdict = "positive", (
+            f"{score:.0f} of a possible {ceiling:.0f}: as far as this evidence goes. "
+            "Match it against a source, or confirm it, to settle it further.")
+    elif score >= 0.6 * ceiling:
+        colour, verdict = "warning", (
+            f"{score:.0f} of a possible {ceiling:.0f}: some of the evidence is missing or disagrees.")
+    else:
+        colour, verdict = "negative", (
+            f"{score:.0f} of a possible {ceiling:.0f}: little of this identity is backed up.")
+    # Tight separator: the badge sits beside the title in the dense list, and every character it
+    # takes is one the title loses to an ellipsis. The title is what the row exists to show.
+    return (f"{score:.0f}/{ceiling:.0f}", colour,
+            "How well your library's own structure and file tags support this book's identity, "
+            f"before any online match. {verdict}")
 
 
-def _primary_confidence(book: BookUnit, threshold: float) -> tuple[float, str, str]:
+def _primary_confidence(book: BookUnit, threshold: float) -> tuple[str, str, str]:
     """The confidence to feature for a book: once a source match (or manual confirm) exists, the
     match-verification score; otherwise the pre-match local-identification confidence. `confidence`
     is only ever nonzero post-match, so its presence is what distinguishes the two. Returns
-    (value, badge color, tooltip)."""
+    (label, badge color, tooltip). Match confidence keeps a bare number because 0-100 is a real
+    scale there, gated on a real threshold; identity confidence carries its ceiling."""
     if book.confidence > 0:
-        return (book.confidence, _confidence_color(book.confidence),
+        return (f"{book.confidence:.0f}", _confidence_color(book.confidence),
                 _confidence_tooltip(book, threshold))
-    return (book.identity_confidence, _confidence_color(book.identity_confidence), _IDENTITY_TOOLTIP)
+    return identity_badge(book)
 
 
 def _state_badge(book: BookUnit) -> None:
@@ -746,7 +773,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
                         _render_cover(book, width=112, height=168, icon="text-h2")
                         _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
-                        ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
+                        ui.badge(_cval).props(f"color={_ccolor}").tooltip(_ctip)
                         _state_badge(book)
                     # Main column: title, source path, tools, grouped fields.
                     with ui.column().classes("col q-gutter-none").style("min-width: 0"):
@@ -1448,7 +1475,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             "Audio quality across this book's files"
                         )
                     _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
-                    ui.badge(f"{_cval:.0f}").props(f"color={_ccolor}").tooltip(_ctip)
+                    ui.badge(_cval).props(f"color={_ccolor}").tooltip(_ctip)
                     _state_badge(book)
                     if has_blocking_error(book):
                         # A hard error: files missing or corrupt/unreadable. Persisted actions are

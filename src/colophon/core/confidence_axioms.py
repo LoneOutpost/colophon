@@ -324,16 +324,36 @@ def cf_series_support(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # 
 IDENTITY_FIELDS = ("title", "authors", "series")
 
 
+def matched_identity_fields(book: BookUnit) -> list[str]:
+    """The IDENTITY fields an external provider supplied. Measured against a real library, keying on
+    ANY matched field handed the raised ceiling to 100 of 167 books whose only match was `genres`,
+    `tags` or `subtitle` — peripheral data that says nothing about whether the book is correctly
+    identified. That is the same false certainty this family exists to remove, arriving by a side
+    door, so only the identity fields count."""
+    return [f for f in IDENTITY_FIELDS if book.provenance.get(f) in MATCH_PROV]
+
+
+def identity_ceiling(book: BookUnit) -> float:
+    """The most this book's identity score could justify, in [0, 1].
+
+    The same ceiling `score_identity` applies, exposed on its own because the number is not
+    meaningful without it: a score is a fraction of what its class of evidence can prove, and 70 out
+    of a possible 70 says something completely different from 70 out of 100. A reader comparing the
+    bare numbers across classes is comparing different scales. `test_identity_ceiling_matches_the
+    _engine` pins the two together.
+    """
+    if book.manually_confirmed:
+        return CEIL_MANUAL
+    if matched_identity_fields(book):
+        return CEIL_MATCH
+    return CEIL_LOCAL
+
+
 def cf_match_ceiling(book: BookUnit, ctx: ScoreCtx) -> list[Support | Cap]:  # ctx: uniform axiom signature
     """An external source is independent of the library's own labelling, so it lifts the ceiling —
     but never to certainty, because a provider can return the wrong edition.
-
-    Only a match on an IDENTITY field counts. Measured against a real library, keying on ANY matched
-    field handed the raised ceiling to 100 of 167 books whose only match was `genres`, `tags` or
-    `subtitle` — peripheral data that says nothing about whether the book is correctly identified.
-    That is the same false certainty this family exists to remove, arriving through a side door.
     """
-    matched = [f for f in IDENTITY_FIELDS if book.provenance.get(f) in MATCH_PROV]
+    matched = matched_identity_fields(book)
     if matched:
         return [Cap(CEIL_MATCH, f"an external source match backs the {', '.join(matched)}")]
     return []
