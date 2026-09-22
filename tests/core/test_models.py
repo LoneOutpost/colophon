@@ -8,10 +8,15 @@ from colophon.core.models import (
     BookState,
     BookUnit,
     ConfidenceSignal,
+    Finding,
+    FindingCode,
+    FindingSeverity,
     Provenance,
     SeriesRef,
     SourceFile,
     _now,
+    active_findings,
+    is_acknowledged,
 )
 
 
@@ -259,3 +264,49 @@ def test_embedded_tags_blank_strings_normalize_to_none():
     # heals the cache: a blank value stored in JSON loads back as None
     restored = EmbeddedTags.model_validate_json('{"artist": "  "}')
     assert restored.artist is None
+
+
+def _conflict(detail: str) -> Finding:
+    return Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail=detail)
+
+
+def test_dismissing_one_finding_leaves_the_others_sharing_its_code(tmp_path):
+    """METADATA_CONFLICT is raised by three unrelated checks. Dismissing the author disagreement
+    must not also silence 'your files are tagged as a different book', which is a separate claim."""
+    author = _conflict("author: tag 'A' vs folder 'B'")
+    album = _conflict('folder "Putting Up Roots" vs tag "Higher Education"')
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.findings = [author, album]
+    book.acknowledged_findings = [author.key]
+
+    assert is_acknowledged(book, author)
+    assert not is_acknowledged(book, album)
+    assert active_findings(book) == [album]
+
+
+def test_a_legacy_bare_code_dismissal_still_covers_every_finding_with_that_code(tmp_path):
+    """Rows written before dismissals were per-finding hold a bare code. They keep their original
+    meaning, so upgrading never resurfaces something the user already put away."""
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.findings = [_conflict("author: tag 'A' vs folder 'B'"), _conflict('folder "X" vs tag "Y"')]
+    book.acknowledged_findings = ["metadata_conflict"]
+
+    assert active_findings(book) == []
+
+
+def test_a_finding_whose_detail_changed_asks_again(tmp_path):
+    """The detail is part of the identity: a changed detail is a different claim, and inheriting an
+    answer given about something else is how a real conflict goes unseen."""
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    answered = _conflict('folder "X" vs tag "Y"')
+    book.acknowledged_findings = [answered.key]
+    book.findings = [_conflict('folder "X" vs tag "Z"')]
+
+    assert active_findings(book) == book.findings
+
+
+def test_active_findings_still_drops_the_retired_codes(tmp_path):
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.findings = [Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN,
+                             detail="one book loose in an author folder")]
+    assert active_findings(book) == []

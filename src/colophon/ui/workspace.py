@@ -525,9 +525,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.label(item.detail)
                 ui.label(item.suggestion).classes("colophon-muted text-caption")
                 with ui.row().classes("gap-2"):
-                    if FixAction.ACKNOWLEDGE in item.actions and item.code is not None:
-                        def _ack(c=item.code, b=book) -> None:
-                            controller.acknowledge_finding(b, c)
+                    if FixAction.ACKNOWLEDGE in item.actions and item.key is not None:
+                        def _ack(k=item.key, b=book) -> None:
+                            controller.acknowledge_finding(b, k)
                             ui.notify("Acknowledged", type="info")
                             repaint(nav=True, middle=True)
                         ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
@@ -1100,8 +1100,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         files=lambda: _tabs.set_value("details"),
                         matches=lambda b=book: compare_dialog(
                             controller, b, show_detail=show_detail, refresh_list=refresh_list),
-                        acknowledge=lambda code, b=book: (
-                            controller.acknowledge_finding(b, code), refresh_list(),
+                        acknowledge=lambda key, b=book: (
+                            controller.acknowledge_finding(b, key), refresh_list(),
                             show_detail(b.id)),
                         delete=lambda b=book: _delete_book_items(b),
                         rerun_phase=_rerun_one,

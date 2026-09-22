@@ -60,7 +60,6 @@ from colophon.core.jobs import Job
 from colophon.core.known_entity import build_known_series
 from colophon.core.library_graph import reconcile
 from colophon.core.models import (
-    SUPPRESSED_FINDINGS,
     BookState,
     BookUnit,
     ConfidenceSignal,
@@ -75,6 +74,7 @@ from colophon.core.models import (
     PhaseState,
     Provenance,
     _Base,
+    active_findings,
     new_batch_id,
 )
 from colophon.core.navigator import (
@@ -2124,10 +2124,7 @@ class AppController:
     def _active_findings(self, book: BookUnit) -> list[Finding]:
         """Findings not dismissed via acknowledge, excluding the ones retired from the user-facing
         surface (e.g. LOOSE_IN_AUTHOR — the normal loose-file-in-author layout)."""
-        return [
-            f for f in book.findings
-            if f.code not in book.acknowledged_findings and f.code not in SUPPRESSED_FINDINGS
-        ]
+        return active_findings(book)
 
     def books_needing_attention(self) -> list[BookUnit]:
         """All books carrying at least one un-acknowledged finding, most severe first."""
@@ -2137,10 +2134,15 @@ class AppController:
             key=lambda b: min(self._SEVERITY_RANK[f.severity] for f in self._active_findings(b)),
         )
 
-    def acknowledge_finding(self, book: BookUnit, code: FindingCode) -> None:
-        """Dismiss an advisory finding so a re-scan won't resurface it."""
-        if code not in book.acknowledged_findings:
-            book.acknowledged_findings = [*book.acknowledged_findings, code]
+    def acknowledge_finding(self, book: BookUnit, key: str) -> None:
+        """Dismiss ONE advisory finding so a re-scan won't resurface it.
+
+        `key` is a `Finding.key` — the code AND what the finding says — not a bare code. A book can
+        hold several findings under one code (METADATA_CONFLICT is raised by three unrelated
+        checks), and dismissing one must leave the others standing.
+        """
+        if key not in book.acknowledged_findings:
+            book.acknowledged_findings = [*book.acknowledged_findings, key]
             book.touch()
             self.ctx.books.upsert(book)
 
@@ -2308,8 +2310,8 @@ class AppController:
         ]
         book.manually_confirmed = True
         for finding in self._active_findings(book):
-            if finding.code not in book.acknowledged_findings:
-                book.acknowledged_findings = [*book.acknowledged_findings, finding.code]
+            if finding.key not in book.acknowledged_findings:
+                book.acknowledged_findings = [*book.acknowledged_findings, finding.key]
         mark(book, Phase.IDENTIFY, PhaseState.FRESH)
         resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         book.touch()

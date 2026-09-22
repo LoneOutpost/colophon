@@ -833,17 +833,37 @@ def test_fill_title_corroboration_retracts_a_finding_the_verdict_no_longer_suppo
     b.title, b.authors = "At Risk", ["Stella Rimington"]
     b.provenance["authors"] = Provenance.TAG.value
     # Left behind by a pass taken while the title was still wrong.
-    b.findings = [Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
-                          detail='metadata title "Some Other Book" vs folder "At Risk"')]
-    b.acknowledged_findings = [FindingCode.METADATA_CONFLICT]
+    stale = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                    detail='metadata title "Some Other Book" vs folder "At Risk"')
+    b.findings = [stale]
+    b.acknowledged_findings = [stale.key]
 
     _fill_title_corroboration([b])
 
     assert b.title_corroboration == "agree"
     assert not any(f.code == FindingCode.METADATA_CONFLICT for f in b.findings)
-    # The acknowledgement went with it: it settled a conflict that no longer exists, and leaving it
-    # would silently pre-acknowledge the NEXT, different contradiction on this book.
-    assert FindingCode.METADATA_CONFLICT not in b.acknowledged_findings
+    # The dismissal went with it: it settled a conflict that no longer exists, and leaving it would
+    # silently pre-answer the NEXT, different contradiction on this book.
+    assert stale.key not in b.acknowledged_findings
+
+
+def test_fill_title_corroboration_keeps_a_legacy_bare_code_dismissal(tmp_path):
+    """A bare-code entry predates per-finding keys and still covers the two other checks sharing
+    METADATA_CONFLICT, so retracting our finding must not remove it and un-dismiss theirs."""
+    from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    b = BookUnit.new(source_folder=tmp_path / "At Risk")
+    b.title, b.authors = "At Risk", ["Stella Rimington"]
+    b.provenance["authors"] = Provenance.TAG.value
+    b.findings = [Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                          detail='metadata title "Some Other Book" vs folder "At Risk"')]
+    b.acknowledged_findings = ["metadata_conflict"]
+
+    _fill_title_corroboration([b])
+
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in b.findings)
+    assert b.acknowledged_findings == ["metadata_conflict"]
 
 
 def test_fill_title_corroboration_retracts_only_its_own_conflict(tmp_path):

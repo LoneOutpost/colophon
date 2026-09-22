@@ -3,7 +3,12 @@ findings). UI-agnostic so the Library page's facet filters are unit-testable wit
 
 from __future__ import annotations
 
-from colophon.core.models import BLOCKING_FINDINGS, SUPPRESSED_FINDINGS, BookState, BookUnit
+from colophon.core.models import (
+    BLOCKING_FINDINGS,
+    BookState,
+    BookUnit,
+    active_findings,
+)
 
 # States that do NOT need a human: finished work, or a deliberate skip.
 _DONE_STATES = {BookState.READY, BookState.ORGANIZED, BookState.ENCODED, BookState.SKIPPED}
@@ -112,10 +117,7 @@ def missing_fields(book: BookUnit) -> set[str]:
 def has_open_findings(book: BookUnit) -> bool:
     """True when the book has an unacknowledged, user-facing structural finding (retired findings
     like LOOSE_IN_AUTHOR do not count)."""
-    return any(
-        f.code not in book.acknowledged_findings and f.code not in SUPPRESSED_FINDINGS
-        for f in book.findings
-    )
+    return bool(active_findings(book))
 
 
 def has_blocking_error(book: BookUnit) -> bool:

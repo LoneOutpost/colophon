@@ -1948,9 +1948,16 @@ def test_confirm_confidence_acknowledges_open_findings(tmp_path):
     assert ctrl._active_findings(book)          # flagged before confirming
     ctrl.confirm_confidence(book)
     assert ctrl._active_findings(book) == []    # and settled after
-    assert FindingCode.METADATA_CONFLICT in book.acknowledged_findings
-    assert FindingCode.MIXED_QUALITY in book.acknowledged_findings
+    # Settled per FINDING, not per code: confirming answers the concerns actually raised, and must
+    # not pre-answer a different one that happens to share a code.
+    assert book.acknowledged_findings == [
+        "metadata_conflict:author: a vs b", "mixed_quality:files span 64-128 kbps",
+    ]
     assert book not in ctrl.books_needing_attention()
+    later = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                    detail='folder "Dune" vs tag "Higher Education"')
+    book.findings = [*book.findings, later]
+    assert ctrl._active_findings(book) == [later]
     ctx.close()
 
 

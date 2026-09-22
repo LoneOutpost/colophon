@@ -767,13 +767,14 @@ def _fill_title_corroboration(books: list[BookUnit]) -> None:
                     detail=tc.evidence,
                 ))
         elif any(mine(f) for f in book.findings):
+            retracted = {f.key for f in book.findings if mine(f)}
             book.findings = [f for f in book.findings if not mine(f)]
-            # The acknowledgement is keyed by CODE, and two other checks raise that same code (the
-            # album-vs-folder conflict in classify.py, the author variant below). Only drop it once
-            # no conflict of any kind is left, or retracting ours would un-acknowledge theirs.
-            if not any(f.code == FindingCode.METADATA_CONFLICT for f in book.findings):
-                book.acknowledged_findings = [c for c in book.acknowledged_findings
-                                              if c != FindingCode.METADATA_CONFLICT]
+            # Drop the dismissals that belonged to the retracted findings: they settled a conflict
+            # that no longer exists, and keeping them would pre-answer a future, different one.
+            # A LEGACY bare-code entry is left alone — it predates per-finding keys and still covers
+            # the other two checks that share this code, so removing it would un-dismiss theirs.
+            book.acknowledged_findings = [k for k in book.acknowledged_findings
+                                          if k not in retracted]
 
 
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
