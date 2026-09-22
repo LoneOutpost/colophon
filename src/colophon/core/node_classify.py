@@ -732,22 +732,48 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     return result.score
 
 
+# The detail shape `title_corroborate` emits (`metadata title "X" vs folder "Y"`). METADATA_CONFLICT
+# is raised by three independent checks — this one, the album-vs-folder test in classify.py, and the
+# author variant below — so a pass may only retract the finding it can prove is its own.
+_TITLE_CONFLICT_PREFIX = 'metadata title "'
+
+
 def _fill_title_corroboration(books: list[BookUnit]) -> None:
-    """Stamp each book's title-corroboration verdict and, on a contradiction, raise a passive
-    METADATA_CONFLICT finding. Mutates no identity field — this slice only scores and flags. Runs
-    last, once author/series/franchise are resolved, so the title residual subtracts a complete set
-    of known entities (title-as-residual)."""
+    """Stamp each book's title-corroboration verdict and keep its METADATA_CONFLICT finding in step
+    with it: raised on a contradiction, RETRACTED when the verdict no longer says so. Mutates no
+    identity field — this pass only scores and flags. Runs last, once author/series/franchise are
+    resolved, so the title residual subtracts a complete set of known entities (title-as-residual).
+
+    The retraction is the half that used to be missing. The verdict is recomputed on every derive,
+    so a finding that outlives its verdict accuses the book of a conflict its own stored verdict
+    denies — exactly what a user sees after fixing the title the finding complained about. The
+    acknowledgement goes with it: it settled a conflict that no longer exists, and keeping it would
+    silently pre-acknowledge the NEXT, different contradiction on this book.
+    """
     from colophon.core.models import Finding, FindingCode, FindingSeverity
     from colophon.core.title_corroborate import book_title_verdict
+
+    def mine(f: Finding) -> bool:
+        return (f.code == FindingCode.METADATA_CONFLICT
+                and (f.detail or "").startswith(_TITLE_CONFLICT_PREFIX))
+
     for book in books:
         tc = book_title_verdict(book)
         book.title_corroboration = tc.verdict
-        if tc.verdict == "contradict" and not any(
-            f.code == FindingCode.METADATA_CONFLICT for f in book.findings
-        ):
-            book.findings.append(Finding(
-                code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN, detail=tc.evidence,
-            ))
+        if tc.verdict == "contradict":
+            if not any(mine(f) for f in book.findings):
+                book.findings.append(Finding(
+                    code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                    detail=tc.evidence,
+                ))
+        elif any(mine(f) for f in book.findings):
+            book.findings = [f for f in book.findings if not mine(f)]
+            # The acknowledgement is keyed by CODE, and two other checks raise that same code (the
+            # album-vs-folder conflict in classify.py, the author variant below). Only drop it once
+            # no conflict of any kind is left, or retracting ours would un-acknowledge theirs.
+            if not any(f.code == FindingCode.METADATA_CONFLICT for f in book.findings):
+                book.acknowledged_findings = [c for c in book.acknowledged_findings
+                                              if c != FindingCode.METADATA_CONFLICT]
 
 
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
