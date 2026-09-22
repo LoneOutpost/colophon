@@ -1068,6 +1068,15 @@ def test_move_file_reorders_and_persists(tmp_path):
     ctx.close()
 
 
+def test_move_files_to_edge_persists_the_new_order(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = _book_with_files(ctx, tmp_path, ["a.mp3", "b.mp3", "c.mp3"])
+    AppController(ctx).move_files_to_edge(book, [book.source_files[2].path], "top")
+    stored = ctx.books.get(book.id)
+    assert [sf.path.name for sf in stored.source_files] == ["c.mp3", "a.mp3", "b.mp3"]
+    ctx.close()
+
+
 def test_exclude_file_persists(tmp_path):
     ctx = _ctx(tmp_path)
     book = _book_with_files(ctx, tmp_path, ["01.mp3", "02.mp3"])

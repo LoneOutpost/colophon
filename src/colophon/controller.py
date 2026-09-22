@@ -2109,6 +2109,16 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
+    def move_files_to_edge(self, book: BookUnit, paths: list[Path], edge: str) -> None:
+        """Send a selection of the book's files to the top or bottom, as a block.
+
+        The batch counterpart to `move_file`: reordering a 193-file book with single-position swaps
+        is a manual insertion sort, quadratic in clicks.
+        """
+        file_ops.move_to_edge(book, paths, edge)
+        book.touch()
+        self.ctx.books.upsert(book)
+
     def exclude_file(self, book: BookUnit, path: Path) -> None:
         """Remove a file from the book's source list (does not delete it from disk)."""
         file_ops.exclude(book, path)
