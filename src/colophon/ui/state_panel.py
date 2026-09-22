@@ -208,7 +208,11 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
     timeline (with reserved, disabled per-phase re-run buttons), the confidence-signal
     breakdown, classification signals, and the Attention section (findings + a suggested
     next action each)."""
-    from colophon.ui.workspace import _STATE_BADGE, _confidence_color  # local: avoid import cycle
+    from colophon.ui.workspace import (  # local: avoid import cycle
+        _STATE_BADGE,
+        _confidence_color,
+        identity_badge,
+    )
 
     logger.debug(f"rendering At a Glance tab for book {book.id}")
 
@@ -232,12 +236,10 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
             ui.badge(label).props(f"color={color} outline").tooltip(state_description(book.state))
             # The two confidences are distinct and both shown here, labelled: identity is the
             # pre-match local-identification rollup from the graph; match is the post-match score.
-            ui.badge(f"Identity {book.identity_confidence:.0f}").props(
-                f"color={_confidence_color(book.identity_confidence)}"
-            ).tooltip(
-                "Local-identification confidence: how sure we are we've identified this book "
-                "from your library's structure and file tags, before matching an online source."
-            )
+            # Identity carries its ceiling because it is a score out of what its class of evidence
+            # can prove (70 locally, 95 matched, 100 confirmed), never out of 100.
+            _ilabel, _icolor, _itip = identity_badge(book)
+            ui.badge(f"Identity {_ilabel}").props(f"color={_icolor}").tooltip(_itip)
             ui.badge(f"Match {book.confidence:.0f}").props(
                 f"color={_confidence_color(book.confidence)}"
             ).tooltip("Match confidence: how strongly a matched source agrees. 0 until matched.")

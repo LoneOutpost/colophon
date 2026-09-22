@@ -272,3 +272,40 @@ def test_a_peripheral_field_match_does_not_lift_the_ceiling():
     assert cf_match_ceiling(b, ScoreCtx()) == []
     b.provenance = {"genres": "audnexus", "authors": "audnexus"}
     assert cf_match_ceiling(b, ScoreCtx())[0].ceiling == CEIL_MATCH
+
+
+def _ceiling_the_engine_applied(book) -> float:
+    """The ceiling `score_identity` actually used, read back off the signal it records."""
+    signals = score_identity(book, ScoreCtx()).signals
+    return next(s.points for s in signals if s.name == "ceiling_applied") / 100
+
+
+def test_identity_ceiling_matches_the_engine(tmp_path):
+    """`identity_ceiling` is a second statement of a rule the engine already owns, so the two are
+    pinned together: the UI reads the standalone one to say what a score is out of, and a drift
+    between them would misreport every book."""
+    from colophon.core.confidence_axioms import identity_ceiling
+    from colophon.core.models import Provenance
+
+    for confirmed in (False, True):
+        for matched in (False, True):
+            book = BookUnit.new(source_folder=tmp_path / "Dune")
+            book.title, book.authors = "Dune", ["Frank Herbert"]
+            book.provenance["authors"] = (
+                Provenance.HARDCOVER.value if matched else Provenance.DIRECTORY.value)
+            book.manually_confirmed = confirmed
+            assert identity_ceiling(book) == _ceiling_the_engine_applied(book), (
+                f"confirmed={confirmed} matched={matched}")
+
+
+def test_identity_ceiling_ignores_a_match_on_a_peripheral_field(tmp_path):
+    """A provider filling in genres has not verified who wrote the book, so it must not lift the
+    ceiling. Same rule `cf_match_ceiling` enforces, checked through the standalone reader."""
+    from colophon.core.confidence_axioms import CEIL_LOCAL, identity_ceiling
+    from colophon.core.models import Provenance
+
+    book = BookUnit.new(source_folder=tmp_path / "Dune")
+    book.title, book.authors = "Dune", ["Frank Herbert"]
+    book.provenance["authors"] = Provenance.DIRECTORY.value
+    book.provenance["genres"] = Provenance.HARDCOVER.value
+    assert identity_ceiling(book) == CEIL_LOCAL
