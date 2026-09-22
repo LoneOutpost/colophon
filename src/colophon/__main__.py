@@ -116,6 +116,22 @@ def main() -> None:
             logger.info(f"covers: cleared {healed_covers} colliding cover reference(s) to re-fetch")
     except Exception:
         logger.exception("cover dedupe failed; starting with cover references as loaded")
+    # Report-only: surface entity-alias/franchise keys a past normalize_key change left
+    # unreachable (e.g. a raw apostrophe from before punctuation-stripping existed). These can't
+    # be repaired -- the original alias text was never stored -- so this only logs them for the
+    # user to notice and re-apply; it must never block startup.
+    try:
+        stale_aliases = controller.unreachable_alias_keys()
+        stale_franchises = controller.unreachable_franchise_keys()
+        if stale_aliases or stale_franchises:
+            logger.warning(
+                f"entity store: {len(stale_aliases)} alias key(s) and "
+                f"{len(stale_franchises)} franchise key(s) are unreachable under the current "
+                f"tokenizer and will never match again -- "
+                f"aliases: {stale_aliases}, franchises: {stale_franchises}"
+            )
+    except Exception:
+        logger.exception("unreachable alias/franchise key check failed; skipping the report")
     create_app(controller)
     raise_ws_message_cap()  # keep large UI payloads from tripping the 1 MB socket cap
     run_kwargs: dict[str, object] = {}
