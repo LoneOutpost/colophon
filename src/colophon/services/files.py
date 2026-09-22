@@ -25,6 +25,25 @@ def reorder(book: BookUnit, ordered_paths: list[Path]) -> None:
     book.source_files = [current[p] for p in ordered_paths]
 
 
+def move_to_edge(book: BookUnit, paths: list[Path], edge: str) -> None:
+    """Move `paths` to the top or bottom of the book's file order, as a block.
+
+    The moved files keep their RELATIVE order from the book, not the order they were passed in: a
+    caller selecting scattered files expects them to land in the order they already had, and a
+    selection has no meaningful order of its own. Paths the book does not own are ignored, so a
+    stale selection cannot raise.
+    """
+    if edge not in ("top", "bottom"):
+        raise ValueError(f"edge must be 'top' or 'bottom', got {edge!r}")
+    chosen = set(paths)
+    current = [sf.path for sf in book.source_files]
+    moving = [p for p in current if p in chosen]
+    staying = [p for p in current if p not in chosen]
+    if not moving:
+        return
+    reorder(book, moving + staying if edge == "top" else staying + moving)
+
+
 def exclude(book: BookUnit, path: Path) -> None:
     """Remove a file from the book's source list (does not delete it from disk)."""
     book.source_files = [sf for sf in book.source_files if sf.path != path]
