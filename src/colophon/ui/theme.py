@@ -157,10 +157,14 @@ body.body--dark { color: #ece4d8; }
    confidence/state badges get pushed off the (often narrow) list pane. */
 .book-row .q-item__section--main,
 .book-row .colophon-book-title { min-width: 0; }
-/* Pin the Books list's scroll content to its container width. Quasar's scroll content is absolutely
-   positioned and sizes to its widest child, so without this the rows expand to their natural width
-   and push the right-pinned confidence/state badges out past the (scrollable) pane edge. */
-.colophon-book-scroll .q-scrollarea__content { width: 100%; }
+/* Pin every scroll area's content to its container width. Quasar's scroll content is absolutely
+   positioned with width:auto, so it sizes to MAX-CONTENT: one long unbroken string -- a folder
+   path, a filename -- inflates the whole box, every sibling section stretches to match, and the
+   pane grows a horizontal scrollbar that pushes right-pinned controls out of sight. `ellipsis`
+   does not prevent it: that clips the paint, not the intrinsic width. Every scroll area here is a
+   vertical scroller, so this is the rule rather than a per-pane patch (it replaces one that fixed
+   only the Books list). A pane that genuinely needs to scroll sideways must opt out explicitly. */
+.q-scrollarea__content { width: 100%; }
 /* Calmer scrollbars. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, .4); border-radius: 8px; }

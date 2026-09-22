@@ -2865,7 +2865,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 middle_count = ui.label("").classes("text-caption colophon-muted")
             middle_toolbar = ui.column().classes("w-full gap-1 q-mt-xs")
             ui.separator().classes("q-mt-xs")
-            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col colophon-book-scroll")
+            list_scroll = ui.scroll_area(on_scroll=_on_list_scroll).classes("col")
             with list_scroll:
                 list_container = ui.column().classes("w-full gap-0")
         ui.element("div").classes("colophon-resizer").tooltip("Drag to resize")
