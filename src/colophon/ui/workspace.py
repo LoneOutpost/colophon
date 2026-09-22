@@ -351,6 +351,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # The one place that decides what the Details column shows. Reads `selected_ids` live; every
     # site below asks it rather than re-deriving the rule (see core/detail_pane.py).
     detail_pane = DetailPane(selected_ids)
+    # Which of the open book's files are checked in the Files list, for the batch
+    # top/bottom reorder. A sibling of `selected_ids`, held here in the same enclosing
+    # closure so it survives `show_detail`'s rebuild — but unlike `selected_ids` it is
+    # purely transient: it is never persisted and is dropped the moment the detail pane
+    # switches to a different book (see the reset in `show_detail`).
+    file_selection: dict[str, object] = {"book_id": None, "paths": set()}
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
     # list and the navigator (author/series list) respect the folder filter, and
@@ -589,6 +595,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         detail_container.clear()
         detail_actions.clear()
         book = controller.get_book(book_id)
+        if file_selection["book_id"] != book_id:
+            # A new book: the file selection (and anything scoped to the old one) is transient
+            # and does not carry over.
+            file_selection["book_id"] = book_id
+            file_selection["paths"] = set()
         with detail_container:
             if book is None:
                 _clear_editor_state()
@@ -939,11 +950,23 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.separator().classes("q-my-sm")
                     ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
 
+                    def _toggle_file(p: Path, checked: bool) -> None:
+                        if checked:
+                            file_selection["paths"].add(p)
+                        else:
+                            file_selection["paths"].discard(p)
+                        show_detail(book.id)
+
                     players = []  # one audio container per row; only one preview plays at a time
 
                     with ui.list().props("dense bordered").classes("w-full"):
                         for idx, sf in enumerate(book.source_files):
                             with ui.item():
+                                with ui.item_section().props("side"):
+                                    ui.checkbox(
+                                        value=sf.path in file_selection["paths"],
+                                        on_change=lambda e, p=sf.path: _toggle_file(p, e.value),
+                                    ).props(f'dense aria-label="Select {sf.path.name}"')
                                 with ui.item_section():
                                     ui.item_label(sf.path.name)
                                     quality = format_file_quality(sf)
