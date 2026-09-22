@@ -1086,8 +1086,6 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(icon="play_arrow", on_click=_toggle_player).props('flat dense round aria-label="Play the start of this file"').tooltip("Play the start of this file")
                                         ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
                                         ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
-                                        ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
-                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (file_selection["paths"].discard(p), controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
                                         def _delete_file(p=sf.path, b=book) -> None:
                                             from colophon.ui.dialogs import confirm_delete_dialog
                                             last = len(b.source_files) == 1
@@ -1106,7 +1104,32 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
 
                                             confirm_delete_dialog([p], book_removed=last, on_confirm=_run)
 
-                                        ui.button(icon="delete_forever", on_click=_delete_file).props('flat dense round color=negative aria-label="Delete this file from disk"').tooltip("Delete this file from disk (permanent)")
+                                        # Play and the two nudges stay inline: they are the frequent,
+                                        # safe, per-row actions. Rename, exclude and delete move behind
+                                        # one overflow menu, for two reasons. Six always-visible icons
+                                        # per row is the cramped-admin-panel shape PRODUCT.md names as
+                                        # an anti-reference: the icons out-weigh the filename, which is
+                                        # the one thing the row exists to show. And it kept two
+                                        # destructive actions one stray click from the safe ones.
+                                        # `ui.menu` is the app's existing overflow vocabulary — see the
+                                        # classify menu in graph_view.
+                                        more = ui.button(icon="more_vert").props(
+                                            'flat dense round aria-label="More actions for this file"')
+                                        more.tooltip("More actions")
+                                        with more, ui.menu():
+                                            ui.menu_item(
+                                                "Move or rename…",
+                                                lambda p=sf.path: move_rename_dialog(
+                                                    controller, book, p, show_detail=show_detail,
+                                                    clear_selection=_clear_selection))
+                                            ui.separator()
+                                            ui.menu_item(
+                                                "Exclude from this book",
+                                                lambda p=sf.path: (file_selection["paths"].discard(p),
+                                                                   controller.exclude_file(book, p),
+                                                                   ui.notify("Excluded"),
+                                                                   show_detail(book.id)))
+                                            ui.menu_item("Delete from disk…", _delete_file)
 
                     siblings = controller.folder_sibling_files(book)
                     if siblings:

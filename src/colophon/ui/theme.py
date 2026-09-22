@@ -205,10 +205,13 @@ body.body--dark { color: #ece4d8; }
 }
 .colophon-attention { border: 1px solid rgba(180, 83, 9, .38);
   border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
-/* Files list (batch reorder): a filter match gets a quiet accent rule so a long,
-   non-contiguous match set (every "CD 2") stays scannable without a color wash;
-   a checked row gets the same tonal selection wash the Books list uses. */
-.colophon-file-match { border-left: 3px solid var(--colophon-accent); }
+/* Files list (batch reorder). Two strengths of the SAME tonal wash, not two different
+   devices: a filter match gets the faint tint, a selected row the stronger one, so
+   "matches the filter" and "matched and chosen" read as one scale rather than as two
+   unrelated signals. Deliberately not a coloured left-border — a side-stripe is a
+   decorative accent masquerading as structure, and on a long non-contiguous match set
+   it stripes most of the list. */
+.colophon-file-match { background: var(--colophon-tag-bg); }
 .colophon-file-selected { background: var(--colophon-sel); }
 /* Primary save actions: a fixed toolbar above the detail scroll area (not inside it),
    so Save / Write tags / Mark ready stay visible however far the fields scroll. The
