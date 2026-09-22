@@ -205,6 +205,11 @@ body.body--dark { color: #ece4d8; }
 }
 .colophon-attention { border: 1px solid rgba(180, 83, 9, .38);
   border-radius: 8px; padding: 8px 10px; background: rgba(180, 83, 9, .06); }
+/* Files list (batch reorder): a filter match gets a quiet accent rule so a long,
+   non-contiguous match set (every "CD 2") stays scannable without a color wash;
+   a checked row gets the same tonal selection wash the Books list uses. */
+.colophon-file-match { border-left: 3px solid var(--colophon-accent); }
+.colophon-file-selected { background: var(--colophon-sel); }
 /* Primary save actions: a fixed toolbar above the detail scroll area (not inside it),
    so Save / Write tags / Mark ready stay visible however far the fields scroll. The
    hairline rule separates the toolbar from the scrolling content below. */

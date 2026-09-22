@@ -356,7 +356,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # closure so it survives `show_detail`'s rebuild — but unlike `selected_ids` it is
     # purely transient: it is never persisted and is dropped the moment the detail pane
     # switches to a different book (see the reset in `show_detail`).
-    file_selection: dict[str, object] = {"book_id": None, "paths": set()}
+    file_selection: dict[str, object] = {
+        "book_id": None, "paths": set(), "filter": "", "last_clicked": None,
+    }
     # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
     # list and the navigator (author/series list) respect the folder filter, and
@@ -600,6 +602,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             # and does not carry over.
             file_selection["book_id"] = book_id
             file_selection["paths"] = set()
+            file_selection["filter"] = ""
+            file_selection["last_clicked"] = None
         with detail_container:
             if book is None:
                 _clear_editor_state()
@@ -950,23 +954,102 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.separator().classes("q-my-sm")
                     ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
 
-                    def _toggle_file(p: Path, checked: bool) -> None:
-                        if checked:
-                            file_selection["paths"].add(p)
-                        else:
-                            file_selection["paths"].discard(p)
+                    all_paths = [sf.path for sf in book.source_files]
+
+                    def _file_matches(name: str) -> bool:
+                        # Deliberately dumb: a plain case-insensitive substring match, not a
+                        # disc/track parser. That's what lets it survive a naming scheme
+                        # nobody anticipated — the user just types what to match.
+                        needle = str(file_selection["filter"]).strip().lower()
+                        return not needle or needle in name.lower()
+
+                    def _set_file_filter(text: str) -> None:
+                        file_selection["filter"] = text
                         show_detail(book.id)
+
+                    def _select_matching() -> None:
+                        file_selection["paths"].update(p for p in all_paths if _file_matches(p.name))
+                        show_detail(book.id)
+
+                    def _clear_file_selection() -> None:
+                        file_selection["paths"] = set()
+                        file_selection["last_clicked"] = None
+                        show_detail(book.id)
+
+                    def _on_file_click(e, p: Path) -> None:
+                        # Plain click: toggle just this row. Shift-click: select the inclusive
+                        # range from the last-clicked row to this one — the contiguous-run
+                        # convenience that "Select matching" (non-contiguous) doesn't cover.
+                        shift = bool(isinstance(e.args, dict) and e.args.get("shiftKey"))
+                        anchor = file_selection["last_clicked"]
+                        if shift and anchor in all_paths and p in all_paths:
+                            i, j = all_paths.index(anchor), all_paths.index(p)
+                            lo, hi = min(i, j), max(i, j)
+                            file_selection["paths"].update(all_paths[lo:hi + 1])
+                        elif p in file_selection["paths"]:
+                            file_selection["paths"].discard(p)
+                        else:
+                            file_selection["paths"].add(p)
+                        file_selection["last_clicked"] = p
+                        show_detail(book.id)
+
+                    def _send_files_to_edge(edge: str) -> None:
+                        paths = [p for p in all_paths if p in file_selection["paths"]]
+                        controller.move_files_to_edge(book, paths, edge)
+                        file_selection["paths"] = set()
+                        file_selection["last_clicked"] = None
+                        ui.notify(f"Sent {len(paths)} file(s) to the {edge}")
+                        show_detail(book.id)
+
+                    with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mt-xs"):
+                        filter_input(
+                            _set_file_filter, placeholder="Filter files",
+                            value=str(file_selection["filter"]), aria_label="Filter files",
+                        ).classes("col")
+                        ui.button(
+                            "Select matching", icon="playlist_add_check",
+                            on_click=_select_matching,
+                        ).props("flat dense no-caps").tooltip(
+                            "Add every file matching the filter to the selection"
+                        ).set_enabled(bool(str(file_selection["filter"]).strip()))
+
+                    if file_selection["paths"]:
+                        with ui.row().classes(
+                            "colophon-actionbar w-full no-wrap items-center q-gutter-sm"
+                        ):
+                            ui.label(f"{len(file_selection['paths'])} selected").classes(
+                                "text-caption colophon-muted"
+                            )
+                            ui.space()
+                            ui.button(
+                                "Send to top", icon="vertical_align_top",
+                                on_click=lambda: _send_files_to_edge("top"),
+                            ).props("flat dense no-caps")
+                            ui.button(
+                                "Send to bottom", icon="vertical_align_bottom",
+                                on_click=lambda: _send_files_to_edge("bottom"),
+                            ).props("flat dense no-caps")
+                            ui.button(icon="close", on_click=_clear_file_selection).props(
+                                'flat dense round aria-label="Clear file selection"'
+                            ).tooltip("Clear file selection")
 
                     players = []  # one audio container per row; only one preview plays at a time
 
                     with ui.list().props("dense bordered").classes("w-full"):
                         for idx, sf in enumerate(book.source_files):
-                            with ui.item():
+                            row_classes = []
+                            if _file_matches(sf.path.name):
+                                row_classes.append("colophon-file-match")
+                            if sf.path in file_selection["paths"]:
+                                row_classes.append("colophon-file-selected")
+                            with ui.item().classes(" ".join(row_classes)):
                                 with ui.item_section().props("side"):
-                                    ui.checkbox(
-                                        value=sf.path in file_selection["paths"],
-                                        on_change=lambda e, p=sf.path: _toggle_file(p, e.value),
-                                    ).props(f'dense aria-label="Select {sf.path.name}"')
+                                    ui.checkbox(value=sf.path in file_selection["paths"]).props(
+                                        f'dense aria-label="Select {sf.path.name}"'
+                                    ).on(
+                                        "click", lambda e, p=sf.path: _on_file_click(e, p),
+                                        args=["shiftKey"],
+                                    )
                                 with ui.item_section():
                                     ui.item_label(sf.path.name)
                                     quality = format_file_quality(sf)
@@ -999,12 +1082,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                         ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
                                         ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
                                         ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
-                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
+                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (file_selection["paths"].discard(p), controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
                                         def _delete_file(p=sf.path, b=book) -> None:
                                             from colophon.ui.dialogs import confirm_delete_dialog
                                             last = len(b.source_files) == 1
 
                                             async def _run() -> None:
+                                                file_selection["paths"].discard(p)
                                                 result = await asyncio.to_thread(controller.delete_file, b, p)
                                                 if result.errors:
                                                     ui.notify("; ".join(result.errors), type="warning")
