@@ -1035,10 +1035,15 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
 
                     players = []  # one audio container per row; only one preview plays at a time
 
+                    # An empty filter matches everything (so "Select matching" can act as a
+                    # select-all), but the match HIGHLIGHT must not: marking every row accent-left
+                    # when nothing is typed is pure noise, and it puts terracotta on the whole list
+                    # rather than the <=10% the design system allows.
+                    highlighting = bool(str(file_selection["filter"]).strip())
                     with ui.list().props("dense bordered").classes("w-full"):
                         for idx, sf in enumerate(book.source_files):
                             row_classes = []
-                            if _file_matches(sf.path.name):
+                            if highlighting and _file_matches(sf.path.name):
                                 row_classes.append("colophon-file-match")
                             if sf.path in file_selection["paths"]:
                                 row_classes.append("colophon-file-selected")
