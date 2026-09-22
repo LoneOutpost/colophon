@@ -208,8 +208,12 @@ def test_single_book_leaf_folder_named_like_author_becomes_author(tmp_path):
 
     node = graph.directories[DirectoryNode.id_for(folder)]
     assert node.kind == "author" and node.author == "Sean Flynn"
-    # the payoff: the book now reads as locally identified, not a flat zero
-    assert book_identity_confidence(book, graph, root) >= 60
+    # The payoff: resolving the folder as the author gives the author axis real support, where an
+    # unresolved graph gave it none. The TOTAL stays modest because this book's title is evidenced by
+    # nothing at all — under the old `max(a, s)` an unevidenced title was free, and it no longer is.
+    score = book_identity_confidence(book, graph, root)
+    assert score > 0
+    assert any(s.name == "author_support" for s in book.identity_signals)
 
 
 def test_single_book_leaf_folder_named_like_title_stays_title(tmp_path):

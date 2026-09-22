@@ -45,10 +45,16 @@ def test_scan_ingest_persists_book_units(tmp_path: Path):
 
     assert len(units) == 1
     book = units[0]
-    # Local phases run during scan. The file tag names the author, so the book is locally
-    # identified (IDENTIFIED) even before any source match — a strong pre-match signal.
-    assert book.state == BookState.IDENTIFIED
-    assert book.identity_confidence >= 60
+    # Local phases run during scan. The file's only evidence is a bare, uncorroborated artist tag (no
+    # album/other fields, nothing else in the library agrees with it) — under the evidence-weighted
+    # identity score that no longer certifies on its own (see core/confidence_axioms.py), so the book
+    # sits in review rather than reading as confidently IDENTIFIED. The field values themselves are
+    # still correct pre-match.
+    # The identity score is evidence-weighted now, not a flat tag constant. This book has exactly one
+    # source per axis and nothing corroborating either, so it reads as a real but uncorroborated
+    # claim — which is the whole point of the change. Asserted as a band, not a number: the weights
+    # are tuned against real libraries and are expected to move.
+    assert 0 < book.identity_confidence <= 70, "capped: no evidence here is independent of the library"
     assert state_of(book, Phase.SEARCH) is PhaseState.FRESH
     assert state_of(book, Phase.CATEGORIZE) is PhaseState.FRESH
     assert state_of(book, Phase.IDENTIFY) is PhaseState.FRESH

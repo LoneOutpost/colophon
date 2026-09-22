@@ -901,3 +901,23 @@ def test_author_conflict_is_flagged_as_metadata_conflict(tmp_path):
     assert not any(f.code == FindingCode.METADATA_CONFLICT for f in corroborate[0].findings)
     # a co-author superset (same primary, extra name) is format/completeness, not a conflict
     assert not any(f.code == FindingCode.METADATA_CONFLICT for f in coauthor.findings)
+
+
+def test_identity_confidence_no_longer_certifies_a_lone_tag(tmp_path):
+    # Regression: a tag-sourced author read a flat 0.9 and a populated series added 0.1, so an
+    # uncorroborated tag reached 100.
+    from colophon.core.graph import Graph
+    from colophon.core.models import BookUnit, EmbeddedTags, SourceFile
+    from colophon.core.node_classify import book_identity_confidence
+
+    folder = tmp_path / "Assorted" / "Disc 1"
+    folder.mkdir(parents=True)
+    book = BookUnit.new(source_folder=folder)
+    book.title = "Dune"
+    book.authors = ["Frank Herbert"]
+    book.provenance = {"authors": "tag", "title": "tag"}
+    book.source_files = [SourceFile(path=folder / "track01.mp3", size=1, duration_seconds=1.0,
+                                    ext="mp3", tags=EmbeddedTags(artist="Frank Herbert",
+                                                                 album="Dune"))]
+    score = book_identity_confidence(book, Graph(), tmp_path)
+    assert score <= 70, f"local-only evidence must not exceed the ceiling, got {score}"
