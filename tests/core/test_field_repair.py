@@ -5,11 +5,14 @@ from colophon.core.field_repair import repair_fields
 from colophon.core.models import BookUnit, Provenance
 
 
-def _book(title=None, prov="tag", year=None):
+def _book(title=None, prov="tag", year=None, authors=None, authors_prov="tag"):
     b = BookUnit.new(source_folder=Path("/x/Book"))
     if title is not None:
         b.title = title
         b.provenance["title"] = prov
+    if authors is not None:
+        b.authors = authors
+        b.provenance["authors"] = authors_prov
     b.publish_year = year
     return b
 
@@ -68,3 +71,32 @@ def test_idempotent():
     assert repair_fields(b) is True
     assert repair_fields(b) is False   # second pass finds nothing
     assert b.title == "Star Bridge" and b.publish_year is None
+
+
+def test_repair_strips_a_catalog_code_prefix():
+    b = _book(title="EV01 Dies the Fire")
+    assert repair_fields(b) is True
+    assert b.title == "Dies the Fire"
+
+
+def test_repair_leaves_a_real_title_that_merely_starts_with_letters_and_digits():
+    # Must not eat a legitimate title.
+    for keep in ("SSN", "1Q84", "Apollo 13", "Se7en", "Fahrenheit 451",
+                 "Catch-22", "Slaughterhouse-Five"):   # Catch-22 is why the encode rule needs 3 digits
+        b = _book(title=keep)
+        repair_fields(b)
+        assert b.title == keep, keep
+
+
+def test_repair_strips_a_narrator_suffix_from_an_author():
+    b = _book(title="Family Linen", authors=["Lee Smith--Narr: Linda Stephens"])
+    assert repair_fields(b) is True
+    assert b.authors == ["Lee Smith"]
+
+
+def test_repair_strips_trailing_encode_junk_from_a_title():
+    for raw, want in (("Sharpe's Gold-237", "Sharpe's Gold"),
+                      ("Sharpe's Skirmish-55.9", "Sharpe's Skirmish")):
+        b = _book(title=raw)
+        assert repair_fields(b) is True
+        assert b.title == want

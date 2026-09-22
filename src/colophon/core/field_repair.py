@@ -7,6 +7,7 @@ action (Slice 2)."""
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,18 @@ if TYPE_CHECKING:
 
 _MIN_YEAR = 1400
 _MAX_YEAR = date.today().year + 1   # seeded once at import; a next-year pub date is plausible
+
+# A cataloguer's shelf code prefixing a real title: "EV01 Dies the Fire", "LSFL01a Family.Linen",
+# "Hb02 Black Ice". Deliberately narrow — 2-4 capitals, 2-3 digits, an optional letter, then
+# whitespace — so a real title that merely opens with letters and digits ("SSN", "1Q84", "Apollo 13")
+# is untouched.
+_CATALOG_PREFIX = re.compile(r"^[A-Z]{2,4}\d{2,3}[a-z]?\s+")
+# A narrator credit appended to an author: "Lee Smith--Narr: Linda Stephens".
+_NARRATOR_SUFFIX = re.compile(r"\s*--\s*(narr|narrated|read)\b.*$", re.IGNORECASE)
+# A fractional duration a ripper appended to a title: "Sharpe's Skirmish-55.9". The INTEGER form
+# ("-237", "-184") is already removed upstream by clean_title's trailing-index rule, so only the
+# decimal case belongs here — a second rule for the integer form would be a duplicate that drifts.
+_ENCODE_SUFFIX = re.compile(r"-\d{1,3}\.\d+$")
 
 
 def repair_fields(book: BookUnit) -> bool:
@@ -32,6 +45,28 @@ def repair_fields(book: BookUnit) -> bool:
         cleaned = clean_title(book.title)
         if cleaned != book.title:
             book.title = cleaned
+            changed = True
+        # A cataloguer's shelf code prefix ("EV01 Dies the Fire") and encode residue a ripper
+        # appended to the filename ("Sharpe's Gold-237") — never let either strip empty the title.
+        stripped = _CATALOG_PREFIX.sub("", book.title)
+        stripped = _ENCODE_SUFFIX.sub("", stripped).strip()
+        if stripped and stripped != book.title:
+            book.title = stripped
+            changed = True
+    # A narrator credit appended to an author ("Lee Smith--Narr: Linda Stephens") — never let the
+    # strip empty the author.
+    if book.authors and book.provenance.get("authors") != Provenance.MANUAL.value:
+        cleaned_authors = []
+        authors_changed = False
+        for author in book.authors:
+            stripped_author = _NARRATOR_SUFFIX.sub("", author).strip()
+            if stripped_author and stripped_author != author:
+                cleaned_authors.append(stripped_author)
+                authors_changed = True
+            else:
+                cleaned_authors.append(author)
+        if authors_changed:
+            book.authors = cleaned_authors
             changed = True
     # C1: drop an impossible publish year.
     if book.publish_year is not None and not (_MIN_YEAR <= book.publish_year <= _MAX_YEAR):
