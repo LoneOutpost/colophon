@@ -85,7 +85,12 @@ from colophon.core.navigator import (
     filter_library_tree,
 )
 from colophon.core.node_classify import book_identity_confidence, classify_nodes
-from colophon.core.normalize import FIELD_NORMALIZERS, merge_preserve, normalize_genres
+from colophon.core.normalize import (
+    FIELD_NORMALIZERS,
+    merge_preserve,
+    normalize_genres,
+    normalize_key,
+)
 from colophon.core.part_order import resolve_part_order
 from colophon.core.pathscheme import build_reorg_targets, build_target_path, sanitize_name
 from colophon.core.perf import timed
@@ -1808,6 +1813,29 @@ class AppController:
             book.touch()
             self.ctx.books.upsert(book, commit=(i == len(stale) - 1))
         return len(stale)
+
+    def unreachable_alias_keys(self) -> list[tuple[str, str]]:
+        """Stored alias keys the current tokenizer can no longer produce, so nothing will ever
+        match them.
+
+        A key is reachable when re-keying it through `normalize_key` is a fixed point: some
+        string exists today that would still produce it. A row still carrying a raw apostrophe
+        ("o'brien", from a normalize_key era that never stripped punctuation) is not — the
+        current tokenizer strips apostrophes, so it yields "obrien" instead, and the row is dead
+        weight nothing will ever hit again. Note this is a narrower net than "was this row
+        written under the old apostrophe-as-space rule": that rule's own output ("o brien") is
+        still a fixed point today, because a literal two-word name like "O Brien" also keys
+        there — so it stays unflagged rather than risk a false positive.
+
+        Reports only. It cannot repair: the original alias text was never stored, so any rewrite
+        would be a guess at which entity the user meant."""
+        return [(kind, key) for kind, key in self.ctx.aliases.all() if normalize_key(key) != key]
+
+    def unreachable_franchise_keys(self) -> list[str]:
+        """Same detector as `unreachable_alias_keys`, for user-declared franchise keys
+        (`KnownFranchiseRepo`). Shares the same fixed-point test and the same "report, never
+        repair" reasoning: the original franchise text was never stored either."""
+        return [key for key in self.ctx.franchises.all() if normalize_key(key) != key]
 
     def books_all(self) -> list[BookUnit]:
         """All persisted books (used by callers that need the full set)."""

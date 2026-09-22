@@ -8,6 +8,8 @@ from colophon.core.sequence_affix import clean_title
 @pytest.mark.parametrize("legit", [
     "Slaughterhouse 5", "Catch 22", "Fahrenheit 451", "2001 - A Space Odyssey", "1984", "2312",
     "The Land: Forging: Chaos Seeds, Book 2", "Children of Time",
+    # a hyphenated number belongs to these titles; the old trailing-index rule ate it
+    "Catch-22", "Hawaii Five-0", "Slaughterhouse-Five",
     "God's Eye: Awakening: A Labyrinth World LitRPG Novel",
 ])
 def test_legitimate_titles_are_untouched(legit):
@@ -17,7 +19,10 @@ def test_legitimate_titles_are_untouched(legit):
 @pytest.mark.parametrize("dirty,expected", [
     ("Acorna - 01", "Acorna"),
     ("Rogue Angel 01", "Rogue Angel"),
-    ("ABC-2 output", "ABC"),
+    # was "ABC-2 output": a bare 1-2 digit number after a dash is no longer treated as an
+    # index, because that reading turned "Catch-22" into "Catch". Padded form keeps the
+    # fixture's actual point (the "output" junk word plus an index are both stripped).
+    ("ABC-02 output", "ABC"),
     ("Coyote Horizon - Unb-001", "Coyote Horizon"),
     ("Hotwire 3-04", "Hotwire"),
     ("01_28_The_Coming_of_the_Ship", "The Coming of the Ship"),

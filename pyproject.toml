@@ -71,3 +71,6 @@ ignore = ["E501"]
 # Curly quotes are the fixture here: these cases assert how clean_title treats a lone leading ‘.
 "tests/core/test_clean_title.py" = ["RUF001"]
 "tests/core/test_sequence_marker.py" = ["RUF001"]
+# The apostrophe-variant charset (straight, typographic, modifier-letter) is intentional: taggers and
+# filesystems emit all of them, and canonical_words must strip every one, not just the ASCII form.
+"src/colophon/core/normalize.py" = ["RUF001"]

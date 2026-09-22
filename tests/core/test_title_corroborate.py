@@ -82,3 +82,9 @@ def test_abstain_glued_disc_track_tag():
 def test_no_false_agree_on_shared_stopword():
     # 'The Cat' vs a folder 'The Dog' must not agree merely by sharing 'the'.
     assert _v("The Cat", [], "Aesop - The Dog", ["Aesop"]) == "contradict"
+
+
+def test_title_words_agree_across_a_dropped_apostrophe():
+    from colophon.core.title_corroborate import _title_words
+    assert _title_words("Sharpe's Gold") == _title_words("Sharpes Gold")
+    assert _title_words("Old Man's War") & _title_words("Old Mans War Bk01")

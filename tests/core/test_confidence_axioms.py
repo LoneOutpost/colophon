@@ -105,7 +105,7 @@ def _book(folder="/audio/Frank Herbert/Dune", stem="Dune", prov="tag", **kw):
 
 def test_axis_candidates_collects_one_vote_per_source():
     b = _book(tags=EmbeddedTags(artist="Frank Herbert"), authors=["Frank Herbert"])
-    got = {name: value for value, _weight, name in axis_candidates(b, "author", None)}
+    got = {name: value for value, _weight, name in axis_candidates(b, "author")}
     assert got["tag"] == "Frank Herbert"
     assert got["folder"] == "Frank Herbert"      # the parent directory of the book folder
 
@@ -113,19 +113,19 @@ def test_axis_candidates_collects_one_vote_per_source():
 def test_axis_candidates_drops_a_junk_author_so_it_cannot_vote():
     b = _book(tags=EmbeddedTags(artist="Narrated by William Gaminara"),
               authors=["Narrated by William Gaminara"])
-    names = {name for _v, _w, name in axis_candidates(b, "author", None)}
+    names = {name for _v, _w, name in axis_candidates(b, "author")}
     assert "tag" not in names
 
 
 def test_axis_candidates_drops_an_author_that_echoes_the_title():
     b = _book(tags=EmbeddedTags(artist="Dune"), authors=["Dune"], title="Dune")
-    names = {name for _v, _w, name in axis_candidates(b, "author", None)}
+    names = {name for _v, _w, name in axis_candidates(b, "author")}
     assert "tag" not in names
 
 
 def test_axis_candidates_uses_the_folder_name_for_title():
     b = _book(folder="/audio/Frank Herbert/Dune", tags=EmbeddedTags(album="Dune"), title="Dune")
-    got = {name: value for value, _weight, name in axis_candidates(b, "title", None)}
+    got = {name: value for value, _weight, name in axis_candidates(b, "title")}
     assert got["tag"] == "Dune"
     assert got["folder"] == "Dune"
     assert got["filename"] == "Dune"

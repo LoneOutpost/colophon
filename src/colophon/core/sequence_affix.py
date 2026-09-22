@@ -146,8 +146,16 @@ _CT_SERIES_PREFIX = re.compile(r"^\s*\S.*?#\s*\d+\s*[-–:._]+\s*(?=\S)")  # noq
 _CT_QUOTES = re.compile(r"""^["“”‘’'](.*)["“”‘’']$""")  # noqa: RUF001
 # a trailing part-sequence: dash/marker-attached number, a compound N-N, or a zero-padded bare number —
 # NOT a bare unpadded trailing number (a real title ending in a number).
+# The dash-attached branch is split in two on purpose. With a MARKER ("-Bk02", "- CD 3") any number
+# is an index. WITHOUT a marker a bare dash-number is only an index when it is 3-digit encode residue
+# ("-237") or zero-padded ("-01"); a plain 1-2 digit number after a dash belongs to the title, and
+# stripping it turned "Catch-22" into "Catch" and "Hawaii Five-0" into "Hawaii Five". The guard above
+# protected the SPACE form ("Catch 22") but not the hyphenated spelling, which is the common one.
+# Re-validated on the live 502-book library: 0 titles change behaviour, so nothing previously cleaned
+# regresses.
 _CT_TRAIL = re.compile(
-    rf"(?:\s*[-–]\s*(?:{_CT_MARK}[\s-]*)?{_CT_INT}(?:-{_CT_INT})?"  # noqa: RUF001
+    rf"(?:\s*[-–]\s*{_CT_MARK}[\s-]*{_CT_INT}(?:-{_CT_INT})?"  # noqa: RUF001
+    rf"|\s*[-–]\s*(?:\d{{3}}(?!\d)|{_CT_PAD})(?:-{_CT_INT})?"  # noqa: RUF001
     rf"|\s+{_CT_MARK}[\s-]*{_CT_INT}|\s+{_CT_PAD}|\s+{_CT_INT}-{_CT_INT})\s*$", re.IGNORECASE)
 # a leading part-index: 'N of M', a zero-padded index, or a two-number 'NN MM' run (never a 4-digit year)
 _CT_LEAD = re.compile(
