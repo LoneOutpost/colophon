@@ -821,6 +821,83 @@ def test_fill_title_corroboration_stamps_and_flags(tmp_path):
     assert any(f.code == FindingCode.METADATA_CONFLICT for f in contra.findings)
 
 
+def test_fill_title_corroboration_retracts_a_finding_the_verdict_no_longer_supports(tmp_path):
+    """A METADATA_CONFLICT raised by an earlier pass must go when the verdict stops saying
+    contradict. The verdict is recomputed every derive, so a finding that outlives it accuses the
+    book of a conflict its own stored verdict denies — which is what a user sees after they fix the
+    title the finding complained about."""
+    from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    b = BookUnit.new(source_folder=tmp_path / "At Risk")
+    b.title, b.authors = "At Risk", ["Stella Rimington"]
+    b.provenance["authors"] = Provenance.TAG.value
+    # Left behind by a pass taken while the title was still wrong.
+    stale = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                    detail='metadata title "Some Other Book" vs folder "At Risk"')
+    b.findings = [stale]
+    b.acknowledged_findings = [stale.key]
+
+    _fill_title_corroboration([b])
+
+    assert b.title_corroboration == "agree"
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in b.findings)
+    # The dismissal went with it: it settled a conflict that no longer exists, and leaving it would
+    # silently pre-answer the NEXT, different contradiction on this book.
+    assert stale.key not in b.acknowledged_findings
+
+
+def test_fill_title_corroboration_keeps_a_legacy_bare_code_dismissal(tmp_path):
+    """A bare-code entry predates per-finding keys and still covers the two other checks sharing
+    METADATA_CONFLICT, so retracting our finding must not remove it and un-dismiss theirs."""
+    from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    b = BookUnit.new(source_folder=tmp_path / "At Risk")
+    b.title, b.authors = "At Risk", ["Stella Rimington"]
+    b.provenance["authors"] = Provenance.TAG.value
+    b.findings = [Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                          detail='metadata title "Some Other Book" vs folder "At Risk"')]
+    b.acknowledged_findings = ["metadata_conflict"]
+
+    _fill_title_corroboration([b])
+
+    assert not any(f.code == FindingCode.METADATA_CONFLICT for f in b.findings)
+    assert b.acknowledged_findings == ["metadata_conflict"]
+
+
+def test_fill_title_corroboration_retracts_only_its_own_conflict(tmp_path):
+    """Three independent checks raise METADATA_CONFLICT — this pass, the album-vs-folder test in
+    classify.py, and the author variant. Retracting must not sweep away the other two: they test
+    different things and a title that now agrees says nothing about either."""
+    from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    b = BookUnit.new(source_folder=tmp_path / "At Risk")
+    b.title, b.authors = "At Risk", ["Stella Rimington"]
+    b.provenance["authors"] = Provenance.TAG.value
+    b.findings = [
+        Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail='metadata title "Some Other Book" vs folder "At Risk"'),   # ours: stale
+        Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail='folder "At Risk" vs tag "Higher Education"'),             # classify.py
+        Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail="author: tag 'X' vs folder 'Y'"),                          # author variant
+        Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="zero length"),
+    ]
+    b.acknowledged_findings = [FindingCode.METADATA_CONFLICT]
+
+    _fill_title_corroboration([b])
+
+    details = [f.detail for f in b.findings]
+    assert 'metadata title "Some Other Book" vs folder "At Risk"' not in details
+    assert 'folder "At Risk" vs tag "Higher Education"' in details
+    assert "author: tag 'X' vs folder 'Y'" in details
+    assert "zero length" in details
+    # A conflict of another kind still stands, so the code-keyed acknowledgement must stay.
+    assert FindingCode.METADATA_CONFLICT in b.acknowledged_findings
+
+
 def test_fill_title_corroboration_mutates_no_field(tmp_path):
     from colophon.core.models import BookUnit, Provenance
     from colophon.core.node_classify import _fill_title_corroboration

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from colophon.core.models import BookUnit, FindingCode
+from colophon.core.models import BookUnit, FindingCode, is_acknowledged
 from colophon.core.normalize import collides_with_title
 from colophon.core.phases import DEFAULT_IDENTITY_THRESHOLD
 
@@ -53,7 +53,7 @@ def review_reasons(
 
     # Structural concerns (skip user-acknowledged findings and the benign loose-in-author case).
     for f in book.findings:
-        if f.code in book.acknowledged_findings:
+        if is_acknowledged(book, f):
             continue
         msg = _FINDING_MSG.get(f.code)
         if msg:

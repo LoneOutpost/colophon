@@ -20,7 +20,6 @@ from colophon.core.models import (
     BookState,
     BookUnit,
     EmbeddedTags,
-    FindingCode,
     Phase,
     PhaseState,
 )
@@ -41,7 +40,7 @@ class AttentionActions:
     organize: Callable[[], None]
     files: Callable[[], None]
     matches: Callable[[], None]
-    acknowledge: Callable[[FindingCode], None]
+    acknowledge: Callable[[str], None]   # takes a Finding.key, not a bare code
     delete: Callable[[], None]
     rerun_phase: Callable[[BookUnit, Phase], Awaitable[None]]
     fix_extension: Callable[[], None]
@@ -213,14 +212,15 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
 
     logger.debug(f"rendering At a Glance tab for book {book.id}")
 
-    def _action_button(action: FixAction, code: FindingCode | None = None) -> None:
+    def _action_button(action: FixAction, ack_key: str | None = None) -> None:
         text, icon = _ACTION_META[action]
         handlers: dict[FixAction, Callable[[], None]] = {
             FixAction.REPROBE: actions.reprobe,
             FixAction.ORGANIZE: actions.organize,
             FixAction.FILES: actions.files,
             FixAction.MATCHES: actions.matches,
-            FixAction.ACKNOWLEDGE: (lambda c=code: actions.acknowledge(c)) if code else (lambda: None),
+            FixAction.ACKNOWLEDGE: ((lambda k=ack_key: actions.acknowledge(k)) if ack_key
+                                    else (lambda: None)),
             FixAction.DELETE: actions.delete,
             FixAction.FIX_EXTENSION: actions.fix_extension,
         }
@@ -362,4 +362,4 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                     ui.label(item.suggestion).classes("colophon-muted text-caption q-pl-lg")
                     with ui.row().classes("q-pl-lg q-gutter-xs"):
                         for action in item.actions:
-                            _action_button(action, item.code)
+                            _action_button(action, item.key)

@@ -18,6 +18,7 @@ class AttentionItem(NamedTuple):
     suggestion: str
     actions: tuple[FixAction, ...]
     code: FindingCode | None  # None for the synthetic missing-book item
+    key: str | None = None    # the finding's acknowledgement identity; None when there is no finding
 
 
 def attention_items(book: BookUnit, active_findings: list[Finding]) -> list[AttentionItem]:
@@ -37,6 +38,6 @@ def attention_items(book: BookUnit, active_findings: list[Finding]) -> list[Atte
         g = finding_guidance(f.code)
         items.append(AttentionItem(
             severity=f.severity, detail=f.detail, suggestion=g.suggestion,
-            actions=g.actions, code=f.code,
+            actions=g.actions, code=f.code, key=f.key,
         ))
     return items

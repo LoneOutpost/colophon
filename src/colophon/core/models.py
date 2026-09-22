@@ -125,6 +125,21 @@ class Finding(_Base):
     severity: FindingSeverity
     detail: str
 
+    @property
+    def key(self) -> str:
+        """This finding's acknowledgement identity: its code AND what it says.
+
+        Dismissals are recorded per-key rather than per-code because one code can cover several
+        independent checks. METADATA_CONFLICT is raised by three of them (a title-vs-folder
+        residual, an album-vs-folder comparison, an author disagreement), and dismissing one must
+        not silence the other two — they are different claims that happen to share a label.
+
+        The detail is part of the identity on purpose: a finding whose detail changed is making a
+        different claim, so it asks again rather than inheriting an answer given about something
+        else.
+        """
+        return f"{self.code.value}:{self.detail}"
+
 
 class DetectedWork(_Base):
     """One distinct work the classifier found inside a folder; the unit a split
@@ -306,7 +321,10 @@ class BookUnit(_Base):
     title_corroboration: str | None = None
     findings: list[Finding] = []
     detected_works: list[DetectedWork] = []
-    acknowledged_findings: list[FindingCode] = []
+    # Acknowledgement KEYS (see `Finding.key`), or — for rows written before dismissals
+    # were per-finding — a bare finding code, which still means "all findings of this
+    # code". `is_acknowledged` honours both.
+    acknowledged_findings: list[str] = []
     manually_confirmed: bool = False
     missing: bool = False  # tracked folder vanished outside the app; surfaced for cleanup
     state: BookState = BookState.DETECTED
@@ -373,3 +391,25 @@ class OperationRecord(_Base):
     after: str | None = None
     outcome: str = "ok"
     detail: str | None = None
+
+
+def is_acknowledged(book: BookUnit, finding: Finding) -> bool:
+    """Whether the user dismissed THIS finding.
+
+    Two shapes are honoured. A precise `Finding.key` dismisses exactly the finding it names. A
+    bare finding code is the legacy shape, written before dismissals were per-finding, and keeps
+    its original meaning — every finding carrying that code — so upgrading never resurfaces
+    something the user already put away.
+    """
+    ack = book.acknowledged_findings
+    return finding.key in ack or finding.code.value in ack
+
+
+def active_findings(book: BookUnit) -> list[Finding]:
+    """The book's findings minus the dismissed ones and the codes retired from the user-facing
+    surface. The single definition of "active": four callers used to spell this rule out
+    separately, which was survivable while it was one `in` test and is not now that an
+    acknowledgement has two shapes.
+    """
+    return [f for f in book.findings
+            if not is_acknowledged(book, f) and f.code not in SUPPRESSED_FINDINGS]

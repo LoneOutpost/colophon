@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from colophon.core.graph import DirectoryNode, Graph
-from colophon.core.models import SUPPRESSED_FINDINGS
+from colophon.core.models import active_findings
 
 
 @dataclass
@@ -63,10 +63,7 @@ def _dir_badges(node: DirectoryNode) -> list[str]:
 def _book_has_active_finding(book) -> bool:
     """True when the book carries a finding that is neither acknowledged nor globally suppressed —
     the same 'active finding' rule the Attention view uses, rolled up to folders here."""
-    return any(
-        f.code not in book.acknowledged_findings and f.code not in SUPPRESSED_FINDINGS
-        for f in book.findings
-    )
+    return bool(active_findings(book))
 
 
 def _folder_row(graph: Graph, dir_id: str) -> FolderRow:
