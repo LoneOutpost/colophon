@@ -63,7 +63,7 @@ def build_library_tree(
             b for b in books
             if not any(k in ("author", "series") for (k, _) in g.book_entities.get(b.id, []))
         ),
-        key=lambda b: b.confidence,
+        key=lambda b: b.identity_confidence,
     )
     return LibraryTree(
         needs_id=needs_id,

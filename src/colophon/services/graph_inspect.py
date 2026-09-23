@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from colophon.adapters.repository.store import BookUnitRepo
+from colophon.core.confidence_axioms import identity_ceiling
 from colophon.core.graph_explore import (
     display_kind,
     neighborhood,
@@ -37,7 +38,7 @@ def _confidence_of(books: BookUnitRepo):
         book_id = node.attrs.get("book_id")
         if book_id:
             book = books.get(str(book_id))
-            return book.confidence if book is not None else None
+            return book.identity_confidence if book is not None else None
         return None
     return conf
 
@@ -57,7 +58,8 @@ def _provenance_of(books: BookUnitRepo):
                 src = book.provenance.get(field)
                 if src:
                     lines.append(f"{field.capitalize()} from {src}")
-            lines.append(f"Confidence {book.confidence:.0f}%")
+            lines.append(f"Identity confidence {book.identity_confidence:.0f} of a possible "
+                         f"{identity_ceiling(book) * 100:.0f}")
             return lines
         if node.physical == "directory":
             if "kind" not in node.attrs:

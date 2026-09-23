@@ -234,18 +234,24 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
         with ui.row().classes("items-center q-gutter-sm"):
             label, color = _STATE_BADGE.get(book.state, (book.state.value, "grey-6"))
             ui.badge(label).props(f"color={color} outline").tooltip(state_description(book.state))
-            # The two confidences are distinct and both shown here, labelled: identity is the
-            # pre-match local-identification rollup from the graph; match is the post-match score.
+            # The two confidences are distinct and both shown here, labelled: identity is how well all
+            # the evidence (a match included) backs the book; match is the one source record's fit.
             # Identity carries its ceiling because it is a score out of what its class of evidence
             # can prove (70 locally, 95 matched, 100 confirmed), never out of 100.
             _ilabel, _icolor, _itip = identity_badge(book)
             ui.badge(f"Identity {_ilabel}").props(f"color={_icolor}").tooltip(_itip)
-            ui.badge(f"Match {book.confidence:.0f}").props(
-                f"color={_confidence_color(book.confidence)}"
-            ).tooltip("Match confidence: how strongly a matched source agrees. 0 until matched.")
-            ui.label(f"/ threshold {controller.review_threshold():.0f}").classes(
-                "colophon-muted text-caption"
-            )
+            # The match score measures how closely one source record fitted, so a book no source has
+            # been matched against has no score: "Match 0" in red read as a failed match.
+            if book.confidence > 0:
+                ui.badge(f"Match {book.confidence:.0f}").props(
+                    f"color={_confidence_color(book.confidence)}"
+                ).tooltip(
+                    "How closely the matched source record fits this book. At or above "
+                    f"{controller.review_threshold():.0f}, a match marks the book Ready on its own."
+                )
+            else:
+                ui.badge("Not matched").props("color=grey-8 outline").tooltip(
+                    "No source has been matched against this book yet.")
 
         _render_review_reasons(book)
         if review_reasons(book) and book.state not in (

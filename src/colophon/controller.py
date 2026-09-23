@@ -62,7 +62,6 @@ from colophon.core.library_graph import reconcile
 from colophon.core.models import (
     BookState,
     BookUnit,
-    ConfidenceSignal,
     EditChange,
     EmbeddedTags,
     Finding,
@@ -121,7 +120,7 @@ from colophon.core.sources import (
     unchecked_edition_fields,
 )
 from colophon.core.title_corroborate import book_title_verdict
-from colophon.core.triage import has_blocking_error
+from colophon.core.triage import blocking_reason, has_blocking_error
 from colophon.services import files as file_ops
 from colophon.services import graph_inspect as graph_inspect_svc
 from colophon.services.catalog import apply_catalog_mapping
@@ -2281,46 +2280,52 @@ class AppController:
         self.undo(batch_id)
         return True
 
-    def mark_ready(self, book: BookUnit) -> None:
-        """Mark a book Ready by human approval. A person has reviewed and accepted it, so this is a
-        manual confirmation: it forces confidence to maximum rather than leaving the pre-match guess
-        in place. See confirm_confidence."""
-        self.confirm_confidence(book)
+    def mark_ready(self, book: BookUnit) -> int:
+        """Mark a book Ready by human approval: the user has reviewed it and says it is right.
 
-    def mark_ready_books(self, books: list[BookUnit]) -> int:
-        """Mark every book in `books` Ready by human approval, skipping any with a blocking error.
-        The single-book button is disabled on a blocking error (no in-app edit fixes missing or
-        corrupt files), so the bulk action must not confirm them either. Returns the number marked."""
-        marked = [b for b in books if not has_blocking_error(b)]
-        for book in marked:
-            self.confirm_confidence(book)
-        return len(marked)
+        That settles it, so the book is flagged manually confirmed (identity reads 100 of a possible
+        100) and its open advisory findings are acknowledged: saying "this book is right" answers
+        the concerns that asked whether it was. The match score is left alone; it measures how well
+        a source record fitted, and a confirmation is not a match.
 
-    def confirm_confidence(self, book: BookUnit) -> None:
-        """Manually confirm a book: force confidence to 100, mark it Ready, and
-        flag it as manual so the badge/recheck know it was set by hand.
+        A book with a blocking error (a missing folder, a corrupt file) cannot be confirmed: no edit
+        in the app fixes those, and acknowledging them would hide the fault.
 
-        Confirming also acknowledges the book's open advisory findings: saying "this book is right"
-        settles the concerns that asked whether it was. Blocking findings can never arrive here (the
-        single-book button is disabled on one and the bulk path filters them out), so a corrupt file
-        or a missing folder is never cleared by a confirmation."""
-        book.confidence = 100.0
-        book.confidence_signals = [
-            ConfidenceSignal(name="manual_confirmation", points=100, detail="Manually confirmed")
-        ]
+        Returns how many findings it settled, so the caller can say so: settling them silently hid a
+        real title conflict behind a bare "Marked ready"."""
+        if has_blocking_error(book):
+            raise ValueError(f"cannot mark ready: {blocking_reason(book)}")
         book.manually_confirmed = True
-        for finding in self._active_findings(book):
-            if finding.key not in book.acknowledged_findings:
-                book.acknowledged_findings = [*book.acknowledged_findings, finding.key]
+        settled = [f.key for f in self._active_findings(book)
+                   if f.key not in book.acknowledged_findings]
+        book.acknowledged_findings = [*book.acknowledged_findings, *settled]
+        self._restamp_identity(book)
         mark(book, Phase.IDENTIFY, PhaseState.FRESH)
         resync_state(book, ready_threshold=self.ctx.config.review_threshold)
         book.touch()
         self.ctx.books.upsert(book)
+        return len(settled)
+
+    def mark_ready_books(self, books: list[BookUnit]) -> int:
+        """Mark every book in `books` Ready by human approval, skipping any with a blocking error
+        (see mark_ready). Returns the number marked."""
+        marked = [b for b in books if not has_blocking_error(b)]
+        for book in marked:
+            self.mark_ready(book)
+        return len(marked)
+
+    @staticmethod
+    def _restamp_identity(book: BookUnit) -> None:
+        """Recompute identity confidence after a change to what settles the book (a confirmation
+        made or withdrawn). The score reads no graph, so this needs no re-derive."""
+        book.identity_confidence = book_identity_confidence(book, None, None)
 
     async def recheck_confidence(self, book: BookUnit) -> None:
         """Revert to auto confidence: re-query all sources, rescore, clear the
         manual flag, and persist."""
         book = self._apply_confirmed([book])[0]
+        book.manually_confirmed = False
+        self._restamp_identity(book)
         results = await gather_matches(self.ctx.sources, query_for_book(book))
         self._rescore_after_match(book, results)
         book.touch()
@@ -2517,7 +2522,6 @@ class AppController:
         outcome = self._score(book, results)
         book.confidence = outcome.confidence
         book.confidence_signals = outcome.signals
-        book.manually_confirmed = False
         has_identity = bool(book.authors) or bool(book.series)
         ready = (
             outcome.confidence >= self.ctx.config.review_threshold
