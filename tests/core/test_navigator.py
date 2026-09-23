@@ -5,13 +5,13 @@ from colophon.core.models import BookUnit, SeriesRef
 from colophon.core.navigator import build_library_tree, resolve_alias
 
 
-def _book(bid: str, *, authors=None, series=None, title="", confidence=0.0) -> BookUnit:
+def _book(bid: str, *, authors=None, series=None, title="", identity_confidence=0.0) -> BookUnit:
     b = BookUnit.new(source_folder=Path("/x") / bid)
     b.id = bid
     b.title = title
     b.authors = authors or []
     b.series = series or []
-    b.confidence = confidence
+    b.identity_confidence = identity_confidence
     return b
 
 
@@ -48,10 +48,10 @@ def test_needs_id_is_no_author_and_no_series():
 
 
 def test_needs_id_sorted_by_confidence():
-    hi = _book("hi", title="High", confidence=40.0)
-    lo = _book("lo", title="Low", confidence=10.0)
+    hi = _book("hi", title="High", identity_confidence=40.0)
+    lo = _book("lo", title="Low", identity_confidence=10.0)
     tree = build_library_tree([hi, lo])
-    assert [b.confidence for b in tree.needs_id] == [10.0, 40.0]  # ascending confidence
+    assert [b.identity_confidence for b in tree.needs_id] == [10.0, 40.0]  # ascending
 
 
 def test_series_without_author_files_under_series_name():

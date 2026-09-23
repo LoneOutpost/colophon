@@ -3,6 +3,7 @@ findings). UI-agnostic so the Library page's facet filters are unit-testable wit
 
 from __future__ import annotations
 
+from colophon.core.confidence_axioms import CEIL_LOCAL
 from colophon.core.models import (
     BLOCKING_FINDINGS,
     BookState,
@@ -19,8 +20,6 @@ WEAK_ID_TRUST_TIERS: frozenset[str] = frozenset(_WEAK_PROVENANCE)
 # The local provenance tiers (where a scanned value came from without an online match).
 # Anything non-empty outside this set is an external match provider.
 _LOCAL_PROVENANCE = {"tag", "datafile", "directory", "filename", "graphing", "manual"}
-_CONF_LOW = 40.0   # < this -> "low" (red); matches the badge color thresholds
-_CONF_HIGH = 75.0  # >= this -> "high" (green); the default ready threshold
 
 
 def needs_human(book: BookUnit) -> bool:
@@ -38,22 +37,20 @@ def is_ready_to_persist(book: BookUnit) -> bool:
     return book.manually_confirmed or book.state in _PERSIST_READY
 
 
-def effective_confidence(book: BookUnit) -> float:
-    """The confidence to rank and bucket a book by: its post-match verification score once matched,
-    else its pre-match local-identification confidence. `confidence` is only ever nonzero after a
-    source match or a manual confirmation, so it takes precedence when present; before that the graph
-    tells us how well we know the book locally."""
-    return book.confidence if book.confidence > 0 else book.identity_confidence
-
-
 def confidence_bucket(book: BookUnit) -> str:
-    """'low' (<40), 'mid' (40-74), or 'high' (>=75) — matching the confidence badge colors.
-    Buckets on the effective confidence, so a locally-identified but unmatched book reads by how
-    well the graph knows it, not as a flat 0."""
-    conf = effective_confidence(book)
-    if conf >= _CONF_HIGH:
+    """'high', 'mid' or 'low': how well backed the book's identity is. The badge colour, the
+    Confidence facet and the confidence sort all read this one band, so they cannot disagree.
+
+    'high' starts at the local ceiling, the most the library's own labelling can prove. A book there
+    is as corroborated as local evidence gets, and a match or a confirmation only lifts it further.
+    Judging a matched book against its own higher ceiling instead, or featuring the provider's match
+    score in place of identity, made applying an AGREEING match turn a green badge amber: on a real
+    library 9 of 12 matched books read lower after matching, when evidence had only been added.
+    """
+    good = CEIL_LOCAL * 100
+    if book.identity_confidence >= good:
         return "high"
-    if conf >= _CONF_LOW:
+    if book.identity_confidence >= 0.6 * good:
         return "mid"
     return "low"
 
@@ -180,9 +177,9 @@ def sort_books(books: list[BookUnit], key: str) -> list[BookUnit]:
     """Order a book list. 'conf_asc' (worst first) / 'conf_desc' / 'title'; any other key
     (e.g. 'none') leaves the order unchanged. Confidence ties break by title."""
     if key == "conf_asc":
-        return sorted(books, key=lambda b: (effective_confidence(b), (b.title or "").casefold()))
+        return sorted(books, key=lambda b: (b.identity_confidence, (b.title or "").casefold()))
     if key == "conf_desc":
-        return sorted(books, key=lambda b: (-effective_confidence(b), (b.title or "").casefold()))
+        return sorted(books, key=lambda b: (-b.identity_confidence, (b.title or "").casefold()))
     if key == "title":
         return sorted(books, key=lambda b: (b.title or "").casefold())
     return list(books)

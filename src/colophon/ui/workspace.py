@@ -46,6 +46,7 @@ from colophon.core.triage import (
     WEAK_ID_TRUST_TIERS,
     apply_facets,
     blocking_reason,
+    confidence_bucket,
     has_blocking_error,
     has_open_findings,
     needs_human,
@@ -184,56 +185,38 @@ def _confidence_color(value: float) -> str:
     return "negative"
 
 
-def _confidence_tooltip(book: BookUnit, threshold: float) -> str:
-    if book.manually_confirmed:
-        return "Manually confirmed (100%). Use Recheck Confidence to recompute from sources."
-    return (
-        f"Match confidence 0-100: how strongly the metadata agrees with the sources. "
-        f"At or above {threshold:.0f} a book is auto-marked Ready."
-    )
-
-
 def identity_badge(book: BookUnit) -> tuple[str, str, str]:
-    """The identity confidence as (label, colour, tooltip), read against its own ceiling.
+    """The book's featured confidence as (label, colour, tooltip): its identity score, labelled with
+    the ceiling its class of evidence can reach (70 from the library's own labelling, 95 with a
+    source match, 100 once confirmed), because a bare number compares different scales.
 
-    Identity confidence is a score out of what its CLASS of evidence can prove, not out of 100.
-    Anything drawn from the library's own labelling is capped at 70, an external match at 95, a
-    confirmation at 100. Judging all three against one fixed threshold said a fully corroborated
-    book was mediocre: on a real 269-book library 238 of 269 badges rendered amber, 218 of them
-    books sitting exactly AT their ceiling with nothing left to prove locally. The 11 genuinely
-    short of it were indistinguishable in the noise.
-
-    So the colour asks "how close to the most this could be", and the label shows what the score is
-    out of, which is also the only honest way to read it.
+    Identity is featured before AND after a match. It already counts the match as evidence, so it
+    only rises when a source agrees; the provider's own match score measures something else (how
+    closely one returned record fits) and lives in the State tab. The colour is `confidence_bucket`,
+    shared with the Confidence facet and the sort.
     """
     score, ceiling = book.identity_confidence, identity_ceiling(book) * 100
-    if score >= ceiling:
-        colour, verdict = "positive", (
-            f"{score:.0f} of a possible {ceiling:.0f}: as far as this evidence goes. "
-            "Match it against a source, or confirm it, to settle it further.")
-    elif score >= 0.6 * ceiling:
-        colour, verdict = "warning", (
-            f"{score:.0f} of a possible {ceiling:.0f}: some of the evidence is missing or disagrees.")
+    colour = _BAND_COLOUR[confidence_bucket(book)]
+    of = f"{score:.0f} of a possible {ceiling:.0f}"
+    if book.manually_confirmed:
+        verdict = f"{of}: you confirmed this book."
+    elif score >= ceiling:
+        verdict = (f"{of}: as far as this evidence goes. "
+                   "Match it against a source, or mark it ready, to settle it further.")
+    elif colour == "positive":
+        verdict = f"{of}: well backed, and a source match agrees."
+    elif colour == "warning":
+        verdict = f"{of}: some of the evidence is missing or disagrees."
     else:
-        colour, verdict = "negative", (
-            f"{score:.0f} of a possible {ceiling:.0f}: little of this identity is backed up.")
+        verdict = f"{of}: little of this identity is backed up."
     # Tight separator: the badge sits beside the title in the dense list, and every character it
     # takes is one the title loses to an ellipsis. The title is what the row exists to show.
     return (f"{score:.0f}/{ceiling:.0f}", colour,
-            "How well your library's own structure and file tags support this book's identity, "
-            f"before any online match. {verdict}")
+            "How well the evidence (your folders, file tags, and any source match) supports this "
+            f"book's identity. {verdict}")
 
 
-def _primary_confidence(book: BookUnit, threshold: float) -> tuple[str, str, str]:
-    """The confidence to feature for a book: once a source match (or manual confirm) exists, the
-    match-verification score; otherwise the pre-match local-identification confidence. `confidence`
-    is only ever nonzero post-match, so its presence is what distinguishes the two. Returns
-    (label, badge color, tooltip). Match confidence keeps a bare number because 0-100 is a real
-    scale there, gated on a real threshold; identity confidence carries its ceiling."""
-    if book.confidence > 0:
-        return (f"{book.confidence:.0f}", _confidence_color(book.confidence),
-                _confidence_tooltip(book, threshold))
-    return identity_badge(book)
+_BAND_COLOUR = {"high": "positive", "mid": "warning", "low": "negative"}
 
 
 def _state_badge(book: BookUnit) -> None:
@@ -754,25 +737,43 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     if block_tip:
                         write_btn.tooltip(f"Can't persist — {block_tip}")
                     ui.space()
-                    ready_btn = ui.button(
-                        "Mark ready", icon="check",
-                        # Rebuild the detail panel too (not just the list) so the state badge flips to
-                        # Ready right away — otherwise the panel looks unchanged and the action seems
-                        # to do nothing. Matches how applying a match refreshes.
-                        on_click=lambda b=book: (
-                            controller.mark_ready(b), ui.notify("Marked ready"),
-                            refresh_list(), show_detail(b.id),
-                        ),
-                    ).props("flat")
-                    ready_btn.set_enabled(not blocked)
-                    if block_tip:
-                        ready_btn.tooltip(f"Can't mark ready — {block_tip}")
+                    # One readiness control, and its undo in the same place. A confirmed book offers
+                    # Recheck instead: it withdraws the confirmation and re-scores against sources.
+                    # Every repaint includes the navigator, whose Needs attention group lists books
+                    # by their open findings; marking ready acknowledges them, so skipping the nav
+                    # left a Ready book sitting under Needs attention.
+                    if book.manually_confirmed:
+                        recheck_btn = ui.button("Recheck", icon="refresh").props("flat").tooltip(
+                            "Withdraw your confirmation and re-score this book against the sources"
+                        )
+
+                        async def _recheck(b=book) -> None:
+                            with busy(recheck_btn):
+                                await controller.recheck_confidence(b)
+                            ui.notify("Confirmation withdrawn; confidence rechecked")
+                            repaint(nav=True, list=True, status=True, detail_book_id=b.id)
+
+                        recheck_btn.on_click(single_flight(_recheck))
+                    else:
+                        def _mark_ready(b=book) -> None:
+                            settled = controller.mark_ready(b)
+                            ui.notify("Marked ready" + (
+                                f", and settled {settled} open finding{'s' if settled != 1 else ''}"
+                                if settled else ""))
+                            repaint(nav=True, list=True, status=True, detail_book_id=b.id)
+
+                        ready_btn = ui.button("Mark ready", icon="check", on_click=_mark_ready).props(
+                            "flat"
+                        ).tooltip("You've reviewed this book and it's right. Settles its open findings.")
+                        ready_btn.set_enabled(not blocked)
+                        if block_tip:
+                            ready_btn.tooltip(f"Can't mark ready — {block_tip}")
 
                 with ui.row().classes("w-full no-wrap items-start q-gutter-md"):
                     # Left aside: cover, status, location.
                     with ui.column().classes("items-center q-gutter-xs").style("width: 120px; flex: 0 0 120px"):
                         _render_cover(book, width=112, height=168, icon="text-h2")
-                        _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
+                        _cval, _ccolor, _ctip = identity_badge(book)
                         ui.badge(_cval).props(f"color={_ccolor}").tooltip(_ctip)
                         _state_badge(book)
                     # Main column: title, source path, tools, grouped fields.
@@ -823,24 +824,6 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                     ui.button("Matches", icon="travel_explore", on_click=lambda b=book: compare_dialog(controller, b, show_detail=show_detail, refresh_list=refresh_list)).props("flat dense no-caps").tooltip("Find and apply metadata matches")
                                     ui.button("Chapters", icon="toc", on_click=_fetch_clicked).props("flat dense no-caps").tooltip("Fetch chapters from Audible")
                                     ui.button("Cover", icon="image", on_click=lambda b=book: cover_dialog(controller, b, show_detail=show_detail)).props("flat dense no-caps").tooltip("Search or set the cover")
-                            with ui.element("div").classes("colophon-toolgroup"):
-                                ui.label("Confidence").classes("colophon-seccap")
-                                with ui.row().classes("q-gutter-xs"):
-                                    if book.manually_confirmed:
-                                        async def _recheck(b=book) -> None:
-                                            ui.notify("Rechecking confidence...")
-                                            await controller.recheck_confidence(b)
-                                            repaint(list=True, status=True, detail_book_id=b.id)
-                                        ui.button("Recheck Confidence", icon="refresh", on_click=_recheck).props(
-                                            "flat dense no-caps"
-                                        ).tooltip("Re-query sources and revert to the computed confidence")
-                                    else:
-                                        def _confirm(b=book) -> None:
-                                            controller.confirm_confidence(b)
-                                            repaint(list=True, status=True, detail_book_id=b.id)
-                                        ui.button("Manual Confirmation", icon="verified", on_click=_confirm).props(
-                                            "flat dense no-caps"
-                                        ).tooltip("Confirm this book and set its confidence to 100%")
                             with ui.element("div").classes("colophon-toolgroup"):
                                 ui.label("Clean up").classes("colophon-seccap")
                                 with ui.row().classes("q-gutter-xs"):
@@ -1474,7 +1457,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         ui.label(quality).classes(f"text-caption {_qcls} colophon-mono").tooltip(
                             "Audio quality across this book's files"
                         )
-                    _cval, _ccolor, _ctip = _primary_confidence(book, controller.review_threshold())
+                    _cval, _ccolor, _ctip = identity_badge(book)
                     ui.badge(_cval).props(f"color={_ccolor}").tooltip(_ctip)
                     _state_badge(book)
                     if has_blocking_error(book):
@@ -1490,7 +1473,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
                 line2 = f"{author} · {series}" if series else author
-                reason = weak_identity_reason(book)
+                # A confirmed book has been settled by a person, so where its author came from is no
+                # longer a question worth a chip on every row.
+                reason = None if book.manually_confirmed else weak_identity_reason(book)
                 if reason is None:
                     ui.item_label(line2).props("caption")
                 else:

@@ -253,7 +253,15 @@ body.body--dark { color: #ece4d8; }
 /* AA helpers (#105): warm muted text, muted outline chips, dark filled-button ink
    text (the dark accent fails white-on-fill), and a viewport cap on every dialog. */
 .colophon-muted { color: var(--colophon-muted); }
-.colophon-chip { color: var(--colophon-muted); border-color: var(--colophon-border); }
+/* A provenance chip ("Folder", "Inferred") says where a value came from; it is not a warning. An
+   outline q-badge carries Quasar's `text-primary !important`, which NiceGUI puts in a cascade layer.
+   For !important the EARLIEST layer wins and unlayered rules lose to every layer, so an unlayered
+   override (even !important, even more specific) never applied and the chip rendered terracotta,
+   reading as an alert that never cleared. `theme` is the first layer NiceGUI declares. */
+@layer theme {
+  .q-badge.colophon-chip { color: var(--colophon-muted) !important; }
+}
+.colophon-chip { border-color: var(--colophon-border); }
 /* Genre/tag chips on book rows: a quiet tonal pill (low-opacity terracotta fill +
    terracotta text) so the metadata recedes under the title and clears AA, replacing
    NiceGUI's loud solid-primary default (dark text on full terracotta = 4.0:1). */

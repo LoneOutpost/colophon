@@ -1932,7 +1932,7 @@ def test_apply_match_fields_rescores_confidence(tmp_path):
     ctx.close()
 
 
-def test_confirm_confidence_acknowledges_open_findings(tmp_path):
+def test_mark_ready_acknowledges_open_findings(tmp_path):
     # Confirming a book says "this is right", which settles the advisory concerns that asked whether
     # it was. Without this, a confirmed book kept surfacing in the attention list forever.
     ctx = _ctx(tmp_path)
@@ -1946,7 +1946,7 @@ def test_confirm_confidence_acknowledges_open_findings(tmp_path):
     ctx.books.upsert(book)
     ctrl = AppController(ctx)
     assert ctrl._active_findings(book)          # flagged before confirming
-    ctrl.confirm_confidence(book)
+    assert ctrl.mark_ready(book) == 2           # and says how many it settled
     assert ctrl._active_findings(book) == []    # and settled after
     # Settled per FINDING, not per code: confirming answers the concerns actually raised, and must
     # not pre-answer a different one that happens to share a code.
@@ -1961,24 +1961,10 @@ def test_confirm_confidence_acknowledges_open_findings(tmp_path):
     ctx.close()
 
 
-def test_confirm_confidence_sets_100_ready_and_manual_flag(tmp_path):
-    ctx = _ctx(tmp_path)
-    book = BookUnit.new(source_folder=tmp_path / "x")
-    book.title = "Dune"
-    book.authors = ["Frank Herbert"]
-    ctx.books.upsert(book)
-    AppController(ctx).confirm_confidence(book)
-    assert book.confidence == 100.0
-    assert book.manually_confirmed is True
-    assert book.state == BookState.READY
-    assert any(s.name == "manual_confirmation" for s in book.confidence_signals)
-    assert ctx.books.get(book.id).manually_confirmed is True
-    ctx.close()
-
-
-def test_mark_ready_forces_max_confidence_not_weak_value(tmp_path):
-    # A human approving a book is a manual confirmation: mark_ready must not leave the
-    # weak pre-match identity_confidence in the featured score.
+def test_mark_ready_settles_identity_and_leaves_the_match_score_alone(tmp_path):
+    # A human approving a book settles its identity: it must read 100 of a possible 100 at once, not
+    # the weak pre-review score under a raised ceiling (a confirmed book read "60/100" in amber). The
+    # match score is a source record's fit; a confirmation is not a match, so it is not invented.
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "x")
     book.title = "Dune"
@@ -1986,11 +1972,29 @@ def test_mark_ready_forces_max_confidence_not_weak_value(tmp_path):
     book.identity_confidence = 42.0        # weak local guess before review
     ctx.books.upsert(book)
     AppController(ctx).mark_ready(book)
-    assert book.confidence == 100.0
     assert book.manually_confirmed is True
     assert book.state == BookState.READY
-    assert any(s.name == "manual_confirmation" for s in book.confidence_signals)
-    assert ctx.books.get(book.id).confidence == 100.0
+    assert book.identity_confidence == 100.0
+    assert book.confidence == 0.0
+    stored = ctx.books.get(book.id)
+    assert stored.manually_confirmed is True
+    assert stored.identity_confidence == 100.0
+    ctx.close()
+
+
+def test_mark_ready_refuses_a_book_with_a_blocking_error(tmp_path):
+    # No edit in the app fixes a missing folder or a corrupt file, and confirming would acknowledge
+    # the fault away. The bulk path skips these; the single-book path must refuse them too.
+    import pytest
+
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "gone")
+    book.title = "Missing"
+    book.missing = True
+    ctx.books.upsert(book)
+    with pytest.raises(ValueError, match="cannot mark ready"):
+        AppController(ctx).mark_ready(book)
+    assert ctx.books.get(book.id).manually_confirmed is False
     ctx.close()
 
 
@@ -2047,24 +2051,27 @@ async def test_recheck_confidence_reverts_to_auto_and_clears_flag(tmp_path):
     book.authors = ["Frank Herbert"]
     ctx.books.upsert(book)
     ctrl = AppController(ctx)
-    ctrl.confirm_confidence(book)
+    ctrl.mark_ready(book)
     assert book.manually_confirmed is True
     await ctrl.recheck_confidence(book)
     assert book.manually_confirmed is False
-    assert not any(s.name == "manual_confirmation" for s in book.confidence_signals)
+    assert book.identity_confidence < 100.0   # restamped without the confirmation
+    assert book.confidence > 0                 # and re-scored against the source
     ctx.close()
 
 
-def test_rescore_after_match_clears_manual_flag(tmp_path):
+def test_a_match_does_not_withdraw_a_confirmation(tmp_path):
+    # Matching a book you confirmed adds evidence; it must not quietly overturn your decision and
+    # drop the book out of Ready. Only Recheck withdraws a confirmation.
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "x")
     book.title = "Dune"
     book.authors = ["Frank Herbert"]
     ctrl = AppController(ctx)
-    ctrl.confirm_confidence(book)
-    assert book.manually_confirmed is True
+    ctrl.mark_ready(book)
     ctrl._rescore_after_match(book, [SourceResult(provider="audnexus", title="Dune", authors=["Frank Herbert"])])
-    assert book.manually_confirmed is False
+    assert book.manually_confirmed is True
+    assert book.state == BookState.READY
     ctx.close()
 
 
@@ -3373,7 +3380,8 @@ def test_graph_neighborhood_resolves_book_label_and_confidence(tmp_path):
 
     book = BookUnit.new(source_folder=tmp_path / "lib" / "Stella Rimington")
     book.title = "Close Call"
-    book.confidence = 42.0
+    book.identity_confidence = 42.0
+    book.confidence = 90.0  # the match fit score is not what the graph features
     ctx.books.upsert(book)
 
     author = NodeRecord(id="A", physical="directory", semantic="author",

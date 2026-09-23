@@ -12,7 +12,6 @@ from colophon.core.triage import (
     FACET_DEFAULTS,
     apply_facets,
     confidence_bucket,
-    effective_confidence,
     has_open_findings,
     has_weak_identity,
     missing_fields,
@@ -35,31 +34,27 @@ def test_needs_human_excludes_done_and_skipped():
         assert not needs_human(_book(state=s))
 
 
-def test_confidence_bucket():
-    assert confidence_bucket(_book(confidence=0.0)) == "low"
-    assert confidence_bucket(_book(confidence=39.9)) == "low"
-    assert confidence_bucket(_book(confidence=40.0)) == "mid"
-    assert confidence_bucket(_book(confidence=74.9)) == "mid"
-    assert confidence_bucket(_book(confidence=75.0)) == "high"
-    assert confidence_bucket(_book(confidence=100.0)) == "high"
+def test_confidence_bucket_reads_identity_against_the_local_ceiling():
+    # 'high' starts at 70, the most the library's own labelling can prove; 'mid' at 60% of it.
+    assert confidence_bucket(_book(identity_confidence=0.0)) == "low"
+    assert confidence_bucket(_book(identity_confidence=41.9)) == "low"
+    assert confidence_bucket(_book(identity_confidence=42.0)) == "mid"
+    assert confidence_bucket(_book(identity_confidence=69.9)) == "mid"
+    assert confidence_bucket(_book(identity_confidence=70.0)) == "high"
+    assert confidence_bucket(_book(identity_confidence=100.0)) == "high"
 
 
-def test_effective_confidence_prefers_match_then_identity():
-    # a matched book ranks by its match score
-    assert effective_confidence(_book(confidence=82.0, identity_confidence=40.0)) == 82.0
-    # unmatched (confidence 0): fall back to local-identification confidence
-    assert effective_confidence(_book(confidence=0.0, identity_confidence=90.0)) == 90.0
-    # neither: 0
-    assert effective_confidence(_book()) == 0.0
+def test_a_poor_match_score_does_not_lower_the_bucket():
+    # Real case: The Mediterranean Caper, identity 95 of 95 once matched, provider fit 53. The match
+    # added evidence; featuring its fit score instead turned a well-backed book amber.
+    assert confidence_bucket(_book(confidence=53.0, identity_confidence=95.0)) == "high"
 
 
-def test_confidence_bucket_uses_identity_pre_match():
-    # unmatched but locally well-identified reads 'high', not a flat 'low'
-    assert confidence_bucket(_book(confidence=0.0, identity_confidence=90.0)) == "high"
-    assert confidence_bucket(_book(confidence=0.0, identity_confidence=30.0)) == "low"
+def test_the_match_score_alone_never_lifts_the_bucket():
+    assert confidence_bucket(_book(confidence=90.0, identity_confidence=30.0)) == "low"
 
 
-def test_sort_worst_first_ranks_by_effective_confidence():
+def test_sort_worst_first_ranks_by_identity_confidence():
     strong = _book(title="A", confidence=0.0, identity_confidence=90.0)
     weak = _book(title="B", confidence=0.0, identity_confidence=20.0)
     assert sort_books([strong, weak], "conf_asc") == [weak, strong]
@@ -134,9 +129,9 @@ def test_facet_defaults_are_no_constraint():
 
 
 def test_apply_facets_state_confidence_id_trust():
-    low_weak = _book(state=BookState.NEEDS_REVIEW, confidence=20.0,
+    low_weak = _book(state=BookState.NEEDS_REVIEW, identity_confidence=20.0,
                      provenance={"authors": "graphing"})
-    high_trusted = _book(state=BookState.READY, confidence=90.0,
+    high_trusted = _book(state=BookState.READY, identity_confidence=90.0,
                          provenance={"authors": "tag"})
     books = [low_weak, high_trusted]
     assert apply_facets(books, {**FACET_DEFAULTS, "confidence": ["low"]}) == [low_weak]
@@ -197,8 +192,8 @@ def test_apply_facets_errors_only():
 
 
 def test_sort_books():
-    a = _book(confidence=20.0, title="B")
-    b = _book(confidence=80.0, title="A")
+    a = _book(identity_confidence=20.0, title="B")
+    b = _book(identity_confidence=80.0, title="A")
     assert sort_books([a, b], "conf_asc") == [a, b]
     assert sort_books([a, b], "conf_desc") == [b, a]
     assert sort_books([a, b], "title") == [b, a]
