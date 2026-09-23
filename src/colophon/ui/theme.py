@@ -156,7 +156,13 @@ body.body--dark { color: #ece4d8; }
    below its content unless min-width is 0, and without this the right-pinned
    confidence/state badges get pushed off the (often narrow) list pane. */
 .book-row .q-item__section--main,
-.book-row .colophon-book-title { min-width: 0; }
+.book-row .colophon-book-title,
+.book-row .book-row-byline { min-width: 0; }
+/* The checkbox and cover sections take Quasar's avatar minimum (56px) plus 16px padding each, sized
+   for a 40px avatar neither of them is. Sizing them to their content hands that width to the title. */
+.book-row .q-item__section--avatar { min-width: 0; padding-right: 8px; }
+/* Genre chips on line 3 give way (clip) before the duration and quality beside them do. */
+.book-row .colophon-tag-chip { min-width: 0; flex-shrink: 1; overflow: hidden; }
 /* Pin the Books list's scroll content to its container width. Quasar's scroll content is absolutely
    positioned and sizes to its widest child, so without this the rows expand to their natural width
    and push the right-pinned confidence/state badges out past the (scrollable) pane edge. */

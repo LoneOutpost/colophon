@@ -525,6 +525,15 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         return sort_books(apply_facets(_scoped_books(), view["facets"]), view["sort"])
 
     # --- attention pane (findings + guided actions) ---
+    def _acknowledge(b, key: str) -> None:
+        """Dismiss one finding and repaint every pane that shows it: the detail (the finding
+        itself), the row (its warning icon), the navigator (Needs attention) and the status bar.
+        The Details and At a Glance buttons each repainted a different subset, so the dismissed
+        finding stayed on screen until a refresh."""
+        controller.acknowledge_finding(b, key)
+        ui.notify("Acknowledged", type="info")
+        repaint(nav=True, list=True, status=True, detail_book_id=b.id)
+
     def render_attention_pane(book) -> None:
         items = attention_items(book, controller._active_findings(book))
         with ui.column().classes("w-full gap-2"):
@@ -536,11 +545,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 ui.label(item.suggestion).classes("colophon-muted text-caption")
                 with ui.row().classes("gap-2"):
                     if FixAction.ACKNOWLEDGE in item.actions and item.key is not None:
-                        def _ack(k=item.key, b=book) -> None:
-                            controller.acknowledge_finding(b, k)
-                            ui.notify("Acknowledged", type="info")
-                            repaint(nav=True, middle=True)
-                        ui.button("Acknowledge", on_click=_ack).props("flat color=primary")
+                        ui.button(
+                            "Acknowledge",
+                            on_click=lambda k=item.key, b=book: _acknowledge(b, k),
+                        ).props("flat color=primary")
                     if FixAction.DELETE in item.actions:
                         def _del(b=book) -> None:
                             _delete_book_items(b)
@@ -1110,9 +1118,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         files=lambda: _tabs.set_value("details"),
                         matches=lambda b=book: compare_dialog(
                             controller, b, show_detail=show_detail, refresh_list=refresh_list),
-                        acknowledge=lambda key, b=book: (
-                            controller.acknowledge_finding(b, key), refresh_list(),
-                            show_detail(b.id)),
+                        acknowledge=lambda key, b=book: _acknowledge(b, key),
                         delete=lambda b=book: _delete_book_items(b),
                         rerun_phase=_rerun_one,
                         fix_extension=_fix_extension,
@@ -1440,23 +1446,14 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.item_section().classes("cursor-pointer").on(
                 "click", lambda bid=book.id: _set_focus(bid)
             ):
-                # Line 1: title (ellipsized) with confidence + state badges
-                # pinned right, so the badges never clip on a narrow pane.
+                # Line 1 is the title and only the judgements about it (confidence, state,
+                # alerts). Duration and quality used to share it and never shrink, so at the default
+                # pane width the title collapsed to 0px while "9h 34m" wrapped over two lines: every
+                # row showed its bitrate and not its name.
                 with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                     ui.label(book.title or "(untitled)").classes(
                         "colophon-book-title col ellipsis"
-                    )
-                    total = sum(sf.duration_seconds for sf in book.source_files)
-                    if book.source_files:
-                        ui.label(_fmt_duration(total)).classes(
-                            "text-caption colophon-muted colophon-mono"
-                        )
-                    quality = book_quality_summary(book.source_files)
-                    if quality:
-                        _qcls = "text-warning" if quality == "Mixed quality" else "colophon-muted"
-                        ui.label(quality).classes(f"text-caption {_qcls} colophon-mono").tooltip(
-                            "Audio quality across this book's files"
-                        )
+                    ).tooltip(book.title or "(untitled)")
                     _cval, _ccolor, _ctip = identity_badge(book)
                     ui.badge(_cval).props(f"color={_ccolor}").tooltip(_ctip)
                     _state_badge(book)
@@ -1468,7 +1465,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         ).tooltip(blocking_reason(book) or "Blocking problem")
                     if has_open_findings(book):
                         ui.icon("warning_amber", size="1.125rem").classes("text-warning").tooltip(
-                            "Needs attention — see At a Glance"
+                            "Needs attention: see At a Glance"
                         )
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
@@ -1476,18 +1473,29 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 # A confirmed book has been settled by a person, so where its author came from is no
                 # longer a question worth a chip on every row.
                 reason = None if book.manually_confirmed else weak_identity_reason(book)
-                if reason is None:
-                    ui.item_label(line2).props("caption")
-                else:
-                    field, prov = reason
-                    with ui.row().classes("items-center no-wrap q-gutter-xs"):
-                        ui.item_label(line2).props("caption")
+                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                    ui.item_label(line2).props("caption").classes("col ellipsis book-row-byline")
+                    if reason is not None:
+                        field, prov = reason
                         ui.badge(controller.source_label(prov)).props("outline").classes(
                             "colophon-chip"
                         ).tooltip(f"{field.capitalize()}: {controller.source_tooltip(prov)}")
+                # Line 3: the file facts, then genre/tag chips. Kept on one line, never wrapped.
+                total = sum(sf.duration_seconds for sf in book.source_files)
+                quality = book_quality_summary(book.source_files)
                 chip_labels = book.genres + book.tags
-                if chip_labels:
-                    with ui.row().classes("items-center no-wrap q-gutter-xs q-mt-none"):
+                if book.source_files or quality or chip_labels:
+                    with ui.row().classes("items-center w-full no-wrap q-gutter-xs q-mt-none"):
+                        if book.source_files:
+                            ui.label(_fmt_duration(total)).classes(
+                                "text-caption colophon-muted colophon-mono text-no-wrap"
+                            )
+                        if quality:
+                            _qcls = ("text-warning" if quality == "Mixed quality"
+                                     else "colophon-muted")
+                            ui.label(quality).classes(
+                                f"text-caption {_qcls} colophon-mono text-no-wrap"
+                            ).tooltip("Audio quality across this book's files")
                         for label in chip_labels[:3]:
                             ui.chip(label, color=None).props(
                                 "dense square size=sm clickable"
