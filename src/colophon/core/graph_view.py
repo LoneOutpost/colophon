@@ -29,6 +29,7 @@ class FolderRow:
     is_container_shape: bool = False  # loose audio alongside subfolders
     kind: str = ""              # raw classification kind (for filtering); "" = unclassified
     kind_source: str = ""       # "manual" / "matched" / "" (auto), for the manual filter
+    kind_value: str = ""        # the elected name (author/series/franchise) a Confirm would vouch for
 
 
 @dataclass
@@ -88,6 +89,7 @@ def _folder_row(graph: Graph, dir_id: str) -> FolderRow:
         is_container_shape=bool(d.child_files and d.child_dirs),
         kind=d.kind,
         kind_source=d.kind_source,
+        kind_value=d.kind_value or "",
     )
 
 

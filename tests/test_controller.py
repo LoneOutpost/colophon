@@ -4017,6 +4017,75 @@ def test_confirming_an_author_folder_settles_a_tag_that_disagrees_with_it(tmp_pa
     ctx.close()
 
 
+def test_an_author_folder_named_against_its_tags_is_flagged_until_confirmed(tmp_path):
+    # A bulk tagger stamped every book's artist, so the tags elect that string as the folder's
+    # author and every book agrees with it. Real ID3 tags drive the whole scan, so this also proves
+    # a full scan persists the finding, not only a re-derive.
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    author = ingest / "Neal Stephenson"
+    for title in ("Cryptonomicon", "Anathem", "Seveneves"):
+        folder = author / f"Neal Stephenson.-.{title}"
+        folder.mkdir(parents=True)
+        f = folder / "01.mp3"
+        f.write_bytes(b"")
+        tags = ID3()
+        tags.add(TPE1(encoding=3, text=["Top 100 Sci-Fi Books"]))
+        tags.save(f)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+
+    def under_author():
+        return [b for b in ctx.books.list_all() if author in b.source_folder.parents]
+
+    def folder_name_findings(b):
+        return [f for f in b.findings if (f.detail or "").startswith("folder name:")]
+
+    books = under_author()
+    assert len(books) == 3
+    assert {tuple(b.authors) for b in books} == {("Top 100 Sci-Fi Books",)}
+    for b in books:
+        assert [f.detail for f in folder_name_findings(b)] == [
+            "folder name: folder 'Neal Stephenson' vs tags 'Top 100 Sci-Fi Books'"]
+    phrase = "the folder's name disagrees with its books' tags"
+    [group] = [g for g in ctrl.review_queue().groups if g.phrase == phrase]
+    assert group.label == f"3 books under Neal Stephenson: {phrase}"
+
+    ctrl.set_node_classification(author, "author", "Neal Stephenson")
+    for b in under_author():
+        assert folder_name_findings(b) == []
+        assert b.authors == ["Neal Stephenson"]
+        assert b.provenance["authors"] == "confirmed_folder"
+    assert not any(g.phrase == phrase for g in ctrl.review_queue().groups)
+    ctx.close()
+
+
+def test_a_folder_name_conflict_raised_on_reclassify_is_saved(tmp_path):
+    # The re-derive classifies book COPIES; a finding raised there must reach the stored book.
+    # Clearing the stored finding stands in for a library scanned before this check existed.
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Neal Stephenson" / "Neal Stephenson.-.Anathem"
+    folder.mkdir(parents=True)
+    f = folder / "01.mp3"
+    f.write_bytes(b"")
+    tags = ID3()
+    tags.add(TPE1(encoding=3, text=["Top 100 Sci-Fi Books"]))
+    tags.save(f)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    book.findings = []
+    ctx.books.upsert(book)
+
+    ctrl.clear_node_classification(ingest / "Neal Stephenson")   # no override: a plain re-derive
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert any((f.detail or "").startswith("folder name:") for f in book.findings), book.findings
+    ctx.close()
+
+
 def test_review_queue_groups_the_library_and_drops_a_book_once_ready(tmp_path):
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "x")

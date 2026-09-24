@@ -89,3 +89,21 @@ def test_split_people_keeps_names_that_merely_start_with_by():
     from colophon.core.people import split_people
     assert split_people("Byron Preiss") == ["Byron Preiss"]
     assert split_people("Bywater Smith") == ["Bywater Smith"]
+
+
+def test_names_disagree_when_the_folder_and_its_elected_value_share_nothing():
+    from colophon.core.people import names_disagree
+    # The three real cases: a bulk-tagger string, a series folder read as a surname, and a series
+    # folder whose books' tags elected the author.
+    assert names_disagree("Neal Stephenson", "Top 100 Sci-Fi Books")
+    assert names_disagree("Jim Stringer", "Martin")
+    assert names_disagree("Harry Bosch (series)", "Connelly, Michael")
+
+
+def test_names_agree_across_format_initials_and_co_authors():
+    from colophon.core.people import names_disagree
+    assert not names_disagree("Connelly, Michael", "Michael Connelly")
+    assert not names_disagree("Tolkien", "J.R.R. Tolkien")
+    assert not names_disagree("Clarke, Baxter", "Clarke and Baxter")
+    assert not names_disagree("Neal Stephenson", "Neal Stephenson")
+    assert not names_disagree("Neal Stephenson", "")   # no elected value, nothing to disagree with

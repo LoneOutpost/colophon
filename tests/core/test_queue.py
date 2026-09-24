@@ -258,3 +258,23 @@ def test_a_ready_book_with_an_active_finding_is_still_queued():
     f = Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN, detail="x")
     b = _book("/lib/a", state=BookState.READY, findings=[f])
     assert [r.kind for r in _reasons(b)] == ["finding"]
+
+
+def test_a_folder_name_conflict_groups_its_books_on_the_author_folder():
+    # The bulk-tagger case: every book agrees with the folder's elected value, so only the folder's
+    # own name can say something is wrong, and that is one problem, not three.
+    folder = Path("/lib/Neal Stephenson")
+
+    def kinds(p: Path) -> str:
+        return "author" if p == folder else ""
+
+    detail = "folder name: folder 'Neal Stephenson' vs tags 'Top 100 Sci-Fi Books'"
+    books = [_book(f"/lib/Neal Stephenson/Neal Stephenson.-.{t}", authors=("Top 100 Sci-Fi Books",),
+                   findings=[Finding(code=FindingCode.METADATA_CONFLICT,
+                                     severity=FindingSeverity.WARN, detail=detail)])
+             for t in ("Cryptonomicon", "Anathem", "Seveneves")]
+    q = build_queue(books, root_for=lambda _p: ROOT, kind_of=kinds)
+    [group] = q.groups
+    assert group.label == ("3 books under Neal Stephenson: "
+                           "the folder's name disagrees with its books' tags")
+    assert len(group.books) == 3

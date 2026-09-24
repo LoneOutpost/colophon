@@ -106,19 +106,24 @@ _OWN_FOLDER_CODES = frozenset({
 # so the two agree on what "mine" means without duplicating the literal.
 TITLE_CONFLICT_PREFIX = 'metadata title "'
 
+# The detail prefix node_classify's folder-name check writes (`folder name: folder 'X' vs tags 'Y'`):
+# an author folder whose own name shares nothing with the author its books' tags elected for it.
+# Public: node_classify raises/retracts it and the controller syncs it with the same constant.
+FOLDER_NAME_CONFLICT_PREFIX = "folder name:"
+
 FindingScope = Literal["author_folder", "own_folder", "book"]
 
 
 def finding_scope(finding: Finding) -> FindingScope:
     """What a finding is about, so the review queue can group it by its probable cause.
 
-    Decided per finding, not per code: METADATA_CONFLICT is raised by three unrelated checks, and
-    only the author one questions a folder's claim. Structure findings are about how the book's own
-    folder is laid out, so books clustered in one folder group together. Anything else, including
-    a code added later, is about the book alone.
+    Decided per finding, not per code: METADATA_CONFLICT is raised by several unrelated checks, and
+    only the author and folder-name ones question a folder's claim. Structure findings are about how
+    the book's own folder is laid out, so books clustered in one folder group together. Anything
+    else, including a code added later, is about the book alone.
     """
     if finding.code == FindingCode.METADATA_CONFLICT and (finding.detail or "").startswith(
-            AUTHOR_CONFLICT_PREFIX):
+            (AUTHOR_CONFLICT_PREFIX, FOLDER_NAME_CONFLICT_PREFIX)):
         return "author_folder"
     if finding.code in _OWN_FOLDER_CODES:
         return "own_folder"
@@ -148,6 +153,8 @@ def finding_phrase(finding: Finding) -> str:
             return "tags name a different author"
         if (finding.detail or "").startswith(TITLE_CONFLICT_PREFIX):
             return "title disagrees with the folder"
+        if (finding.detail or "").startswith(FOLDER_NAME_CONFLICT_PREFIX):
+            return "the folder's name disagrees with its books' tags"
         return "tags disagree with the folder"
     return _FINDING_PHRASE.get(finding.code, "needs a look")
 

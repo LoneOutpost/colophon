@@ -86,6 +86,10 @@ def test_metadata_conflict_scope_follows_which_check_raised_it():
     assert finding_scope(_f(FindingCode.METADATA_CONFLICT,
                             'metadata title "X" vs folder "Y"')) == "book"
     assert finding_scope(_f(FindingCode.METADATA_CONFLICT, 'folder "Dune" vs tag "Emma"')) == "book"
+    # The folder-name check questions the author folder itself, so it groups there too.
+    assert finding_scope(_f(FindingCode.METADATA_CONFLICT,
+                            "folder name: folder 'Neal Stephenson' vs tags 'Top 100 Sci-Fi Books'")
+                         ) == "author_folder"
 
 
 def test_structure_findings_are_about_the_books_own_folder():
@@ -107,6 +111,9 @@ def test_finding_phrase_splits_metadata_conflict_by_which_check_raised_it():
                              'metadata title "X" vs folder "Y"')) == "title disagrees with the folder"
     assert finding_phrase(_f(FindingCode.METADATA_CONFLICT,
                              'folder "Dune" vs tag "Emma"')) == "tags disagree with the folder"
+    assert finding_phrase(_f(FindingCode.METADATA_CONFLICT,
+                             "folder name: folder 'A' vs tags 'B'")
+                          ) == "the folder's name disagrees with its books' tags"
 
 
 def test_finding_phrase_falls_back_for_an_unlisted_code():
