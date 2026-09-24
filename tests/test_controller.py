@@ -1953,7 +1953,7 @@ def test_mark_ready_acknowledges_open_findings(tmp_path):
     assert book.acknowledged_findings == [
         "metadata_conflict:author: a vs b", "mixed_quality:files span 64-128 kbps",
     ]
-    assert book not in ctrl.books_needing_attention()
+    assert ctrl.review_queue().book_count == 0
     later = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
                     detail='folder "Dune" vs tag "Higher Education"')
     book.findings = [*book.findings, later]
@@ -3985,4 +3985,35 @@ def test_a_confirmed_author_follows_a_later_reclassify(tmp_path):
     book = next(b for b in ctx.books.list_all() if b.source_folder == dune)
     assert book.provenance.get("authors") != "confirmed_folder"
     ctx.close()
+    ctx.close()
+
+
+def test_review_queue_groups_the_library_and_drops_a_book_once_ready(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title, book.authors = "Dune", ["Frank Herbert"]
+    book.findings = [Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN,
+                             detail="files span 64-128 kbps")]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    assert ctrl.review_queue().book_count == 1
+    ctrl.mark_ready(book)
+    assert ctrl.review_queue().book_count == 0
+    ctx.close()
+
+
+def test_confirm_node_classification_keeps_the_folders_current_kind(tmp_path):
+    from colophon.core.graph import DirectoryNode
+    from colophon.core.graph_records import NodeRecord
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "lib" / "Frank Herbert"
+    ctrl = AppController(ctx)
+    ctx.library_graph.nodes[DirectoryNode.id_for(folder)] = NodeRecord(
+        id=DirectoryNode.id_for(folder), physical="directory", semantic="author", root=str(tmp_path / "lib"),
+        attrs={"path": str(folder), "kind": "author", "kind_value": "Frank Herbert"})
+    calls = []
+    ctrl.set_node_classification = lambda p, k, v=None: calls.append((p, k, v))
+    assert ctrl.confirm_node_classification(folder) is True
+    assert calls == [(folder, "author", "Frank Herbert")]
+    assert ctrl.confirm_node_classification(tmp_path / "nowhere") is False
     ctx.close()

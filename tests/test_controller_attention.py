@@ -18,20 +18,6 @@ def test_acknowledge_finding_persists(tmp_path):
     assert FindingCode.DUP_FORMAT in reloaded.acknowledged_findings
 
 
-def test_books_needing_attention_sorts_errors_first(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctrl = AppController(ctx)
-    from colophon.core.models import Finding, FindingSeverity
-    warn = BookUnit.new(source_folder=tmp_path / "w")
-    warn.findings = [Finding(code=FindingCode.MULTI_IN_AUTHOR, severity=FindingSeverity.WARN, detail="x")]
-    err = BookUnit.new(source_folder=tmp_path / "e")
-    err.findings = [Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR, detail="y")]
-    ctx.books.upsert(warn)
-    ctx.books.upsert(err)
-    out = ctrl.books_needing_attention()
-    assert [b.id for b in out][:2] == [err.id, warn.id]
-
-
 def test_delete_corrupt_files_removes_bad_file_keeps_book(tmp_path):
     ctx = _ctx(tmp_path)
     ctrl = AppController(ctx)

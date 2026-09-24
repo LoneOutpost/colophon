@@ -10,7 +10,6 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import PATTERN_HISTORY_CAP, Config, OrganizePattern, save_config
@@ -66,7 +65,6 @@ from colophon.core.models import (
     EmbeddedTags,
     Finding,
     FindingCode,
-    FindingSeverity,
     NodeOverride,
     OperationRecord,
     Phase,
@@ -105,6 +103,7 @@ from colophon.core.phases import (
 )
 from colophon.core.progress import step
 from colophon.core.provenance import provenance_label, provenance_tooltip
+from colophon.core.queue import Queue, build_queue, check_matches
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -2121,24 +2120,22 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
-    _SEVERITY_RANK: ClassVar[dict[FindingSeverity, int]] = {
-        FindingSeverity.ERROR: 0,
-        FindingSeverity.WARN: 1,
-        FindingSeverity.INFO: 2,
-    }
-
     def _active_findings(self, book: BookUnit) -> list[Finding]:
         """Findings not dismissed via acknowledge, excluding the ones retired from the user-facing
         surface (e.g. LOOSE_IN_AUTHOR — the normal loose-file-in-author layout)."""
         return active_findings(book)
 
-    def books_needing_attention(self) -> list[BookUnit]:
-        """All books carrying at least one un-acknowledged finding, most severe first."""
-        flagged = [b for b in self.ctx.books.list_all() if self._active_findings(b)]
-        return sorted(
-            flagged,
-            key=lambda b: min(self._SEVERITY_RANK[f.severity] for f in self._active_findings(b)),
-        )
+    def review_queue(self, books: list[BookUnit] | None = None) -> Queue:
+        """The books that need a person, grouped by probable cause (see core/queue.py). `books`
+        narrows it (the Library passes its folder/text-filtered set); None means the whole library."""
+        pool = self.ctx.books.list_all() if books is None else books
+        return build_queue(pool, root_for=self._scan_root_for_path,
+                           kind_of=self.folder_classification)
+
+    def books_to_check_matches(self, books: list[BookUnit] | None = None) -> list[BookUnit]:
+        """Matched books whose provider fit stayed under the Ready threshold, worst first."""
+        pool = self.ctx.books.list_all() if books is None else books
+        return check_matches(pool, self.ctx.config.review_threshold)
 
     def acknowledge_finding(self, book: BookUnit, key: str) -> None:
         """Dismiss ONE advisory finding so a re-scan won't resurface it.
@@ -2325,7 +2322,13 @@ class AppController:
     def _restamp_identity(book: BookUnit) -> None:
         """Recompute identity confidence after a change to what settles the book (a confirmation
         made or withdrawn). The score reads no graph, so this needs no re-derive."""
-        book.identity_confidence = book_identity_confidence(book, None, None)
+        from colophon.core.confidence_axioms import ScoreCtx, score_identity
+        if not (book.authors or book.series):
+            book.identity_confidence = 0.0
+            return
+        result = score_identity(book, ScoreCtx())
+        book.identity_signals = result.signals
+        book.identity_confidence = result.score
 
     async def recheck_confidence(self, book: BookUnit) -> None:
         """Revert to auto confidence: re-query all sources, rescore, clear the
@@ -2676,6 +2679,18 @@ class AppController:
         self.ctx.overrides.set(str(path), kind, value)
         self._graph_cache.clear()
         self._resync_roots({self._scan_root_for_path(path)})
+
+    def confirm_node_classification(self, path: Path) -> bool:
+        """Confirm the folder's CURRENT classification as right (the Tree view's one-click Confirm):
+        persist its present kind and value as a manual override, which re-derives its books so the
+        value it supplies counts as the user's word. False when the folder has no classified node."""
+        node = self.ctx.library_graph.nodes.get(DirectoryNode.id_for(path))
+        kind = str(node.attrs.get("kind", "")) if node is not None else ""
+        if not kind or kind == "unknown":
+            return False
+        value = node.attrs.get("kind_value")
+        self.set_node_classification(path, kind, str(value) if value else None)
+        return True
 
     def clear_node_classification(self, path: Path) -> None:
         """Remove the manual classification for `path` (revert to auto) and invalidate cache."""
