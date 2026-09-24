@@ -556,6 +556,11 @@ def nodes_url_for_book(book_id: str) -> str:
     return _mode_url("explorer", book_node_id(book_id))
 
 
+def folder_tree_url(path: Path) -> str:
+    """The Tree view focused on the folder at `path` (the review queue's Review folder target)."""
+    return _mode_url("classic", DirectoryNode.id_for(path))
+
+
 def _mode_url(mode: str, focal: str | None) -> str:
     """A /graph URL for `mode` (nodes=explorer / tree=classic) that carries the focal node across the
     flip, so switching Tree<->Nodes keeps you on the same node."""

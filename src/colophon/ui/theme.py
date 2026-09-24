@@ -161,6 +161,10 @@ body.body--dark { color: #ece4d8; }
 /* The checkbox and cover sections take Quasar's avatar minimum (56px) plus 16px padding each, sized
    for a 40px avatar neither of them is. Sizing them to their content hands that width to the title. */
 .book-row .q-item__section--avatar { min-width: 0; padding-right: 8px; }
+/* A queue group header: one cause, not one book. Same rhythm as a book row, no card chrome; its
+   opened rows sit flush like any other list rows. */
+.colophon-queue-group > .q-expansion-item__container > .q-item { min-height: 48px; padding: 4px 8px; }
+.colophon-queue-group .nicegui-expansion-content { padding: 0; gap: 0; }
 /* Genre chips on line 3 give way (clip) before the duration and quality beside them do. */
 .book-row .colophon-tag-chip { min-width: 0; flex-shrink: 1; overflow: hidden; }
 /* Pin the Books list's scroll content to its container width. Quasar's scroll content is absolutely

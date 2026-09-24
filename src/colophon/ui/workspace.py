@@ -78,6 +78,7 @@ from colophon.ui.dialogs import (
 from colophon.ui.filter_input import filter_input
 from colophon.ui.graph_view import (
     combine_folder_dialog,
+    folder_tree_url,
     nodes_url_for_book,
     reclassify_folder_dialog,
 )
@@ -123,6 +124,13 @@ def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
 # Short state label + Quasar color for the per-row state badge.
 _PAGE = 50  # book rows rendered per chunk; ~a viewport, the rest fill in on scroll
 _NAV_PAGE = 80  # navigator entity rows (author/series/franchise) rendered per chunk
+# Queue group kind -> (icon, Quasar color) for its header in the Queue scope.
+_QUEUE_ICON: dict[str, tuple[str, str]] = {
+    "blocked": ("error", "negative"),
+    "unsure": ("help_outline", "warning"),
+    "finding": ("warning_amber", "warning"),
+    "weak": ("trending_down", "warning"),
+}
 
 _STATE_BADGE: dict[BookState, tuple[str, str]] = {
     BookState.DETECTED: ("Detected", "grey-6"),
@@ -360,7 +368,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # The one place that decides what the Details column shows. Reads `selected_ids` live; every
     # site below asks it rather than re-deriving the rule (see core/detail_pane.py).
     detail_pane = DetailPane(selected_ids)
-    # `scope` is the author/series/all/attention selection; `folder_filter` is an
+    # `scope` is the author/series/all/queue selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
     # list and the navigator (author/series list) respect the folder filter, and
     # a scope selection refines within it.
@@ -424,6 +432,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # render closure per entity; `el` is the ui.list() they render into.
     _nav_view: dict[str, object] = {"pending": [], "rendered": 0, "el": None}
     _list_footer: dict[str, object] = {"el": None}  # the "Showing X of Y" caption
+    # The Queue scope windows its entries (one per cause group) the same way; `pending` holds one
+    # zero-arg render closure per group.
+    _queue_view: dict[str, object] = {"pending": [], "rendered": 0}
     list_scroll = None                              # assigned at the layout site
     detail_scroll = None                            # the detail pane's scroll area (layout site)
     # The detail pane's tab and scroll offset persist across book navigation so cycling
@@ -485,9 +496,16 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     def _books_for_scope() -> list:
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
-        if kind == "attention":
-            return [b for b in tree.all_books if controller._active_findings(b)]
-        if kind == "author":
+        if kind == "queue":
+            # A book can sit in more than one group (a finding and a weak match); list it once.
+            seen: dict[str, object] = {}
+            for g in controller.review_queue(list(tree.all_books)).groups:
+                for b in g.books:
+                    seen.setdefault(b.id, b)
+            books = list(seen.values())
+        elif kind == "check_matches":
+            books = controller.books_to_check_matches(list(tree.all_books))
+        elif kind == "author":
             node = next((a for a in tree.authors if a.name == key), None)
             # dedup by id: a book in two of this author's series is filed under each
             books = list({b.id: b for s in node.series for b in s.books}.values()) + node.standalone if node else []
@@ -524,7 +542,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # --- attention pane (findings + guided actions) ---
     def _acknowledge(b, key: str) -> None:
         """Dismiss one finding and repaint every pane that shows it: the detail (the finding
-        itself), the row (its warning icon), the navigator (Needs attention) and the status bar.
+        itself), the row (its warning icon), the navigator (Queue) and the status bar.
         The Details and At a Glance buttons each repainted a different subset, so the dismissed
         finding stayed on screen until a refresh."""
         controller.acknowledge_finding(b, key)
@@ -744,9 +762,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.space()
                     # One readiness control, and its undo in the same place. A confirmed book offers
                     # Recheck instead: it withdraws the confirmation and re-scores against sources.
-                    # Every repaint includes the navigator, whose Needs attention group lists books
-                    # by their open findings; marking ready acknowledges them, so skipping the nav
-                    # left a Ready book sitting under Needs attention.
+                    # Every repaint includes the navigator, whose Queue counts books by their open
+                    # findings; marking ready acknowledges them, so skipping the nav left a Ready
+                    # book counted in the Queue.
                     if book.manually_confirmed:
                         recheck_btn = ui.button("Recheck", icon="refresh").props("flat").tooltip(
                             "Withdraw your confirmation and re-score this book against the sources"
@@ -1424,7 +1442,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         _after_select()
         _persist_view()
 
-    def _build_row(book) -> None:
+    def _build_row(book, note: str | None = None) -> None:
+        # `note` (the Queue's reason for a lone book) renders as a caption under the byline.
         # Every book is always individually selectable. The leading checkbox
         # toggles selection; clicking the title section opens the detail view.
         # Rows are keyboard-navigable; the focused row is tinted.
@@ -1462,7 +1481,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         ).tooltip(blocking_reason(book) or "Blocking problem")
                     if has_open_findings(book):
                         ui.icon("warning_amber", size="1.125rem").classes("text-warning").tooltip(
-                            "Needs attention: see At a Glance"
+                            "In your queue: see At a Glance"
                         )
                 series = book.series[0].name if book.series else ""
                 author = ", ".join(book.authors) or "unknown author"
@@ -1477,6 +1496,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         ui.badge(controller.source_label(prov)).props("outline").classes(
                             "colophon-chip"
                         ).tooltip(f"{field.capitalize()}: {controller.source_tooltip(prov)}")
+                if note:
+                    # Muted, not text-warning: the warning hue misses AA as text on the dark surface.
+                    ui.label(note).classes("text-caption colophon-muted ellipsis").tooltip(note)
                 # Line 3: the file facts, then genre/tag chips. Kept on one line, never wrapped.
                 total = sum(sf.duration_seconds for sf in book.source_files)
                 quality = book_quality_summary(book.source_files)
@@ -1540,8 +1562,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             _render_more()
 
     def _on_list_scroll(e) -> None:
-        if e.vertical_percentage > 0.85 and _list_view["rendered"] < len(_list_view["books"]):
+        if e.vertical_percentage <= 0.85:
+            return
+        if _list_view["rendered"] < len(_list_view["books"]):
             _render_more()
+        elif _queue_view["rendered"] < len(_queue_view["pending"]):
+            _render_queue_more()
 
     def _on_detail_scroll(e) -> None:
         # Remember where the detail pane is scrolled so book navigation can restore it.
@@ -1574,6 +1600,10 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 skeleton_rows(8)
             _ensure_warm()
             return
+        _queue_view["pending"], _queue_view["rendered"] = [], 0
+        if scope["kind"] == "queue":
+            _render_queue()
+            return
         books = _visible_books()
         _list_view["books"] = books
         _list_view["rendered"] = 0
@@ -1603,6 +1633,85 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         _render_more()
         if list_scroll is not None:
             list_scroll.scroll_to(percent=0.0)
+
+    def _render_queue() -> None:
+        """The Queue scope: cause groups, not books. A lone book with its own cause is a normal row
+        with the reason under its byline; any other group is a collapsed header that lists its
+        books as normal rows when opened, so bulk selection works on a cause's books as it does
+        anywhere else. A folder cause offers Review folder (the Tree view focused on it)."""
+        queue = controller.review_queue(_visible_books())
+        # Distinct queued books, for the selection helpers. rendered == len keeps the book-row
+        # windowing (_render_more, _ensure_rendered, the scroll handler) out of queue mode; the
+        # queue windows its own entries below.
+        _list_view["books"] = list({b.id: b for g in queue.groups for b in g.books}.values())
+        _list_view["rendered"] = len(_list_view["books"])
+        _sync_deselect_btn()
+        with list_container:
+            if not queue.groups:
+                if book_filter["text"].strip():
+                    with empty_state(
+                        "search_off", "No queued books match your filter",
+                        "Try a different term, or clear the filter to see the whole queue.",
+                    ):
+                        pass
+                else:
+                    with empty_state(
+                        "task_alt", "Nothing needs you",
+                        "Every book is settled or waiting on a bulk step: Match, then Persist.",
+                    ):
+                        pass
+                _list_el["el"] = None
+                _list_footer["el"] = None
+                return
+            _list_el["el"] = ui.list().props("separator dense").classes("w-full")
+            _list_footer["el"] = ui.label().classes("text-caption colophon-muted q-pa-sm")
+        _queue_view["pending"] = [lambda g=g: _render_queue_group(g) for g in queue.groups]
+        _render_queue_more()
+        if list_scroll is not None:
+            list_scroll.scroll_to(percent=0.0)
+
+    def _render_queue_more() -> None:
+        pending = _queue_view["pending"]
+        start = _queue_view["rendered"]
+        end = min(start + _PAGE, len(pending))
+        if start >= end or _list_el["el"] is None:
+            return
+        with _list_el["el"]:
+            for render in pending[start:end]:
+                render()
+        _queue_view["rendered"] = end
+        footer = _list_footer["el"]
+        if footer is not None:
+            footer.set_text(f"Showing {end} of {len(pending)}; scroll for more")
+            footer.set_visibility(end < len(pending))
+
+    def _render_queue_group(group) -> None:
+        if group.cause.kind == "book" and len(group.books) == 1:
+            _build_row(group.books[0], note=group.phrase)
+            return
+        icon, color = _QUEUE_ICON[group.kind]
+        exp = ui.expansion().classes("w-full colophon-queue-group")
+        with exp.add_slot("header"), ui.row().classes("items-center no-wrap w-full q-gutter-sm"):
+            ui.icon(icon, color=color, size="1.25rem")
+            ui.label(group.label).classes("col ellipsis").tooltip(group.label)
+            if group.cause.kind == "folder":
+                # click.stop: opening the Tree must not also toggle the group.
+                ui.button("Review folder", icon="account_tree").props("flat dense no-caps").on(
+                    "click.stop", lambda p=group.cause.path: ui.navigate.to(folder_tree_url(p))
+                ).tooltip(str(group.cause.path))
+        # A group's rows are built on first open, not up front: a big folder cause can hold
+        # hundreds of books, and every collapsed row would still cost its DOM.
+        built = {"done": False}
+
+        def _fill(e, exp=exp, group=group, built=built) -> None:
+            if not e.value or built["done"]:
+                return
+            built["done"] = True
+            with exp, ui.list().props("separator dense").classes("w-full"):
+                for b in group.books:
+                    _build_row(b)
+
+        exp.on_value_change(_fill)
 
     # --- keyboard navigation ---
     def _set_focus(book_id: str) -> None:
@@ -2041,7 +2150,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ).set_enabled(bool(selected_ids))
             # Authors/series shown are limited to those with books in the active
             # folder filter (when one is set), mirroring the filtered Books list.
-            # The header items (All / Needs attention / phase groups) are few and render up
+            # The header items (All / Queue / Check matches / phase groups) are few and render up
             # front. The author/series/franchise rows can number in the thousands and dominate
             # render time, so each becomes a render closure in `nav_pending`, windowed onto the
             # scroll area exactly like the book list — a slice now, the rest on scroll.
@@ -2049,21 +2158,22 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             with ui.list().props("dense").classes("w-full") as nav_list:
                 all_label = "All books in folder" if folder_filter["path"] else "All books"
                 _nav_item(all_label, "library_books", kind == "all", lambda: _set_scope("all", None))
-                attention = [
-                    b for b in tree.all_books if controller._active_findings(b)
-                    if _in_folder(b) and _matches_filter(b, conditions)
-                ]
-                if attention:
-                    counts = {"error": 0, "warn": 0, "info": 0}
-                    for b in attention:
-                        for f in controller._active_findings(b):
-                            counts[f.severity.value] += 1
+                scoped = [b for b in tree.all_books if _in_folder(b) and _matches_filter(b, conditions)]
+                queue = controller.review_queue(scoped)
+                if queue.book_count:
+                    queued_ids = list(dict.fromkeys(b.id for g in queue.groups for b in g.books))
                     _nav_item(
-                        f"Needs attention ({len(attention)})", "flag",
-                        kind == "attention",
-                        lambda: _set_scope("attention", None),
-                        color="negative" if counts["error"] else "warning",
-                        checkbox=_node_checkbox([b.id for b in attention]),
+                        f"Queue ({queue.book_count})", "inbox", kind == "queue",
+                        lambda: _set_scope("queue", None),
+                        color="negative" if any(g.kind == "blocked" for g in queue.groups) else "warning",
+                        checkbox=_node_checkbox(queued_ids),
+                    )
+                to_check = controller.books_to_check_matches(scoped)
+                if to_check:
+                    _nav_item(
+                        f"Check matches ({len(to_check)})", "rule", kind == "check_matches",
+                        lambda: _set_scope("check_matches", None),
+                        checkbox=_node_checkbox([b.id for b in to_check]),
                     )
                 if view["group_by"] == "phase":
                     universe = [b for b in tree.all_books if _in_folder(b)]
