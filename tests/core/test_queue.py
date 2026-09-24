@@ -1,7 +1,14 @@
 import time
 from pathlib import Path
 
-from colophon.core.models import BookState, BookUnit, Finding, FindingCode, FindingSeverity
+from colophon.core.models import (
+    BookState,
+    BookUnit,
+    Finding,
+    FindingCode,
+    FindingSeverity,
+    SeriesRef,
+)
 from colophon.core.queue import build_queue, check_matches, nearest_classified, queue_reasons
 
 ROOT = Path("/lib")
@@ -206,7 +213,7 @@ def test_clustered_books_with_a_book_scoped_finding_form_separate_groups():
 
 def test_weak_series_reason_is_caused_by_the_series_folder():
     b = _book("/lib/Carole Stivers/Mind Games/Book1", identity=55.0)
-    b.series = "Mind Games"
+    b.series = [SeriesRef(name="Mind Games")]
     b.provenance["series"] = "graphing"
     [r] = _reasons(b)
     assert r.kind == "weak" and r.phrase == "series only from the folder"

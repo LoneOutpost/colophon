@@ -31,9 +31,10 @@ ReasonKind = Literal["blocked", "unsure", "finding", "weak"]
 KindOf = Callable[[Path], str]   # a folder's classified kind in the maintained graph, "" when none
 
 _ENTITY_KINDS = frozenset({"author", "series", "franchise"})
-# READY is deliberately absent: a Ready book (whether by a confirmed match or Mark ready) can still
-# carry an open finding, and Mark ready does not acknowledge findings, so it stays queued until one
-# does. Only a genuinely finished or skipped book is settled.
+# READY is deliberately absent. A book made Ready by a strong source match keeps its open findings
+# (a match does not acknowledge them), so it stays queued until one is resolved. Mark ready needs no
+# exclusion here: it confirms the book, which the early return below already settles. Only a
+# finished or skipped book is settled by state alone.
 _SETTLED_STATES = frozenset({BookState.SKIPPED, BookState.ORGANIZED, BookState.ENCODED})
 _FOLDER_PROVENANCE = frozenset({"directory", "graphing"})
 
