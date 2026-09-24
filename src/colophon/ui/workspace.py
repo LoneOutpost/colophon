@@ -487,7 +487,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         tree = controller.library_tree()
         kind, key = scope["kind"], scope["key"]
         if kind == "attention":
-            return controller.books_needing_attention()
+            return [b for b in tree.all_books if controller._active_findings(b)]
         if kind == "needs_id":
             books = list(tree.needs_id)
         elif kind == "author":
@@ -2063,7 +2063,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         checkbox=_node_checkbox([b.id for b in needs_id]),
                     )
                 attention = [
-                    b for b in controller.books_needing_attention()
+                    b for b in tree.all_books if controller._active_findings(b)
                     if _in_folder(b) and _matches_filter(b, conditions)
                 ]
                 if attention:
