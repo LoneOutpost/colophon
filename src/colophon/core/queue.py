@@ -121,14 +121,23 @@ def _finding_reason(book: BookUnit, finding: Finding, root: Path, kind_of: KindO
     return QueueReason("finding", phrase, cause)
 
 
-def _weak_reason(book: BookUnit, root: Path, kind_of: KindOf) -> QueueReason:
+def _weak_folder_cause(book: BookUnit, root: Path, kind_of: KindOf) -> tuple[str, Cause | None]:
+    """The weak identity field ("" when none) and, when a folder supplied it, the nearest ancestor
+    classified as that field's role: the folder whose confirmation would settle it."""
     weak = weak_identity_reason(book)
-    if weak is not None:
-        field_name, provenance = weak
-        if provenance in _FOLDER_PROVENANCE:
-            cause = _folder_cause(book, root, kind_of, {field_name})
-            if cause is not None:
-                return QueueReason("weak", f"{field_name} only from the folder", cause)
+    if weak is None:
+        return "", None
+    field_name, provenance = weak
+    if provenance not in _FOLDER_PROVENANCE:
+        return field_name, None
+    return field_name, _folder_cause(book, root, kind_of, {field_name})
+
+
+def _weak_reason(book: BookUnit, root: Path, kind_of: KindOf) -> QueueReason:
+    field_name, cause = _weak_folder_cause(book, root, kind_of)
+    if cause is not None:
+        return QueueReason("weak", f"{field_name} only from the folder", cause)
+    if field_name:
         return QueueReason("weak", f"{field_name} weakly backed", _book_cause(book))
     return QueueReason("weak", "identity weakly backed", _book_cause(book))
 
@@ -147,7 +156,10 @@ def queue_reasons(book: BookUnit, *, root: Path, kind_of: KindOf) -> list[QueueR
     if book.manually_confirmed or book.state in _SETTLED_STATES:
         return reasons
     if book.state is BookState.NEEDS_REVIEW:
-        cause = _folder_cause(book, root, kind_of, _ENTITY_KINDS) or _book_cause(book)
+        # Blame what is actually weak. Only a folder-supplied field points at a folder; a book whose
+        # author came from its tags is unsure for its own reasons (a publisher read as its title,
+        # say), and confirming the folder above it would change nothing.
+        cause = _weak_folder_cause(book, root, kind_of)[1] or _book_cause(book)
         reasons.append(QueueReason("unsure", "identity unsure", cause))
     for finding in active_findings(book):
         if finding.code not in BLOCKING_FINDINGS:

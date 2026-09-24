@@ -59,7 +59,7 @@ def test_a_weak_author_from_a_filename_is_the_books_own_problem():
     assert r.cause.kind == "book" and r.cause.book_id == b.id
 
 
-def test_unsure_groups_under_the_nearest_entity_folder():
+def test_unsure_suppresses_the_weak_reason():
     b = _book("/lib/Carole Stivers/X", state=BookState.NEEDS_REVIEW, identity=30.0)
     kinds = [r.kind for r in _reasons(b)]
     assert kinds == ["unsure"]          # weak is suppressed: unsure already explains the low score
@@ -155,10 +155,22 @@ def test_review_queue_scales_to_a_large_flat_library_quickly():
     assert q.book_count == 12_000
 
 
-def test_unsure_cause_is_the_nearest_entity_folder():
-    b = _book("/lib/Carole Stivers/X", state=BookState.NEEDS_REVIEW, identity=30.0)
+def test_unsure_with_a_folder_derived_author_is_caused_by_that_author_folder():
+    b = _book("/lib/Carole Stivers/X", state=BookState.NEEDS_REVIEW, identity=30.0,
+              author_prov="graphing")
     [r] = _reasons(b)
+    assert r.phrase == "identity unsure"
     assert r.cause.kind == "folder" and r.cause.path == Path("/lib/Carole Stivers")
+
+
+def test_unsure_with_a_tag_author_under_an_author_folder_is_the_books_own_problem():
+    # The folder did not supply the author, so confirming it cannot settle the book (a publisher
+    # read as the title, say): the queue must not send the user to the Tree for it.
+    b = _book("/lib/Carole Stivers/X", state=BookState.NEEDS_REVIEW, identity=55.0,
+              title="Simon & Schuster")
+    [r] = _reasons(b)
+    assert r.phrase == "identity unsure"
+    assert r.cause.kind == "book" and r.cause.book_id == b.id
 
 
 def test_unsure_with_no_entity_ancestor_uses_the_book():
