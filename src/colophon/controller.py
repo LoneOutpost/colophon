@@ -461,6 +461,10 @@ class AppController:
         self._tree_cache: tuple[tuple[int, int, int], LibraryTree] | None = None
         self._distinct_cache: dict[str, tuple[int, list[str]]] = {}  # kind -> (books_gen, values)
         self._classic_graph_cache: tuple[tuple[str, int, int], Graph] | None = None  # (root, graph_gen, books_gen)
+        # Review-queue views, per (view, input book ids), valid while the books/graph generations and
+        # the scan paths hold (see _queue_memo). The Library asks several times per repaint.
+        self._queue_cache_gen: tuple | None = None
+        self._queue_cache: dict[tuple, object] = {}
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -2124,17 +2128,33 @@ class AppController:
         surface (e.g. LOOSE_IN_AUTHOR — the normal loose-file-in-author layout)."""
         return active_findings(book)
 
+    _QUEUE_MEMO_MAX = 32  # distinct filter sets remembered per generation
+
+    def _queue_memo[T](self, view: tuple, books: list[BookUnit] | None,
+                       build: Callable[[list[BookUnit]], T]) -> T:
+        """Memoize a queue view on the inputs it reads: the book store (states, findings, scores),
+        the maintained graph (folder kinds), the scan paths (cause roots), and which books were
+        asked about. Any write bumps a generation, which drops every entry."""
+        gen = (self.ctx.books.generation, self.ctx.library_graph.generation,
+               tuple(str(p) for p in self.ctx.config.scan_paths))
+        if gen != self._queue_cache_gen or len(self._queue_cache) >= self._QUEUE_MEMO_MAX:
+            self._queue_cache_gen, self._queue_cache = gen, {}
+        key = (view, None if books is None else tuple(b.id for b in books))
+        if key not in self._queue_cache:
+            self._queue_cache[key] = build(self.ctx.books.list_all() if books is None else books)
+        return self._queue_cache[key]  # type: ignore[return-value]
+
     def review_queue(self, books: list[BookUnit] | None = None) -> Queue:
         """The books that need a person, grouped by probable cause (see core/queue.py). `books`
-        narrows it (the Library passes its folder/text-filtered set); None means the whole library."""
-        pool = self.ctx.books.list_all() if books is None else books
-        return build_queue(pool, root_for=self._scan_root_for_path,
-                           kind_of=self.folder_classification)
+        narrows it (the Library passes its filtered set); None means the whole library. Memoized."""
+        return self._queue_memo(("queue",), books, lambda pool: build_queue(
+            pool, root_for=self._scan_root_for_path, kind_of=self.folder_classification))
 
     def books_to_check_matches(self, books: list[BookUnit] | None = None) -> list[BookUnit]:
-        """Matched books whose provider fit stayed under the Ready threshold, worst first."""
-        pool = self.ctx.books.list_all() if books is None else books
-        return check_matches(pool, self.ctx.config.review_threshold)
+        """Matched books whose provider fit stayed under the Ready threshold, worst first. Memoized."""
+        threshold = self.ctx.config.review_threshold
+        return self._queue_memo(("check", threshold), books,
+                                lambda pool: check_matches(pool, threshold))
 
     def acknowledge_finding(self, book: BookUnit, key: str) -> None:
         """Dismiss ONE advisory finding so a re-scan won't resurface it.

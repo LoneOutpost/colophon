@@ -4000,6 +4000,25 @@ def test_review_queue_groups_the_library_and_drops_a_book_once_ready(tmp_path):
     ctx.close()
 
 
+def test_queue_views_are_memoized_until_a_book_changes(tmp_path):
+    # The Library asks for the queue several times per repaint; unchanged inputs reuse one result.
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title, book.authors = "Dune", ["Frank Herbert"]
+    book.confidence = 40.0
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    first, matches = ctrl.review_queue([book]), ctrl.books_to_check_matches([book])
+    assert ctrl.review_queue([book]) is first
+    assert ctrl.books_to_check_matches([book]) is matches
+    assert ctrl.review_queue() is not first            # a different input set is its own entry
+    book.title = "Dune Messiah"
+    ctx.books.upsert(book)                             # a write bumps the generation
+    assert ctrl.review_queue([book]) is not first
+    assert ctrl.books_to_check_matches([book]) is not matches
+    ctx.close()
+
+
 def test_confirm_node_classification_keeps_the_folders_current_kind(tmp_path):
     from colophon.core.graph import DirectoryNode
     from colophon.core.graph_records import NodeRecord

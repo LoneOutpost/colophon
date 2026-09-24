@@ -55,3 +55,12 @@ def test_none_snapshot_yields_defaults():
     assert out.selected_ids == set()
     assert out.open_book_id is None
     assert out.view["group_by"] == "author"
+
+
+def test_a_tab_saved_on_a_retired_scope_restores_to_the_queue():
+    for retired in ("attention", "needs_id"):
+        out = snapshot_to_view(
+            {"scope": {"kind": retired, "key": None}},
+            known_book_ids=set(), known_authors=set(), known_series=set(),
+        )
+        assert out.scope == {"kind": "queue", "key": None}
