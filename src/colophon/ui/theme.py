@@ -158,6 +158,19 @@ body.body--dark { color: #ece4d8; }
 .book-row .q-item__section--main,
 .book-row .colophon-book-title,
 .book-row .book-row-byline { min-width: 0; }
+/* Line 1 wraps instead of squeezing: the title keeps a readable minimum and the badges drop to the
+   next line when the pane is narrow. With no-wrap, an 862px window gave every title 0px while the
+   confidence/state badges kept their full width. Same for a queue group: the label keeps its width
+   and Review folder wraps under it. */
+.book-row .book-row-line1,
+.colophon-queue-group .queue-group-head { flex-wrap: wrap; row-gap: 4px; }
+.book-row .book-row-line1 > .colophon-book-title,
+.colophon-queue-group .queue-group-label { flex: 1 1 8rem; min-width: min(8rem, 100%); }
+/* A group label is a sentence ("2 books under Tom Clancy: tags name a different author"); two lines
+   keep the problem readable in a narrow pane where one line cut it off after the folder name. */
+.colophon-queue-group .queue-group-label.ellipsis {
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 /* The checkbox and cover sections take Quasar's avatar minimum (56px) plus 16px padding each, sized
    for a 40px avatar neither of them is. Sizing them to their content hands that width to the title. */
 .book-row .q-item__section--avatar { min-width: 0; padding-right: 8px; }

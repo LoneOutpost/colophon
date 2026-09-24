@@ -31,7 +31,7 @@ _CLASSIFICATION_BADGE_TIP = (
 _LEGEND = (
     "Badges show each folder's classification and confidence (0 to 1). "
     "'author?' and 'series?' are suggestions you confirm; '· manual' marks a classification "
-    "you confirmed. Confirmed authors and series apply to the books on the next scan."
+    "you confirmed. Confirming one updates the books under it at once."
 )
 
 # Manual-classification targets (label shown in the menus), ordered Book-first since correcting a
@@ -349,8 +349,8 @@ def render_classic_tree(controller: AppController, focal: str | None = None) -> 
     async def _confirm_cohort(hint: str, count: int) -> None:
         with modal() as dialog, ui.card():
             ui.label(f"Confirm {count} groupings as {hint}?")
-            ui.label("Each folder is marked as that author/series; this applies to the "
-                     "books on the next scan.").classes("colophon-muted text-caption")
+            ui.label("Each folder is marked as that author/series, and the books under it "
+                     "take it at once.").classes("colophon-muted text-caption")
             with ui.row():
                 ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
                 ui.button("Confirm", on_click=lambda: dialog.submit(True)).props("no-caps")
@@ -377,7 +377,7 @@ def render_classic_tree(controller: AppController, focal: str | None = None) -> 
                             ).props("flat dense no-caps").classes("text-primary")
                     if s.unknown_dirs:
                         ui.label(f"· {s.unknown_dirs} unclassified").classes("colophon-muted")
-                ui.label("Confirmed authors and series apply to the books on the next scan.").classes(
+                ui.label("Confirming a folder updates the books under it at once.").classes(
                     "colophon-muted text-caption"
                 )
             else:
