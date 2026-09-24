@@ -736,12 +736,6 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     return result.score
 
 
-# The detail shape `title_corroborate` emits (`metadata title "X" vs folder "Y"`). METADATA_CONFLICT
-# is raised by three independent checks — this one, the album-vs-folder test in classify.py, and the
-# author variant below — so a pass may only retract the finding it can prove is its own.
-_TITLE_CONFLICT_PREFIX = 'metadata title "'
-
-
 def _fill_title_corroboration(books: list[BookUnit]) -> None:
     """Stamp each book's title-corroboration verdict and keep its METADATA_CONFLICT finding in step
     with it: raised on a contradiction, RETRACTED when the verdict no longer says so. Mutates no
@@ -754,12 +748,13 @@ def _fill_title_corroboration(books: list[BookUnit]) -> None:
     acknowledgement goes with it: it settled a conflict that no longer exists, and keeping it would
     silently pre-acknowledge the NEXT, different contradiction on this book.
     """
+    from colophon.core.guidance import TITLE_CONFLICT_PREFIX
     from colophon.core.models import Finding, FindingCode, FindingSeverity
     from colophon.core.title_corroborate import book_title_verdict
 
     def mine(f: Finding) -> bool:
         return (f.code == FindingCode.METADATA_CONFLICT
-                and (f.detail or "").startswith(_TITLE_CONFLICT_PREFIX))
+                and (f.detail or "").startswith(TITLE_CONFLICT_PREFIX))
 
     for book in books:
         tc = book_title_verdict(book)

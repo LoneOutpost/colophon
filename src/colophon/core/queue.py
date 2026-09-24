@@ -17,13 +17,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from colophon.core.guidance import finding_scope
+from colophon.core.guidance import finding_phrase, finding_scope
 from colophon.core.models import (
     BLOCKING_FINDINGS,
     BookState,
     BookUnit,
     Finding,
-    FindingCode,
     active_findings,
 )
 from colophon.core.triage import confidence_bucket, has_blocking_error, weak_identity_reason
@@ -32,22 +31,11 @@ ReasonKind = Literal["blocked", "unsure", "finding", "weak"]
 KindOf = Callable[[Path], str]   # a folder's classified kind in the maintained graph, "" when none
 
 _ENTITY_KINDS = frozenset({"author", "series", "franchise"})
-_DONE_STATES = frozenset({BookState.SKIPPED, BookState.ORGANIZED, BookState.ENCODED})
+# READY is deliberately absent: a Ready book (whether by a confirmed match or Mark ready) can still
+# carry an open finding, and Mark ready does not acknowledge findings, so it stays queued until one
+# does. Only a genuinely finished or skipped book is settled.
+_SETTLED_STATES = frozenset({BookState.SKIPPED, BookState.ORGANIZED, BookState.ENCODED})
 _FOLDER_PROVENANCE = frozenset({"directory", "graphing"})
-
-# What each finding means to a person scanning the queue. METADATA_CONFLICT is split by which check
-# raised it (see guidance.finding_scope).
-_FINDING_PHRASE: dict[FindingCode, str] = {
-    FindingCode.MIXED_QUALITY: "files differ in audio quality",
-    FindingCode.MISSING_TRACKS: "tracks are missing",
-    FindingCode.EXTENSION_MISMATCH: "a file's extension is wrong",
-    FindingCode.MIXED_WORKS: "several works share one folder",
-    FindingCode.MULTI_IN_AUTHOR: "several books share one folder",
-    FindingCode.MULTI_IN_UNDETERMINED: "several books share one folder",
-    FindingCode.STRUCTURE_UNCLEAR: "the folder layout is unclear",
-    FindingCode.DUP_FORMAT: "the same book in two formats",
-    FindingCode.DUP_EDITION: "two editions of one book",
-}
 
 
 @dataclass(frozen=True)
@@ -75,9 +63,9 @@ class QueueGroup:
 
     @property
     def label(self) -> str:
-        if self.cause.kind == "folder":
+        if self.cause.kind == "folder" and len(self.books) > 1:
             n = len(self.books)
-            return f"{n} book{'s' if n != 1 else ''} under {self.cause.path.name}: {self.phrase}"
+            return f"{n} books under {self.cause.path.name}: {self.phrase}"
         book = self.books[0]
         return f"{book.title or book.source_folder.name}: {self.phrase}"
 
@@ -111,21 +99,25 @@ def _folder_cause(book: BookUnit, root: Path, kind_of: KindOf, kinds: Iterable[s
     return Cause("folder", found) if found is not None else None
 
 
+def _missing_fallback_cause(book: BookUnit, root: Path) -> Cause:
+    """A missing book's parent folder, when no entity ancestor is classified — clamped to the scan
+    root, since a book AT the root has no parent to blame that is still inside the library."""
+    p = book.source_folder.parent
+    if root == book.source_folder or (root != p and root not in p.parents):
+        return Cause("folder", root)
+    return Cause("folder", p)
+
+
 def _finding_reason(book: BookUnit, finding: Finding, root: Path, kind_of: KindOf) -> QueueReason:
     scope = finding_scope(finding)
+    phrase = finding_phrase(finding)
     if scope == "author_folder":
         cause = _folder_cause(book, root, kind_of, {"author"}) or _book_cause(book)
-        return QueueReason("finding", "tags name a different author", cause)
-    if scope == "own_folder":
-        return QueueReason("finding", _FINDING_PHRASE.get(finding.code, "needs a look"),
-                           Cause("folder", book.source_folder))
-    if finding.code == FindingCode.METADATA_CONFLICT:
-        phrase = ("title disagrees with the folder"
-                  if (finding.detail or "").startswith("metadata title")
-                  else "tags disagree with the folder")
-        return QueueReason("finding", phrase, _book_cause(book))
-    return QueueReason("finding", _FINDING_PHRASE.get(finding.code, "needs a look"),
-                       _book_cause(book))
+    elif scope == "own_folder":
+        cause = Cause("folder", book.source_folder)
+    else:
+        cause = _book_cause(book)
+    return QueueReason("finding", phrase, cause)
 
 
 def _weak_reason(book: BookUnit, root: Path, kind_of: KindOf) -> QueueReason:
@@ -145,13 +137,13 @@ def queue_reasons(book: BookUnit, *, root: Path, kind_of: KindOf) -> list[QueueR
     reasons: list[QueueReason] = []
     if has_blocking_error(book):
         if book.missing:
-            cause = (_folder_cause(book, root, kind_of, _ENTITY_KINDS)
-                     or Cause("folder", book.source_folder.parent))
-            reasons.append(QueueReason("blocked", "files missing from disk", cause))
+            reasons.append(QueueReason("blocked", "files missing from disk",
+                                       _folder_cause(book, root, kind_of, _ENTITY_KINDS)
+                                       or _missing_fallback_cause(book, root)))
         else:
             reasons.append(QueueReason("blocked", "a file can't be read", _book_cause(book)))
     # A confirmation settles everything but a blocking error; a finished or skipped book is done.
-    if book.manually_confirmed or book.state in _DONE_STATES:
+    if book.manually_confirmed or book.state in _SETTLED_STATES:
         return reasons
     if book.state is BookState.NEEDS_REVIEW:
         cause = _folder_cause(book, root, kind_of, _ENTITY_KINDS) or _book_cause(book)
@@ -173,11 +165,11 @@ def build_queue(books: Iterable[BookUnit], *, root_for: Callable[[Path], Path],
     groups: dict[tuple[str, str, Cause], QueueGroup] = {}
     queued: set[str] = set()
     for book in books:
-        for reason in queue_reasons(book, root=root_for(book.source_folder), kind_of=kind_of):
+        reasons = queue_reasons(book, root=root_for(book.source_folder), kind_of=kind_of)
+        for reason in dict.fromkeys(reasons):
             key = (reason.kind, reason.phrase, reason.cause)
             group = groups.setdefault(key, QueueGroup(reason.kind, reason.phrase, reason.cause))
-            if all(b.id != book.id for b in group.books):
-                group.books.append(book)
+            group.books.append(book)
             queued.add(book.id)
     ordered = sorted(groups.values(),
                      key=lambda g: (g.kind != "blocked", -len(g.books), g.label))

@@ -100,6 +100,11 @@ _OWN_FOLDER_CODES = frozenset({
     FindingCode.MULTI_IN_UNDETERMINED, FindingCode.STRUCTURE_UNCLEAR,
 })
 
+# The detail prefix node_classify's title-corroboration check writes (`metadata title "X" vs
+# folder "Y"`). Public: node_classify's own METADATA_CONFLICT-retraction check shares this constant
+# so the two agree on what "mine" means without duplicating the literal.
+TITLE_CONFLICT_PREFIX = 'metadata title "'
+
 FindingScope = Literal["author_folder", "own_folder", "book"]
 
 
@@ -117,6 +122,33 @@ def finding_scope(finding: Finding) -> FindingScope:
     if finding.code in _OWN_FOLDER_CODES:
         return "own_folder"
     return "book"
+
+
+# What each finding means to a person scanning the review queue, in plain words. Shared with
+# finding_scope's grouping so the two never describe the same finding two different ways.
+_FINDING_PHRASE: dict[FindingCode, str] = {
+    FindingCode.MIXED_QUALITY: "files differ in audio quality",
+    FindingCode.MISSING_TRACKS: "tracks are missing",
+    FindingCode.EXTENSION_MISMATCH: "a file's extension is wrong",
+    FindingCode.MIXED_WORKS: "several works share one folder",
+    FindingCode.MULTI_IN_AUTHOR: "several books share one folder",
+    FindingCode.MULTI_IN_UNDETERMINED: "several books share one folder",
+    FindingCode.STRUCTURE_UNCLEAR: "the folder layout is unclear",
+    FindingCode.DUP_FORMAT: "the same book in two formats",
+    FindingCode.DUP_EDITION: "two editions of one book",
+}
+
+
+def finding_phrase(finding: Finding) -> str:
+    """The finding's problem in plain words, for the review queue. METADATA_CONFLICT is split by
+    which check raised it, same as `finding_scope`; everything else comes from the per-code table."""
+    if finding.code == FindingCode.METADATA_CONFLICT:
+        if (finding.detail or "").startswith(_AUTHOR_CONFLICT_PREFIX):
+            return "tags name a different author"
+        if (finding.detail or "").startswith(TITLE_CONFLICT_PREFIX):
+            return "title disagrees with the folder"
+        return "tags disagree with the folder"
+    return _FINDING_PHRASE.get(finding.code, "needs a look")
 
 
 def review_guidance() -> Guidance:
