@@ -310,3 +310,11 @@ def test_active_findings_still_drops_the_retired_codes(tmp_path):
     book.findings = [Finding(code=FindingCode.LOOSE_IN_AUTHOR, severity=FindingSeverity.WARN,
                              detail="one book loose in an author folder")]
     assert active_findings(book) == []
+
+
+def test_a_stored_finding_without_structure_still_loads():
+    # Findings persisted before conflict findings carried structure have only code/severity/detail.
+    f = Finding.model_validate({"code": "metadata_conflict", "severity": "warn",
+                                "detail": 'folder "A" vs tag "B"'})
+    assert (f.field, f.current, f.suggested, f.source) == (None, None, None, None)
+    assert f.key == 'metadata_conflict:folder "A" vs tag "B"'

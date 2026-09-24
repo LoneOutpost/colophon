@@ -92,3 +92,107 @@ def test_delete_corrupt_files_removes_book_when_all_bad(tmp_path):
 
     assert result.book_removed is True and not bad.exists()
     assert ctx.books.get(book.id) is None
+
+
+def _conflicted(ctx, tmp_path, *, field="title", current="Ph1", suggested="Porterhouse Blue",
+                source="album tag", detail='folder "Porterhouse Blue" vs title "Ph1" (from the album tag)'):
+    from colophon.core.models import Provenance
+
+    book = BookUnit.new(source_folder=tmp_path / "Tom Sharpe" / "Porterhouse Blue")
+    book.title = "Ph1"
+    book.authors = ["Some Narrator"]
+    book.provenance["title"] = Provenance.TAG.value
+    book.provenance["authors"] = Provenance.TAG.value
+    book.findings = [Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                             detail=detail, field=field, current=current, suggested=suggested,
+                             source=source)]
+    ctx.books.upsert(book)
+    return book
+
+
+def _queued_for_conflict(ctrl, book) -> bool:
+    return any(book.id in {b.id for b in g.books} and "disagree" in g.phrase
+               for g in ctrl.review_queue().groups)
+
+
+def test_apply_finding_suggestion_writes_the_folders_title_as_a_manual_edit(tmp_path):
+    from colophon.core.models import Provenance
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _conflicted(ctx, tmp_path)
+    assert _queued_for_conflict(ctrl, book)
+
+    updated = ctrl.apply_finding_suggestion(book, book.findings[0].key)
+
+    stored = ctx.books.get(updated.id)
+    assert stored.title == "Porterhouse Blue"
+    assert stored.provenance["title"] == Provenance.MANUAL.value
+    # The album check compares the file's raw tag, which a book edit does not change, so the
+    # finding is settled by acknowledging it rather than left standing until Write tags.
+    assert ctrl._active_findings(stored) == []
+    assert not _queued_for_conflict(ctrl, stored)
+    ctx.close()
+
+
+def test_apply_finding_suggestion_is_undoable(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _conflicted(ctx, tmp_path)
+    ctrl.apply_finding_suggestion(book, book.findings[0].key)
+    assert ctrl.undo_last() is True
+    assert ctx.books.get(book.id).title == "Ph1"
+    ctx.close()
+
+
+def test_apply_finding_suggestion_writes_authors(tmp_path):
+    from colophon.core.models import Provenance
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _conflicted(ctx, tmp_path, field="authors", current="Some Narrator",
+                       suggested="Tom Sharpe", source="tag",
+                       detail="author: tag 'Some Narrator' vs folder 'Tom Sharpe'")
+    updated = ctrl.apply_finding_suggestion(book, book.findings[0].key)
+    stored = ctx.books.get(updated.id)
+    assert stored.authors == ["Tom Sharpe"]
+    assert stored.provenance["authors"] == Provenance.MANUAL.value
+    assert ctrl._active_findings(stored) == []
+    ctx.close()
+
+
+def test_apply_finding_suggestion_refuses_a_finding_without_a_value(tmp_path):
+    import pytest
+
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = _conflicted(ctx, tmp_path, field=None, current=None, suggested=None, source=None,
+                       detail='folder "Porterhouse Blue" vs tag "Ph1"')
+    with pytest.raises(ValueError):
+        ctrl.apply_finding_suggestion(book, book.findings[0].key)
+    with pytest.raises(ValueError):
+        ctrl.apply_finding_suggestion(book, "metadata_conflict:no such finding")
+    assert ctx.books.get(book.id).title == "Ph1"
+    ctx.close()
+
+
+def test_upgrading_legacy_findings_structures_them_and_carries_the_dismissal(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    old_album = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                        detail='folder "Porterhouse Blue" vs tag "Ph1"')
+    retired = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                      detail='author "Tom Sharpe" not in the folder path')
+    book = BookUnit.new(source_folder=tmp_path / "Tom Sharpe.-.Porterhouse Blue")
+    book.title = "Ph1"
+    book.findings = [old_album, retired]
+    book.acknowledged_findings = [old_album.key, retired.key]
+    ctx.books.upsert(book)
+
+    assert ctrl.upgrade_legacy_findings() == 1
+    stored = ctx.books.get(book.id)
+    [album] = stored.findings                       # the retired-check finding is gone
+    assert album.detail == 'folder "Porterhouse Blue" vs title "Ph1" (from the album tag)'
+    assert album.suggested == "Porterhouse Blue"
+    assert stored.acknowledged_findings == [album.key]   # the dismissal followed the new wording
+    assert ctrl.upgrade_legacy_findings() == 0           # idempotent

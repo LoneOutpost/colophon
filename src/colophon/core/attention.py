@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from colophon.core.guidance import FixAction, finding_guidance
 from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity
+from colophon.core.textlist import join_list
 
 
 class AttentionItem(NamedTuple):
@@ -19,6 +20,15 @@ class AttentionItem(NamedTuple):
     actions: tuple[FixAction, ...]
     code: FindingCode | None  # None for the synthetic missing-book item
     key: str | None = None    # the finding's acknowledgement identity; None when there is no finding
+    suggested: str | None = None  # the folder's value USE_SUGGESTED writes (conflict findings only)
+    field: str | None = None      # the book field USE_SUGGESTED writes it to
+    source: str | None = None     # where the disputed value came from ("album tag", "tag", "title")
+
+
+def _book_holds(book: BookUnit, field: str, value: str) -> bool:
+    """Whether the book's `field` already reads `value`, ignoring case and outer spacing."""
+    held = join_list(book.authors) if field == "authors" else getattr(book, field, None)
+    return (held or "").strip().casefold() == value.strip().casefold()
 
 
 def attention_items(book: BookUnit, active_findings: list[Finding]) -> list[AttentionItem]:
@@ -36,8 +46,20 @@ def attention_items(book: BookUnit, active_findings: list[Finding]) -> list[Atte
     items: list[AttentionItem] = []
     for f in active_findings:
         g = finding_guidance(f.code)
+        suggestion, actions = g.suggestion, g.actions
+        if f.field in ("title", "authors") and f.suggested:
+            if _book_holds(book, f.field, f.suggested):
+                # The book already reads the folder's value; only the file's tag still disagrees,
+                # so there is nothing to apply and writing the tags is the fix.
+                suggestion = f"{suggestion} Write tags to fix the file."
+                actions = (FixAction.ACKNOWLEDGE,)
+            else:
+                # Offered just before Acknowledge: the fix first, dismissing it last.
+                actions = (*(a for a in actions if a is not FixAction.ACKNOWLEDGE),
+                           FixAction.USE_SUGGESTED, FixAction.ACKNOWLEDGE)
         items.append(AttentionItem(
-            severity=f.severity, detail=f.detail, suggestion=g.suggestion,
-            actions=g.actions, code=f.code, key=f.key,
+            severity=f.severity, detail=f.detail, suggestion=suggestion,
+            actions=actions, code=f.code, key=f.key,
+            suggested=f.suggested, field=f.field, source=f.source,
         ))
     return items

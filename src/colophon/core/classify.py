@@ -19,6 +19,7 @@ from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.group_resolve import resolve_grouping
+from colophon.core.guidance import album_conflict
 from colophon.core.identity_tokens import title_candidates
 from colophon.core.metadata_quality import (
     is_junk_title,
@@ -360,25 +361,24 @@ def _metadata_conflict_finding(
     hard-contradiction check: the parsed folder title vs a uniform Album tag. Passive -- a bulk
     tagger wrote the wrong record onto these files; a human confirms and edits. Author disagreement
     is node_classify's job, which compares people-sets rather than testing path presence."""
-    conflicts: list[str] = []
     album = _uniform_tag(f.tags.album for f in features)
-    if folder_kind is FolderKind.TITLE and album and not is_placeholder_title(album):
-        # Compare the tag against the folder's `.-.`-split TITLE segment(s), not the whole
-        # 'Author.-.Title' string: the raw folder name shares no token with a bare title tag, which
-        # false-flagged every '.-.' book (folder 'Alex Kava.-.Damaged' vs tag 'Damaged' agree).
-        cands = title_candidates(folder.name, authors=[], series=[]) \
-            or [parse_folder_title(folder.name).title or folder.name]
-        if not any(shares_token(c, album) for c in cands):
-            conflicts.append(f'folder "{cands[-1]}" vs tag "{album}"')
+    if folder_kind is not FolderKind.TITLE or not album or is_placeholder_title(album):
+        return None
+    # Compare the tag against the folder's `.-.`-split TITLE segment(s), not the whole
+    # 'Author.-.Title' string: the raw folder name shares no token with a bare title tag, which
+    # false-flagged every '.-.' book (folder 'Alex Kava.-.Damaged' vs tag 'Damaged' agree).
+    cands = title_candidates(folder.name, authors=[], series=[]) \
+        or [parse_folder_title(folder.name).title or folder.name]
+    if any(shares_token(c, album) for c in cands):
+        return None
     # An author absent from the folder path is NOT a conflict: nothing disagrees, the layout simply
     # does not name the author. On a real library that arm produced only false positives, because a
     # folder is free to be titled without its author. Genuine author disagreement is caught by
     # node_classify, which compares the tag's people-set against the classified folder author instead
     # of testing for mere presence.
-    if not conflicts:
-        return None
-    return Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
-                   detail="; ".join(conflicts))
+    # The detail names the book field the album tag feeds, so it reads as a disagreement about the
+    # title; the structure carries the folder's value so the UI can offer it as the fix.
+    return album_conflict(cands[-1], album)
 
 
 def _actionable_finding(

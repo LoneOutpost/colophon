@@ -128,6 +128,13 @@ class Finding(_Base):
     code: FindingCode
     severity: FindingSeverity
     detail: str
+    # A conflict finding's structure, so the UI can name the field at stake and offer the folder's
+    # value as a one-click fix. `detail` stays the stored display string and the acknowledgement
+    # identity; these are optional so findings stored before they existed load unchanged.
+    field: str | None = None      # the BookUnit field at stake: "title" or "authors"
+    current: str | None = None    # the disputed value
+    suggested: str | None = None  # the folder's value; None when there is no single value to offer
+    source: str | None = None     # where `current` came from ("album tag", "tag", "title")
 
     @property
     def key(self) -> str:

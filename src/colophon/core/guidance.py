@@ -6,10 +6,11 @@ remedy operations here."""
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Literal, NamedTuple
 
-from colophon.core.models import Finding, FindingCode
+from colophon.core.models import Finding, FindingCode, FindingSeverity
 
 
 class FixAction(StrEnum):
@@ -20,6 +21,7 @@ class FixAction(StrEnum):
     ACKNOWLEDGE = "acknowledge"  # dismiss an advisory finding
     DELETE = "delete"            # permanently delete corrupt files / a missing book
     FIX_EXTENSION = "fix_extension"  # rename mislabeled files to their true extension
+    USE_SUGGESTED = "use_suggested"  # write a conflict finding's folder value into its book field
 
 
 class Guidance(NamedTuple):
@@ -166,3 +168,46 @@ def review_guidance() -> Guidance:
         "to confirm it.",
         (FixAction.MATCHES,),
     )
+
+
+def album_conflict(folder_title: str, album: str) -> Finding:
+    """The album-vs-folder conflict: the file's album tag (which the book used as its title) names a
+    different book than the folder. One builder so the scan check and the legacy upgrade below can't
+    drift apart in wording, and so the acknowledgement key stays stable."""
+    return Finding(
+        code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+        detail=f'folder "{folder_title}" vs title "{album}" (from the album tag)',
+        field="title", current=album, suggested=folder_title, source="album tag",
+    )
+
+
+# Detail shapes Colophon itself wrote before findings carried structure. These are this codebase's
+# own output formats, parsed back exactly, not guesses about user data.
+_LEGACY_ALBUM = re.compile(r'^folder "(?P<folder>.*)" vs tag "(?P<album>.*)"$')
+_TITLE_VS_FOLDER = re.compile(r'^metadata title "(?P<title>.*)" vs folder "(?P<folder>.*)"$')
+_AUTHOR_VS_FOLDER = re.compile(r"^author: tag '(?P<tag>.*)' vs folder '(?P<folder>.*)'$")
+# A retired check ("author absent from the folder path") that produced only false positives. Nothing
+# raises or retracts it any more, so a stored copy would sit in the queue forever.
+_RETIRED_AUTHOR_NOT_IN_PATH = re.compile(r'^author ".*" not in the folder path$')
+
+
+def upgrade_legacy_conflict(finding: Finding) -> Finding | None:
+    """Bring a METADATA_CONFLICT stored before findings carried structure up to date: the same
+    finding with its field, disputed value and folder value filled in, or None when it came from a
+    retired check and should be dropped. Anything else (already structured, another code, a title
+    residual that came from filenames rather than the folder) is returned unchanged."""
+    if finding.code != FindingCode.METADATA_CONFLICT or finding.field is not None:
+        return finding
+    detail = finding.detail or ""
+    if _RETIRED_AUTHOR_NOT_IN_PATH.match(detail):
+        return None
+    if m := _LEGACY_ALBUM.match(detail):
+        return album_conflict(m["folder"], m["album"]).model_copy(
+            update={"severity": finding.severity})
+    if m := _TITLE_VS_FOLDER.match(detail):
+        return finding.model_copy(update={"field": "title", "current": m["title"],
+                                          "suggested": m["folder"], "source": "title"})
+    if m := _AUTHOR_VS_FOLDER.match(detail):
+        return finding.model_copy(update={"field": "authors", "current": m["tag"],
+                                          "suggested": m["folder"], "source": "tag"})
+    return finding

@@ -55,6 +55,7 @@ from colophon.core.graph_resolve import (
     franchise_for,
 )
 from colophon.core.graph_view import grouping_cohort
+from colophon.core.guidance import upgrade_legacy_conflict
 from colophon.core.jobs import Job
 from colophon.core.known_entity import build_known_series
 from colophon.core.library_graph import reconcile
@@ -465,6 +466,10 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
         and stored.findings == rederived.findings
         and stored.acknowledged_findings == rederived.acknowledged_findings
     )
+
+
+# A conflict finding's `field` (a BookUnit attribute) to the editor's field key it is saved under.
+_SUGGESTION_FIELDS = {"title": "title", "authors": "author"}
 
 
 class AppController:
@@ -1881,6 +1886,36 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
+    def upgrade_legacy_findings(self) -> int:
+        """Give conflict findings stored before findings carried structure their field, disputed
+        value and folder value, so the one-click fix is offered without a rescan; drop findings from
+        a retired check that nothing can clear. A finding whose wording changed keeps its dismissal:
+        the acknowledgement moves to the new key. Idempotent (an up-to-date library writes nothing);
+        returns the number of books updated."""
+        updated = 0
+        for book in self.ctx.books.list_all():
+            findings: list[Finding] = []
+            renamed: dict[str, str | None] = {}   # old key -> new key, or None when dropped
+            for finding in book.findings:
+                upgraded = upgrade_legacy_conflict(finding)
+                if upgraded is None:
+                    renamed[finding.key] = None
+                    continue
+                if upgraded.key != finding.key:
+                    renamed[finding.key] = upgraded.key
+                findings.append(upgraded)
+            if findings == book.findings:
+                continue
+            acks = []
+            for key in book.acknowledged_findings:
+                new = renamed.get(key, key)
+                if new is not None and new not in acks:
+                    acks.append(new)
+            book.findings, book.acknowledged_findings = findings, acks
+            self.ctx.books.upsert(book)
+            updated += 1
+        return updated
+
     def dedupe_colliding_covers(self) -> int:
         """One-time repair for covers cached before the fix that keyed the cache file
         on the folder. Clustered books that share a source folder all wrote to the same
@@ -2244,6 +2279,23 @@ class AppController:
             book.acknowledged_findings = [*book.acknowledged_findings, key]
             book.touch()
             self.ctx.books.upsert(book)
+
+    def apply_finding_suggestion(self, book: BookUnit, key: str) -> BookUnit:
+        """Fix a conflict finding with the folder's value: write `suggested` into the finding's field
+        as a manual edit (the detail editor's Save path, so it is undoable), then acknowledge it.
+
+        The acknowledgement is needed because the album check compares the file's own tag, which a
+        book edit does not change; the next Write tags fixes the file. Returns the updated book,
+        followed to its current id in case the scoped re-derive churned it."""
+        finding = next((f for f in self._active_findings(book) if f.key == key), None)
+        if finding is None or finding.field not in _SUGGESTION_FIELDS or not finding.suggested:
+            raise ValueError(f"no folder value to apply for finding {key!r}")
+        self.save_fields(book, {_SUGGESTION_FIELDS[finding.field]: finding.suggested})
+        # save_fields' re-derive may have written a fresh copy; acknowledge on the stored book so the
+        # upsert does not overwrite that copy with this stale object.
+        updated = self.get_book(self.resolve_detail_target(book) or book.id) or book
+        self.acknowledge_finding(updated, key)
+        return updated
 
     def tag_plan(self, book: BookUnit) -> TagPlan:
         """The dry-run preview of writing this book's metadata into its files."""

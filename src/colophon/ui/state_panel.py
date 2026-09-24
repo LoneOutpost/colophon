@@ -14,7 +14,7 @@ from typing import NamedTuple
 
 from nicegui import ui
 
-from colophon.core.attention import attention_items
+from colophon.core.attention import AttentionItem, attention_items
 from colophon.core.guidance import FixAction, review_guidance
 from colophon.core.models import (
     BookState,
@@ -44,6 +44,8 @@ class AttentionActions:
     delete: Callable[[], None]
     rerun_phase: Callable[[BookUnit, Phase], Awaitable[None]]
     fix_extension: Callable[[], None]
+    # Writes a conflict item's folder value into its field; gets the button so it can show busy.
+    use_suggested: Callable[[AttentionItem, ui.button], Awaitable[None]]
 
 
 _PHASE_LABELS: dict[Phase, str] = {
@@ -200,6 +202,7 @@ _ACTION_META: dict[FixAction, tuple[str, str]] = {
     FixAction.ACKNOWLEDGE: ("Acknowledge", "check"),
     FixAction.DELETE: ("Delete", "delete"),
     FixAction.FIX_EXTENSION: ("Fix extension", "edit"),
+    FixAction.USE_SUGGESTED: ("Use the folder's value", "done"),  # labelled with the value itself
 }
 
 
@@ -216,8 +219,15 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
 
     logger.debug(f"rendering At a Glance tab for book {book.id}")
 
-    def _action_button(action: FixAction, ack_key: str | None = None) -> None:
+    def _action_button(action: FixAction, item: AttentionItem | None = None) -> None:
         text, icon = _ACTION_META[action]
+        if action is FixAction.USE_SUGGESTED:
+            if item is None or not item.suggested:
+                return
+            button = ui.button(f'Use "{item.suggested}"', icon=icon).props("flat dense no-caps")
+            button.on_click(lambda i=item, btn=button: actions.use_suggested(i, btn))
+            return
+        ack_key = item.key if item is not None else None
         handlers: dict[FixAction, Callable[[], None]] = {
             FixAction.REPROBE: actions.reprobe,
             FixAction.ORGANIZE: actions.organize,
@@ -370,4 +380,4 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                     ui.label(item.suggestion).classes("colophon-muted text-caption q-pl-lg")
                     with ui.row().classes("q-pl-lg q-gutter-xs"):
                         for action in item.actions:
-                            _action_button(action, item.key)
+                            _action_button(action, item)

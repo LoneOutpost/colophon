@@ -106,6 +106,15 @@ def main() -> None:
             logger.info(f"identity: backfilled {updated} book(s) from the graph classification")
     except Exception:
         logger.exception("identity backfill failed; starting with stored confidence/state as loaded")
+    # Conflict findings stored before findings carried structure get their field and folder value
+    # back (parsed from the details Colophon itself wrote), so the one-click fix appears without a
+    # rescan. Idempotent and non-fatal.
+    try:
+        upgraded = controller.upgrade_legacy_findings()
+        if upgraded:
+            logger.info(f"findings: upgraded conflict findings on {upgraded} book(s)")
+    except Exception:
+        logger.exception("finding upgrade failed; starting with findings as loaded")
     # Heal covers cached under the old folder-keyed name: clustered books sharing a folder
     # all collided on one file. Clearing the shared cover_path re-fetches each from its own
     # cover_url into a per-book path. Idempotent and non-fatal — never blocks startup.
