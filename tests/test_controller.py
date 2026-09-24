@@ -4061,6 +4061,70 @@ def test_an_author_folder_named_against_its_tags_is_flagged_until_confirmed(tmp_
     ctx.close()
 
 
+def _bulk_tagged_author_folder(tmp_path):
+    """A 'Neal Stephenson' folder of books whose tags all name 'Top 100 Sci-Fi Books', scanned."""
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    author = ingest / "Neal Stephenson"
+    for title in ("Cryptonomicon", "Anathem"):
+        folder = author / f"Neal Stephenson.-.{title}"
+        folder.mkdir(parents=True)
+        f = folder / "01.mp3"
+        f.write_bytes(b"")
+        tags = ID3()
+        tags.add(TPE1(encoding=3, text=["Top 100 Sci-Fi Books"]))
+        tags.save(f)
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    books = [b for b in ctx.books.list_all() if author in b.source_folder.parents]
+    return ctx, ctrl, author, books
+
+
+def _assert_folder_name_accepted(ctx, ctrl, author):
+    books = [b for b in ctx.books.list_all() if author in b.source_folder.parents]
+    assert len(books) == 2
+    for b in books:
+        assert b.authors == ["Neal Stephenson"]
+        assert b.provenance["authors"] == "confirmed_folder"
+        assert not [f for f in b.findings if (f.detail or "").startswith("folder name:")]
+    phrase = "the folder's name disagrees with its books' tags"
+    assert not any(g.phrase == phrase for g in ctrl.review_queue().groups)
+
+
+def test_the_folder_name_finding_names_the_folder_and_the_elected_value(tmp_path):
+    ctx, _ctrl, _author, books = _bulk_tagged_author_folder(tmp_path)
+    for b in books:
+        [f] = [f for f in b.findings if (f.detail or "").startswith("folder name:")]
+        assert (f.field, f.current, f.suggested, f.source) == (
+            "folder_author", "Top 100 Sci-Fi Books", "Neal Stephenson", "tags")
+    ctx.close()
+
+
+def test_accept_folder_name_makes_the_folder_the_author_of_its_books(tmp_path):
+    ctx, ctrl, author, _books = _bulk_tagged_author_folder(tmp_path)
+    ctrl.accept_folder_name(author)
+    _assert_folder_name_accepted(ctx, ctrl, author)
+    ctx.close()
+
+
+def test_accept_folder_name_for_a_book_finds_its_author_folder(tmp_path):
+    ctx, ctrl, author, books = _bulk_tagged_author_folder(tmp_path)
+    ctrl.accept_folder_name_for(books[0])
+    _assert_folder_name_accepted(ctx, ctrl, author)
+    ctx.close()
+
+
+def test_accept_folder_name_for_a_book_without_an_author_folder_refuses(tmp_path):
+    import pytest
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    book = BookUnit.new(source_folder=tmp_path / "loose")
+    with pytest.raises(ValueError):
+        ctrl.accept_folder_name_for(book)
+    ctx.close()
+
+
 def test_a_folder_name_conflict_raised_on_reclassify_is_saved(tmp_path):
     # The re-derive classifies book COPIES; a finding raised there must reach the stored book.
     # Clearing the stored finding stands in for a library scanned before this check existed.

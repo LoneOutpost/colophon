@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from colophon.core.guidance import FixAction, finding_guidance
+from colophon.core.guidance import FOLDER_AUTHOR_FIELD, FixAction, finding_guidance
 from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity
 from colophon.core.textlist import join_list
 
@@ -20,7 +20,8 @@ class AttentionItem(NamedTuple):
     actions: tuple[FixAction, ...]
     code: FindingCode | None  # None for the synthetic missing-book item
     key: str | None = None    # the finding's acknowledgement identity; None when there is no finding
-    suggested: str | None = None  # the folder's value USE_SUGGESTED writes (conflict findings only)
+    suggested: str | None = None  # the folder's value USE_SUGGESTED writes, or the folder name
+                                  # USE_FOLDER_NAME makes the author (conflict findings only)
     field: str | None = None      # the book field USE_SUGGESTED writes it to
     source: str | None = None     # where the disputed value came from ("album tag", "tag", "title")
 
@@ -47,7 +48,12 @@ def attention_items(book: BookUnit, active_findings: list[Finding]) -> list[Atte
     for f in active_findings:
         g = finding_guidance(f.code)
         suggestion, actions = g.suggestion, g.actions
-        if f.field in ("title", "authors") and f.suggested:
+        if f.field == FOLDER_AUTHOR_FIELD and f.suggested:
+            # The fix reclassifies the author folder, so every book under it follows; it never
+            # writes this one book's field, which is why it is not USE_SUGGESTED.
+            actions = (*(a for a in actions if a is not FixAction.ACKNOWLEDGE),
+                       FixAction.USE_FOLDER_NAME, FixAction.ACKNOWLEDGE)
+        elif f.field in ("title", "authors") and f.suggested:
             if _book_holds(book, f.field, f.suggested):
                 # The book already reads the folder's value; only the file's tag still disagrees,
                 # so there is nothing to apply and writing the tags is the fix.

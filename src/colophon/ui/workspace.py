@@ -35,7 +35,7 @@ from colophon.core.detail_pane import DetailPane, Pane
 from colophon.core.fields import EDITABLE_FIELDS, field_provenance, get_field
 from colophon.core.filename_parser import compile_template
 from colophon.core.graph_resolve import _name_key
-from colophon.core.guidance import FixAction
+from colophon.core.guidance import FOLDER_NAME_PHRASE, FixAction
 from colophon.core.models import BookState, BookUnit, FindingSeverity, Phase, PhaseState
 from colophon.core.normalize import FIELD_NORMALIZERS, NORMALIZABLE_FIELDS
 from colophon.core.perf import span
@@ -595,6 +595,28 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         ui.notify(message, type="positive")
         repaint(nav=True, list=True, status=True, detail_book_id=updated.id)
 
+    async def _accept_folder_name(button, name: str, run, follow: BookUnit | None) -> None:
+        """Make an author folder take its own name as author (`run` does it). Every book under it
+        re-derives, so this runs off the event loop behind a busy button, and the detail pane
+        follows `follow`, the book it showed, to the id the re-derive left it at."""
+        with busy(button):
+            try:
+                await asyncio.to_thread(run)
+            except ValueError:
+                ui.notify("This book is no longer under an author folder", type="warning")
+                return
+            target = None
+            if follow is not None:
+                target = await asyncio.to_thread(controller.resolve_detail_target, follow)
+                target = target or follow.id
+        ui.notify(f'Set the folder "{name}" as the author for its books.', type="positive")
+        repaint(nav=True, list=True, status=True, detail_book_id=target)
+
+    async def _use_folder_name(b, item, button) -> None:
+        """The Attention fix for a folder-name conflict: the author folder above `b` takes its name."""
+        await _accept_folder_name(
+            button, item.suggested, lambda: controller.accept_folder_name_for(b), b)
+
     def render_attention_pane(book) -> None:
         items = attention_items(book, controller._active_findings(book))
         with ui.column().classes("w-full gap-2"):
@@ -610,6 +632,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                             "flat color=primary")
                         use_btn.on_click(
                             lambda i=item, b=book, btn=use_btn: _use_suggested(b, i, btn))
+                    if FixAction.USE_FOLDER_NAME in item.actions and item.suggested:
+                        name_btn = ui.button(f'Use folder name "{item.suggested}"',
+                                             icon="drive_file_rename_outline").props(
+                            "flat color=primary")
+                        name_btn.on_click(
+                            lambda i=item, b=book, btn=name_btn: _use_folder_name(b, i, btn))
                     if FixAction.ACKNOWLEDGE in item.actions and item.key is not None:
                         ui.button(
                             "Acknowledge",
@@ -1189,6 +1217,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         rerun_phase=_rerun_one,
                         fix_extension=_fix_extension,
                         use_suggested=lambda item, btn, b=book: _use_suggested(b, item, btn),
+                        use_folder_name=lambda item, btn, b=book: _use_folder_name(b, item, btn),
                     )
                     state_panel.render(controller, book, actions=_attn)
 
@@ -1760,6 +1789,14 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
             footer.set_text(f"Showing {end} of {len(pending)} causes; scroll for more")
             footer.set_visibility(end < len(pending))
 
+    async def _use_group_folder_name(path: Path, button) -> None:
+        """The queue group's fix for a folder-name conflict. The open book, if any, may sit under
+        the folder, so the detail pane follows it through the re-derive."""
+        opened = detail_pane.current().book_id
+        follow = controller.get_book(opened) if opened else None
+        await _accept_folder_name(
+            button, path.name, lambda: controller.accept_folder_name(path), follow)
+
     def _render_queue_group(group) -> None:
         if group.cause.kind == "book" and len(group.books) == 1:
             _queue_view["entries"].append((group, None))
@@ -1781,6 +1818,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 ).on(
                     "click.stop", lambda p=path: ui.navigate.to(folder_tree_url(p))
                 ).tooltip(str(path))
+                if group.phrase == FOLDER_NAME_PHRASE:
+                    name_btn = ui.button(f'Use "{path.name}"', icon="drive_file_rename_outline")
+                    name_btn.props(f'flat dense no-caps aria-label="Use the folder name '
+                                   f'{path.name} as the author"')
+                    name_btn.on("click.stop", lambda p=path, btn=name_btn: _use_group_folder_name(p, btn))
+                    name_btn.tooltip("Make the folder's name the author of every book under it")
         # A group's rows are built on first open, not up front: a big folder cause can hold
         # hundreds of books, and every collapsed row would still cost its DOM.
         built = {"done": False}

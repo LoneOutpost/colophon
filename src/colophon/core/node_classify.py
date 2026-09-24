@@ -731,26 +731,25 @@ def _fill_folder_name_conflict(graph: Graph, books: list[BookUnit], *, root: Pat
     on its value and is never questioned; a soft scan root is a bucket path, not an author name.
     Retraction takes the dismissal with it, same as `_fill_title_corroboration`: it settled a
     disagreement that no longer exists and would otherwise pre-answer a different one later."""
-    from colophon.core.guidance import FOLDER_NAME_CONFLICT_PREFIX
-    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.core.guidance import folder_name_conflict
     from colophon.core.people import names_disagree
     mine = _is_folder_name_conflict
 
     for book in books:
         node = _nearest_kind(graph, book.source_folder, root, "author")
-        detail = None
+        want = None
         if (node is not None and node.kind_source != "manual" and node.kind_value
                 and not (node.path == root and not node.kind_source)
                 and names_disagree(node.path.name, node.kind_value)):
-            detail = (f"{FOLDER_NAME_CONFLICT_PREFIX} folder '{node.path.name}' "
-                      f"vs tags '{node.kind_value}'")
-        stale = {f.key for f in book.findings if mine(f) and f.detail != detail}
-        if stale:
-            book.findings = [f for f in book.findings if f.key not in stale]
+            want = folder_name_conflict(node.path.name, node.kind_value)
+        # Replaced whenever it differs, so a copy stored without the structure gains it; the
+        # dismissal survives unless the claim itself (the key) changed.
+        if any(mine(f) and f != want for f in book.findings):
+            stale = {f.key for f in book.findings if mine(f)} - ({want.key} if want else set())
+            book.findings = [f for f in book.findings if not mine(f)]
             book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in stale]
-        if detail is not None and not any(mine(f) for f in book.findings):
-            book.findings.append(Finding(code=FindingCode.METADATA_CONFLICT,
-                                         severity=FindingSeverity.WARN, detail=detail))
+        if want is not None and not any(mine(f) for f in book.findings):
+            book.findings.append(want)
 
 
 def sync_folder_name_conflict(book: BookUnit, rederived: BookUnit) -> None:
@@ -759,9 +758,9 @@ def sync_folder_name_conflict(book: BookUnit, rederived: BookUnit) -> None:
     unless moved here. A removed finding takes its dismissal with it; other findings are untouched."""
     mine = _is_folder_name_conflict
     want = [f for f in rederived.findings if mine(f)]
-    have = {f.key for f in book.findings if mine(f)}
-    if have == {f.key for f in want}:
+    if [f for f in book.findings if mine(f)] == want:
         return
+    have = {f.key for f in book.findings if mine(f)}
     removed = have - {f.key for f in want}
     book.findings = [f for f in book.findings if not mine(f)] + [f.model_copy() for f in want]
     book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in removed]

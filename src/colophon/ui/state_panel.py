@@ -46,6 +46,8 @@ class AttentionActions:
     fix_extension: Callable[[], None]
     # Writes a conflict item's folder value into its field; gets the button so it can show busy.
     use_suggested: Callable[[AttentionItem, ui.button], Awaitable[None]]
+    # Makes a folder-name item's author folder take its own name as author; also gets the button.
+    use_folder_name: Callable[[AttentionItem, ui.button], Awaitable[None]]
 
 
 _PHASE_LABELS: dict[Phase, str] = {
@@ -203,6 +205,7 @@ _ACTION_META: dict[FixAction, tuple[str, str]] = {
     FixAction.DELETE: ("Delete", "delete"),
     FixAction.FIX_EXTENSION: ("Fix extension", "edit"),
     FixAction.USE_SUGGESTED: ("Use the folder's value", "done"),  # labelled with the value itself
+    FixAction.USE_FOLDER_NAME: ("Use folder name", "drive_file_rename_outline"),  # and the name
 }
 
 
@@ -226,6 +229,12 @@ def render(controller, book: BookUnit, *, actions: AttentionActions) -> None:
                 return
             button = ui.button(f'Use "{item.suggested}"', icon=icon).props("flat dense no-caps")
             button.on_click(lambda i=item, btn=button: actions.use_suggested(i, btn))
+            return
+        if action is FixAction.USE_FOLDER_NAME:
+            if item is None or not item.suggested:
+                return
+            button = ui.button(f'{text} "{item.suggested}"', icon=icon).props("flat dense no-caps")
+            button.on_click(lambda i=item, btn=button: actions.use_folder_name(i, btn))
             return
         ack_key = item.key if item is not None else None
         handlers: dict[FixAction, Callable[[], None]] = {

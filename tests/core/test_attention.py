@@ -69,3 +69,26 @@ def test_unstructured_conflict_offers_no_value():
     [item] = attention_items(_book(title="Ph1"), [f])
     assert FixAction.USE_SUGGESTED not in item.actions
     assert FixAction.ACKNOWLEDGE in item.actions
+
+
+def _folder_name(**kw) -> Finding:
+    base = dict(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail="folder name: folder 'Neal Stephenson' vs tags 'Top 100 Sci-Fi Books'",
+                field="folder_author", current="Top 100 Sci-Fi Books",
+                suggested="Neal Stephenson", source="tags")
+    return Finding(**{**base, **kw})
+
+
+def test_folder_name_conflict_offers_the_folder_name_never_a_field_write():
+    # The fix reclassifies the folder, not this one book's field, so it is not USE_SUGGESTED.
+    [item] = attention_items(_book(authors=["Top 100 Sci-Fi Books"]), [_folder_name()])
+    assert FixAction.USE_SUGGESTED not in item.actions
+    assert FixAction.USE_FOLDER_NAME in item.actions
+    assert item.actions.index(FixAction.USE_FOLDER_NAME) < item.actions.index(FixAction.ACKNOWLEDGE)
+    assert item.suggested == "Neal Stephenson"
+
+
+def test_an_unstructured_folder_name_conflict_offers_no_folder_name():
+    [item] = attention_items(_book(), [_folder_name(field=None, current=None, suggested=None,
+                                                    source=None)])
+    assert FixAction.USE_FOLDER_NAME not in item.actions
