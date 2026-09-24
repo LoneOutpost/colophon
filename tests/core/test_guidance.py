@@ -118,3 +118,45 @@ def test_finding_phrase_splits_metadata_conflict_by_which_check_raised_it():
 
 def test_finding_phrase_falls_back_for_an_unlisted_code():
     assert finding_phrase(_f(FindingCode.LOOSE_IN_AUTHOR)) == "needs a look"
+
+
+def test_a_legacy_album_conflict_is_reworded_and_structured():
+    from colophon.core.guidance import upgrade_legacy_conflict
+    old = _f(FindingCode.METADATA_CONFLICT, 'folder "Porterhouse Blue" vs tag "Ph1"')
+    new = upgrade_legacy_conflict(old)
+    assert new.detail == 'folder "Porterhouse Blue" vs title "Ph1" (from the album tag)'
+    assert (new.field, new.current, new.suggested, new.source) == (
+        "title", "Ph1", "Porterhouse Blue", "album tag")
+
+
+def test_legacy_title_and_author_conflicts_keep_their_wording_and_gain_structure():
+    from colophon.core.guidance import upgrade_legacy_conflict
+    title = upgrade_legacy_conflict(
+        _f(FindingCode.METADATA_CONFLICT, 'metadata title "Bf" vs folder "Blott on the Landscape"'))
+    assert title.detail == 'metadata title "Bf" vs folder "Blott on the Landscape"'
+    assert (title.field, title.current, title.suggested) == ("title", "Bf", "Blott on the Landscape")
+    author = upgrade_legacy_conflict(
+        _f(FindingCode.METADATA_CONFLICT, "author: tag 'Top 100' vs folder 'Neal Stephenson'"))
+    assert (author.field, author.current, author.suggested) == (
+        "authors", "Top 100", "Neal Stephenson")
+
+
+def test_a_title_residual_from_filenames_is_left_unstructured():
+    # The only fix offered is the folder's value; a filename residual is lowercased shared words.
+    from colophon.core.guidance import upgrade_legacy_conflict
+    f = _f(FindingCode.METADATA_CONFLICT, 'metadata title "X" vs filename "chapter one"')
+    assert upgrade_legacy_conflict(f) == f
+
+
+def test_a_finding_from_the_retired_author_path_check_is_dropped():
+    from colophon.core.guidance import upgrade_legacy_conflict
+    f = _f(FindingCode.METADATA_CONFLICT, 'author "Jane Doe" not in the folder path')
+    assert upgrade_legacy_conflict(f) is None
+
+
+def test_other_codes_and_structured_findings_pass_through():
+    from colophon.core.guidance import album_conflict, upgrade_legacy_conflict
+    mq = _f(FindingCode.MIXED_QUALITY, 'folder "a" vs tag "b"')
+    assert upgrade_legacy_conflict(mq) == mq
+    done = album_conflict("Porterhouse Blue", "Ph1")
+    assert upgrade_legacy_conflict(done) == done

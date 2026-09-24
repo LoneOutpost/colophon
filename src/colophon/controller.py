@@ -55,6 +55,7 @@ from colophon.core.graph_resolve import (
     franchise_for,
 )
 from colophon.core.graph_view import grouping_cohort
+from colophon.core.guidance import upgrade_legacy_conflict
 from colophon.core.jobs import Job
 from colophon.core.known_entity import build_known_series
 from colophon.core.library_graph import reconcile
@@ -1884,6 +1885,36 @@ class AppController:
         book.cover_path = None
         book.touch()
         self.ctx.books.upsert(book)
+
+    def upgrade_legacy_findings(self) -> int:
+        """Give conflict findings stored before findings carried structure their field, disputed
+        value and folder value, so the one-click fix is offered without a rescan; drop findings from
+        a retired check that nothing can clear. A finding whose wording changed keeps its dismissal:
+        the acknowledgement moves to the new key. Idempotent (an up-to-date library writes nothing);
+        returns the number of books updated."""
+        updated = 0
+        for book in self.ctx.books.list_all():
+            findings: list[Finding] = []
+            renamed: dict[str, str | None] = {}   # old key -> new key, or None when dropped
+            for finding in book.findings:
+                upgraded = upgrade_legacy_conflict(finding)
+                if upgraded is None:
+                    renamed[finding.key] = None
+                    continue
+                if upgraded.key != finding.key:
+                    renamed[finding.key] = upgraded.key
+                findings.append(upgraded)
+            if findings == book.findings:
+                continue
+            acks = []
+            for key in book.acknowledged_findings:
+                new = renamed.get(key, key)
+                if new is not None and new not in acks:
+                    acks.append(new)
+            book.findings, book.acknowledged_findings = findings, acks
+            self.ctx.books.upsert(book)
+            updated += 1
+        return updated
 
     def dedupe_colliding_covers(self) -> int:
         """One-time repair for covers cached before the fix that keyed the cache file

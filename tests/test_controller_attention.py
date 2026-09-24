@@ -174,3 +174,25 @@ def test_apply_finding_suggestion_refuses_a_finding_without_a_value(tmp_path):
         ctrl.apply_finding_suggestion(book, "metadata_conflict:no such finding")
     assert ctx.books.get(book.id).title == "Ph1"
     ctx.close()
+
+
+def test_upgrading_legacy_findings_structures_them_and_carries_the_dismissal(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctrl = AppController(ctx)
+    old_album = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                        detail='folder "Porterhouse Blue" vs tag "Ph1"')
+    retired = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                      detail='author "Tom Sharpe" not in the folder path')
+    book = BookUnit.new(source_folder=tmp_path / "Tom Sharpe.-.Porterhouse Blue")
+    book.title = "Ph1"
+    book.findings = [old_album, retired]
+    book.acknowledged_findings = [old_album.key, retired.key]
+    ctx.books.upsert(book)
+
+    assert ctrl.upgrade_legacy_findings() == 1
+    stored = ctx.books.get(book.id)
+    [album] = stored.findings                       # the retired-check finding is gone
+    assert album.detail == 'folder "Porterhouse Blue" vs title "Ph1" (from the album tag)'
+    assert album.suggested == "Porterhouse Blue"
+    assert stored.acknowledged_findings == [album.key]   # the dismissal followed the new wording
+    assert ctrl.upgrade_legacy_findings() == 0           # idempotent

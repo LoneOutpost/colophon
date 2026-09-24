@@ -19,6 +19,7 @@ from colophon.core.filename_cluster import cluster, shares_token
 from colophon.core.filename_parser import parse_filename
 from colophon.core.folder_title import parse_folder_title
 from colophon.core.group_resolve import resolve_grouping
+from colophon.core.guidance import album_conflict
 from colophon.core.identity_tokens import title_candidates
 from colophon.core.metadata_quality import (
     is_junk_title,
@@ -377,10 +378,7 @@ def _metadata_conflict_finding(
     # of testing for mere presence.
     # The detail names the book field the album tag feeds, so it reads as a disagreement about the
     # title; the structure carries the folder's value so the UI can offer it as the fix.
-    folder_title = cands[-1]
-    return Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
-                   detail=f'folder "{folder_title}" vs title "{album}" (from the album tag)',
-                   field="title", current=album, suggested=folder_title, source="album tag")
+    return album_conflict(cands[-1], album)
 
 
 def _actionable_finding(
