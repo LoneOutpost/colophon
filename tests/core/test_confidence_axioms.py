@@ -309,3 +309,27 @@ def test_identity_ceiling_ignores_a_match_on_a_peripheral_field(tmp_path):
     book.provenance["authors"] = Provenance.DIRECTORY.value
     book.provenance["genres"] = Provenance.HARDCOVER.value
     assert identity_ceiling(book) == CEIL_LOCAL
+
+
+def test_a_confirmed_folder_author_scores_like_a_manual_one():
+    """The user confirmed the folder that supplied this author, so it is their word for it."""
+    from pathlib import Path
+
+    from colophon.core.confidence_axioms import ScoreCtx, score_identity
+    from colophon.core.models import BookUnit, Provenance
+
+    def book(prov: str) -> BookUnit:
+        # Not an Author/Title layout: a parent folder named after the author adds its own
+        # folder-containment vote, which saturates author support for every provenance and hides
+        # the weight difference this test exists to check.
+        b = BookUnit.new(source_folder=Path("/lib/audiobooks/Dune"))
+        b.title, b.authors = "Dune", ["Frank Herbert"]
+        b.provenance = {"authors": prov, "title": Provenance.DIRECTORY.value}
+        return b
+
+    confirmed = score_identity(book(Provenance.CONFIRMED_FOLDER.value), ScoreCtx()).score
+    manual = score_identity(book(Provenance.MANUAL.value), ScoreCtx()).score
+    graph = score_identity(book(Provenance.GRAPHING.value), ScoreCtx()).score
+    assert confirmed == manual
+    assert confirmed > graph
+    assert confirmed <= 70.0   # still the local ceiling: the folder vouches for the author only

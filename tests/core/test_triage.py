@@ -231,3 +231,10 @@ def test_needs_work_facet_keeps_only_unfinished():
     facets = dict(FACET_DEFAULTS)
     facets["needs_work"] = True
     assert apply_facets(books, facets) == [unfinished]
+
+
+def test_a_confirmed_folder_author_is_not_weak():
+    from colophon.core.triage import has_weak_identity, weak_identity_reason
+    b = _book(provenance={"authors": "confirmed_folder"})
+    assert not has_weak_identity(b)
+    assert weak_identity_reason(b) is None

@@ -19,7 +19,9 @@ _WEAK_PROVENANCE = {"directory", "filename", "graphing"}
 WEAK_ID_TRUST_TIERS: frozenset[str] = frozenset(_WEAK_PROVENANCE)
 # The local provenance tiers (where a scanned value came from without an online match).
 # Anything non-empty outside this set is an external match provider.
-_LOCAL_PROVENANCE = {"tag", "datafile", "directory", "filename", "graphing", "manual"}
+_LOCAL_PROVENANCE = {
+    "tag", "datafile", "directory", "filename", "graphing", "manual", "confirmed_folder",
+}
 
 
 def needs_human(book: BookUnit) -> bool:

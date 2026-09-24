@@ -12,6 +12,7 @@ _LABELS: dict[str, str] = {
     Provenance.DIRECTORY.value: "Folder",
     Provenance.FILENAME.value: "Filename",
     Provenance.GRAPHING.value: "Inferred",
+    Provenance.CONFIRMED_FOLDER.value: "Confirmed folder",
     Provenance.MANUAL.value: "Edited",
 }
 
@@ -23,6 +24,7 @@ _TOOLTIPS: dict[str, str] = {
     Provenance.GRAPHING.value: (
         "Inferred from the author folder (a nearby tagged book named the author)."
     ),
+    Provenance.CONFIRMED_FOLDER.value: "From a folder whose classification you confirmed.",
     Provenance.MANUAL.value: "You set this value.",
 }
 

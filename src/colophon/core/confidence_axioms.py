@@ -98,7 +98,7 @@ def source_weight(prov: str | None, tags: EmbeddedTags | None) -> float:
     book — scan scope is an artifact, not evidence about the book. What the graph RESOLVED is the
     evidence; how sure the classifier was is its own business.
     """
-    if prov == Provenance.MANUAL.value:
+    if prov in (Provenance.MANUAL.value, Provenance.CONFIRMED_FOLDER.value):
         return W_MANUAL
     if prov in MATCH_PROV:
         return W_MATCH
@@ -131,7 +131,8 @@ def _is_usable(axis: str, value: str | None, book: BookUnit) -> bool:
 
 _FIELD_FOR_AXIS = {"author": "authors", "title": "title", "series": "series"}
 _SOURCE_NAME = {Provenance.DIRECTORY.value: "folder", Provenance.FILENAME.value: "filename",
-                Provenance.GRAPHING.value: "graph", Provenance.MANUAL.value: "manual"}
+                Provenance.GRAPHING.value: "graph", Provenance.MANUAL.value: "manual",
+                Provenance.CONFIRMED_FOLDER.value: "confirmed folder"}
 
 
 def _contains_value(name: str, value: str) -> bool:
