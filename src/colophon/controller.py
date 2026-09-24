@@ -86,6 +86,7 @@ from colophon.core.node_classify import (
     classify_nodes,
     restore_author_conflict,
     retract_author_conflict,
+    sync_folder_name_conflict,
 )
 from colophon.core.normalize import (
     FIELD_NORMALIZERS,
@@ -447,7 +448,8 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     """Whether a re-derived book copy leaves the stored book's derived caches + auto-cleaned fields
     untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, series, franchise,
     local-identification confidence, title-corroboration verdict, BookState, the repair_fields
-    cleanings: title, publish_year, and the author conflict a confirmed folder retracts). A `_resync_roots` writeback skips books this returns True for."""
+    cleanings: title, publish_year, the author conflict a confirmed folder retracts, and the
+    folder-name conflict). A `_resync_roots` writeback skips books this returns True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
@@ -833,6 +835,11 @@ class AppController:
                     book.provenance["authors"] = new_prov
                 else:
                     book.provenance.pop("authors", None)
+            # The folder-name conflict is decided entirely by the reclassified folder (its name vs
+            # its elected value, unless confirmed), so the copy's verdict is the answer for every
+            # book: raised, kept or retracted. The stored findings then differ, so the book is saved.
+            for book in root_books:
+                sync_folder_name_conflict(book, copies[book.id])
             # Write the re-derived series back the same way. A copy the ramp stamped CONFIRMED_FOLDER
             # is written even when the stored series came from elsewhere weak (directory/filename),
             # since a confirmed series folder outranks those; a hard series is never fillable.

@@ -666,16 +666,17 @@ def classify_nodes(
     _fill_down(graph, books, evidenced, root=root, author_depth=ctx.author_depth,
                filename_template=filename_template)
     _fill_series_ramp(graph, books, root=root)
+    _fill_folder_name_conflict(graph, books, root=root)
     _fill_title_corroboration(books)
     _fill_identity_confidence(graph, books, root=root)
 
 
-def _nearest_series(graph: Graph, folder: Path, root: Path) -> DirectoryNode | None:
-    """The nearest ancestor (incl. `folder`) classified `series`, or None — walking to root."""
+def _nearest_kind(graph: Graph, folder: Path, root: Path, kind: str) -> DirectoryNode | None:
+    """The nearest ancestor (incl. `folder`) classified `kind`, or None — walking to root."""
     cur = folder
     while True:
         node = graph.directories.get(DirectoryNode.id_for(cur))
-        if node is not None and node.kind == "series":
+        if node is not None and node.kind == kind:
             return node
         if cur == root or root not in cur.parents:
             return None
@@ -695,7 +696,7 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
     from colophon.core.sequence_affix import parse_sequence_affix
     fillable = WEAK_PROV | {Provenance.GRAPHING.value, Provenance.CONFIRMED_FOLDER.value}
     for book in books:
-        node = _nearest_series(graph, book.source_folder, root)
+        node = _nearest_kind(graph, book.source_folder, root, "series")
         if node is None or not node.kind_value or is_structural_marker(node.kind_value):
             continue
         seq = parse_folder_title(book.source_folder.name).sequence
@@ -710,6 +711,60 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             book.provenance["series"] = (Provenance.CONFIRMED_FOLDER.value
                                          if node.kind_source == "manual"
                                          else Provenance.GRAPHING.value)
+
+
+def _is_folder_name_conflict(f) -> bool:
+    from colophon.core.guidance import FOLDER_NAME_CONFLICT_PREFIX
+    from colophon.core.models import FindingCode
+    return (f.code == FindingCode.METADATA_CONFLICT
+            and (f.detail or "").startswith(FOLDER_NAME_CONFLICT_PREFIX))
+
+
+def _fill_folder_name_conflict(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
+    """Flag each book under an author folder whose own NAME shares nothing with the author value
+    elected for it, and retract the flag once that is no longer so.
+
+    The value is elected from the books' own evidence (tag consensus), so when a bulk tagger stamped
+    every file with one string ('Top 100 Sci-Fi Books' on a 'Neal Stephenson' folder) the folder, its
+    books and `_fill_down`'s tag-vs-folder check all agree with each other and nothing is raised. The
+    folder's name is the one independent witness left. A confirmed (manual) folder is the user's word
+    on its value and is never questioned; a soft scan root is a bucket path, not an author name.
+    Retraction takes the dismissal with it, same as `_fill_title_corroboration`: it settled a
+    disagreement that no longer exists and would otherwise pre-answer a different one later."""
+    from colophon.core.guidance import FOLDER_NAME_CONFLICT_PREFIX
+    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.core.people import names_disagree
+    mine = _is_folder_name_conflict
+
+    for book in books:
+        node = _nearest_kind(graph, book.source_folder, root, "author")
+        detail = None
+        if (node is not None and node.kind_source != "manual" and node.kind_value
+                and not (node.path == root and not node.kind_source)
+                and names_disagree(node.path.name, node.kind_value)):
+            detail = (f"{FOLDER_NAME_CONFLICT_PREFIX} folder '{node.path.name}' "
+                      f"vs tags '{node.kind_value}'")
+        stale = {f.key for f in book.findings if mine(f) and f.detail != detail}
+        if stale:
+            book.findings = [f for f in book.findings if f.key not in stale]
+            book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in stale]
+        if detail is not None and not any(mine(f) for f in book.findings):
+            book.findings.append(Finding(code=FindingCode.METADATA_CONFLICT,
+                                         severity=FindingSeverity.WARN, detail=detail))
+
+
+def sync_folder_name_conflict(book: BookUnit, rederived: BookUnit) -> None:
+    """Make `book` carry exactly `rederived`'s folder-name conflict: the controller classifies book
+    COPIES and writes back only named fields, so a finding raised or retracted on the copy is lost
+    unless moved here. A removed finding takes its dismissal with it; other findings are untouched."""
+    mine = _is_folder_name_conflict
+    want = [f for f in rederived.findings if mine(f)]
+    have = {f.key for f in book.findings if mine(f)}
+    if have == {f.key for f in want}:
+        return
+    removed = have - {f.key for f in want}
+    book.findings = [f for f in book.findings if not mine(f)] + [f.model_copy() for f in want]
+    book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in removed]
 
 
 def book_identity_confidence(book: BookUnit, graph: Graph | None = None,

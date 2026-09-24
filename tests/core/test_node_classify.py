@@ -1068,3 +1068,76 @@ def test_a_confirmed_author_folder_never_overwrites_a_manual_author():
     _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
     assert b.authors == ["Grant Blackwood"]
     assert b.provenance["authors"] == "manual"
+
+
+_FOLDER_NAME_DETAIL = "folder name: folder 'Neal Stephenson' vs tags 'Top 100 Sci-Fi Books'"
+
+
+def _folder_name_findings(book):
+    from colophon.core.models import FindingCode
+    return [f for f in book.findings
+            if f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("folder name:")]
+
+
+def test_an_author_folder_whose_name_disagrees_with_its_elected_value_flags_its_books():
+    # A bulk tagger stamped every book's artist, so the tags elected that string as the folder's
+    # author and every book agrees with it: only the folder's own name exposes the mistake.
+    from colophon.core.node_classify import _fill_folder_name_conflict
+    g = Graph()
+    _node(g, "/lib/Neal Stephenson", "author", "Top 100 Sci-Fi Books", "")
+    b = _book("/lib/Neal Stephenson/Neal Stephenson.-.Cryptonomicon",
+              authors=["Top 100 Sci-Fi Books"], prov="tag")
+    _fill_folder_name_conflict(g, [b], root=Path("/lib"))
+    _fill_folder_name_conflict(g, [b], root=Path("/lib"))   # re-derive must not stack a copy
+    assert [f.detail for f in _folder_name_findings(b)] == [_FOLDER_NAME_DETAIL]
+
+
+def test_a_folder_name_conflict_is_retracted_once_the_folder_agrees_or_is_confirmed():
+    from colophon.core.node_classify import _fill_folder_name_conflict
+    root = Path("/lib")
+    for kind, value, source in (("author", "Neal Stephenson", ""),        # names now agree
+                                ("author", "Top 100 Sci-Fi Books", "manual"),  # the user's word
+                                ("series", "Top 100 Sci-Fi Books", "")):   # no longer an author
+        g = Graph()
+        _node(g, "/lib/Neal Stephenson", kind, value, source)
+        b = _book("/lib/Neal Stephenson/Cryptonomicon")
+        g2 = Graph()
+        _node(g2, "/lib/Neal Stephenson", "author", "Top 100 Sci-Fi Books", "")
+        _fill_folder_name_conflict(g2, [b], root=root)
+        [raised] = _folder_name_findings(b)
+        b.acknowledged_findings = [raised.key]
+        _fill_folder_name_conflict(g, [b], root=root)
+        assert _folder_name_findings(b) == [], (kind, value, source)
+        assert b.acknowledged_findings == [], (kind, value, source)
+
+
+def test_classify_nodes_raises_the_folder_name_conflict_from_tag_consensus(tmp_path):
+    # End to end through the classifier: the elected value comes from the books' tag artists.
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.models import EmbeddedTags, SourceFile
+    from colophon.core.node_classify import classify_nodes
+
+    author = tmp_path / "Neal Stephenson"
+    books_by_folder = {}
+    for title in ("Cryptonomicon", "Anathem", "Seveneves"):
+        folder = author / f"Neal Stephenson.-.{title}"
+        b = _book(str(folder), authors=["Top 100 Sci-Fi Books"], prov="tag")
+        b.title = title
+        b.source_files = [SourceFile(path=folder / "01.mp3", size=1, duration_seconds=0.0,
+                                     ext="mp3", tags=EmbeddedTags(artist="Top 100 Sci-Fi Books"))]
+        books_by_folder[str(folder)] = [b]
+    g = _graph_with(books_by_folder, tmp_path)
+    author_node = _dir(g, str(author))
+    root_node = g.directories[DirectoryNode.id_for(tmp_path)]
+    for folder in books_by_folder:
+        fid = DirectoryNode.id_for(Path(folder))
+        root_node.child_dirs.remove(fid)
+        author_node.child_dirs.append(fid)
+    root_node.child_dirs.append(author_node.id)
+    classify_graph(g, root=tmp_path)
+    books = [bn.book for bn in g.books.values()]
+    classify_nodes(g, books, root=tmp_path, overrides={})
+
+    assert author_node.kind == "author" and author_node.kind_value == "Top 100 Sci-Fi Books"
+    for b in books:
+        assert [f.detail for f in _folder_name_findings(b)] == [_FOLDER_NAME_DETAIL], b.findings

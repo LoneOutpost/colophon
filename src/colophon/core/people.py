@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+from colophon.core.normalize import normalize_key
+
 # Unambiguous multi-person separators always split in auto mode: '&', a
 # whitespace-bounded 'and', and ';'. (Commas are handled separately.)
 _AUTO_SEPARATORS = re.compile(r"\s*&\s*|\s+and\s+|\s*;\s*")
@@ -58,6 +60,19 @@ def split_people(value: str | None, *, separators: list[str] | None = None) -> l
         else:
             out.append(chunk)
     return out
+
+
+def names_disagree(folder_name: str, value: str) -> bool:
+    """Whether an author folder's own name and the author value elected for it name different
+    people outright: their normalized words share nothing at all. Deliberately loose, because a
+    folder is spelled however its owner liked ('Tolkien' for 'J.R.R. Tolkien', 'Connelly, Michael'
+    for 'Michael Connelly', 'Clarke, Baxter' for 'Clarke and Baxter'); any shared word is agreement.
+    Word-disjointness also implies the people-sets differ with neither containing the other, so the
+    `_fill_down` people-set comparison needs no separate check here. Blank on either side is not a
+    disagreement: there is nothing to compare."""
+    folder_words = {w for p in split_people(folder_name) for w in normalize_key(p).split()}
+    value_words = {w for p in split_people(value) for w in normalize_key(p).split()}
+    return bool(folder_words and value_words) and folder_words.isdisjoint(value_words)
 
 
 # A single name token: an initial ('A', 'A.', 'AC', 'AJ'), a capitalized word ('Robinson', "O'Brien",
