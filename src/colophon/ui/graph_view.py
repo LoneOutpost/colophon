@@ -399,8 +399,13 @@ def render_classic_tree(controller: AppController, focal: str | None = None) -> 
             return
         confirmed = row.kind_source == "manual"
         classified = row.kind in _CLASSIFY_KINDS
+        # An entity folder names its value: Confirm vouches for that name, so it must be visible
+        # (a tag-elected "Top 100 Sci-Fi Books" on a "Neal Stephenson" folder would otherwise pass).
+        label = _CLASSIFY_KINDS.get(row.kind, "")
+        if row.kind in _KINDS_WITH_VALUE and row.kind_value:
+            label = f"{label}: {row.kind_value}"
         status = ("Unclassified" if not classified
-                  else f"{_CLASSIFY_KINDS[row.kind]} · {'confirmed' if confirmed else 'a guess'}")
+                  else f"{label} · {'confirmed' if confirmed else 'a guess'}")
         with focus_box, ui.element("div").classes("colophon-focus w-full"):
             with ui.row().classes("items-center no-wrap q-gutter-sm w-full"):
                 ui.icon("folder_open", color="amber-7")

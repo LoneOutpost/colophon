@@ -80,6 +80,14 @@ def test_folder_rows_are_directory_only_with_counts():
     assert collection.multi_book is True   # a folder holding >1 book
 
 
+def test_folder_rows_expose_the_elected_kind_value():
+    # The focus panel shows this value, so Confirm never vouches for a name the user has not seen.
+    g, root = _build_graph()
+    author = folder_rows(g, root)[0]
+    assert author.kind_value == "Brandon Sanderson"
+    assert author.children[0].kind_value == ""   # unclassified folder carries no value
+
+
 def test_folder_rows_attention_rolls_up_active_findings():
     g, root = _build_graph()
     g.books["legion"].book.findings = [
