@@ -2838,7 +2838,8 @@ def test_scan_applies_author_override_to_books(tmp_path):
 
     book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
     assert book.authors == ["Brandon Sanderson"]
-    assert book.provenance["authors"] == "manual"
+    # confirmed_folder, not manual: it must re-derive with the folder, not freeze at this value.
+    assert book.provenance["authors"] == "confirmed_folder"
     ctx.close()
 
 
@@ -3960,4 +3961,28 @@ def test_rerun_book_pipeline_reapplies_identity_rules(tmp_path):
     ctrl.rerun_book_pipeline([book], Phase.SEARCH)
     after = next(b for b in ctx.books.list_all())
     assert after.title != "STALE WRONG TITLE"   # the flow re-derived it
+
+
+def test_a_confirmed_author_follows_a_later_reclassify(tmp_path):
+    # The confirmed folder's author must track the folder: reclassifying it away re-derives the book
+    # instead of leaving a frozen author behind (what MANUAL did).
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Frank Herbert" / "Dune"
+    dune.mkdir(parents=True)
+    (dune / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    author = ingest / "Frank Herbert"
+
+    ctrl.set_node_classification(author, "author", "Frank Herbert")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == dune)
+    assert book.authors == ["Frank Herbert"]
+    assert book.provenance["authors"] == "confirmed_folder"
+
+    ctrl.set_node_classification(author, "container", None)
+    book = next(b for b in ctx.books.list_all() if b.source_folder == dune)
+    assert book.provenance.get("authors") != "confirmed_folder"
+    ctx.close()
     ctx.close()

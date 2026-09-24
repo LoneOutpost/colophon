@@ -194,7 +194,11 @@ _REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progr
 # Author provenances that are derived from the folder classification (vs. the file's own tags,
 # a match, a manual edit, or the filename). Only these are re-derived when a folder is reclassified,
 # so a book tracks the current classification without ever clobbering authoritative author data.
-_GRAPH_AUTHOR_PROV = frozenset({Provenance.GRAPHING.value, Provenance.DIRECTORY.value})
+# CONFIRMED_FOLDER (a user-confirmed author folder) belongs here too: it must keep tracking that
+# folder's classification, not freeze at the value the confirmation first produced.
+_GRAPH_AUTHOR_PROV = frozenset({
+    Provenance.GRAPHING.value, Provenance.DIRECTORY.value, Provenance.CONFIRMED_FOLDER.value,
+})
 
 
 def _part_tracks(book: BookUnit) -> list[int | None]:
@@ -765,12 +769,15 @@ class AppController:
             # Write the re-derived graph author back onto the book copy (mirrors the franchise fill
             # above). The classify copy reflects the new classification: a real ancestor author
             # refills it, an author-turned-Book folder clears it (dropping the book to "Needs
-            # identification").
+            # identification"). Compare provenance too, not just the name: confirming a folder that
+            # already named the right author keeps the same string but must still move the tier from
+            # GRAPHING to CONFIRMED_FOLDER, or the confirmation would look like a no-op.
             for book in root_books:
                 if book.id not in graph_author_ids:
                     continue
                 classified = copies[book.id]
-                if book.authors == classified.authors:
+                if (book.authors == classified.authors
+                        and book.provenance.get("authors") == classified.provenance.get("authors")):
                     continue
                 book.authors = list(classified.authors)
                 new_prov = classified.provenance.get("authors")

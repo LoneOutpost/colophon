@@ -686,13 +686,14 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
     """For a book under a folder classified `series`, stamp series name + sequence when it has no
     stronger series. The sequence comes from the book's own folder's explicit book number
     ("(Series Book #N)" / "#N -"), falling back to the child-name affix ramp ("02 - Yendi") for a
-    plain numbered shelf. GRAPHING provenance; a tag/datafile/match/manual series is never touched.
-    Title affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) owns the title."""
+    plain numbered shelf. GRAPHING provenance, or CONFIRMED_FOLDER when the user confirmed the series
+    folder; a tag/datafile/match/manual series is never touched. Title affix-cleaning is NOT done
+    here — the role-driven weak stage (`identify_weak`) owns the title."""
     from colophon.core.folder_title import parse_folder_title
     from colophon.core.metadata_quality import is_structural_marker
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
-    fillable = WEAK_PROV | {Provenance.GRAPHING.value}
+    fillable = WEAK_PROV | {Provenance.GRAPHING.value, Provenance.CONFIRMED_FOLDER.value}
     for book in books:
         node = _nearest_series(graph, book.source_folder, root)
         if node is None or not node.kind_value or is_structural_marker(node.kind_value):
@@ -705,7 +706,10 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             continue
         if not book.series or book.provenance.get("series") in fillable:
             book.series = [SeriesRef(name=node.kind_value, sequence=seq)]
-            book.provenance["series"] = Provenance.GRAPHING.value
+            # A folder the user confirmed vouches for its series; an auto-classified one is inference.
+            book.provenance["series"] = (Provenance.CONFIRMED_FOLDER.value
+                                         if node.kind_source == "manual"
+                                         else Provenance.GRAPHING.value)
 
 
 def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
@@ -843,11 +847,14 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
                 break
             cur = cur.parent
         chosen = next((n for n in seen if evidenced.get(n.id)), seen[0] if seen else None)
-        # A user-confirmed (manual) author folder is authoritative — assign verbatim, skip the ballot.
+        # A user-confirmed (manual) author folder vouches for its author: assign verbatim, skip the
+        # ballot. Stamped CONFIRMED_FOLDER, not MANUAL: MANUAL is settled (re-derives skip it, a
+        # re-cluster carries it), so a later reclassify of this folder would never reach the book.
         if chosen is not None and chosen.kind_source == "manual" and chosen.author:
-            if book.authors != [chosen.author]:
+            if (book.authors != [chosen.author]
+                    or book.provenance.get("authors") != Provenance.CONFIRMED_FOLDER.value):
                 book.authors = [chosen.author]
-                book.provenance["authors"] = Provenance.MANUAL.value
+                book.provenance["authors"] = Provenance.CONFIRMED_FOLDER.value
             continue
         # Structural author signals for the ballot (proper-cased so a shouting folder name is tidy).
         classified = (proper_case_if_shouting(chosen.author)
