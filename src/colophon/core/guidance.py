@@ -20,6 +20,7 @@ class FixAction(StrEnum):
     ACKNOWLEDGE = "acknowledge"  # dismiss an advisory finding
     DELETE = "delete"            # permanently delete corrupt files / a missing book
     FIX_EXTENSION = "fix_extension"  # rename mislabeled files to their true extension
+    USE_SUGGESTED = "use_suggested"  # write a conflict finding's folder value into its book field
 
 
 class Guidance(NamedTuple):

@@ -467,6 +467,10 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     )
 
 
+# A conflict finding's `field` (a BookUnit attribute) to the editor's field key it is saved under.
+_SUGGESTION_FIELDS = {"title": "title", "authors": "author"}
+
+
 class AppController:
     def __init__(self, ctx: AppContext) -> None:
         self.ctx = ctx
@@ -2244,6 +2248,23 @@ class AppController:
             book.acknowledged_findings = [*book.acknowledged_findings, key]
             book.touch()
             self.ctx.books.upsert(book)
+
+    def apply_finding_suggestion(self, book: BookUnit, key: str) -> BookUnit:
+        """Fix a conflict finding with the folder's value: write `suggested` into the finding's field
+        as a manual edit (the detail editor's Save path, so it is undoable), then acknowledge it.
+
+        The acknowledgement is needed because the album check compares the file's own tag, which a
+        book edit does not change; the next Write tags fixes the file. Returns the updated book,
+        followed to its current id in case the scoped re-derive churned it."""
+        finding = next((f for f in self._active_findings(book) if f.key == key), None)
+        if finding is None or finding.field not in _SUGGESTION_FIELDS or not finding.suggested:
+            raise ValueError(f"no folder value to apply for finding {key!r}")
+        self.save_fields(book, {_SUGGESTION_FIELDS[finding.field]: finding.suggested})
+        # save_fields' re-derive may have written a fresh copy; acknowledge on the stored book so the
+        # upsert does not overwrite that copy with this stale object.
+        updated = self.get_book(self.resolve_detail_target(book) or book.id) or book
+        self.acknowledge_finding(updated, key)
+        return updated
 
     def tag_plan(self, book: BookUnit) -> TagPlan:
         """The dry-run preview of writing this book's metadata into its files."""

@@ -577,6 +577,24 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         ui.notify("Acknowledged", type="info")
         repaint(nav=True, list=True, status=True, detail_book_id=b.id)
 
+    async def _use_suggested(b, item, button) -> None:
+        """Fix a conflict finding with the folder's value: a manual, undoable edit of its field that
+        also settles the finding. Repaints what `_acknowledge` does, on the id the edit left it at.
+        The edit re-derives the book's folder, so it runs off the event loop behind a busy button."""
+        with busy(button):
+            try:
+                updated = await asyncio.to_thread(controller.apply_finding_suggestion, b, item.key)
+            except ValueError:
+                ui.notify("This conflict has no folder value to apply any more", type="warning")
+                return
+        field = "author" if item.field == "authors" else item.field
+        message = f'Set {field} to "{item.suggested}".'
+        if item.source and "tag" in item.source:
+            # The file still carries the tag the finding complained about until tags are written.
+            message += " Write tags to update the file."
+        ui.notify(message, type="positive")
+        repaint(nav=True, list=True, status=True, detail_book_id=updated.id)
+
     def render_attention_pane(book) -> None:
         items = attention_items(book, controller._active_findings(book))
         with ui.column().classes("w-full gap-2"):
@@ -587,6 +605,11 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.label(item.detail)
                 ui.label(item.suggestion).classes("colophon-muted text-caption")
                 with ui.row().classes("gap-2"):
+                    if FixAction.USE_SUGGESTED in item.actions and item.suggested:
+                        use_btn = ui.button(f'Use "{item.suggested}"', icon="done").props(
+                            "flat color=primary")
+                        use_btn.on_click(
+                            lambda i=item, b=book, btn=use_btn: _use_suggested(b, i, btn))
                     if FixAction.ACKNOWLEDGE in item.actions and item.key is not None:
                         ui.button(
                             "Acknowledge",
@@ -1165,6 +1188,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                         delete=lambda b=book: _delete_book_items(b),
                         rerun_phase=_rerun_one,
                         fix_extension=_fix_extension,
+                        use_suggested=lambda item, btn, b=book: _use_suggested(b, item, btn),
                     )
                     state_panel.render(controller, book, actions=_attn)
 
