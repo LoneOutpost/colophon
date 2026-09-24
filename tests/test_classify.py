@@ -774,3 +774,17 @@ def test_metadata_conflict_ignores_dotdash_author_prefix():
     # a genuinely different album still flags, now naming the clean folder title
     f = _metadata_conflict_finding(folder, [_f("The Reckoning")], FolderKind.TITLE)
     assert f is not None and 'folder "Damaged"' in f.detail and "The Reckoning" in f.detail
+
+
+def test_album_conflict_names_the_field_and_carries_the_folders_value():
+    # The Ph1 shape: a folder 'Porterhouse Blue' whose files carry the album tag 'Ph1'. The finding
+    # says which book field the tag feeds, and carries the folder's value so the UI can offer it.
+    from colophon.core.classify import _metadata_conflict_finding
+
+    folder = Path("/audio/Tom Sharpe/Porterhouse Blue")
+    f = _metadata_conflict_finding(folder, [_feat(str(folder / "01.mp3"), album="Ph1")],
+                                   FolderKind.TITLE)
+    assert f is not None
+    assert f.detail == 'folder "Porterhouse Blue" vs title "Ph1" (from the album tag)'
+    assert (f.field, f.current, f.suggested, f.source) == (
+        "title", "Ph1", "Porterhouse Blue", "album tag")

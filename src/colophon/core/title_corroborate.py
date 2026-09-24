@@ -51,6 +51,7 @@ class TitleCorroboration:
     agreeing_sources: tuple[str, ...] = ()
     evidence: str = ""
     suggested_title: str | None = None
+    suggested_from: str | None = None  # which source a contradict's suggested_title came from
 
 
 # Word extraction that splits on ALL punctuation ('.', '-', ':' included, which _tokens/_spaced keep
@@ -156,6 +157,7 @@ def corroborate_title(
     return TitleCorroboration(
         verdict="contradict",
         evidence=f'metadata title "{tag}" vs {src0} "{res0}"', suggested_title=res0,
+        suggested_from=src0,
     )
 
 

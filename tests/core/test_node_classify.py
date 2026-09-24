@@ -1141,3 +1141,108 @@ def test_classify_nodes_raises_the_folder_name_conflict_from_tag_consensus(tmp_p
     assert author_node.kind == "author" and author_node.kind_value == "Top 100 Sci-Fi Books"
     for b in books:
         assert [f.detail for f in _folder_name_findings(b)] == [_FOLDER_NAME_DETAIL], b.findings
+
+
+def test_title_conflict_carries_the_field_and_the_folders_title(tmp_path):
+    from colophon.core.models import BookUnit, FindingCode, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    book = BookUnit.new(source_folder=tmp_path / "At Risk")
+    book.title, book.authors = "Some Other Book", ["Stella Rimington"]
+    book.provenance["authors"] = Provenance.TAG.value
+    _fill_title_corroboration([book])
+
+    [f] = [f for f in book.findings if f.code == FindingCode.METADATA_CONFLICT]
+    assert f.detail.startswith('metadata title "')
+    assert (f.field, f.current, f.suggested, f.source) == (
+        "title", "Some Other Book", "At Risk", "title")
+
+
+def test_title_conflict_upgrades_a_stored_unstructured_finding_and_keeps_its_dismissal(tmp_path):
+    """A finding stored before findings carried structure has the same key as the one raised now, so
+    it is replaced in place: the fix becomes available and a dismissal of it still holds."""
+    from colophon.core.models import BookUnit, Finding, FindingCode, FindingSeverity, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    book = BookUnit.new(source_folder=tmp_path / "At Risk")
+    book.title, book.authors = "Some Other Book", ["Stella Rimington"]
+    book.provenance["authors"] = Provenance.TAG.value
+    legacy = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                     detail='metadata title "Some Other Book" vs folder "At Risk"')
+    book.findings = [legacy]
+    book.acknowledged_findings = [legacy.key]
+    _fill_title_corroboration([book])
+
+    assert len(book.findings) == 1
+    assert book.findings[0].suggested == "At Risk"
+    assert book.acknowledged_findings == [legacy.key]
+
+
+def test_title_conflict_from_filenames_offers_no_value(tmp_path):
+    """Only a folder-derived title is offered: the filename residual is lowercased word soup, and
+    the user chose "use the folder's value" as the one fix."""
+    from colophon.core.models import BookUnit, FindingCode, Provenance, SourceFile
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    book = BookUnit.new(source_folder=tmp_path / "Stella Rimington")
+    book.title, book.authors = "Some Other Book", ["Stella Rimington"]
+    book.provenance["authors"] = Provenance.TAG.value
+    book.source_files = [SourceFile(path=tmp_path / "Stella Rimington" / f"At Risk {i:02}.mp3",
+                                    size=1, duration_seconds=1.0, ext="mp3") for i in (1, 2)]
+    _fill_title_corroboration([book])
+
+    [f] = [f for f in book.findings if f.code == FindingCode.METADATA_CONFLICT]
+    assert f.suggested is None and f.field is None
+
+
+def test_author_conflict_carries_the_field_and_the_folders_author(tmp_path):
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.models import EmbeddedTags, FindingCode, SourceFile
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Isaac Asimov")
+
+    def tagged(artist):
+        b = _book(folder, authors=[artist], prov="tag")
+        b.source_files = [SourceFile(path=Path(folder) / f"{artist}.opus", size=1,
+                                     duration_seconds=0.0, ext="opus", tags=EmbeddedTags(artist=artist))]
+        return b
+
+    dissent = tagged("Some Narrator")
+    g = _graph_with({folder: [*(tagged("Isaac Asimov") for _ in range(3)), dissent]}, root)
+    classify_graph(g, root=root)
+    classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})
+
+    [f] = [f for f in dissent.findings if f.code == FindingCode.METADATA_CONFLICT
+           and f.detail.startswith("author:")]
+    assert f.detail == "author: tag 'Some Narrator' vs folder 'Isaac Asimov'"
+    assert (f.field, f.current, f.suggested, f.source) == (
+        "authors", "Some Narrator", "Isaac Asimov", "tag")
+
+
+def test_author_conflict_upgrades_a_stored_unstructured_finding(tmp_path):
+    from colophon.core.graph_classify import classify_graph
+    from colophon.core.models import EmbeddedTags, Finding, FindingCode, FindingSeverity, SourceFile
+    from colophon.core.node_classify import classify_nodes
+
+    root = tmp_path
+    folder = str(root / "Isaac Asimov")
+
+    def tagged(artist):
+        b = _book(folder, authors=[artist], prov="tag")
+        b.source_files = [SourceFile(path=Path(folder) / f"{artist}.opus", size=1,
+                                     duration_seconds=0.0, ext="opus", tags=EmbeddedTags(artist=artist))]
+        return b
+
+    dissent = tagged("Some Narrator")
+    legacy = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                     detail="author: tag 'Some Narrator' vs folder 'Isaac Asimov'")
+    dissent.findings = [legacy]
+    dissent.acknowledged_findings = [legacy.key]
+    g = _graph_with({folder: [*(tagged("Isaac Asimov") for _ in range(3)), dissent]}, root)
+    classify_graph(g, root=root)
+    classify_nodes(g, [bn.book for bn in g.books.values()], root=root, overrides={})
+
+    assert [f.suggested for f in dissent.findings] == ["Isaac Asimov"]
+    assert dissent.acknowledged_findings == [legacy.key]

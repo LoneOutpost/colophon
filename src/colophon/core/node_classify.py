@@ -816,11 +816,21 @@ def _fill_title_corroboration(books: list[BookUnit]) -> None:
         tc = book_title_verdict(book)
         book.title_corroboration = tc.verdict
         if tc.verdict == "contradict":
+            # Only a folder-derived title is offered as the fix: the filename residual is
+            # lowercased shared words, not a title to write back.
+            from_folder = tc.suggested_from == "folder"
+            raised = Finding(
+                code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                detail=tc.evidence,
+                field="title" if from_folder else None, current=book.title,
+                suggested=tc.suggested_title if from_folder else None, source="title",
+            )
             if not any(mine(f) for f in book.findings):
-                book.findings.append(Finding(
-                    code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
-                    detail=tc.evidence,
-                ))
+                book.findings.append(raised)
+            else:
+                # Same key, so a stored copy (possibly from before findings carried structure) is
+                # swapped for the fresh one in place and its dismissal still applies.
+                book.findings = [raised if f.key == raised.key else f for f in book.findings]
         elif any(mine(f) for f in book.findings):
             retracted = {f.key for f in book.findings if mine(f)}
             book.findings = [f for f in book.findings if not mine(f)]
@@ -1007,11 +1017,17 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
         disagree = bool(tag_people and folder_people) and not (
             tag_people <= folder_people or folder_people <= tag_people)
         if (tag_artist and classified and author_junk(tag_artist) == 0 and author_junk(classified) == 0
-                and disagree
-                and not any(f.code == FindingCode.METADATA_CONFLICT
-                            and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX)
-                            for f in book.findings)):
-            book.findings.append(Finding(
+                and disagree):
+            raised = Finding(
                 code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
                 detail=f"author: tag '{tag_artist}' vs folder '{classified}'",
-            ))
+                field="authors", current=tag_artist, suggested=classified, source="tag",
+            )
+            if not any(f.code == FindingCode.METADATA_CONFLICT
+                       and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX)
+                       for f in book.findings):
+                book.findings.append(raised)
+            else:
+                # Same key: swap a stored copy (possibly from before findings carried structure)
+                # for the fresh one in place, so its dismissal still applies.
+                book.findings = [raised if f.key == raised.key else f for f in book.findings]
