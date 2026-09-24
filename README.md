@@ -114,7 +114,7 @@ controlled location.
    field came from. Embedded tags take precedence, then the sidecar, then the
    folder name, then the filename.
 2. Identify. It queries the configured metadata sources, scores a confidence
-   value for each book, and routes each one to ready or needs review.
+   value for each book, and routes each one to Ready or Unsure.
 3. Review. Books are grouped by author and series, with a separate group for
    books that could not be identified. For each book you can view the field
    provenance, compare candidate matches and apply one, edit or remap fields, and

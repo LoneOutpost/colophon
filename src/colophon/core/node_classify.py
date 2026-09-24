@@ -712,15 +712,16 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
                                          else Provenance.GRAPHING.value)
 
 
-def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
+def book_identity_confidence(book: BookUnit, graph: Graph | None = None,
+                             root: Path | None = None) -> float:
     """A book's local-identification confidence (0-100): how much of the available evidence backs the
     committed identity, and how well that evidence agrees with itself. Pre-match, distinct from the
     post-match `confidence`.
 
     It does NOT claim correctness. A collection that is genuinely mislabeled cannot be detected from
     the data available, so evidence drawn entirely from the library's own labelling is capped — see
-    `core/confidence_axioms.py`, which owns the rules. `graph` and `root` are part of the derive-path
-    call contract and are no longer read here: the graph's contribution reaches the score through
+    `core/confidence_axioms.py`, which owns the rules. `graph` and `root` are optional: the derive path
+    still passes them, but they are no longer read here: the graph's contribution reaches the score through
     provenance instead (see the note below).
     """
     from colophon.core.confidence_axioms import ScoreCtx, score_identity

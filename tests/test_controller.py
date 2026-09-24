@@ -4148,3 +4148,37 @@ def test_withdrawing_a_folder_confirmation_brings_its_author_conflict_back(tmp_p
     assert back and back[0].code == FindingCode.METADATA_CONFLICT
     assert back[0].key not in book.acknowledged_findings
     ctx.close()
+
+
+def test_confirming_the_folder_clears_its_author_only_from_the_folder_group(tmp_path):
+    # End to end through the real confirm path (not a stubbed set_node_classification): the queue's
+    # folder-cause group names the folder whose confirmation settles its books, so confirming it
+    # has to actually take them out of that group.
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    author = ingest / "Frank Herbert"
+    for name in ("Dune", "Children of Dune"):
+        (author / name).mkdir(parents=True)
+        (author / name / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    # A scan of bare files already scores a folder-only author at the local ceiling (high band), so
+    # the weak band is set on the stored books directly; the author stays graph-derived as scanned.
+    for book in ctx.books.list_all():
+        assert book.provenance["authors"] == "graphing"
+        book.identity_confidence = 40.0
+        ctx.books.upsert(book)
+    ids = {b.id for b in ctx.books.list_all()}
+
+    def folder_group_ids():
+        return {b.id for g in ctrl.review_queue().groups
+                if g.phrase == "author only from the folder" and g.cause.path == author
+                for b in g.books}
+
+    assert folder_group_ids() == ids
+    assert ctrl.confirm_node_classification(author) is True
+    assert folder_group_ids() == set()
+    for book in ctx.books.list_all():
+        assert book.provenance["authors"] == "confirmed_folder"
+    ctx.close()

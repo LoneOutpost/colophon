@@ -803,8 +803,8 @@ class AppController:
                 apply_franchise_fill(book, folder_fr)
             # Write the re-derived graph author back onto the book copy (mirrors the franchise fill
             # above). The classify copy reflects the new classification: a real ancestor author
-            # refills it, an author-turned-Book folder clears it (dropping the book to "Needs
-            # identification"). Compare provenance too, not just the name: confirming a folder that
+            # refills it, an author-turned-Book folder clears it (an authorless book reads Unsure
+            # and lands in the Queue). Compare provenance too, not just the name: confirming a folder that
             # already named the right author keeps the same string but must still move the tier from
             # GRAPHING to CONFIRMED_FOLDER, or the confirmation would look like a no-op.
             # A confirmed author folder also overrides a disagreeing tag (or filename) author: the
@@ -2411,13 +2411,7 @@ class AppController:
     def _restamp_identity(book: BookUnit) -> None:
         """Recompute identity confidence after a change to what settles the book (a confirmation
         made or withdrawn). The score reads no graph, so this needs no re-derive."""
-        from colophon.core.confidence_axioms import ScoreCtx, score_identity
-        if not (book.authors or book.series):
-            book.identity_confidence = 0.0
-            return
-        result = score_identity(book, ScoreCtx())
-        book.identity_signals = result.signals
-        book.identity_confidence = result.score
+        book.identity_confidence = book_identity_confidence(book)
 
     async def recheck_confidence(self, book: BookUnit) -> None:
         """Revert to auto confidence: re-query all sources, rescore, clear the
@@ -2507,7 +2501,7 @@ class AppController:
 
     def apply_identify(self, plan: IdentifyPlan) -> IdentifySummary:
         """Fill-empty apply the confident proposals (Ready) and re-score the rest
-        (Needs review), in one undo batch. Manually-confirmed and organized books
+        (Unsure), in one undo batch. Manually-confirmed and organized books
         are not in the plan and are never touched."""
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in plan.proposals:
