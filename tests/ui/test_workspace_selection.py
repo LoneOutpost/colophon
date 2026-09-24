@@ -368,3 +368,18 @@ async def test_an_opened_book_survives_a_repaint_that_left_the_selection_alone(
 
     assert workspace.detail_pane() == "single"
     assert workspace.detail_title() == "Book 1"
+
+
+async def test_navigator_select_all_in_multiselect_opens_the_bulk_editor(
+    loop_registered, library, monkeypatch,
+):
+    # The navigator's Select all repaints the navigator, deleting the very button whose click is
+    # being handled. The bulk editor then mirrored its dirty flag to the browser through that
+    # button's (deleted) slot and raised, so the selection landed but the editor never opened.
+    controller, _ids = library
+    workspace = await _render(controller, restored=_restored([], None), monkeypatch=monkeypatch)
+    buttons = [e for e in workspace._of("Button") if e.text == "Select all"]
+    assert len(buttons) == 2            # navigator + Books header, in build order
+    workspace.click("Select all")       # the first built: the navigator's
+    await workspace.settle()
+    assert workspace.detail_pane() == "bulk"

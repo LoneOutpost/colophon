@@ -379,10 +379,16 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         "book_id": None, "is_dirty": None, "save_pending": None, "save": None, "write": None,
     }
 
+    # The page's client, captured while the page is built. ui.run_javascript resolves the client
+    # through the current slot, which is the clicked element's: a handler that repaints the pane
+    # holding its own button (the navigator's Select all) deletes that slot mid-handler, and the
+    # call raised, leaving the selection made but the bulk editor never opened.
+    page_client = ui.context.client
+
     def _set_dirty(value: bool) -> None:
         """Mirror the editor's unsaved-changes state into the browser so the
         beforeunload guard (see the keyboard/unload block) can warn on navigation."""
-        ui.run_javascript(f"window.__colophon_dirty = {'true' if value else 'false'}")
+        page_client.run_javascript(f"window.__colophon_dirty = {'true' if value else 'false'}")
 
     def _clear_editor_state() -> None:
         editor_state.update(
@@ -1499,7 +1505,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                 # alerts). Duration and quality used to share it and never shrink, so at the default
                 # pane width the title collapsed to 0px while "9h 34m" wrapped over two lines: every
                 # row showed its bitrate and not its name.
-                with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
+                with ui.row().classes("items-center w-full q-gutter-xs book-row-line1"):
                     ui.label(book.title or "(untitled)").classes(
                         "colophon-book-title col ellipsis"
                     ).tooltip(book.title or "(untitled)")
@@ -1740,9 +1746,9 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         is_open = key in _queue_view["open"]
         icon, color = _QUEUE_ICON[group.kind]
         exp = ui.expansion(value=is_open).classes("w-full colophon-queue-group")
-        with exp.add_slot("header"), ui.row().classes("items-center no-wrap w-full q-gutter-sm"):
+        with exp.add_slot("header"), ui.row().classes("items-center w-full q-gutter-sm queue-group-head"):
             ui.icon(icon, color=color, size="1.25rem")
-            ui.label(group.label).classes("col ellipsis").tooltip(group.label)
+            ui.label(group.label).classes("col ellipsis queue-group-label").tooltip(group.label)
             if group.cause.kind == "folder":
                 path = group.cause.path
                 # click.stop: opening the Tree must not also toggle the group.
