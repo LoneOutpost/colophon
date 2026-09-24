@@ -776,6 +776,25 @@ def _fill_title_corroboration(books: list[BookUnit]) -> None:
                                           if k not in retracted]
 
 
+def retract_author_conflict(book: BookUnit) -> None:
+    """Drop the book's author-vs-folder METADATA_CONFLICT and its dismissal. Called once a confirmed
+    author folder supplies the author: the confirmation is the user's answer to that conflict, so
+    it is settled, and a dismissal kept past it would pre-answer a future, different one. The other
+    METADATA_CONFLICT checks (title, album) are left alone."""
+    from colophon.core.guidance import AUTHOR_CONFLICT_PREFIX
+    from colophon.core.models import Finding, FindingCode
+
+    def mine(f: Finding) -> bool:
+        return (f.code == FindingCode.METADATA_CONFLICT
+                and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX))
+
+    retracted = {f.key for f in book.findings if mine(f)}
+    if not retracted:
+        return
+    book.findings = [f for f in book.findings if not mine(f)]
+    book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in retracted]
+
+
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """Stamp each book's local-identification confidence from the now-classified graph."""
     for book in books:
@@ -792,6 +811,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
+    from colophon.core.guidance import AUTHOR_CONFLICT_PREFIX
     from colophon.core.identity_tokens import leaf_folder_author
     from colophon.core.metadata_quality import author_junk
     from colophon.core.models import Finding, FindingCode, FindingSeverity, Provenance
@@ -850,6 +870,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
                     or book.provenance.get("authors") != Provenance.CONFIRMED_FOLDER.value):
                 book.authors = [chosen.author]
                 book.provenance["authors"] = Provenance.CONFIRMED_FOLDER.value
+            retract_author_conflict(book)
             continue
         # Structural author signals for the ballot (proper-cased so a shouting folder name is tidy).
         classified = (proper_case_if_shouting(chosen.author)
@@ -916,7 +937,8 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             tag_people <= folder_people or folder_people <= tag_people)
         if (tag_artist and classified and author_junk(tag_artist) == 0 and author_junk(classified) == 0
                 and disagree
-                and not any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+                and not any(f.code == FindingCode.METADATA_CONFLICT
+                            and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX)
                             for f in book.findings)):
             book.findings.append(Finding(
                 code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,

@@ -81,7 +81,11 @@ from colophon.core.navigator import (
     build_library_tree,
     filter_library_tree,
 )
-from colophon.core.node_classify import book_identity_confidence, classify_nodes
+from colophon.core.node_classify import (
+    book_identity_confidence,
+    classify_nodes,
+    retract_author_conflict,
+)
 from colophon.core.normalize import (
     FIELD_NORMALIZERS,
     merge_preserve,
@@ -437,8 +441,8 @@ def _clear_weak_identity(book: BookUnit) -> None:
 def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     """Whether a re-derived book copy leaves the stored book's derived caches + auto-cleaned fields
     untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, franchise,
-    local-identification confidence, title-corroboration verdict, BookState, and the repair_fields
-    cleanings: title, publish_year). A `_resync_roots` writeback skips books this returns True for."""
+    local-identification confidence, title-corroboration verdict, BookState, the repair_fields
+    cleanings: title, publish_year, and the author conflict a confirmed folder retracts). A `_resync_roots` writeback skips books this returns True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
@@ -449,6 +453,8 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
         and stored.title == rederived.title
         and stored.publish_year == rederived.publish_year
         and stored.state is rederived.state
+        and stored.findings == rederived.findings
+        and stored.acknowledged_findings == rederived.acknowledged_findings
     )
 
 
@@ -775,10 +781,18 @@ class AppController:
             # identification"). Compare provenance too, not just the name: confirming a folder that
             # already named the right author keeps the same string but must still move the tier from
             # GRAPHING to CONFIRMED_FOLDER, or the confirmation would look like a no-op.
+            # A confirmed author folder also overrides a disagreeing tag (or filename) author: the
+            # confirmation is the user's answer to "is the folder or the tag right?", so its
+            # CONFIRMED_FOLDER value is written back too and the author conflict it answered is
+            # retracted. `_fill_down` never lets it reach a manual or matched author.
             for book in root_books:
-                if book.id not in graph_author_ids:
-                    continue
                 classified = copies[book.id]
+                confirmed = (classified.provenance.get("authors")
+                             == Provenance.CONFIRMED_FOLDER.value)
+                if book.id not in graph_author_ids and not confirmed:
+                    continue
+                if confirmed:
+                    retract_author_conflict(book)
                 if (book.authors == classified.authors
                         and book.provenance.get("authors") == classified.provenance.get("authors")):
                     continue

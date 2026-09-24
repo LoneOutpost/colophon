@@ -3986,6 +3986,36 @@ def test_a_confirmed_author_follows_a_later_reclassify(tmp_path):
     ctx.close()
 
 
+def test_confirming_an_author_folder_settles_a_tag_that_disagrees_with_it(tmp_path):
+    # A tag author is not graph-derived, so the re-derive used to leave it in place (and its author
+    # conflict open) even though the confirmed folder had answered that conflict.
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Tom Clancy" / "Rainbow Six"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                       detail="author: tag 'Tom Clancy - Rainbow Six' vs folder 'Tom Clancy'")
+    book.authors = ["Tom Clancy - Rainbow Six"]
+    book.provenance["authors"] = "tag"
+    book.findings = [conflict]
+    ctx.books.upsert(book)
+    assert any(book.id in {b.id for b in g.books} for g in ctrl.review_queue().groups)
+
+    ctrl.set_node_classification(ingest / "Tom Clancy", "author", "Tom Clancy")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert book.authors == ["Tom Clancy"]
+    assert book.provenance["authors"] == "confirmed_folder"
+    assert conflict.key not in {f.key for f in book.findings}
+    assert not any(g.phrase == "tags name a different author" and book.id in {b.id for b in g.books}
+                   for g in ctrl.review_queue().groups)
+    ctx.close()
+
+
 def test_review_queue_groups_the_library_and_drops_a_book_once_ready(tmp_path):
     ctx = _ctx(tmp_path)
     book = BookUnit.new(source_folder=tmp_path / "x")

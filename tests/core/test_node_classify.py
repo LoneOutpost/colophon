@@ -1037,3 +1037,34 @@ def test_a_confirmed_author_folder_stamps_confirmed_folder_not_manual():
     _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
     assert b.authors == ["Frank Herbert"]
     assert b.provenance["authors"] == "confirmed_folder"
+
+
+def test_a_confirmed_author_folder_settles_a_tag_that_disagrees_with_it():
+    """Confirming the folder is the user's answer to 'is the folder or the tag right?': the folder's
+    author wins and the author conflict it answered is retracted, dismissal and all."""
+    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.core.node_classify import _fill_down
+    g = Graph()
+    _node(g, "/lib/Tom Clancy", "author", "Tom Clancy", "manual")
+    b = _book("/lib/Tom Clancy/Rainbow Six", authors=["Tom Clancy - Rainbow Six"], prov="tag")
+    author_conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                              detail="author: tag 'Tom Clancy - Rainbow Six' vs folder 'Tom Clancy'")
+    title_conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                             detail='metadata title "X" vs folder "Rainbow Six"')
+    b.findings = [author_conflict, title_conflict]
+    b.acknowledged_findings = [author_conflict.key, title_conflict.key]
+    _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
+    assert b.authors == ["Tom Clancy"]
+    assert b.provenance["authors"] == "confirmed_folder"
+    assert b.findings == [title_conflict]
+    assert b.acknowledged_findings == [title_conflict.key]
+
+
+def test_a_confirmed_author_folder_never_overwrites_a_manual_author():
+    from colophon.core.node_classify import _fill_down
+    g = Graph()
+    _node(g, "/lib/Tom Clancy", "author", "Tom Clancy", "manual")
+    b = _book("/lib/Tom Clancy/Red Rabbit", authors=["Grant Blackwood"], prov="manual")
+    _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
+    assert b.authors == ["Grant Blackwood"]
+    assert b.provenance["authors"] == "manual"

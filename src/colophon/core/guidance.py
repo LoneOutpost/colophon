@@ -94,7 +94,8 @@ def finding_guidance(code: FindingCode) -> Guidance:
 
 # The detail prefix node_classify's author-vs-folder check writes (`author: tag 'X' vs folder 'Y'`).
 # The other two METADATA_CONFLICT producers (title corroboration, album-vs-folder) are about the book.
-_AUTHOR_CONFLICT_PREFIX = "author:"
+# Public: node_classify raises and retracts this finding with the same constant.
+AUTHOR_CONFLICT_PREFIX = "author:"
 _OWN_FOLDER_CODES = frozenset({
     FindingCode.MIXED_WORKS, FindingCode.MULTI_IN_AUTHOR,
     FindingCode.MULTI_IN_UNDETERMINED, FindingCode.STRUCTURE_UNCLEAR,
@@ -117,7 +118,7 @@ def finding_scope(finding: Finding) -> FindingScope:
     a code added later, is about the book alone.
     """
     if finding.code == FindingCode.METADATA_CONFLICT and (finding.detail or "").startswith(
-            _AUTHOR_CONFLICT_PREFIX):
+            AUTHOR_CONFLICT_PREFIX):
         return "author_folder"
     if finding.code in _OWN_FOLDER_CODES:
         return "own_folder"
@@ -143,7 +144,7 @@ def finding_phrase(finding: Finding) -> str:
     """The finding's problem in plain words, for the review queue. METADATA_CONFLICT is split by
     which check raised it, same as `finding_scope`; everything else comes from the per-code table."""
     if finding.code == FindingCode.METADATA_CONFLICT:
-        if (finding.detail or "").startswith(_AUTHOR_CONFLICT_PREFIX):
+        if (finding.detail or "").startswith(AUTHOR_CONFLICT_PREFIX):
             return "tags name a different author"
         if (finding.detail or "").startswith(TITLE_CONFLICT_PREFIX):
             return "title disagrees with the folder"
