@@ -10,7 +10,6 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
 
 from colophon.adapters.audio import is_audio_file
 from colophon.adapters.config import PATTERN_HISTORY_CAP, Config, OrganizePattern, save_config
@@ -66,7 +65,6 @@ from colophon.core.models import (
     EmbeddedTags,
     Finding,
     FindingCode,
-    FindingSeverity,
     NodeOverride,
     OperationRecord,
     Phase,
@@ -83,7 +81,12 @@ from colophon.core.navigator import (
     build_library_tree,
     filter_library_tree,
 )
-from colophon.core.node_classify import book_identity_confidence, classify_nodes
+from colophon.core.node_classify import (
+    book_identity_confidence,
+    classify_nodes,
+    restore_author_conflict,
+    retract_author_conflict,
+)
 from colophon.core.normalize import (
     FIELD_NORMALIZERS,
     merge_preserve,
@@ -105,6 +108,7 @@ from colophon.core.phases import (
 )
 from colophon.core.progress import step
 from colophon.core.provenance import provenance_label, provenance_tooltip
+from colophon.core.queue import Queue, build_queue, check_matches
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -194,7 +198,15 @@ _REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progr
 # Author provenances that are derived from the folder classification (vs. the file's own tags,
 # a match, a manual edit, or the filename). Only these are re-derived when a folder is reclassified,
 # so a book tracks the current classification without ever clobbering authoritative author data.
-_GRAPH_AUTHOR_PROV = frozenset({Provenance.GRAPHING.value, Provenance.DIRECTORY.value})
+# CONFIRMED_FOLDER (a user-confirmed author folder) belongs here too: it must keep tracking that
+# folder's classification, not freeze at the value the confirmation first produced.
+_GRAPH_AUTHOR_PROV = frozenset({
+    Provenance.GRAPHING.value, Provenance.DIRECTORY.value, Provenance.CONFIRMED_FOLDER.value,
+})
+# The series counterpart: the two provenances `_fill_series_ramp` stamps from a folder classified
+# `series`. A directory/filename series is only ever overwritten by the ramp, never cleared by it, so
+# it is left out; a tag/datafile/match/manual series the ramp never touches.
+_GRAPH_SERIES_PROV = frozenset({Provenance.GRAPHING.value, Provenance.CONFIRMED_FOLDER.value})
 
 
 def _part_tracks(book: BookUnit) -> list[int | None]:
@@ -433,12 +445,14 @@ def _clear_weak_identity(book: BookUnit) -> None:
 
 def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     """Whether a re-derived book copy leaves the stored book's derived caches + auto-cleaned fields
-    untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, franchise,
-    local-identification confidence, title-corroboration verdict, BookState, and the repair_fields
-    cleanings: title, publish_year). A `_resync_roots` writeback skips books this returns True for."""
+    untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, series, franchise,
+    local-identification confidence, title-corroboration verdict, BookState, the repair_fields
+    cleanings: title, publish_year, and the author conflict a confirmed folder retracts). A `_resync_roots` writeback skips books this returns True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
+        and stored.series == rederived.series
+        and stored.provenance.get("series") == rederived.provenance.get("series")
         and stored.franchise == rederived.franchise
         and stored.provenance.get("franchise") == rederived.provenance.get("franchise")
         and stored.identity_confidence == rederived.identity_confidence
@@ -446,6 +460,8 @@ def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
         and stored.title == rederived.title
         and stored.publish_year == rederived.publish_year
         and stored.state is rederived.state
+        and stored.findings == rederived.findings
+        and stored.acknowledged_findings == rederived.acknowledged_findings
     )
 
 
@@ -458,6 +474,10 @@ class AppController:
         self._tree_cache: tuple[tuple[int, int, int], LibraryTree] | None = None
         self._distinct_cache: dict[str, tuple[int, list[str]]] = {}  # kind -> (books_gen, values)
         self._classic_graph_cache: tuple[tuple[str, int, int], Graph] | None = None  # (root, graph_gen, books_gen)
+        # Review-queue views, per (view, input book ids), valid while the books/graph generations and
+        # the scan paths hold (see _queue_memo). The Library asks several times per repaint.
+        self._queue_cache_gen: tuple | None = None
+        self._queue_cache: dict[tuple, object] = {}
 
     def save_settings(self, config: Config) -> None:
         """Persist `config` and update the live context. The source list is rebuilt
@@ -742,6 +762,25 @@ class AppController:
             for bid in graph_author_ids:
                 copies[bid].authors = []
                 copies[bid].provenance.pop("authors", None)
+            # Same for a series the ramp filled from a folder classified `series`, so confirming,
+            # un-confirming or reclassifying that folder re-derives it now rather than on the next scan.
+            # A GRAPHING series is only cleared when it names an ancestor series folder: the
+            # known-series cross-reference also stamps GRAPHING, and the ramp would never refill that.
+            folder_series = {
+                str(n.attrs["path"]): n.attrs.get("kind_value") for n in skeleton_nodes
+                if n.physical == "directory" and n.attrs.get("kind") == "series"
+            }
+            graph_series_ids = {
+                b.id for b in root_books
+                if b.series and (
+                    b.provenance.get("series") == Provenance.CONFIRMED_FOLDER.value
+                    or (b.provenance.get("series") in _GRAPH_SERIES_PROV
+                        and self._series_from_folder(b, folder_series))
+                )
+            }
+            for bid in graph_series_ids:
+                copies[bid].series = []
+                copies[bid].provenance.pop("series", None)
             recon = graph_from_records(
                 skeleton_nodes + book_nodes, skeleton_edges + book_edges, copies, root=root,
                 # Scoped mode restores every node's persisted classification so the frozen spine keeps
@@ -764,13 +803,29 @@ class AppController:
                 apply_franchise_fill(book, folder_fr)
             # Write the re-derived graph author back onto the book copy (mirrors the franchise fill
             # above). The classify copy reflects the new classification: a real ancestor author
-            # refills it, an author-turned-Book folder clears it (dropping the book to "Needs
-            # identification").
+            # refills it, an author-turned-Book folder clears it (an authorless book reads Unsure
+            # and lands in the Queue). Compare provenance too, not just the name: confirming a folder that
+            # already named the right author keeps the same string but must still move the tier from
+            # GRAPHING to CONFIRMED_FOLDER, or the confirmation would look like a no-op.
+            # A confirmed author folder also overrides a disagreeing tag (or filename) author: the
+            # confirmation is the user's answer to "is the folder or the tag right?", so its
+            # CONFIRMED_FOLDER value is written back too and the author conflict it answered is
+            # retracted. `_fill_down` never lets it reach a manual or matched author.
             for book in root_books:
-                if book.id not in graph_author_ids:
-                    continue
                 classified = copies[book.id]
-                if book.authors == classified.authors:
+                confirmed = (classified.provenance.get("authors")
+                             == Provenance.CONFIRMED_FOLDER.value)
+                # Withdrawing a confirmation reopens the question it answered: bring back the author
+                # conflict the confirm retracted, which `_fill_down` re-raised on the copy.
+                if (book.provenance.get("authors") == Provenance.CONFIRMED_FOLDER.value
+                        and not confirmed):
+                    restore_author_conflict(book, classified)
+                if book.id not in graph_author_ids and not confirmed:
+                    continue
+                if confirmed:
+                    retract_author_conflict(book)
+                if (book.authors == classified.authors
+                        and book.provenance.get("authors") == classified.provenance.get("authors")):
                     continue
                 book.authors = list(classified.authors)
                 new_prov = classified.provenance.get("authors")
@@ -778,6 +833,23 @@ class AppController:
                     book.provenance["authors"] = new_prov
                 else:
                     book.provenance.pop("authors", None)
+            # Write the re-derived series back the same way. A copy the ramp stamped CONFIRMED_FOLDER
+            # is written even when the stored series came from elsewhere weak (directory/filename),
+            # since a confirmed series folder outranks those; a hard series is never fillable.
+            for book in root_books:
+                classified = copies[book.id]
+                if (book.id not in graph_series_ids
+                        and classified.provenance.get("series") != Provenance.CONFIRMED_FOLDER.value):
+                    continue
+                if (book.series == classified.series
+                        and book.provenance.get("series") == classified.provenance.get("series")):
+                    continue
+                book.series = [s.model_copy() for s in classified.series]
+                new_prov = classified.provenance.get("series")
+                if new_prov:
+                    book.provenance["series"] = new_prov
+                else:
+                    book.provenance.pop("series", None)
             # Second pass: rebuild the franchise edges from the now-filled books, then serialize.
             franchise_of = {}
             for b in root_books:
@@ -806,6 +878,14 @@ class AppController:
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
                 rederived[book.id] = book
         return rederived, graph_writes
+
+    @staticmethod
+    def _series_from_folder(book: BookUnit, folder_series: dict[str, str | None]) -> bool:
+        """Whether `book`'s first series names a folder above it classified `series` (by path
+        string -> kind_value), i.e. the ramp supplied it rather than the known-series lookup."""
+        name = book.series[0].name
+        return any(value == name and AppController._path_under_any(str(book.source_folder), (path,))
+                   for path, value in folder_series.items())
 
     _ENTITY_KINDS = frozenset({"author", "series", "franchise"})
 
@@ -1898,9 +1978,8 @@ class AppController:
     @timed("library_tree")
     def library_tree(self) -> LibraryTree:
         """Group all books into the entity-model tree, read from the maintained graph
-        (`ctx.library_graph`). Conservative: `all_books`/`needs_id` come from `ctx.books`,
-        so a book the graph hasn't placed still shows (in All, and under Needs
-        identification) rather than vanishing."""
+        (`ctx.library_graph`). Conservative: `all_books` comes from `ctx.books`, so a book
+        the graph hasn't placed still shows (in All) rather than vanishing."""
         key = (
             self.ctx.books.generation,
             self.ctx.aliases.generation,
@@ -2114,24 +2193,38 @@ class AppController:
         book.touch()
         self.ctx.books.upsert(book)
 
-    _SEVERITY_RANK: ClassVar[dict[FindingSeverity, int]] = {
-        FindingSeverity.ERROR: 0,
-        FindingSeverity.WARN: 1,
-        FindingSeverity.INFO: 2,
-    }
-
     def _active_findings(self, book: BookUnit) -> list[Finding]:
         """Findings not dismissed via acknowledge, excluding the ones retired from the user-facing
         surface (e.g. LOOSE_IN_AUTHOR — the normal loose-file-in-author layout)."""
         return active_findings(book)
 
-    def books_needing_attention(self) -> list[BookUnit]:
-        """All books carrying at least one un-acknowledged finding, most severe first."""
-        flagged = [b for b in self.ctx.books.list_all() if self._active_findings(b)]
-        return sorted(
-            flagged,
-            key=lambda b: min(self._SEVERITY_RANK[f.severity] for f in self._active_findings(b)),
-        )
+    _QUEUE_MEMO_MAX = 32  # distinct filter sets remembered per generation
+
+    def _queue_memo[T](self, view: tuple, books: list[BookUnit] | None,
+                       build: Callable[[list[BookUnit]], T]) -> T:
+        """Memoize a queue view on the inputs it reads: the book store (states, findings, scores),
+        the maintained graph (folder kinds), the scan paths (cause roots), and which books were
+        asked about. Any write bumps a generation, which drops every entry."""
+        gen = (self.ctx.books.generation, self.ctx.library_graph.generation,
+               tuple(str(p) for p in self.ctx.config.scan_paths))
+        if gen != self._queue_cache_gen or len(self._queue_cache) >= self._QUEUE_MEMO_MAX:
+            self._queue_cache_gen, self._queue_cache = gen, {}
+        key = (view, None if books is None else tuple(b.id for b in books))
+        if key not in self._queue_cache:
+            self._queue_cache[key] = build(self.ctx.books.list_all() if books is None else books)
+        return self._queue_cache[key]  # type: ignore[return-value]
+
+    def review_queue(self, books: list[BookUnit] | None = None) -> Queue:
+        """The books that need a person, grouped by probable cause (see core/queue.py). `books`
+        narrows it (the Library passes its filtered set); None means the whole library. Memoized."""
+        return self._queue_memo(("queue",), books, lambda pool: build_queue(
+            pool, root_for=self._scan_root_for_path, kind_of=self.folder_classification))
+
+    def books_to_check_matches(self, books: list[BookUnit] | None = None) -> list[BookUnit]:
+        """Matched books whose provider fit stayed under the Ready threshold, worst first. Memoized."""
+        threshold = self.ctx.config.review_threshold
+        return self._queue_memo(("check", threshold), books,
+                                lambda pool: check_matches(pool, threshold))
 
     def acknowledge_finding(self, book: BookUnit, key: str) -> None:
         """Dismiss ONE advisory finding so a re-scan won't resurface it.
@@ -2318,7 +2411,7 @@ class AppController:
     def _restamp_identity(book: BookUnit) -> None:
         """Recompute identity confidence after a change to what settles the book (a confirmation
         made or withdrawn). The score reads no graph, so this needs no re-derive."""
-        book.identity_confidence = book_identity_confidence(book, None, None)
+        book.identity_confidence = book_identity_confidence(book)
 
     async def recheck_confidence(self, book: BookUnit) -> None:
         """Revert to auto confidence: re-query all sources, rescore, clear the
@@ -2408,7 +2501,7 @@ class AppController:
 
     def apply_identify(self, plan: IdentifyPlan) -> IdentifySummary:
         """Fill-empty apply the confident proposals (Ready) and re-score the rest
-        (Needs review), in one undo batch. Manually-confirmed and organized books
+        (Unsure), in one undo batch. Manually-confirmed and organized books
         are not in the plan and are never touched."""
         items: list[tuple[BookUnit, dict[str, str | None], str]] = []
         for p in plan.proposals:
@@ -2669,6 +2762,18 @@ class AppController:
         self.ctx.overrides.set(str(path), kind, value)
         self._graph_cache.clear()
         self._resync_roots({self._scan_root_for_path(path)})
+
+    def confirm_node_classification(self, path: Path) -> bool:
+        """Confirm the folder's CURRENT classification as right (the Tree view's one-click Confirm):
+        persist its present kind and value as a manual override, which re-derives its books so the
+        value it supplies counts as the user's word. False when the folder has no classified node."""
+        node = self.ctx.library_graph.nodes.get(DirectoryNode.id_for(path))
+        kind = str(node.attrs.get("kind", "")) if node is not None else ""
+        if not kind or kind == "unknown":
+            return False
+        value = node.attrs.get("kind_value")
+        self.set_node_classification(path, kind, str(value) if value else None)
+        return True
 
     def clear_node_classification(self, path: Path) -> None:
         """Remove the manual classification for `path` (revert to auto) and invalidate cache."""

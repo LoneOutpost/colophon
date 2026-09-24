@@ -118,7 +118,7 @@ def _render_review_reasons(book: BookUnit) -> None:
     reasons = review_reasons(book)
     if not reasons:
         return
-    ui.label("Needs review because").classes("colophon-seccap")
+    ui.label("Unsure because").classes("colophon-seccap")
     with ui.column().classes("w-full q-gutter-xs"):
         for reason in reasons:
             with ui.row().classes("items-start no-wrap q-gutter-xs"):

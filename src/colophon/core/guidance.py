@@ -7,9 +7,9 @@ remedy operations here."""
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
-from colophon.core.models import FindingCode
+from colophon.core.models import Finding, FindingCode
 
 
 class FixAction(StrEnum):
@@ -90,6 +90,66 @@ def finding_guidance(code: FindingCode) -> Guidance:
     """The suggestion + next-actions for a finding code. Unknown codes fall back to a
     manual acknowledge, so a new finding is never actionless."""
     return _BY_CODE.get(code, _UNCLEAR)
+
+
+# The detail prefix node_classify's author-vs-folder check writes (`author: tag 'X' vs folder 'Y'`).
+# The other two METADATA_CONFLICT producers (title corroboration, album-vs-folder) are about the book.
+# Public: node_classify raises and retracts this finding with the same constant.
+AUTHOR_CONFLICT_PREFIX = "author:"
+_OWN_FOLDER_CODES = frozenset({
+    FindingCode.MIXED_WORKS, FindingCode.MULTI_IN_AUTHOR,
+    FindingCode.MULTI_IN_UNDETERMINED, FindingCode.STRUCTURE_UNCLEAR,
+})
+
+# The detail prefix node_classify's title-corroboration check writes (`metadata title "X" vs
+# folder "Y"`). Public: node_classify's own METADATA_CONFLICT-retraction check shares this constant
+# so the two agree on what "mine" means without duplicating the literal.
+TITLE_CONFLICT_PREFIX = 'metadata title "'
+
+FindingScope = Literal["author_folder", "own_folder", "book"]
+
+
+def finding_scope(finding: Finding) -> FindingScope:
+    """What a finding is about, so the review queue can group it by its probable cause.
+
+    Decided per finding, not per code: METADATA_CONFLICT is raised by three unrelated checks, and
+    only the author one questions a folder's claim. Structure findings are about how the book's own
+    folder is laid out, so books clustered in one folder group together. Anything else, including
+    a code added later, is about the book alone.
+    """
+    if finding.code == FindingCode.METADATA_CONFLICT and (finding.detail or "").startswith(
+            AUTHOR_CONFLICT_PREFIX):
+        return "author_folder"
+    if finding.code in _OWN_FOLDER_CODES:
+        return "own_folder"
+    return "book"
+
+
+# What each finding means to a person scanning the review queue, in plain words. Shared with
+# finding_scope's grouping so the two never describe the same finding two different ways.
+_FINDING_PHRASE: dict[FindingCode, str] = {
+    FindingCode.MIXED_QUALITY: "files differ in audio quality",
+    FindingCode.MISSING_TRACKS: "tracks are missing",
+    FindingCode.EXTENSION_MISMATCH: "a file's extension is wrong",
+    FindingCode.MIXED_WORKS: "several works share one folder",
+    FindingCode.MULTI_IN_AUTHOR: "several books share one folder",
+    FindingCode.MULTI_IN_UNDETERMINED: "several books share one folder",
+    FindingCode.STRUCTURE_UNCLEAR: "the folder layout is unclear",
+    FindingCode.DUP_FORMAT: "the same book in two formats",
+    FindingCode.DUP_EDITION: "two editions of one book",
+}
+
+
+def finding_phrase(finding: Finding) -> str:
+    """The finding's problem in plain words, for the review queue. METADATA_CONFLICT is split by
+    which check raised it, same as `finding_scope`; everything else comes from the per-code table."""
+    if finding.code == FindingCode.METADATA_CONFLICT:
+        if (finding.detail or "").startswith(AUTHOR_CONFLICT_PREFIX):
+            return "tags name a different author"
+        if (finding.detail or "").startswith(TITLE_CONFLICT_PREFIX):
+            return "title disagrees with the folder"
+        return "tags disagree with the folder"
+    return _FINDING_PHRASE.get(finding.code, "needs a look")
 
 
 def review_guidance() -> Guidance:

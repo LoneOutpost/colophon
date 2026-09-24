@@ -14,6 +14,7 @@ from colophon.core.models import (
     FindingCode,
     FindingSeverity,
     Provenance,
+    SeriesRef,
     SourceFile,
 )
 from colophon.core.sources import SourceResult
@@ -1953,7 +1954,7 @@ def test_mark_ready_acknowledges_open_findings(tmp_path):
     assert book.acknowledged_findings == [
         "metadata_conflict:author: a vs b", "mixed_quality:files span 64-128 kbps",
     ]
-    assert book not in ctrl.books_needing_attention()
+    assert ctrl.review_queue().book_count == 0
     later = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
                     detail='folder "Dune" vs tag "Higher Education"')
     book.findings = [*book.findings, later]
@@ -2838,7 +2839,8 @@ def test_scan_applies_author_override_to_books(tmp_path):
 
     book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
     assert book.authors == ["Brandon Sanderson"]
-    assert book.provenance["authors"] == "manual"
+    # confirmed_folder, not manual: it must re-derive with the folder, not freeze at this value.
+    assert book.provenance["authors"] == "confirmed_folder"
     ctx.close()
 
 
@@ -3304,7 +3306,6 @@ def test_library_tree_reads_authors_from_graph(tmp_path):
     assert "Frank Herbert" in [a.name for a in tree.authors]
     book = ctx.books.list_all()[0]
     assert book.id in {b.id for b in tree.all_books}
-    assert book.id not in {b.id for b in tree.needs_id}
     ctx.close()
 
 
@@ -3316,8 +3317,7 @@ def test_library_tree_conservative_book_absent_from_graph(tmp_path):
     b.title, b.authors = "Orphan", ["Someone"]
     ctx.books.upsert(b)                 # in the store, never scanned -> not in the graph
     tree = ctrl.library_tree()
-    assert b.id in {x.id for x in tree.all_books}    # visible in All
-    assert b.id in {x.id for x in tree.needs_id}     # surfaces as needs_id (tripwire)
+    assert b.id in {x.id for x in tree.all_books}    # visible in All, even though ungraphed
     assert b.id not in {x.id for a in tree.authors for s in a.series for x in s.books}
     assert b.id not in {x.id for a in tree.authors for x in a.standalone}
     ctx.close()
@@ -3960,4 +3960,225 @@ def test_rerun_book_pipeline_reapplies_identity_rules(tmp_path):
     ctrl.rerun_book_pipeline([book], Phase.SEARCH)
     after = next(b for b in ctx.books.list_all())
     assert after.title != "STALE WRONG TITLE"   # the flow re-derived it
+
+
+def test_a_confirmed_author_follows_a_later_reclassify(tmp_path):
+    # The confirmed folder's author must track the folder: reclassifying it away re-derives the book
+    # instead of leaving a frozen author behind (what MANUAL did).
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    dune = ingest / "Frank Herbert" / "Dune"
+    dune.mkdir(parents=True)
+    (dune / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    author = ingest / "Frank Herbert"
+
+    ctrl.set_node_classification(author, "author", "Frank Herbert")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == dune)
+    assert book.authors == ["Frank Herbert"]
+    assert book.provenance["authors"] == "confirmed_folder"
+
+    ctrl.set_node_classification(author, "container", None)
+    book = next(b for b in ctx.books.list_all() if b.source_folder == dune)
+    assert book.provenance.get("authors") != "confirmed_folder"
+    ctx.close()
+    ctx.close()
+
+
+def test_confirming_an_author_folder_settles_a_tag_that_disagrees_with_it(tmp_path):
+    # A tag author is not graph-derived, so the re-derive used to leave it in place (and its author
+    # conflict open) even though the confirmed folder had answered that conflict.
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Tom Clancy" / "Rainbow Six"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                       detail="author: tag 'Tom Clancy - Rainbow Six' vs folder 'Tom Clancy'")
+    book.authors = ["Tom Clancy - Rainbow Six"]
+    book.provenance["authors"] = "tag"
+    book.findings = [conflict]
+    ctx.books.upsert(book)
+    assert any(book.id in {b.id for b in g.books} for g in ctrl.review_queue().groups)
+
+    ctrl.set_node_classification(ingest / "Tom Clancy", "author", "Tom Clancy")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert book.authors == ["Tom Clancy"]
+    assert book.provenance["authors"] == "confirmed_folder"
+    assert conflict.key not in {f.key for f in book.findings}
+    assert not any(g.phrase == "tags name a different author" and book.id in {b.id for b in g.books}
+                   for g in ctrl.review_queue().groups)
+    ctx.close()
+
+
+def test_review_queue_groups_the_library_and_drops_a_book_once_ready(tmp_path):
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title, book.authors = "Dune", ["Frank Herbert"]
+    book.findings = [Finding(code=FindingCode.MIXED_QUALITY, severity=FindingSeverity.WARN,
+                             detail="files span 64-128 kbps")]
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    assert ctrl.review_queue().book_count == 1
+    ctrl.mark_ready(book)
+    assert ctrl.review_queue().book_count == 0
+    ctx.close()
+
+
+def test_queue_views_are_memoized_until_a_book_changes(tmp_path):
+    # The Library asks for the queue several times per repaint; unchanged inputs reuse one result.
+    ctx = _ctx(tmp_path)
+    book = BookUnit.new(source_folder=tmp_path / "x")
+    book.title, book.authors = "Dune", ["Frank Herbert"]
+    book.confidence = 40.0
+    ctx.books.upsert(book)
+    ctrl = AppController(ctx)
+    first, matches = ctrl.review_queue([book]), ctrl.books_to_check_matches([book])
+    assert ctrl.review_queue([book]) is first
+    assert ctrl.books_to_check_matches([book]) is matches
+    assert ctrl.review_queue() is not first            # a different input set is its own entry
+    book.title = "Dune Messiah"
+    ctx.books.upsert(book)                             # a write bumps the generation
+    assert ctrl.review_queue([book]) is not first
+    assert ctrl.books_to_check_matches([book]) is not matches
+    ctx.close()
+
+
+def test_confirm_node_classification_keeps_the_folders_current_kind(tmp_path):
+    from colophon.core.graph import DirectoryNode
+    from colophon.core.graph_records import NodeRecord
+    ctx = _ctx(tmp_path)
+    folder = tmp_path / "lib" / "Frank Herbert"
+    ctrl = AppController(ctx)
+    ctx.library_graph.nodes[DirectoryNode.id_for(folder)] = NodeRecord(
+        id=DirectoryNode.id_for(folder), physical="directory", semantic="author", root=str(tmp_path / "lib"),
+        attrs={"path": str(folder), "kind": "author", "kind_value": "Frank Herbert"})
+    calls = []
+    ctrl.set_node_classification = lambda p, k, v=None: calls.append((p, k, v))
+    assert ctrl.confirm_node_classification(folder) is True
+    assert calls == [(folder, "author", "Frank Herbert")]
+    assert ctrl.confirm_node_classification(tmp_path / "nowhere") is False
+    ctx.close()
+
+
+def _vlad_taltos(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    shelf = ingest / "Steven Brust" / "Vlad Taltos"
+    for name in ("01 - Jhereg", "02 - Yendi", "03 - Teckla"):
+        (shelf / name).mkdir(parents=True)
+        (shelf / name / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    return ctx, ctrl, shelf
+
+
+def test_a_confirmed_series_folder_rederives_its_books_series_at_once(tmp_path):
+    # `_fill_series_ramp` stamps CONFIRMED_FOLDER on the classify copies, but the series was never
+    # written back, so a confirm (and its withdrawal) only took effect on the next full scan.
+    ctx, ctrl, shelf = _vlad_taltos(tmp_path)
+    tagged = BookUnit.new(source_folder=shelf / "04 - Phoenix")
+    tagged.title, tagged.authors = "Phoenix", ["Steven Brust"]
+    tagged.provenance["authors"] = "tag"
+    tagged.series = [SeriesRef(name="Taltos Cycle", sequence=4.0)]
+    tagged.provenance["series"] = "tag"
+    ctx.books.upsert(tagged)
+
+    def shelf_series():
+        by_folder = {b.source_folder.name: b for b in ctx.books.list_all()}
+        tag = by_folder.pop("04 - Phoenix")
+        assert tag.series == [SeriesRef(name="Taltos Cycle", sequence=4.0)]
+        assert tag.provenance["series"] == "tag"
+        return by_folder
+
+    assert ctrl.confirm_node_classification(shelf) is True
+    books = shelf_series()
+    assert len(books) == 3
+    for b in books.values():
+        assert b.provenance["series"] == "confirmed_folder"
+        assert b.series and b.series[0].name == "Vlad Taltos"
+
+    ctrl.clear_node_classification(shelf)
+    for b in shelf_series().values():
+        assert b.provenance.get("series") != "confirmed_folder"
+
+    ctrl.confirm_node_classification(shelf)
+    ctrl.set_node_classification(shelf, "container", None)
+    for b in shelf_series().values():
+        assert not b.series and "series" not in b.provenance
+    ctx.close()
+
+
+def test_withdrawing_a_folder_confirmation_brings_its_author_conflict_back(tmp_path):
+    # The confirm retracted the author conflict; un-confirming re-derives the author from the graph,
+    # so the conflict the tag still raises has to come back (open, not pre-acknowledged).
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Tom Clancy" / "Rainbow Six"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    book.source_files[0].tags = EmbeddedTags(artist="Clive Cussler")
+    book.authors = ["Clive Cussler"]
+    book.provenance["authors"] = "tag"
+    conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                       detail="author: tag 'Clive Cussler' vs folder 'Tom Clancy'")
+    book.findings = [conflict]
+    book.acknowledged_findings = [conflict.key]
+    ctx.books.upsert(book)
+
+    ctrl.set_node_classification(ingest / "Tom Clancy", "author", "Tom Clancy")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert not any(f.detail.startswith("author:") for f in book.findings)
+
+    ctrl.clear_node_classification(ingest / "Tom Clancy")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert book.provenance.get("authors") != "confirmed_folder"
+    back = [f for f in book.findings if f.detail.startswith("author:")]
+    assert back and back[0].code == FindingCode.METADATA_CONFLICT
+    assert back[0].key not in book.acknowledged_findings
+    ctx.close()
+
+
+def test_confirming_the_folder_clears_its_author_only_from_the_folder_group(tmp_path):
+    # End to end through the real confirm path (not a stubbed set_node_classification): the queue's
+    # folder-cause group names the folder whose confirmation settles its books, so confirming it
+    # has to actually take them out of that group.
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    author = ingest / "Frank Herbert"
+    for name in ("Dune", "Children of Dune"):
+        (author / name).mkdir(parents=True)
+        (author / name / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    # A scan of bare files already scores a folder-only author at the local ceiling (high band), so
+    # the weak band is set on the stored books directly; the author stays graph-derived as scanned.
+    for book in ctx.books.list_all():
+        assert book.provenance["authors"] == "graphing"
+        book.identity_confidence = 40.0
+        ctx.books.upsert(book)
+    ids = {b.id for b in ctx.books.list_all()}
+
+    def folder_group_ids():
+        return {b.id for g in ctrl.review_queue().groups
+                if g.phrase == "author only from the folder" and g.cause.path == author
+                for b in g.books}
+
+    assert folder_group_ids() == ids
+    assert ctrl.confirm_node_classification(author) is True
+    assert folder_group_ids() == set()
+    for book in ctx.books.list_all():
+        assert book.provenance["authors"] == "confirmed_folder"
     ctx.close()

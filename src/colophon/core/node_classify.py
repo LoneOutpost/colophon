@@ -686,13 +686,14 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
     """For a book under a folder classified `series`, stamp series name + sequence when it has no
     stronger series. The sequence comes from the book's own folder's explicit book number
     ("(Series Book #N)" / "#N -"), falling back to the child-name affix ramp ("02 - Yendi") for a
-    plain numbered shelf. GRAPHING provenance; a tag/datafile/match/manual series is never touched.
-    Title affix-cleaning is NOT done here — the role-driven weak stage (`identify_weak`) owns the title."""
+    plain numbered shelf. GRAPHING provenance, or CONFIRMED_FOLDER when the user confirmed the series
+    folder; a tag/datafile/match/manual series is never touched. Title affix-cleaning is NOT done
+    here — the role-driven weak stage (`identify_weak`) owns the title."""
     from colophon.core.folder_title import parse_folder_title
     from colophon.core.metadata_quality import is_structural_marker
     from colophon.core.models import Provenance, SeriesRef
     from colophon.core.sequence_affix import parse_sequence_affix
-    fillable = WEAK_PROV | {Provenance.GRAPHING.value}
+    fillable = WEAK_PROV | {Provenance.GRAPHING.value, Provenance.CONFIRMED_FOLDER.value}
     for book in books:
         node = _nearest_series(graph, book.source_folder, root)
         if node is None or not node.kind_value or is_structural_marker(node.kind_value):
@@ -705,18 +706,22 @@ def _fill_series_ramp(graph: Graph, books: list[BookUnit], *, root: Path) -> Non
             continue
         if not book.series or book.provenance.get("series") in fillable:
             book.series = [SeriesRef(name=node.kind_value, sequence=seq)]
-            book.provenance["series"] = Provenance.GRAPHING.value
+            # A folder the user confirmed vouches for its series; an auto-classified one is inference.
+            book.provenance["series"] = (Provenance.CONFIRMED_FOLDER.value
+                                         if node.kind_source == "manual"
+                                         else Provenance.GRAPHING.value)
 
 
-def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
+def book_identity_confidence(book: BookUnit, graph: Graph | None = None,
+                             root: Path | None = None) -> float:
     """A book's local-identification confidence (0-100): how much of the available evidence backs the
     committed identity, and how well that evidence agrees with itself. Pre-match, distinct from the
     post-match `confidence`.
 
     It does NOT claim correctness. A collection that is genuinely mislabeled cannot be detected from
     the data available, so evidence drawn entirely from the library's own labelling is capped — see
-    `core/confidence_axioms.py`, which owns the rules. `graph` and `root` are part of the derive-path
-    call contract and are no longer read here: the graph's contribution reaches the score through
+    `core/confidence_axioms.py`, which owns the rules. `graph` and `root` are optional: the derive path
+    still passes them, but they are no longer read here: the graph's contribution reaches the score through
     provenance instead (see the note below).
     """
     from colophon.core.confidence_axioms import ScoreCtx, score_identity
@@ -732,12 +737,6 @@ def book_identity_confidence(book: BookUnit, graph: Graph, root: Path) -> float:
     return result.score
 
 
-# The detail shape `title_corroborate` emits (`metadata title "X" vs folder "Y"`). METADATA_CONFLICT
-# is raised by three independent checks — this one, the album-vs-folder test in classify.py, and the
-# author variant below — so a pass may only retract the finding it can prove is its own.
-_TITLE_CONFLICT_PREFIX = 'metadata title "'
-
-
 def _fill_title_corroboration(books: list[BookUnit]) -> None:
     """Stamp each book's title-corroboration verdict and keep its METADATA_CONFLICT finding in step
     with it: raised on a contradiction, RETRACTED when the verdict no longer says so. Mutates no
@@ -750,12 +749,13 @@ def _fill_title_corroboration(books: list[BookUnit]) -> None:
     acknowledgement goes with it: it settled a conflict that no longer exists, and keeping it would
     silently pre-acknowledge the NEXT, different contradiction on this book.
     """
+    from colophon.core.guidance import TITLE_CONFLICT_PREFIX
     from colophon.core.models import Finding, FindingCode, FindingSeverity
     from colophon.core.title_corroborate import book_title_verdict
 
     def mine(f: Finding) -> bool:
         return (f.code == FindingCode.METADATA_CONFLICT
-                and (f.detail or "").startswith(_TITLE_CONFLICT_PREFIX))
+                and (f.detail or "").startswith(TITLE_CONFLICT_PREFIX))
 
     for book in books:
         tc = book_title_verdict(book)
@@ -777,6 +777,40 @@ def _fill_title_corroboration(books: list[BookUnit]) -> None:
                                           if k not in retracted]
 
 
+def retract_author_conflict(book: BookUnit) -> None:
+    """Drop the book's author-vs-folder METADATA_CONFLICT and its dismissal. Called once a confirmed
+    author folder supplies the author: the confirmation is the user's answer to that conflict, so
+    it is settled, and a dismissal kept past it would pre-answer a future, different one. The other
+    METADATA_CONFLICT checks (title, album) are left alone."""
+    from colophon.core.guidance import AUTHOR_CONFLICT_PREFIX
+    from colophon.core.models import Finding, FindingCode
+
+    def mine(f: Finding) -> bool:
+        return (f.code == FindingCode.METADATA_CONFLICT
+                and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX))
+
+    retracted = {f.key for f in book.findings if mine(f)}
+    if not retracted:
+        return
+    book.findings = [f for f in book.findings if not mine(f)]
+    book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in retracted]
+
+
+def restore_author_conflict(book: BookUnit, rederived: BookUnit) -> None:
+    """The inverse of `retract_author_conflict`, for a withdrawn confirmation: copy `rederived`'s
+    author-vs-folder METADATA_CONFLICT back onto `book`, unacknowledged (the dismissal went with the
+    retraction). Only that finding moves; the rest of `book.findings` is left as it is."""
+    from colophon.core.guidance import AUTHOR_CONFLICT_PREFIX
+    from colophon.core.models import FindingCode
+
+    have = {f.key for f in book.findings}
+    for f in rederived.findings:
+        if (f.code == FindingCode.METADATA_CONFLICT
+                and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX) and f.key not in have):
+            book.findings.append(f.model_copy())
+            book.acknowledged_findings = [k for k in book.acknowledged_findings if k != f.key]
+
+
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """Stamp each book's local-identification confidence from the now-classified graph."""
     for book in books:
@@ -793,6 +827,7 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
     author."""
     from colophon.core.author_evidence import _SETTLE_PROV, resolve_author
     from colophon.core.filename_parser import compile_template, parse_filename
+    from colophon.core.guidance import AUTHOR_CONFLICT_PREFIX
     from colophon.core.identity_tokens import leaf_folder_author
     from colophon.core.metadata_quality import author_junk
     from colophon.core.models import Finding, FindingCode, FindingSeverity, Provenance
@@ -843,11 +878,15 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
                 break
             cur = cur.parent
         chosen = next((n for n in seen if evidenced.get(n.id)), seen[0] if seen else None)
-        # A user-confirmed (manual) author folder is authoritative — assign verbatim, skip the ballot.
+        # A user-confirmed (manual) author folder vouches for its author: assign verbatim, skip the
+        # ballot. Stamped CONFIRMED_FOLDER, not MANUAL: MANUAL is settled (re-derives skip it, a
+        # re-cluster carries it), so a later reclassify of this folder would never reach the book.
         if chosen is not None and chosen.kind_source == "manual" and chosen.author:
-            if book.authors != [chosen.author]:
+            if (book.authors != [chosen.author]
+                    or book.provenance.get("authors") != Provenance.CONFIRMED_FOLDER.value):
                 book.authors = [chosen.author]
-                book.provenance["authors"] = Provenance.MANUAL.value
+                book.provenance["authors"] = Provenance.CONFIRMED_FOLDER.value
+            retract_author_conflict(book)
             continue
         # Structural author signals for the ballot (proper-cased so a shouting folder name is tidy).
         classified = (proper_case_if_shouting(chosen.author)
@@ -914,7 +953,8 @@ def _fill_down(graph: Graph, books: list[BookUnit], evidenced: dict[str, bool], 
             tag_people <= folder_people or folder_people <= tag_people)
         if (tag_artist and classified and author_junk(tag_artist) == 0 and author_junk(classified) == 0
                 and disagree
-                and not any(f.code == FindingCode.METADATA_CONFLICT and (f.detail or "").startswith("author:")
+                and not any(f.code == FindingCode.METADATA_CONFLICT
+                            and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX)
                             for f in book.findings)):
             book.findings.append(Finding(
                 code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,

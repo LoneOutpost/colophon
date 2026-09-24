@@ -29,7 +29,7 @@ def _seed(ctx, tmp_path, books) -> None:
     ctx.library_graph.replace_root(str(tmp_path), nodes, edges)
 
 
-def test_library_tree_groups_authors_series_and_needs_id(tmp_path):
+def test_library_tree_groups_authors_and_series(tmp_path):
     ctx = _ctx(tmp_path)
     a = _book(tmp_path, "Way of Kings", author="Brandon Sanderson", series="Stormlight", seq=1.0)
     b = _book(tmp_path, "Words of Radiance", author="Brandon Sanderson", series="Stormlight", seq=2.0)
@@ -38,7 +38,6 @@ def test_library_tree_groups_authors_series_and_needs_id(tmp_path):
     _seed(ctx, tmp_path, [a, b, standalone, mystery])
 
     tree = AppController(ctx).library_tree()
-    assert [bk.id for bk in tree.needs_id] == [mystery.id]
     author = next(n for n in tree.authors if n.name == "Brandon Sanderson")
     series = next(s for s in author.series if s.name == "Stormlight")
     assert [bk.title for bk in series.books] == ["Way of Kings", "Words of Radiance"]  # by sequence
@@ -70,7 +69,7 @@ def test_library_tree_author_with_series_and_standalone_and_series_only(tmp_path
     assert [bk.id for bk in mistborn.books] == [series_only.id]
 
     # No book appears twice across the whole tree.
-    all_ids: list[str] = [bk.id for bk in tree.needs_id]
+    all_ids: list[str] = []
     for node in tree.authors:
         for s in node.series:
             all_ids.extend(bk.id for bk in s.books)
@@ -83,7 +82,7 @@ def test_library_tree_author_with_series_and_standalone_and_series_only(tmp_path
 def test_library_tree_empty(tmp_path):
     ctx = _ctx(tmp_path)
     tree = AppController(ctx).library_tree()
-    assert tree.needs_id == [] and tree.authors == []
+    assert tree.authors == []
     ctx.close()
 
 

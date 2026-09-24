@@ -27,7 +27,6 @@ class FranchiseNode(_Base):
 
 
 class LibraryTree(_Base):
-    needs_id: list[BookUnit] = []   # noqa: RUF012 - pydantic field default, copied per instance
     authors: list[AuthorNode] = []  # noqa: RUF012 - pydantic field default, copied per instance
     series: list[SeriesNode] = []   # noqa: RUF012 - series-node-rooted view
     franchises: list[FranchiseNode] = []  # noqa: RUF012 - pydantic field default, copied per instance
@@ -51,22 +50,13 @@ def build_library_tree(
 ) -> LibraryTree:
     """Assemble the library tree by traversing an entity graph. The graph is supplied
     (sourced from the maintained persisted graph) or built live from `books` as a fallback.
-    `needs_id` = books with no author/series membership in the graph (so a book absent from
-    a supplied graph surfaces here — the conservative tripwire). The author view nests
-    series under authors; the series view is rooted at series nodes; both honor entity
-    overrides. A book with a series but no author keeps its legacy pseudo-author home."""
+    The author view nests series under authors; the series view is rooted at series nodes;
+    both honor entity overrides. A book with a series but no author keeps its legacy
+    pseudo-author home."""
     g = entity_graph if entity_graph is not None else build_entity_graph(
         books, franchise_of=franchise_of, aliases=aliases
     )
-    needs_id = sorted(
-        (
-            b for b in books
-            if not any(k in ("author", "series") for (k, _) in g.book_entities.get(b.id, []))
-        ),
-        key=lambda b: b.identity_confidence,
-    )
     return LibraryTree(
-        needs_id=needs_id,
         authors=_author_view(g, aliases),
         series=_series_view(g, aliases),
         franchises=_franchise_view(g),
@@ -92,7 +82,6 @@ def filter_library_tree(tree: LibraryTree, book_ids: set[str] | None) -> Library
         if series or standalone:
             authors.append(AuthorNode(name=a.name, series=series, standalone=standalone))
     return LibraryTree(
-        needs_id=keep(tree.needs_id),
         authors=authors,
         series=[s for s in (SeriesNode(name=s.name, books=keep(s.books)) for s in tree.series) if s.books],
         franchises=[f for f in (FranchiseNode(name=f.name, books=keep(f.books)) for f in tree.franchises) if f.books],

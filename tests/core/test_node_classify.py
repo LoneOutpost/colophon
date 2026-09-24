@@ -998,3 +998,73 @@ def test_identity_confidence_no_longer_certifies_a_lone_tag(tmp_path):
                                                                  album="Dune"))]
     score = book_identity_confidence(book, Graph(), tmp_path)
     assert score <= 70, f"local-only evidence must not exceed the ceiling, got {score}"
+
+
+def _node(g, path, kind, value, source):
+    d = DirectoryNode(path=Path(path))
+    d.kind, d.kind_value, d.kind_source = kind, value, source
+    if kind == "author":
+        d.author = value
+    g.directories[d.id] = d
+    return d
+
+
+def test_a_confirmed_series_folder_stamps_confirmed_folder():
+    from colophon.core.node_classify import _fill_series_ramp
+    g = Graph()
+    _node(g, "/lib/Vlad Taltos", "series", "Vlad Taltos", "manual")
+    b = _book("/lib/Vlad Taltos/02 - Yendi")
+    _fill_series_ramp(g, [b], root=Path("/lib"))
+    assert b.series[0].name == "Vlad Taltos"
+    assert b.provenance["series"] == "confirmed_folder"
+
+
+def test_an_auto_series_folder_still_stamps_graphing():
+    from colophon.core.node_classify import _fill_series_ramp
+    g = Graph()
+    _node(g, "/lib/Vlad Taltos", "series", "Vlad Taltos", "")
+    b = _book("/lib/Vlad Taltos/02 - Yendi")
+    _fill_series_ramp(g, [b], root=Path("/lib"))
+    assert b.provenance["series"] == "graphing"
+
+
+def test_a_confirmed_author_folder_stamps_confirmed_folder_not_manual():
+    """MANUAL would freeze the author: re-derives skip it and a later reclassify never moves it."""
+    from colophon.core.node_classify import _fill_down
+    g = Graph()
+    _node(g, "/lib/Frank Herbert", "author", "Frank Herbert", "manual")
+    b = _book("/lib/Frank Herbert/Dune")
+    _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
+    assert b.authors == ["Frank Herbert"]
+    assert b.provenance["authors"] == "confirmed_folder"
+
+
+def test_a_confirmed_author_folder_settles_a_tag_that_disagrees_with_it():
+    """Confirming the folder is the user's answer to 'is the folder or the tag right?': the folder's
+    author wins and the author conflict it answered is retracted, dismissal and all."""
+    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.core.node_classify import _fill_down
+    g = Graph()
+    _node(g, "/lib/Tom Clancy", "author", "Tom Clancy", "manual")
+    b = _book("/lib/Tom Clancy/Rainbow Six", authors=["Tom Clancy - Rainbow Six"], prov="tag")
+    author_conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                              detail="author: tag 'Tom Clancy - Rainbow Six' vs folder 'Tom Clancy'")
+    title_conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                             detail='metadata title "X" vs folder "Rainbow Six"')
+    b.findings = [author_conflict, title_conflict]
+    b.acknowledged_findings = [author_conflict.key, title_conflict.key]
+    _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
+    assert b.authors == ["Tom Clancy"]
+    assert b.provenance["authors"] == "confirmed_folder"
+    assert b.findings == [title_conflict]
+    assert b.acknowledged_findings == [title_conflict.key]
+
+
+def test_a_confirmed_author_folder_never_overwrites_a_manual_author():
+    from colophon.core.node_classify import _fill_down
+    g = Graph()
+    _node(g, "/lib/Tom Clancy", "author", "Tom Clancy", "manual")
+    b = _book("/lib/Tom Clancy/Red Rabbit", authors=["Grant Blackwood"], prov="manual")
+    _fill_down(g, [b], {}, root=Path("/lib"), author_depth=None)
+    assert b.authors == ["Grant Blackwood"]
+    assert b.provenance["authors"] == "manual"

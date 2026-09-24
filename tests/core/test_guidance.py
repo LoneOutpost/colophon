@@ -1,5 +1,15 @@
-from colophon.core.guidance import FixAction, finding_guidance, review_guidance
-from colophon.core.models import FindingCode
+from colophon.core.guidance import (
+    FixAction,
+    finding_guidance,
+    finding_phrase,
+    finding_scope,
+    review_guidance,
+)
+from colophon.core.models import Finding, FindingCode, FindingSeverity
+
+
+def _f(code: FindingCode, detail: str = "x") -> Finding:
+    return Finding(code=code, severity=FindingSeverity.WARN, detail=detail)
 
 
 def test_every_finding_code_has_guidance():
@@ -67,3 +77,37 @@ def test_missing_tracks_offers_acknowledge():
 
     actions = finding_guidance(FindingCode.MISSING_TRACKS).actions
     assert actions == (FixAction.ACKNOWLEDGE,)
+
+
+def test_metadata_conflict_scope_follows_which_check_raised_it():
+    # Three unrelated checks share this code; only the author one is about a folder's claim.
+    assert finding_scope(_f(FindingCode.METADATA_CONFLICT,
+                            "author: tag 'A' vs folder 'B'")) == "author_folder"
+    assert finding_scope(_f(FindingCode.METADATA_CONFLICT,
+                            'metadata title "X" vs folder "Y"')) == "book"
+    assert finding_scope(_f(FindingCode.METADATA_CONFLICT, 'folder "Dune" vs tag "Emma"')) == "book"
+
+
+def test_structure_findings_are_about_the_books_own_folder():
+    for code in (FindingCode.MIXED_WORKS, FindingCode.MULTI_IN_AUTHOR,
+                 FindingCode.MULTI_IN_UNDETERMINED, FindingCode.STRUCTURE_UNCLEAR):
+        assert finding_scope(_f(code)) == "own_folder"
+
+
+def test_everything_else_is_about_the_book():
+    for code in (FindingCode.MIXED_QUALITY, FindingCode.MISSING_TRACKS,
+                 FindingCode.EXTENSION_MISMATCH, FindingCode.DUP_FORMAT):
+        assert finding_scope(_f(code)) == "book"
+
+
+def test_finding_phrase_splits_metadata_conflict_by_which_check_raised_it():
+    assert finding_phrase(_f(FindingCode.METADATA_CONFLICT,
+                             "author: tag 'A' vs folder 'B'")) == "tags name a different author"
+    assert finding_phrase(_f(FindingCode.METADATA_CONFLICT,
+                             'metadata title "X" vs folder "Y"')) == "title disagrees with the folder"
+    assert finding_phrase(_f(FindingCode.METADATA_CONFLICT,
+                             'folder "Dune" vs tag "Emma"')) == "tags disagree with the folder"
+
+
+def test_finding_phrase_falls_back_for_an_unlisted_code():
+    assert finding_phrase(_f(FindingCode.LOOSE_IN_AUTHOR)) == "needs a look"

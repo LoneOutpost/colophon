@@ -20,7 +20,7 @@ from colophon.core.graph_records import book_node_id
 from colophon.core.graph_view import FolderRow, folder_rows, graph_summary, grouping_cohort
 from colophon.core.view_state import view_to_snapshot
 from colophon.ui.chrome import body_column, empty_state, page_header, page_toolbar
-from colophon.ui.dialogs import modal
+from colophon.ui.dialogs import busy, modal
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ _CLASSIFICATION_BADGE_TIP = (
 _LEGEND = (
     "Badges show each folder's classification and confidence (0 to 1). "
     "'author?' and 'series?' are suggestions you confirm; '· manual' marks a classification "
-    "you confirmed. Confirmed authors and series apply to the books on the next scan."
+    "you confirmed. Confirming one updates the books under it at once."
 )
 
 # Manual-classification targets (label shown in the menus), ordered Book-first since correcting a
@@ -194,8 +194,27 @@ def _settled_line(s) -> str:
     return " · ".join(parts)
 
 
-def render_classic_tree(controller: AppController) -> None:
-    """The original classification tree, kept behind the Explorer/Classic toggle."""
+def resolve_tree_focus(
+    focal: str | None, roots: list[Path], directory_node,
+) -> tuple[Path, Path] | None:
+    """The (scan root, folder path) the Tree view should focus for the `focal` node id, or None when
+    there is nothing to focus: no id, not a directory node, or a folder outside every root. With
+    nested roots the deepest root holding the folder wins, since that is the tree it appears in."""
+    if not focal:
+        return None
+    hit = directory_node(focal)
+    if hit is None:
+        return None
+    path = hit[0]
+    holding = [r for r in roots if r == path or r in path.parents]
+    if not holding:
+        return None
+    return max(holding, key=lambda r: len(r.parts)), path
+
+
+def render_classic_tree(controller: AppController, focal: str | None = None) -> None:
+    """The original classification tree, kept behind the Explorer/Classic toggle. A `focal` directory
+    node (the review queue's Review folder) opens the root holding it with a pinned focus panel."""
     roots = controller.graph_roots()
     if not roots:
         ui.label("No scan paths configured. Set them in Settings.").classes(
@@ -220,6 +239,11 @@ def render_classic_tree(controller: AppController) -> None:
     _remembered = _store.get(_ROOT_KEY) if _store is not None else None
     if _remembered in {str(r) for r in roots}:  # restore the last-selected root across page navigation
         state["root"] = _remembered
+    focus: dict[str, Path | None] = {"path": None}
+    _hit = resolve_tree_focus(focal, roots, controller.directory_node)
+    if _hit is not None:  # a focused folder wins over the remembered root: open the root that holds it
+        state["root"] = str(_hit[0])
+        focus["path"] = _hit[1]
 
     with page_toolbar():
         with ui.row().classes("items-center q-gutter-sm w-full no-wrap"):
@@ -242,6 +266,7 @@ def render_classic_tree(controller: AppController) -> None:
             review_only = ui.switch("Needs review only").props("dense")
             name_filter = ui.input(placeholder="Filter folders by name…").props(
                 "dense outlined clearable").classes("col")
+        focus_box = ui.column().classes("w-full")
         worklist = ui.column().classes("w-full q-gutter-xs")
 
     body = body_column("full")
@@ -324,8 +349,8 @@ def render_classic_tree(controller: AppController) -> None:
     async def _confirm_cohort(hint: str, count: int) -> None:
         with modal() as dialog, ui.card():
             ui.label(f"Confirm {count} groupings as {hint}?")
-            ui.label("Each folder is marked as that author/series; this applies to the "
-                     "books on the next scan.").classes("colophon-muted text-caption")
+            ui.label("Each folder is marked as that author/series, and the books under it "
+                     "take it at once.").classes("colophon-muted text-caption")
             with ui.row():
                 ui.button("Cancel", on_click=dialog.close).props("flat no-caps")
                 ui.button("Confirm", on_click=lambda: dialog.submit(True)).props("no-caps")
@@ -352,7 +377,7 @@ def render_classic_tree(controller: AppController) -> None:
                             ).props("flat dense no-caps").classes("text-primary")
                     if s.unknown_dirs:
                         ui.label(f"· {s.unknown_dirs} unclassified").classes("colophon-muted")
-                ui.label("Confirmed authors and series apply to the books on the next scan.").classes(
+                ui.label("Confirming a folder updates the books under it at once.").classes(
                     "colophon-muted text-caption"
                 )
             else:
@@ -362,6 +387,45 @@ def render_classic_tree(controller: AppController) -> None:
             settled = _settled_line(s)
             if settled:
                 ui.label(settled).classes("colophon-muted text-caption")
+
+    def _render_focus(rows: list[FolderRow]) -> None:
+        """The pinned panel for the folder the page was opened on: its kind, whether that is your
+        word or a guess, one-click Confirm, the classify menu, and a way back to every folder."""
+        focus_box.clear()
+        if focus["path"] is None:
+            return
+        row = next((r for r in _flatten(rows) if r.path == focus["path"]), None)
+        if row is None:
+            return
+        confirmed = row.kind_source == "manual"
+        classified = row.kind in _CLASSIFY_KINDS
+        status = ("Unclassified" if not classified
+                  else f"{_CLASSIFY_KINDS[row.kind]} · {'confirmed' if confirmed else 'a guess'}")
+        with focus_box, ui.element("div").classes("colophon-focus w-full"):
+            with ui.row().classes("items-center no-wrap q-gutter-sm w-full"):
+                ui.icon("folder_open", color="amber-7")
+                ui.label(row.label).classes("text-weight-medium col ellipsis").tooltip(str(row.path))
+                ui.label(status).classes("colophon-muted text-caption")
+                if classified and not confirmed:
+                    confirm_btn = ui.button("Confirm", icon="check").props("unelevated dense no-caps")
+                    confirm_btn.tooltip("Keep this classification and make it your word")
+                    confirm_btn.on_click(lambda _=None, r=row, b=confirm_btn: _confirm_focus(r, b))
+                _classify_menu(row)
+                ui.button("Show all folders", on_click=_clear_focus).props("flat dense no-caps")
+            books = f"{row.book_count} book{'s' if row.book_count != 1 else ''} in this folder."
+            hint = (" Confirming makes its classification your word for the books below it."
+                    if classified and not confirmed else "")
+            ui.label(books + hint).classes("colophon-muted text-caption")
+
+    async def _confirm_focus(row: FolderRow, button: ui.button) -> None:
+        with busy(button):
+            ok = await asyncio.to_thread(controller.confirm_node_classification, row.path)
+            ui.notify(f"Confirmed {row.label}" if ok else "Nothing to confirm on this folder",
+                      type="positive" if ok else "warning")
+            await _render_maintained()
+
+    def _clear_focus() -> None:
+        ui.navigate.to(_mode_url("classic", None))
 
     def _on_combine(path: Path) -> None:
         combine_folder_dialog(controller, path, on_done=_render_maintained)
@@ -437,6 +501,7 @@ def render_classic_tree(controller: AppController) -> None:
         _render_worklist(graph, graph_summary(graph))
         body.clear()
         rows = folder_rows(graph, Path(state["root"]))
+        _render_focus(rows)
         if _filters_active():
             _render_flat(rows)
             return
@@ -554,6 +619,11 @@ def nodes_url_for_book(book_id: str) -> str:
     """The /graph Nodes-explorer URL focused on a book's node — for the detail pane's
     'Show in the graph' jump. Keeps the explorer URL format in one place."""
     return _mode_url("explorer", book_node_id(book_id))
+
+
+def folder_tree_url(path: Path) -> str:
+    """The Tree view focused on the folder at `path` (the review queue's Review folder target)."""
+    return _mode_url("classic", DirectoryNode.id_for(path))
 
 
 def _mode_url(mode: str, focal: str | None) -> str:
@@ -758,6 +828,6 @@ def render_graph(
         on_change=lambda e: ui.navigate.to(_mode_url(e.value, focal)),
     ).props("dense no-caps").classes("q-ma-sm")
     if mode == "classic":
-        render_classic_tree(controller)
+        render_classic_tree(controller, focal)
     else:
         render_explorer(controller, focal, _parse_hidden(hide), _parse_depth(depth))

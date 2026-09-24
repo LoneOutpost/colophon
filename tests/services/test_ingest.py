@@ -655,7 +655,8 @@ def test_plan_scan_graph_propagates_author_override(tmp_path: Path):
 
     book = next(u for u in plan.units if u.source_folder == folder)
     assert book.authors == ["Brandon Sanderson"]
-    assert book.provenance["authors"] == "manual"
+    # confirmed_folder, not manual: it must re-derive with the folder, not freeze at this value.
+    assert book.provenance["authors"] == "confirmed_folder"
 
 
 def test_plan_scan_graph_without_overrides_unaffected(tmp_path: Path):

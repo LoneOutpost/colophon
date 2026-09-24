@@ -38,6 +38,10 @@ def view_to_snapshot(
     }
 
 
+# Scopes the review Queue replaced; a restored tab that was on one lands on the Queue.
+_RETIRED_TO_QUEUE = frozenset({"attention", "needs_id"})
+
+
 def snapshot_to_view(
     snap: dict[str, Any] | None, *,
     known_book_ids: set[str], known_authors: set[str], known_series: set[str],
@@ -51,6 +55,8 @@ def snapshot_to_view(
     kind, key = raw_scope.get("kind", "all"), raw_scope.get("key")
     if (kind == "author" and key not in known_authors) or (kind == "series" and key not in known_series):
         kind, key = "all", None
+    if kind in _RETIRED_TO_QUEUE:  # a tab saved before the Queue replaced these scopes
+        kind, key = "queue", None
 
     raw_view = snap.get("view") or {}
     view = {

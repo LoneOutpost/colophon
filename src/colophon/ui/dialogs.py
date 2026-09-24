@@ -1259,7 +1259,7 @@ async def scan_dialog(
                 else:
                     ui.label(
                         f"Re-identified {summary.updated} book(s). "
-                        f"{summary.into_review} moved into review · {summary.out_of_review} cleared."
+                        f"{summary.into_review} moved to Unsure · {summary.out_of_review} cleared."
                     ).classes("text-caption colophon-muted")
                 with ui.row().classes("w-full justify-end q-mt-sm"):
                     def _done() -> None:
@@ -1464,7 +1464,7 @@ async def match_dialog(
                 _safe_ui(refresh_all)
                 _safe_ui(lambda: ui.notify(
                     f"Matched {summary.auto_matched} book(s); "
-                    f"{summary.routed_to_review} need review",
+                    f"{summary.routed_to_review} unsure",
                     actions=actions,
                 ))
 

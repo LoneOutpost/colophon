@@ -35,14 +35,14 @@ def test_book_haystack_includes_genres_and_tags():
     assert "tolkien" in hay
 
 
-def test_triage_mode_removed_and_needs_work_facet_present():
+def test_triage_mode_removed_and_needs_work_facet_absent():
     import inspect
 
     from colophon.core.triage import FACET_DEFAULTS
     from colophon.ui import workspace
 
     assert not hasattr(workspace, "_opening_mode")
-    assert "needs_work" in FACET_DEFAULTS
+    assert "needs_work" not in FACET_DEFAULTS
     src = inspect.getsource(workspace)
     assert "Triage" not in src
     assert '"triage"' not in src
@@ -65,3 +65,11 @@ def test_state_filter_options_cover_every_book_state():
     from colophon.ui.workspace import _STATE_FILTER_OPTIONS
 
     assert set(_STATE_FILTER_OPTIONS) == {s.value for s in BookState}
+
+
+def test_the_uncertain_state_reads_unsure_not_needs_review():
+    from colophon.core.models import BookState
+    from colophon.ui.workspace import _STATE_BADGE, _STATE_FILTER_OPTIONS, _STATUS_BADGES
+    assert _STATE_BADGE[BookState.NEEDS_REVIEW][0] == "Unsure"
+    assert _STATE_FILTER_OPTIONS[BookState.NEEDS_REVIEW.value] == "Unsure"
+    assert ("needs_review", "Unsure", "warning") in _STATUS_BADGES

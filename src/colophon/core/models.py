@@ -38,6 +38,10 @@ class Provenance(StrEnum):
     FILENAME = "filename"
     DATAFILE = "datafile"
     GRAPHING = "graphing"   # derived from a directory-tree relationship (Phase 3b)
+    # Supplied by a folder whose classification the user confirmed. Weighted like a manual entry,
+    # but NOT frozen like MANUAL: it re-derives with the folder, so reclassifying the folder later
+    # moves its books with it.
+    CONFIRMED_FOLDER = "confirmed_folder"
     AUDNEXUS = "audnexus"
     AUDIBLE = "audible"
     HARDCOVER = "hardcover"

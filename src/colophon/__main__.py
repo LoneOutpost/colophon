@@ -88,7 +88,7 @@ def main() -> None:
     except Exception:
         logger.exception("graph reconcile failed; starting with the graph as loaded")
     # The self-heal is an optimization, never a boot dependency: the navigator tolerates
-    # books absent from the graph (they show under "Needs identification"). So a failure
+    # books absent from the graph (an authorless one reads Unsure and lands in the Queue). So a failure
     # here (e.g. a graph write conflict from an unusual scan-path config) must degrade to
     # "not healed", never prevent startup.
     try:

@@ -15,7 +15,6 @@ from colophon.core.triage import (
     has_open_findings,
     has_weak_identity,
     missing_fields,
-    needs_human,
     sort_books,
 )
 
@@ -25,13 +24,6 @@ def _book(**kw) -> BookUnit:
     for k, v in kw.items():
         setattr(b, k, v)
     return b
-
-
-def test_needs_human_excludes_done_and_skipped():
-    for s in (BookState.NEEDS_REVIEW, BookState.DETECTED, BookState.IDENTIFIED, BookState.FAILED):
-        assert needs_human(_book(state=s))
-    for s in (BookState.READY, BookState.ORGANIZED, BookState.ENCODED, BookState.SKIPPED):
-        assert not needs_human(_book(state=s))
 
 
 def test_confidence_bucket_reads_identity_against_the_local_ceiling():
@@ -121,9 +113,7 @@ def test_weak_identity_reason_precedence():
 
 
 def test_facet_defaults_are_no_constraint():
-    assert FACET_DEFAULTS == {"state": [], "confidence": [], "id_trust": [],
-                              "missing": [], "findings": False, "errors": False,
-                              "needs_work": False}
+    assert FACET_DEFAULTS == {"state": [], "confidence": [], "id_trust": [], "missing": []}
     books = [_book(confidence=10.0), _book(confidence=90.0)]
     assert apply_facets(books, dict(FACET_DEFAULTS)) == books  # nothing filtered
 
@@ -144,17 +134,12 @@ def test_apply_facets_state_confidence_id_trust():
     ) == [low_weak]
 
 
-def test_apply_facets_missing_and_findings():
+def test_apply_facets_missing():
     no_cover = _book(cover_path=None, cover_url=None, series=[SeriesRef(name="S")],
                      asin="A", narrators=["N"], publish_year=2020)
     has_cover = _book(cover_path=Path("/c.jpg"), series=[SeriesRef(name="S")],
                       asin="A", narrators=["N"], publish_year=2020)
     assert apply_facets([no_cover, has_cover], {**FACET_DEFAULTS, "missing": ["cover"]}) == [no_cover]
-
-    f = Finding(code=FindingCode.MIXED_WORKS, severity=FindingSeverity.ERROR, detail="x")
-    flagged = _book(findings=[f])
-    clean = _book()
-    assert apply_facets([flagged, clean], {**FACET_DEFAULTS, "findings": True}) == [flagged]
 
 
 def test_has_blocking_error():
@@ -182,15 +167,6 @@ def test_blocking_reason():
     assert "missing" in blocking_reason(_book(missing=True, findings=[empty])).lower()
 
 
-def test_apply_facets_errors_only():
-    from colophon.core.triage import has_blocking_error
-    empty = Finding(code=FindingCode.EMPTY_AUDIO, severity=FindingSeverity.ERROR, detail="corrupt")
-    blocked = _book(findings=[empty])
-    clean = _book()
-    assert has_blocking_error(blocked) and not has_blocking_error(clean)
-    assert apply_facets([blocked, clean], {**FACET_DEFAULTS, "errors": True}) == [blocked]
-
-
 def test_sort_books():
     a = _book(identity_confidence=20.0, title="B")
     b = _book(identity_confidence=80.0, title="A")
@@ -211,23 +187,8 @@ def test_is_ready_to_persist():
     assert not is_ready_to_persist(_book(state=BookState.DETECTED))
 
 
-def test_needs_work_facet_keeps_only_unfinished():
-    from pathlib import Path
-
-    from colophon.core.models import BookState, BookUnit
-    from colophon.core.triage import FACET_DEFAULTS, apply_facets
-
-    unfinished = BookUnit.new(source_folder=Path("/x/a"))
-    unfinished.state = BookState.NEEDS_REVIEW
-    done = BookUnit.new(source_folder=Path("/x/b"))
-    done.state = BookState.READY
-    books = [unfinished, done]
-
-    # Default: no constraint.
-    assert apply_facets(books, dict(FACET_DEFAULTS)) == books
-    assert "needs_work" in FACET_DEFAULTS and FACET_DEFAULTS["needs_work"] is False
-
-    # On: only the unfinished book survives.
-    facets = dict(FACET_DEFAULTS)
-    facets["needs_work"] = True
-    assert apply_facets(books, facets) == [unfinished]
+def test_a_confirmed_folder_author_is_not_weak():
+    from colophon.core.triage import has_weak_identity, weak_identity_reason
+    b = _book(provenance={"authors": "confirmed_folder"})
+    assert not has_weak_identity(b)
+    assert weak_identity_reason(b) is None

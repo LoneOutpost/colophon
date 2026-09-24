@@ -17,7 +17,7 @@ First tagged release.
   candidate record per book with per-field provenance.
 - Identification against Audnexus, OpenLibrary, Google Books, and Internet
   Archive, plus any providers exposed by a configured abs-agg instance, with a
-  confidence score that routes each book to ready or needs review.
+  confidence score that routes each book to Ready or Unsure.
 - A web interface with Library, Manage, Stats, Graph, and Settings views, and a
   contextual Acquire view. Books can be reviewed by author and series, compared
   against candidate matches, edited or remapped field by field, and marked ready.
