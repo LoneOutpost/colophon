@@ -795,6 +795,21 @@ def retract_author_conflict(book: BookUnit) -> None:
     book.acknowledged_findings = [k for k in book.acknowledged_findings if k not in retracted]
 
 
+def restore_author_conflict(book: BookUnit, rederived: BookUnit) -> None:
+    """The inverse of `retract_author_conflict`, for a withdrawn confirmation: copy `rederived`'s
+    author-vs-folder METADATA_CONFLICT back onto `book`, unacknowledged (the dismissal went with the
+    retraction). Only that finding moves; the rest of `book.findings` is left as it is."""
+    from colophon.core.guidance import AUTHOR_CONFLICT_PREFIX
+    from colophon.core.models import FindingCode
+
+    have = {f.key for f in book.findings}
+    for f in rederived.findings:
+        if (f.code == FindingCode.METADATA_CONFLICT
+                and (f.detail or "").startswith(AUTHOR_CONFLICT_PREFIX) and f.key not in have):
+            book.findings.append(f.model_copy())
+            book.acknowledged_findings = [k for k in book.acknowledged_findings if k != f.key]
+
+
 def _fill_identity_confidence(graph: Graph, books: list[BookUnit], *, root: Path) -> None:
     """Stamp each book's local-identification confidence from the now-classified graph."""
     for book in books:

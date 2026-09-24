@@ -84,6 +84,7 @@ from colophon.core.navigator import (
 from colophon.core.node_classify import (
     book_identity_confidence,
     classify_nodes,
+    restore_author_conflict,
     retract_author_conflict,
 )
 from colophon.core.normalize import (
@@ -202,6 +203,10 @@ _REPROBE_COMMIT_BATCH = 200  # re-probe persists every N changed books, so progr
 _GRAPH_AUTHOR_PROV = frozenset({
     Provenance.GRAPHING.value, Provenance.DIRECTORY.value, Provenance.CONFIRMED_FOLDER.value,
 })
+# The series counterpart: the two provenances `_fill_series_ramp` stamps from a folder classified
+# `series`. A directory/filename series is only ever overwritten by the ramp, never cleared by it, so
+# it is left out; a tag/datafile/match/manual series the ramp never touches.
+_GRAPH_SERIES_PROV = frozenset({Provenance.GRAPHING.value, Provenance.CONFIRMED_FOLDER.value})
 
 
 def _part_tracks(book: BookUnit) -> list[int | None]:
@@ -440,12 +445,14 @@ def _clear_weak_identity(book: BookUnit) -> None:
 
 def _book_derivation_unchanged(stored: BookUnit, rederived: BookUnit) -> bool:
     """Whether a re-derived book copy leaves the stored book's derived caches + auto-cleaned fields
-    untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, franchise,
+    untouched — the fields `_rederive_root_books` fills/stamps/cleans (author, series, franchise,
     local-identification confidence, title-corroboration verdict, BookState, the repair_fields
     cleanings: title, publish_year, and the author conflict a confirmed folder retracts). A `_resync_roots` writeback skips books this returns True for."""
     return (
         stored.authors == rederived.authors
         and stored.provenance.get("authors") == rederived.provenance.get("authors")
+        and stored.series == rederived.series
+        and stored.provenance.get("series") == rederived.provenance.get("series")
         and stored.franchise == rederived.franchise
         and stored.provenance.get("franchise") == rederived.provenance.get("franchise")
         and stored.identity_confidence == rederived.identity_confidence
@@ -755,6 +762,25 @@ class AppController:
             for bid in graph_author_ids:
                 copies[bid].authors = []
                 copies[bid].provenance.pop("authors", None)
+            # Same for a series the ramp filled from a folder classified `series`, so confirming,
+            # un-confirming or reclassifying that folder re-derives it now rather than on the next scan.
+            # A GRAPHING series is only cleared when it names an ancestor series folder: the
+            # known-series cross-reference also stamps GRAPHING, and the ramp would never refill that.
+            folder_series = {
+                str(n.attrs["path"]): n.attrs.get("kind_value") for n in skeleton_nodes
+                if n.physical == "directory" and n.attrs.get("kind") == "series"
+            }
+            graph_series_ids = {
+                b.id for b in root_books
+                if b.series and (
+                    b.provenance.get("series") == Provenance.CONFIRMED_FOLDER.value
+                    or (b.provenance.get("series") in _GRAPH_SERIES_PROV
+                        and self._series_from_folder(b, folder_series))
+                )
+            }
+            for bid in graph_series_ids:
+                copies[bid].series = []
+                copies[bid].provenance.pop("series", None)
             recon = graph_from_records(
                 skeleton_nodes + book_nodes, skeleton_edges + book_edges, copies, root=root,
                 # Scoped mode restores every node's persisted classification so the frozen spine keeps
@@ -789,6 +815,11 @@ class AppController:
                 classified = copies[book.id]
                 confirmed = (classified.provenance.get("authors")
                              == Provenance.CONFIRMED_FOLDER.value)
+                # Withdrawing a confirmation reopens the question it answered: bring back the author
+                # conflict the confirm retracted, which `_fill_down` re-raised on the copy.
+                if (book.provenance.get("authors") == Provenance.CONFIRMED_FOLDER.value
+                        and not confirmed):
+                    restore_author_conflict(book, classified)
                 if book.id not in graph_author_ids and not confirmed:
                     continue
                 if confirmed:
@@ -802,6 +833,23 @@ class AppController:
                     book.provenance["authors"] = new_prov
                 else:
                     book.provenance.pop("authors", None)
+            # Write the re-derived series back the same way. A copy the ramp stamped CONFIRMED_FOLDER
+            # is written even when the stored series came from elsewhere weak (directory/filename),
+            # since a confirmed series folder outranks those; a hard series is never fillable.
+            for book in root_books:
+                classified = copies[book.id]
+                if (book.id not in graph_series_ids
+                        and classified.provenance.get("series") != Provenance.CONFIRMED_FOLDER.value):
+                    continue
+                if (book.series == classified.series
+                        and book.provenance.get("series") == classified.provenance.get("series")):
+                    continue
+                book.series = [s.model_copy() for s in classified.series]
+                new_prov = classified.provenance.get("series")
+                if new_prov:
+                    book.provenance["series"] = new_prov
+                else:
+                    book.provenance.pop("series", None)
             # Second pass: rebuild the franchise edges from the now-filled books, then serialize.
             franchise_of = {}
             for b in root_books:
@@ -830,6 +878,14 @@ class AppController:
                 resync_state(book, ready_threshold=self.ctx.config.review_threshold)
                 rederived[book.id] = book
         return rederived, graph_writes
+
+    @staticmethod
+    def _series_from_folder(book: BookUnit, folder_series: dict[str, str | None]) -> bool:
+        """Whether `book`'s first series names a folder above it classified `series` (by path
+        string -> kind_value), i.e. the ramp supplied it rather than the known-series lookup."""
+        name = book.series[0].name
+        return any(value == name and AppController._path_under_any(str(book.source_folder), (path,))
+                   for path, value in folder_series.items())
 
     _ENTITY_KINDS = frozenset({"author", "series", "franchise"})
 

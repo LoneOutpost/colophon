@@ -14,6 +14,7 @@ from colophon.core.models import (
     FindingCode,
     FindingSeverity,
     Provenance,
+    SeriesRef,
     SourceFile,
 )
 from colophon.core.sources import SourceResult
@@ -4063,4 +4064,87 @@ def test_confirm_node_classification_keeps_the_folders_current_kind(tmp_path):
     assert ctrl.confirm_node_classification(folder) is True
     assert calls == [(folder, "author", "Frank Herbert")]
     assert ctrl.confirm_node_classification(tmp_path / "nowhere") is False
+    ctx.close()
+
+
+def _vlad_taltos(tmp_path):
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    shelf = ingest / "Steven Brust" / "Vlad Taltos"
+    for name in ("01 - Jhereg", "02 - Yendi", "03 - Teckla"):
+        (shelf / name).mkdir(parents=True)
+        (shelf / name / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    return ctx, ctrl, shelf
+
+
+def test_a_confirmed_series_folder_rederives_its_books_series_at_once(tmp_path):
+    # `_fill_series_ramp` stamps CONFIRMED_FOLDER on the classify copies, but the series was never
+    # written back, so a confirm (and its withdrawal) only took effect on the next full scan.
+    ctx, ctrl, shelf = _vlad_taltos(tmp_path)
+    tagged = BookUnit.new(source_folder=shelf / "04 - Phoenix")
+    tagged.title, tagged.authors = "Phoenix", ["Steven Brust"]
+    tagged.provenance["authors"] = "tag"
+    tagged.series = [SeriesRef(name="Taltos Cycle", sequence=4.0)]
+    tagged.provenance["series"] = "tag"
+    ctx.books.upsert(tagged)
+
+    def shelf_series():
+        by_folder = {b.source_folder.name: b for b in ctx.books.list_all()}
+        tag = by_folder.pop("04 - Phoenix")
+        assert tag.series == [SeriesRef(name="Taltos Cycle", sequence=4.0)]
+        assert tag.provenance["series"] == "tag"
+        return by_folder
+
+    assert ctrl.confirm_node_classification(shelf) is True
+    books = shelf_series()
+    assert len(books) == 3
+    for b in books.values():
+        assert b.provenance["series"] == "confirmed_folder"
+        assert b.series and b.series[0].name == "Vlad Taltos"
+
+    ctrl.clear_node_classification(shelf)
+    for b in shelf_series().values():
+        assert b.provenance.get("series") != "confirmed_folder"
+
+    ctrl.confirm_node_classification(shelf)
+    ctrl.set_node_classification(shelf, "container", None)
+    for b in shelf_series().values():
+        assert not b.series and "series" not in b.provenance
+    ctx.close()
+
+
+def test_withdrawing_a_folder_confirmation_brings_its_author_conflict_back(tmp_path):
+    # The confirm retracted the author conflict; un-confirming re-derives the author from the graph,
+    # so the conflict the tag still raises has to come back (open, not pre-acknowledged).
+    ctx = _ctx(tmp_path)
+    ingest = tmp_path / "ingest"
+    folder = ingest / "Tom Clancy" / "Rainbow Six"
+    folder.mkdir(parents=True)
+    (folder / "01.mp3").write_bytes(b"")
+    ctx.config.scan_paths = [ingest]
+    ctrl = AppController(ctx)
+    ctrl.scan([ingest])
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    book.source_files[0].tags = EmbeddedTags(artist="Clive Cussler")
+    book.authors = ["Clive Cussler"]
+    book.provenance["authors"] = "tag"
+    conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                       detail="author: tag 'Clive Cussler' vs folder 'Tom Clancy'")
+    book.findings = [conflict]
+    book.acknowledged_findings = [conflict.key]
+    ctx.books.upsert(book)
+
+    ctrl.set_node_classification(ingest / "Tom Clancy", "author", "Tom Clancy")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert not any(f.detail.startswith("author:") for f in book.findings)
+
+    ctrl.clear_node_classification(ingest / "Tom Clancy")
+    book = next(b for b in ctx.books.list_all() if b.source_folder == folder)
+    assert book.provenance.get("authors") != "confirmed_folder"
+    back = [f for f in book.findings if f.detail.startswith("author:")]
+    assert back and back[0].code == FindingCode.METADATA_CONFLICT
+    assert back[0].key not in book.acknowledged_findings
     ctx.close()
