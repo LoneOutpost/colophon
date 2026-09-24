@@ -22,6 +22,7 @@ class FixAction(StrEnum):
     DELETE = "delete"            # permanently delete corrupt files / a missing book
     FIX_EXTENSION = "fix_extension"  # rename mislabeled files to their true extension
     USE_SUGGESTED = "use_suggested"  # write a conflict finding's folder value into its book field
+    USE_FOLDER_NAME = "use_folder_name"  # classify the finding's author folder by its own name
 
 
 class Guidance(NamedTuple):
@@ -112,6 +113,12 @@ TITLE_CONFLICT_PREFIX = 'metadata title "'
 # an author folder whose own name shares nothing with the author its books' tags elected for it.
 # Public: node_classify raises/retracts it and the controller syncs it with the same constant.
 FOLDER_NAME_CONFLICT_PREFIX = "folder name:"
+# The folder-name finding's `field`. Not a BookUnit field: its fix reclassifies the author folder, so
+# every book under it follows, rather than writing one book's authors.
+FOLDER_AUTHOR_FIELD = "folder_author"
+# The review queue's phrase for it. Public so the queue can offer the folder's name as a fix on the
+# group without keeping a second copy of the wording.
+FOLDER_NAME_PHRASE = "the folder's name disagrees with its books' tags"
 
 FindingScope = Literal["author_folder", "own_folder", "book"]
 
@@ -156,7 +163,7 @@ def finding_phrase(finding: Finding) -> str:
         if (finding.detail or "").startswith(TITLE_CONFLICT_PREFIX):
             return "title disagrees with the folder"
         if (finding.detail or "").startswith(FOLDER_NAME_CONFLICT_PREFIX):
-            return "the folder's name disagrees with its books' tags"
+            return FOLDER_NAME_PHRASE
         return "tags disagree with the folder"
     return _FINDING_PHRASE.get(finding.code, "needs a look")
 
@@ -167,6 +174,17 @@ def review_guidance() -> Guidance:
         "This identity is only a guess, from the filename or folder. Find a source match "
         "to confirm it.",
         (FixAction.MATCHES,),
+    )
+
+
+def folder_name_conflict(folder_name: str, elected: str) -> Finding:
+    """The folder-name conflict: an author folder's own name shares nothing with the author its
+    books' tags elected for it. One builder so the scan check and the legacy upgrade below can't
+    drift apart in wording, and so the acknowledgement key stays stable."""
+    return Finding(
+        code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+        detail=f"{FOLDER_NAME_CONFLICT_PREFIX} folder '{folder_name}' vs tags '{elected}'",
+        field=FOLDER_AUTHOR_FIELD, current=elected, suggested=folder_name, source="tags",
     )
 
 
@@ -186,6 +204,7 @@ def album_conflict(folder_title: str, album: str) -> Finding:
 _LEGACY_ALBUM = re.compile(r'^folder "(?P<folder>.*)" vs tag "(?P<album>.*)"$')
 _TITLE_VS_FOLDER = re.compile(r'^metadata title "(?P<title>.*)" vs folder "(?P<folder>.*)"$')
 _AUTHOR_VS_FOLDER = re.compile(r"^author: tag '(?P<tag>.*)' vs folder '(?P<folder>.*)'$")
+_FOLDER_NAME = re.compile(r"^folder name: folder '(?P<folder>.*)' vs tags '(?P<value>.*)'$")
 # A retired check ("author absent from the folder path") that produced only false positives. Nothing
 # raises or retracts it any more, so a stored copy would sit in the queue forever.
 _RETIRED_AUTHOR_NOT_IN_PATH = re.compile(r'^author ".*" not in the folder path$')
@@ -210,4 +229,7 @@ def upgrade_legacy_conflict(finding: Finding) -> Finding | None:
     if m := _AUTHOR_VS_FOLDER.match(detail):
         return finding.model_copy(update={"field": "authors", "current": m["tag"],
                                           "suggested": m["folder"], "source": "tag"})
+    if m := _FOLDER_NAME.match(detail):
+        return folder_name_conflict(m["folder"], m["value"]).model_copy(
+            update={"severity": finding.severity})
     return finding

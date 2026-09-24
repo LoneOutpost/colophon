@@ -110,7 +110,7 @@ from colophon.core.phases import (
 )
 from colophon.core.progress import step
 from colophon.core.provenance import provenance_label, provenance_tooltip
-from colophon.core.queue import Queue, build_queue, check_matches
+from colophon.core.queue import Queue, build_queue, check_matches, nearest_classified
 from colophon.core.quickmatch import (
     IdentifyPlan,
     IdentifySummary,
@@ -2821,6 +2821,21 @@ class AppController:
         self.ctx.overrides.set(str(path), kind, value)
         self._graph_cache.clear()
         self._resync_roots({self._scan_root_for_path(path)})
+
+    def accept_folder_name(self, path: Path) -> None:
+        """Take an author folder's own name as its author: the reverse of accepting what its books'
+        tags elected. A manual classification, so every book under it follows the folder."""
+        self.set_node_classification(path, "author", path.name)
+
+    def accept_folder_name_for(self, book: BookUnit) -> None:
+        """`accept_folder_name` for the author folder a book sits under (its nearest ancestor
+        classified author, the folder its folder-name finding is about). Resolved now rather than
+        stored on the finding, so a moved or reclassified library never acts on a stale path."""
+        root = self._scan_root_for_path(book.source_folder)
+        folder = nearest_classified(book.source_folder, root, self.folder_classification, {"author"})
+        if folder is None:
+            raise ValueError(f"no author folder above {book.source_folder}")
+        self.accept_folder_name(folder)
 
     def confirm_node_classification(self, path: Path) -> bool:
         """Confirm the folder's CURRENT classification as right (the Tree view's one-click Confirm):

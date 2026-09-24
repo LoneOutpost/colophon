@@ -141,6 +141,15 @@ def test_legacy_title_and_author_conflicts_keep_their_wording_and_gain_structure
         "authors", "Top 100", "Neal Stephenson")
 
 
+def test_a_legacy_folder_name_conflict_gains_its_folder_and_value():
+    from colophon.core.guidance import upgrade_legacy_conflict
+    detail = "folder name: folder 'Neal Stephenson' vs tags 'Top 100 Sci-Fi Books'"
+    new = upgrade_legacy_conflict(_f(FindingCode.METADATA_CONFLICT, detail))
+    assert new.detail == detail
+    assert (new.field, new.current, new.suggested, new.source) == (
+        "folder_author", "Top 100 Sci-Fi Books", "Neal Stephenson", "tags")
+
+
 def test_a_title_residual_from_filenames_is_left_unstructured():
     # The only fix offered is the folder's value; a filename residual is lowercased shared words.
     from colophon.core.guidance import upgrade_legacy_conflict

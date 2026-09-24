@@ -1,8 +1,10 @@
-"""The Attention pane's one-click fix for a conflict finding: Use "<the folder's value>"."""
+"""The Attention pane's one-click fixes for a conflict finding: Use "<the folder's value>", and for a
+folder-name conflict, Use folder name "<the folder's name>"."""
 
 from pathlib import Path
 
 import pytest
+from mutagen.id3 import ID3, TPE1
 from nicegui.events import GenericEventArguments, handle_event
 
 from colophon.adapters.config import Config
@@ -16,6 +18,7 @@ from colophon.core.models import (
     Provenance,
     SourceFile,
 )
+from tests.ui.test_workspace_queue import _queue_scope
 from tests.ui.test_workspace_selection import _render, loop_registered  # noqa: F401
 
 
@@ -78,3 +81,75 @@ async def test_at_a_glance_offers_the_same_fix(loop_registered, conflicted):  # 
                          GenericEventArguments(sender=glance, client=glance.client, args={}))
     await workspace.settle()
     assert controller.get_book(book_id).title == "Porterhouse Blue"
+
+
+@pytest.fixture
+def misnamed(tmp_path: Path):
+    """A 'Neal Stephenson' folder whose books' tags all elect 'Top 100 Sci-Fi Books', scanned."""
+    ingest = tmp_path / "ingest"
+    ctx = AppContext.create(Config(
+        db_path=tmp_path / "db.sqlite", library_root=tmp_path / "lib", scan_paths=[ingest],
+    ))
+    author = ingest / "Neal Stephenson"
+    for title in ("Cryptonomicon", "Anathem"):
+        folder = author / f"Neal Stephenson.-.{title}"
+        folder.mkdir(parents=True)
+        f = folder / "01.mp3"
+        f.write_bytes(b"")
+        tags = ID3()
+        tags.add(TPE1(encoding=3, text=["Top 100 Sci-Fi Books"]))
+        tags.save(f)
+    controller = AppController(ctx)
+    controller.scan([ingest])
+    books = [b for b in ctx.books.list_all() if author in b.source_folder.parents]
+    yield controller, author, books
+    ctx.close()
+
+
+def _all_take_the_folder_name(controller, books) -> bool:
+    return all(controller.get_book(b.id).authors == ["Neal Stephenson"] for b in books)
+
+
+async def test_use_folder_name_makes_the_folder_the_author_of_every_book_under_it(
+    loop_registered, misnamed,  # noqa: F811
+):
+    controller, _author, books = misnamed
+    workspace = await _render(controller, open_book_id=books[0].id)
+    workspace.click('Use folder name "Neal Stephenson"')
+    await workspace.settle()
+
+    assert _all_take_the_folder_name(controller, books)
+    assert not any(b.text == 'Use folder name "Neal Stephenson"' for b in workspace._of("Button"))
+
+
+async def test_a_folder_name_queue_group_offers_the_folder_name(
+    loop_registered, misnamed, monkeypatch,  # noqa: F811
+):
+    controller, _author, books = misnamed
+    workspace = await _render(controller, restored=_queue_scope(), monkeypatch=monkeypatch)
+    button = workspace.button('Use "Neal Stephenson"')
+    assert button._props["aria-label"] == "Use the folder name Neal Stephenson as the author"
+    # The harness cannot dispatch a browser click, so the button's own click.stop listener is fired.
+    listener = next(v for v in button._event_listeners.values() if v.type == "click.stop")
+    handle_event(listener.handler,
+                 GenericEventArguments(sender=button, client=workspace._client, args={}))
+    await workspace.settle()
+
+    assert _all_take_the_folder_name(controller, books)
+    assert not any(b.text == 'Use "Neal Stephenson"' for b in workspace._of("Button"))
+
+
+async def test_at_a_glance_offers_the_folder_name_too(loop_registered, misnamed):  # noqa: F811
+    controller, _author, books = misnamed
+    workspace = await _render(controller, open_book_id=books[0].id)
+    tabs = next(t for t in workspace._of("Tabs") if t.value == "details")
+    tabs.set_value("state")
+    await workspace.settle()
+    [glance] = [b for b in workspace._of("Button")
+                if b.text == 'Use folder name "Neal Stephenson"' and b._props.get("dense")]
+    for listener in list(glance._event_listeners.values()):
+        if listener.type == "click":
+            handle_event(listener.handler,
+                         GenericEventArguments(sender=glance, client=glance.client, args={}))
+    await workspace.settle()
+    assert _all_take_the_folder_name(controller, books)
