@@ -3305,7 +3305,6 @@ def test_library_tree_reads_authors_from_graph(tmp_path):
     assert "Frank Herbert" in [a.name for a in tree.authors]
     book = ctx.books.list_all()[0]
     assert book.id in {b.id for b in tree.all_books}
-    assert book.id not in {b.id for b in tree.needs_id}
     ctx.close()
 
 
@@ -3317,8 +3316,7 @@ def test_library_tree_conservative_book_absent_from_graph(tmp_path):
     b.title, b.authors = "Orphan", ["Someone"]
     ctx.books.upsert(b)                 # in the store, never scanned -> not in the graph
     tree = ctrl.library_tree()
-    assert b.id in {x.id for x in tree.all_books}    # visible in All
-    assert b.id in {x.id for x in tree.needs_id}     # surfaces as needs_id (tripwire)
+    assert b.id in {x.id for x in tree.all_books}    # visible in All, even though ungraphed
     assert b.id not in {x.id for a in tree.authors for s in a.series for x in s.books}
     assert b.id not in {x.id for a in tree.authors for x in a.standalone}
     ctx.close()

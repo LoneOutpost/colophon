@@ -1,7 +1,7 @@
 """Plain-language reasons a book is uncertain enough to warrant a human's review.
 
 Pure over a BookUnit (and its findings). This is the book-level analogue of a directory node's
-`kind_evidence`: it lets the Library say WHY a book reads "needs review" instead of only flagging it.
+`kind_evidence`: it lets the Library say WHY a book reads "unsure" instead of only flagging it.
 Each axiom inspects the book's own fields/provenance and, when its condition holds, contributes one
 reason. Identity-provenance and structural findings are both surfaced, since either can be why a book
 is unsure; the benign single-book-loose-in-author layout is deliberately NOT a reason.

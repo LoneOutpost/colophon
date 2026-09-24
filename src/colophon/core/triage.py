@@ -11,8 +11,6 @@ from colophon.core.models import (
     active_findings,
 )
 
-# States that do NOT need a human: finished work, or a deliberate skip.
-_DONE_STATES = {BookState.READY, BookState.ORGANIZED, BookState.ENCODED, BookState.SKIPPED}
 # Provenances that mean "inferred, not asserted" — the identity is a guess.
 _WEAK_PROVENANCE = {"directory", "filename", "graphing"}
 # The ID-Trust facet tokens that mean "weakly inferred" — used to deep-filter the Library.
@@ -22,11 +20,6 @@ WEAK_ID_TRUST_TIERS: frozenset[str] = frozenset(_WEAK_PROVENANCE)
 _LOCAL_PROVENANCE = {
     "tag", "datafile", "directory", "filename", "graphing", "manual", "confirmed_folder",
 }
-
-
-def needs_human(book: BookUnit) -> bool:
-    """A book that still needs attention — anything not finished or deliberately skipped."""
-    return book.state not in _DONE_STATES
 
 
 # States that are safe to persist (tag/organize/encode) without a warning: source-verified/ready or
@@ -138,10 +131,7 @@ def blocking_reason(book: BookUnit) -> str | None:
 
 
 # The "no constraint" facet selection. Copy with dict(FACET_DEFAULTS) before mutating.
-FACET_DEFAULTS = {
-    "state": [], "confidence": [], "id_trust": [], "missing": [], "findings": False, "errors": False,
-    "needs_work": False,
-}
+FACET_DEFAULTS = {"state": [], "confidence": [], "id_trust": [], "missing": []}
 
 
 def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
@@ -151,9 +141,6 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
     confidence = set(facets.get("confidence") or ())
     id_trust = set(facets.get("id_trust") or ())
     missing = set(facets.get("missing") or ())
-    findings = bool(facets.get("findings"))
-    errors = bool(facets.get("errors"))
-    needs_work = bool(facets.get("needs_work"))
 
     out: list[BookUnit] = []
     for b in books:
@@ -164,12 +151,6 @@ def apply_facets(books: list[BookUnit], facets: dict) -> list[BookUnit]:
         if id_trust and not (id_trust & identity_tiers(b)):
             continue
         if missing and not (missing & missing_fields(b)):
-            continue
-        if findings and not has_open_findings(b):
-            continue
-        if errors and not has_blocking_error(b):
-            continue
-        if needs_work and not needs_human(b):
             continue
         out.append(b)
     return out

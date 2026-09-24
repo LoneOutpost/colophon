@@ -49,7 +49,6 @@ from colophon.core.triage import (
     confidence_bucket,
     has_blocking_error,
     has_open_findings,
-    needs_human,
     sort_books,
     weak_identity_reason,
 )
@@ -128,7 +127,7 @@ _NAV_PAGE = 80  # navigator entity rows (author/series/franchise) rendered per c
 _STATE_BADGE: dict[BookState, tuple[str, str]] = {
     BookState.DETECTED: ("Detected", "grey-6"),
     BookState.IDENTIFIED: ("Identified", "grey-6"),
-    BookState.NEEDS_REVIEW: ("Review", "warning"),
+    BookState.NEEDS_REVIEW: ("Unsure", "warning"),
     BookState.READY: ("Ready", "positive"),
     BookState.ENCODING: ("Encoding", "info"),
     BookState.ENCODED: ("Encoded", "info"),
@@ -149,7 +148,7 @@ _SEVERITY_BADGE: dict[FindingSeverity, tuple[str, str]] = {
 _STATE_FILTER_OPTIONS: dict[str, str] = {
     BookState.DETECTED.value: "Detected",
     BookState.IDENTIFIED.value: "Identified",
-    BookState.NEEDS_REVIEW.value: "Needs review",
+    BookState.NEEDS_REVIEW.value: "Unsure",
     BookState.READY.value: "Ready",
     BookState.ENCODING.value: "Encoding",
     BookState.ENCODED.value: "Encoded",
@@ -162,7 +161,7 @@ _STATE_FILTER_OPTIONS: dict[str, str] = {
 _STATUS_BADGES = [
     ("detected", "Detected", "grey-6"),
     ("identified", "Identified", "grey-7"),
-    ("needs_review", "Needs review", "warning"),
+    ("needs_review", "Unsure", "warning"),
     ("ready", "Ready", "positive"),
     ("organized", "Organized", "info"),
     ("failed", "Failed", "negative"),
@@ -361,7 +360,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # The one place that decides what the Details column shows. Reads `selected_ids` live; every
     # site below asks it rather than re-deriving the rule (see core/detail_pane.py).
     detail_pane = DetailPane(selected_ids)
-    # `scope` is the author/series/all/needs_id selection; `folder_filter` is an
+    # `scope` is the author/series/all/attention selection; `folder_filter` is an
     # orthogonal, persistent constraint set by browsing a folder. Both the Books
     # list and the navigator (author/series list) respect the folder filter, and
     # a scope selection refines within it.
@@ -488,9 +487,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
         kind, key = scope["kind"], scope["key"]
         if kind == "attention":
             return [b for b in tree.all_books if controller._active_findings(b)]
-        if kind == "needs_id":
-            books = list(tree.needs_id)
-        elif kind == "author":
+        if kind == "author":
             node = next((a for a in tree.authors if a.name == key), None)
             # dedup by id: a book in two of this author's series is filed under each
             books = list({b.id: b for s in node.series for b in s.books}.values()) + node.standalone if node else []
@@ -2044,24 +2041,14 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ).set_enabled(bool(selected_ids))
             # Authors/series shown are limited to those with books in the active
             # folder filter (when one is set), mirroring the filtered Books list.
-            needs_id = [b for b in tree.needs_id if _in_folder(b)]
-            # The header items (All / Needs id / Needs attention / phase groups) are few and
-            # render up front. The author/series/franchise rows can number in the thousands and
-            # dominate render time, so each becomes a render closure in `nav_pending`, windowed
-            # onto the scroll area exactly like the book list — a slice now, the rest on scroll.
+            # The header items (All / Needs attention / phase groups) are few and render up
+            # front. The author/series/franchise rows can number in the thousands and dominate
+            # render time, so each becomes a render closure in `nav_pending`, windowed onto the
+            # scroll area exactly like the book list — a slice now, the rest on scroll.
             nav_pending: list = []
             with ui.list().props("dense").classes("w-full") as nav_list:
                 all_label = "All books in folder" if folder_filter["path"] else "All books"
                 _nav_item(all_label, "library_books", kind == "all", lambda: _set_scope("all", None))
-                if needs_id:
-                    _nav_item(
-                        f"Needs identification ({len(needs_id)})",
-                        "help_outline",
-                        kind == "needs_id",
-                        lambda: _set_scope("needs_id", None),
-                        color="negative",
-                        checkbox=_node_checkbox([b.id for b in needs_id]),
-                    )
                 attention = [
                     b for b in tree.all_books if controller._active_findings(b)
                     if _in_folder(b) and _matches_filter(b, conditions)
@@ -2282,34 +2269,6 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     label="Sort", value=view["sort"],
                     on_change=lambda e: _set_sort(e.value),
                 ).props("dense outlined options-dense").style("min-width: 8.5rem; max-width: 11rem")
-            with ui.row().classes("items-center q-gutter-md"):
-                # Count over scope+folder (not the text search): the toolbar isn't rebuilt on
-                # every keystroke, so a text-inclusive count would go stale. Scope/folder changes
-                # do rebuild it, keeping this current.
-                needs_work_n = (
-                    sum(1 for b in _books_for_scope() if needs_human(b))
-                    if controller.library_tree_warm() else 0
-                )
-                ui.checkbox(
-                    f"Needs work ({needs_work_n})", value=view["facets"]["needs_work"],
-                    on_change=lambda e: _set_facet("needs_work", e.value),
-                ).props("dense").tooltip(
-                    "Only books that are not yet finished: anything still in progress "
-                    "(not Ready, Organized, Encoded, or Skipped)."
-                )
-                ui.checkbox(
-                    "Attention", value=view["facets"]["findings"],
-                    on_change=lambda e: _set_facet("findings", e.value),
-                ).props("dense").tooltip(
-                    "Only books with an unresolved structural finding — duplicates, mixed works, "
-                    "or an unclear folder layout."
-                )
-                ui.checkbox(
-                    "Blocking errors", value=view["facets"]["errors"],
-                    on_change=lambda e: _set_facet("errors", e.value),
-                ).props("dense").tooltip(
-                    "Only books with a fault that blocks persisting — missing or corrupt files."
-                )
             with ui.row().classes("items-center w-full no-wrap q-gutter-xs"):
                 search = filter_input(
                     _set_filter,

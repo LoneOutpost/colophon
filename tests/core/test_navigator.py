@@ -40,27 +40,12 @@ def test_series_sequence_ordering_preserved():
     assert [b.id for b in s.books] == ["b2", "b1"]  # sorted by sequence
 
 
-def test_needs_id_is_no_author_and_no_series():
-    b = _book("b1", title="Mystery")
-    tree = build_library_tree([b])
-    assert [x.id for x in tree.needs_id] == ["b1"]
-    assert tree.authors == []
-
-
-def test_needs_id_sorted_by_confidence():
-    hi = _book("hi", title="High", identity_confidence=40.0)
-    lo = _book("lo", title="Low", identity_confidence=10.0)
-    tree = build_library_tree([hi, lo])
-    assert [b.identity_confidence for b in tree.needs_id] == [10.0, 40.0]  # ascending
-
-
 def test_series_without_author_files_under_series_name():
     # legacy fallback preserved: a book with a series but no author gets a pseudo-author
     # keyed by its first series name (so it still appears in the author view).
     b = _book("b1", series=[SeriesRef(name="Lonely Series", sequence=1.0)], title="Orphan")
     tree = build_library_tree([b])
     assert [a.name for a in tree.authors] == ["Lonely Series"]
-    assert tree.needs_id == []  # has a series, so not needs_id
 
 
 def test_duplicate_author_name_on_one_book_files_it_once():
@@ -199,11 +184,3 @@ def test_build_library_tree_accepts_prebuilt_entity_graph():
     g = build_entity_graph([b])
     tree = build_library_tree([b], entity_graph=g)
     assert [a.name for a in tree.authors] == ["Alice"]
-    assert tree.needs_id == []
-
-
-def test_build_library_tree_needs_id_from_book_entities():
-    b_no = _book("b_no", title="N", authors=[], series=[])
-    b_yes = _book("b_yes", title="Y", authors=["Alice"])
-    tree = build_library_tree([b_no, b_yes])
-    assert [x.title for x in tree.needs_id] == ["N"]

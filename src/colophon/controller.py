@@ -1904,9 +1904,8 @@ class AppController:
     @timed("library_tree")
     def library_tree(self) -> LibraryTree:
         """Group all books into the entity-model tree, read from the maintained graph
-        (`ctx.library_graph`). Conservative: `all_books`/`needs_id` come from `ctx.books`,
-        so a book the graph hasn't placed still shows (in All, and under Needs
-        identification) rather than vanishing."""
+        (`ctx.library_graph`). Conservative: `all_books` comes from `ctx.books`, so a book
+        the graph hasn't placed still shows (in All) rather than vanishing."""
         key = (
             self.ctx.books.generation,
             self.ctx.aliases.generation,
