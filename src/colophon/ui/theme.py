@@ -272,6 +272,12 @@ body.body--dark { color: #ece4d8; }
   .q-badge.colophon-chip { color: var(--colophon-muted) !important; }
 }
 .colophon-chip { border-color: var(--colophon-border); }
+/* The Tree view's focused folder (arrived from a queue group): a tonal band inside the toolbar,
+   not a card (a card there would nest). */
+.colophon-focus {
+  border: 1px solid var(--colophon-border); border-radius: 8px;
+  background: var(--colophon-tag-bg); padding: 8px 12px;
+}
 /* Genre/tag chips on book rows: a quiet tonal pill (low-opacity terracotta fill +
    terracotta text) so the metadata recedes under the title and clears AA, replacing
    NiceGUI's loud solid-primary default (dark text on full terracotta = 4.0:1). */

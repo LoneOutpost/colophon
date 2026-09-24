@@ -74,3 +74,40 @@ def test_node_click_target_navigates_only_on_node():
     assert _node_click_target(
         {"componentType": "series", "dataType": "node", "data": {"id": "a"}}, frozenset({"file"})
     ) == "/graph?focal=a&hide=file"
+
+
+def test_resolve_tree_focus_opens_the_root_holding_a_directory():
+    from pathlib import Path
+
+    from colophon.ui.graph_view import resolve_tree_focus
+
+    roots = [Path("/lib/a"), Path("/lib/b")]
+    folder = Path("/lib/b/Author/Book")
+    dirs = {"dir:1": (folder, "title"), "dir:root": (Path("/lib/a"), "")}
+    lookup = dirs.get
+
+    assert resolve_tree_focus("dir:1", roots, lookup) == (Path("/lib/b"), folder)
+    assert resolve_tree_focus("dir:root", roots, lookup) == (Path("/lib/a"), Path("/lib/a"))
+
+
+def test_resolve_tree_focus_ignores_non_directories_and_outsiders():
+    from pathlib import Path
+
+    from colophon.ui.graph_view import resolve_tree_focus
+
+    roots = [Path("/lib/a")]
+    lookup = {"dir:out": (Path("/elsewhere/x"), "author")}.get
+
+    assert resolve_tree_focus(None, roots, lookup) is None
+    assert resolve_tree_focus("book:1", roots, lookup) is None   # not a directory node
+    assert resolve_tree_focus("dir:out", roots, lookup) is None  # outside every root
+
+
+def test_resolve_tree_focus_prefers_the_deepest_nested_root():
+    from pathlib import Path
+
+    from colophon.ui.graph_view import resolve_tree_focus
+
+    roots = [Path("/lib"), Path("/lib/audio")]
+    folder = Path("/lib/audio/Series/Book 1")
+    assert resolve_tree_focus("d", roots, {"d": (folder, "series")}.get) == (Path("/lib/audio"), folder)
