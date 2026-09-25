@@ -1246,3 +1246,19 @@ def test_author_conflict_upgrades_a_stored_unstructured_finding(tmp_path):
 
     assert [f.suggested for f in dissent.findings] == ["Isaac Asimov"]
     assert dissent.acknowledged_findings == [legacy.key]
+
+
+def test_fill_title_corroboration_offers_the_folder_title_an_abbreviation_stands_for(tmp_path):
+    """A ripper's abbreviation ('Slov Cd') raises the structured title finding whose fix is the
+    folder title it abbreviates, so the one-click 'Use' action applies."""
+    from colophon.core.models import BookUnit, FindingCode, Provenance
+    from colophon.core.node_classify import _fill_title_corroboration
+
+    b = BookUnit.new(source_folder=tmp_path / "EE Smith.-.Skylark Bk3.-.Skylark of Valeron")
+    b.title, b.authors = "Slov Cd", ["E. E. Smith"]
+    b.provenance["title"] = Provenance.TAG.value
+
+    _fill_title_corroboration([b])
+
+    (f,) = [f for f in b.findings if f.code == FindingCode.METADATA_CONFLICT]
+    assert (f.field, f.current, f.suggested) == ("title", "Slov Cd", "Skylark of Valeron")

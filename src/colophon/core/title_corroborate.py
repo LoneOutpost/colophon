@@ -7,7 +7,9 @@ and any sequence/track/series-code numbering. The verdict:
 - agree     — the tag residual shares a word with a real folder/filename residual.
 - abstain   — the tag has no residual (placeholder/echo), OR no structural source has one
               (author-only folder + chaptered files). No confidence change.
-- contradict— a real structural residual exists but shares NO word with the tag residual.
+- contradict— a real structural residual exists but shares NO word with the tag residual, OR the
+              title is an abbreviation of the folder's title ('Slov Cd' for 'Skylark of Valeron'),
+              which outranks any tag~filename agreement since one ripper writes both.
 
 This slice is confidence-only: `suggested_title` is advisory (finding text + future repair), never
 written to the stored title.
@@ -17,14 +19,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING, Literal
 
 from colophon.core.filename_cluster import _spaced, _tokens
 from colophon.core.folder_title import parse_folder_title
+from colophon.core.identity_tokens import title_candidates
 from colophon.core.match import clean_match_title
 from colophon.core.metadata_quality import is_junk_title
 from colophon.core.normalize import canonical_words, collides_with_title
 from colophon.core.sequence_affix import parse_sequence_affix, strip_series_code_affix
+from colophon.core.sequence_marker import strip_parts
 
 if TYPE_CHECKING:
     from colophon.core.models import BookUnit
@@ -131,6 +136,72 @@ def _filename_residual(filenames: list[str], noise: list[str]) -> str:
     return kept if _has_text(kept) else ""
 
 
+def _abbreviation_letters(short: str) -> str | None:
+    """`short` reduced to the one lowercase letter run a ripper's abbreviation leaves once its part
+    marker and numbering are gone ('Slov-cd-01' -> 'slov', 'Slov Cd' -> 'slov'), else None. The part
+    index goes via the shared PART marker strip; a marker word the title cleaner already left behind
+    without its number ('Cd') is dropped by the same non-title words the verdict ignores."""
+    words = [w for w in canonical_words(strip_parts(short))
+             if not w.isdigit() and w not in _NON_TITLE_WORDS]
+    if len(words) != 1 or not words[0].isalpha() or not 2 <= len(words[0]) <= 6:
+        return None
+    return words[0]
+
+
+def is_abbreviation_of(short: str, long: str) -> bool:
+    """Whether `short` abbreviates `long` word by word: its letters, in order, come from `long`'s
+    words, each used word contributing its first letter and optionally more of its own letters in
+    order ('Slov' = SKylark Of VALeron, 'Tsd' = Three Shirt Deal). Every content word must contribute;
+    a stopword may ('To' = The Overlook) or may not ('Bf' = [The] Body Farm). At least two words must
+    contribute, so a single word (or a prefix of one) never counts as its own abbreviation."""
+    letters = _abbreviation_letters(short)
+    if letters is None:
+        return False
+    words = [w for w in canonical_words(long) if w.isalpha()]
+    content = {w for w in words if w not in _STOPWORDS}
+    if not content or letters in content or len(letters) >= sum(map(len, words)):
+        return False
+
+    @cache
+    def fits(i: int, j: int, used: int) -> bool:
+        # letters[i:] consumed by words[j:], `used` words (capped at 2) having contributed so far.
+        if j == len(words):
+            return i == len(letters) and used >= 2
+        word = words[j]
+        if word in _STOPWORDS and fits(i, j + 1, used):
+            return True
+        if i == len(letters) or letters[i] != word[0]:
+            return False
+        # The word's first letter, then each further letter of `letters` that still fits, in order,
+        # inside the rest of the word; every stopping point is a candidate split.
+        k, pos = i + 1, 1
+        while True:
+            if fits(k, j + 1, min(used + 1, 2)):
+                return True
+            if k == len(letters):
+                return False
+            pos = word.find(letters[k], pos) + 1
+            if pos == 0:
+                return False
+            k += 1
+
+    return fits(0, 0, 0)
+
+
+def _abbreviated_folder_title(
+    tag_title: str | None, folder_name: str, authors: list[str], noise: list[str],
+) -> str | None:
+    """The folder title segment `tag_title` abbreviates, else None. Rippers stamp an abbreviation
+    ('Slov-cd-01') on both the tag and the filename, so those two agree with each other while the
+    folder names the real title ('Skylark of Valeron'); only this relation lets the folder win."""
+    if not tag_title or is_junk_title(folder_name):
+        return None
+    for candidate in title_candidates(folder_name, authors=authors, series=noise):
+        if is_abbreviation_of(tag_title, candidate):
+            return candidate
+    return None
+
+
 def corroborate_title(
     tag_title: str | None, filenames: list[str], folder_name: str,
     authors: list[str], series_name: str | None = None, franchise: str | None = None,
@@ -138,6 +209,13 @@ def corroborate_title(
     # Title is the residual: subtract every positively-identified element as potential noise.
     noise = [t for t in (series_name, franchise) if t]
     struct_noise = [*authors, *noise]
+    abbreviated = _abbreviated_folder_title(tag_title, folder_name, authors, noise)
+    if abbreviated is not None:
+        return TitleCorroboration(
+            verdict="contradict",
+            evidence=f'metadata title "{tag_title}" vs folder "{abbreviated}"',
+            suggested_title=abbreviated, suggested_from="folder",
+        )
     tag = _tag_residual(tag_title, noise, authors)
     present = [
         (src, res) for src, res in (
