@@ -157,3 +157,10 @@ def test_title_agreeing_with_the_folder_still_agrees(tmp_path):
                      [f"Skylark of Valeron - 0{i}" for i in (1, 2)], ["Skylark of Valeron"] * 2,
                      "Skylark of Valeron")
     assert book_title_verdict(b).verdict == "agree"
+
+
+def test_a_stray_single_letter_in_the_folder_title_does_not_block_an_abbreviation():
+    # Real folder: 'Patricia D Cornwell.-.Scarpetta series.-.1994.-.The Body Farm r', title 'Bf'.
+    from colophon.core.title_corroborate import is_abbreviation_of
+    assert is_abbreviation_of("Bf", "The Body Farm r")
+    assert not is_abbreviation_of("Bf", "The Black Farm Sale r")   # 'sale' still uncovered

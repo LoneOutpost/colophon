@@ -158,7 +158,10 @@ def is_abbreviation_of(short: str, long: str) -> bool:
     if letters is None:
         return False
     words = [w for w in canonical_words(long) if w.isalpha()]
-    content = {w for w in words if w not in _STOPWORDS}
+    # A stopword or a lone letter (the stray 'r' in a folder named 'The Body Farm r') carries no
+    # title meaning, so it may contribute but never has to.
+    optional = {w for w in words if w in _STOPWORDS or len(w) == 1}
+    content = {w for w in words if w not in optional}
     if not content or letters in content or len(letters) >= sum(map(len, words)):
         return False
 
@@ -168,7 +171,7 @@ def is_abbreviation_of(short: str, long: str) -> bool:
         if j == len(words):
             return i == len(letters) and used >= 2
         word = words[j]
-        if word in _STOPWORDS and fits(i, j + 1, used):
+        if word in optional and fits(i, j + 1, used):
             return True
         if i == len(letters) or letters[i] != word[0]:
             return False
