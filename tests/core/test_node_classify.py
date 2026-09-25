@@ -1262,3 +1262,21 @@ def test_fill_title_corroboration_offers_the_folder_title_an_abbreviation_stands
 
     (f,) = [f for f in b.findings if f.code == FindingCode.METADATA_CONFLICT]
     assert (f.field, f.current, f.suggested) == ("title", "Slov Cd", "Skylark of Valeron")
+
+
+def test_a_title_conflict_raised_on_the_copy_reaches_the_stored_book():
+    # The controller re-derives on copies; without this sync a title that began contradicting its
+    # folder lost its score but never gained the finding, so the one-click fix never appeared.
+    from colophon.core.models import Finding, FindingCode, FindingSeverity
+    from colophon.core.node_classify import sync_derived_conflicts
+    stored = _book("/lib/EE Smith/Skylark of Valeron")
+    copy = stored.model_copy(deep=True)
+    conflict = Finding(code=FindingCode.METADATA_CONFLICT, severity=FindingSeverity.WARN,
+                       detail='metadata title "Slov Cd" vs folder "Skylark of Valeron"',
+                       field="title", current="Slov Cd", suggested="Skylark of Valeron", source="title")
+    copy.findings = [conflict]
+    sync_derived_conflicts(stored, copy)
+    assert stored.findings == [conflict]
+    stored.acknowledged_findings = [conflict.key]
+    sync_derived_conflicts(stored, stored.model_copy(update={"findings": []}))
+    assert stored.findings == [] and stored.acknowledged_findings == []   # retracted, dismissal too
