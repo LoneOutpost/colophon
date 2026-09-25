@@ -87,7 +87,7 @@ from colophon.core.node_classify import (
     classify_nodes,
     restore_author_conflict,
     retract_author_conflict,
-    sync_folder_name_conflict,
+    sync_derived_conflicts,
 )
 from colophon.core.normalize import (
     FIELD_NORMALIZERS,
@@ -844,7 +844,7 @@ class AppController:
             # its elected value, unless confirmed), so the copy's verdict is the answer for every
             # book: raised, kept or retracted. The stored findings then differ, so the book is saved.
             for book in root_books:
-                sync_folder_name_conflict(book, copies[book.id])
+                sync_derived_conflicts(book, copies[book.id])
             # Write the re-derived series back the same way. A copy the ramp stamped CONFIRMED_FOLDER
             # is written even when the stored series came from elsewhere weak (directory/filename),
             # since a confirmed series folder outranks those; a hard series is never fillable.

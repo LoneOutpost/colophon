@@ -752,11 +752,25 @@ def _fill_folder_name_conflict(graph: Graph, books: list[BookUnit], *, root: Pat
             book.findings.append(want)
 
 
-def sync_folder_name_conflict(book: BookUnit, rederived: BookUnit) -> None:
-    """Make `book` carry exactly `rederived`'s folder-name conflict: the controller classifies book
-    COPIES and writes back only named fields, so a finding raised or retracted on the copy is lost
-    unless moved here. A removed finding takes its dismissal with it; other findings are untouched."""
-    mine = _is_folder_name_conflict
+def _is_title_conflict(f) -> bool:
+    from colophon.core.guidance import TITLE_CONFLICT_PREFIX
+    from colophon.core.models import FindingCode
+    return (f.code == FindingCode.METADATA_CONFLICT
+            and (f.detail or "").startswith(TITLE_CONFLICT_PREFIX))
+
+
+def sync_derived_conflicts(book: BookUnit, rederived: BookUnit) -> None:
+    """Make `book` carry exactly `rederived`'s folder-name and title conflicts. The controller
+    classifies book COPIES and writes back only named fields, so a finding raised or retracted on the
+    copy is lost unless moved here: a title that started contradicting its folder showed a lower score
+    but no finding, and so no fix. Other findings are untouched."""
+    _sync_findings(book, rederived, _is_folder_name_conflict)
+    _sync_findings(book, rederived, _is_title_conflict)
+
+
+def _sync_findings(book: BookUnit, rederived: BookUnit, mine) -> None:
+    """Replace `book`'s findings matching `mine` with `rederived`'s. A removed finding takes its
+    dismissal with it."""
     want = [f for f in rederived.findings if mine(f)]
     if [f for f in book.findings if mine(f)] == want:
         return
