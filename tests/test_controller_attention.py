@@ -157,7 +157,11 @@ def test_apply_finding_suggestion_writes_authors(tmp_path):
     stored = ctx.books.get(updated.id)
     assert stored.authors == ["Tom Sharpe"]
     assert stored.provenance["authors"] == Provenance.MANUAL.value
-    assert ctrl._active_findings(stored) == []
+    # The applied author conflict is settled. The fixture's title ('Ph1' in a 'Porterhouse Blue'
+    # folder) is a separate, real conflict that the re-derive now carries onto the stored book.
+    remaining = ctrl._active_findings(stored)
+    assert not any(f.field == "authors" for f in remaining)
+    assert [f.field for f in remaining] == ["title"]
     ctx.close()
 
 
