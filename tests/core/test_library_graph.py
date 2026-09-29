@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from colophon.core.graph_records import EdgeRecord, NodeRecord
-from colophon.core.library_graph import LibraryGraph, check_file_references, reconcile
+from colophon.core.library_graph import (
+    LibraryGraph,
+    check_file_references,
+    prune_missing,
+    reconcile,
+)
 
 
 def _bookn(id_, book_id, root="/lib"):
@@ -194,3 +199,111 @@ def test_apply_delta_mirrors_store_in_memory():
     keys = {(e.src, e.kind, e.dst) for e in g.edges}
     assert ("a", "contains", "b") not in keys and ("b", "contains", "c") in keys
     assert g.generation == gen + 1
+
+
+# --- prune_missing: drop file/directory nodes whose paths are gone from disk ---------------
+
+def _c(src, dst, root="/lib"):
+    return EdgeRecord(src=src, kind="contains", dst=dst, root=root, props={})
+
+
+def _owns(src, dst, root="/lib"):
+    return EdgeRecord(src=src, kind="owns", dst=dst, root=root, props={})
+
+
+def _prune(g, missing, live=frozenset(), present=lambda r: True):
+    return prune_missing(g, missing_node_ids=set(missing), live_book_ids=set(live),
+                         root_present=present)
+
+
+def test_prune_removes_stale_file_and_its_edges():
+    g = LibraryGraph.from_records(
+        [_dir("d", "/lib/a"), _file("f1", "/lib/a/1.mp3"), _file("f2", "/lib/a/2.mp3")],
+        [_c("d", "f1"), _c("d", "f2")],
+    )
+    result = _prune(g, {"f1"})
+    assert result.removed_node_ids == {"f1"}
+    assert set(g.nodes) == {"d", "f2"}
+    assert g.edges == [_c("d", "f2")]
+    assert result.removed_edges == 1
+    assert result.affected_roots == {"/lib"}
+
+
+def test_prune_keeps_missing_file_a_live_book_owns():
+    # A live book's missing file keeps its node so missing-file detection keeps working.
+    g = LibraryGraph.from_records(
+        [_dir("d", "/lib/a"), _file("f", "/lib/a/1.mp3"), _bookn("book:b", "b1")],
+        [_c("d", "f"), _c("d", "book:b"), _owns("book:b", "f")],
+    )
+    gen = g.generation
+    result = _prune(g, {"d", "f"}, live={"b1"})
+    assert not result
+    assert set(g.nodes) == {"d", "f", "book:b"}
+    assert g.generation == gen
+
+
+def test_prune_removes_file_owned_only_by_a_dead_book():
+    g = LibraryGraph.from_records(
+        [_file("f", "/lib/a/1.mp3"), _bookn("book:old", "gone")],
+        [_owns("book:old", "f")],
+    )
+    result = _prune(g, {"f"}, live={"b1"})
+    assert result.removed_node_ids == {"f"}
+    assert g.edges == []
+
+
+def test_prune_removes_directory_emptied_by_file_removals_bottom_up():
+    g = LibraryGraph.from_records(
+        [_dir("top", "/lib/Author"), _dir("d", "/lib/Author/Book"),
+         _file("f1", "/lib/Author/Book/1.mp3"), _file("f2", "/lib/Author/Book/2.mp3")],
+        [_c("top", "d"), _c("d", "f1"), _c("d", "f2")],
+    )
+    result = _prune(g, {"top", "d", "f1", "f2"})
+    assert result.removed_node_ids == {"top", "d", "f1", "f2"}
+    assert g.nodes == {} and g.edges == []
+    assert result.removed_edges == 3
+
+
+def test_prune_keeps_directory_with_a_surviving_child():
+    # The directory is reported missing, but a present file still hangs under it.
+    g = LibraryGraph.from_records(
+        [_dir("d", "/lib/a"), _file("f1", "/lib/a/1.mp3"), _file("f2", "/lib/a/2.mp3")],
+        [_c("d", "f1"), _c("d", "f2")],
+    )
+    result = _prune(g, {"d", "f1"})
+    assert result.removed_node_ids == {"f1"}
+    assert set(g.nodes) == {"d", "f2"}
+
+
+def test_prune_keeps_directory_holding_a_live_book():
+    g = LibraryGraph.from_records(
+        [_dir("d", "/lib/a"), _bookn("book:b", "b1")],
+        [_c("d", "book:b")],
+    )
+    assert not _prune(g, {"d"}, live={"b1"})
+    assert set(g.nodes) == {"d", "book:b"}
+
+
+def test_prune_removes_nothing_on_an_absent_root():
+    # An unmounted NAS makes every path look missing: never prune a root that isn't there.
+    g = LibraryGraph.from_records(
+        [_dir("d", "/nas/a", root="/nas"), _file("f", "/nas/a/1.mp3", root="/nas"),
+         _dir("e", "/lib/b"), _file("g", "/lib/b/1.mp3")],
+        [_c("d", "f", root="/nas"), _c("e", "g")],
+    )
+    result = _prune(g, {"d", "f", "e", "g"}, present=lambda r: r != "/nas")
+    assert result.removed_node_ids == {"e", "g"}
+    assert result.affected_roots == {"/lib"}
+    assert set(g.nodes) == {"d", "f"}
+    assert g.edges == [_c("d", "f", root="/nas")]
+
+
+def test_prune_healthy_graph_is_a_noop():
+    g = LibraryGraph.from_records(
+        [_dir("d", "/lib/a"), _file("f", "/lib/a/1.mp3")], [_c("d", "f")]
+    )
+    gen = g.generation
+    result = _prune(g, set())
+    assert not result
+    assert result.affected_roots == set()
+    assert set(g.nodes) == {"d", "f"} and g.generation == gen

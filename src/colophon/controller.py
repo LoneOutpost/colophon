@@ -58,7 +58,12 @@ from colophon.core.graph_view import grouping_cohort
 from colophon.core.guidance import upgrade_legacy_conflict
 from colophon.core.jobs import Job
 from colophon.core.known_entity import build_known_series
-from colophon.core.library_graph import reconcile
+from colophon.core.library_graph import (
+    GraphValidity,
+    check_file_references,
+    prune_missing,
+    reconcile,
+)
 from colophon.core.models import (
     BookState,
     BookUnit,
@@ -1154,6 +1159,48 @@ class AppController:
             )
             return len(result.removed_node_ids)
 
+    def prune_vanished_graph(self, validity: GraphValidity | None = None) -> int:
+        """Self-heal: drop file/directory nodes whose paths are gone from disk (organized out of the
+        scan root and removed from the library, deleted by hand), then persist the pruned per-root
+        subgraphs. `validity` reuses a `check_file_references` result the caller already has (the
+        startup check); None re-stats the graph. A live book's missing file keeps its node, and a
+        scan root that is itself absent (unmounted mount) is never touched. No-op when no scan paths
+        are configured. Returns the number of nodes removed."""
+        if not self.ctx.config.scan_paths:
+            return 0
+        with step("pruning vanished graph nodes"):
+            graph = self.ctx.library_graph
+            if validity is None:
+                validity = check_file_references(graph)
+            missing = set(validity.missing_dirs) | set(validity.missing_files)
+            if not missing:
+                return 0
+
+            def root_present(root: str) -> bool:
+                try:
+                    return Path(root).is_dir()
+                except OSError:
+                    return False
+
+            result = prune_missing(
+                graph,
+                missing_node_ids=missing,
+                live_book_ids={b.id for b in self.ctx.books.list_all()},
+                root_present=root_present,
+            )
+            if not result:
+                return 0
+            for r in result.affected_roots:
+                nodes_r = [n for n in graph.nodes.values() if n.root == r]
+                edges_r = [e for e in graph.edges if e.root == r]
+                self.ctx.graph.replace_subgraph(Path(r), nodes_r, edges_r)
+            self._graph_cache.clear()
+            logger.info(
+                f"graph prune: removed {len(result.removed_node_ids)} vanished node(s) and "
+                f"{result.removed_edges} edge(s) across {len(result.affected_roots)} root(s)"
+            )
+            return len(result.removed_node_ids)
+
     def rebuild_missing_graph(self) -> int:
         """Self-heal: for any book not represented in the in-memory graph, rebuild its
         scan root's entity records from the existing books (no scan, no filesystem walk).
@@ -1211,6 +1258,9 @@ class AppController:
             self.ctx.operations.delete_for_book(bid, commit=False)
             self.ctx.books.delete(bid, commit=(i == last))  # final delete flushes the batch
         self._resync_scope(folders)
+        # Organized-away books leave their file/directory skeleton behind (the re-derive keeps what
+        # the graph already holds); drop the part that is gone from disk.
+        self.prune_vanished_graph()
         return len(ids)
 
     def remove_from_library(self, book_ids: Iterable[str]) -> int:
