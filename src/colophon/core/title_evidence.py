@@ -90,8 +90,12 @@ def collect_title_evidence(book: BookUnit) -> list[FieldEvidence]:
     # book's identity (the varying part is the chapter index). Built from each file's `title_candidates`
     # (a clean token cut — authors/series/index/disc/refs already dropped), so only a real title token
     # can be the constant. Reinforced by agreement, numeric-aware (agreement proves '1984' is real).
+    # The reinforcement counts DISTINCT tag values, not files: one tagger stamping the same string on
+    # every file is one opinion. Counted per file, 13 files tagged 'no Title' outweighed the folder and
+    # filename agreeing on the real title; different values that all keep one token still corroborate it.
     if len(per_file_titles) > 1:
-        w = min(W.W_T_COHORT_MAX, W.W_T_TAG + W.W_T_COHORT_STEP * (len(per_file_titles) - 1))
+        distinct = len({_norm(t) for t in per_file_titles})
+        w = min(W.W_T_COHORT_MAX, W.W_T_TAG + W.W_T_COHORT_STEP * (distinct - 1))
         display: dict[str, str] = {}
         file_count: Counter[str] = Counter()
         for tt in per_file_titles:
