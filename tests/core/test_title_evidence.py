@@ -109,3 +109,33 @@ def test_uniform_multifile_title_is_not_demoted():
                    ext="opus", tags=EmbeddedTags(title="The Hobbit")) for i in range(1, 5)]
     resolve_title(b)
     assert b.title == "The Hobbit"   # files agree -> committed stays dominant, unchanged
+
+
+def test_identical_tags_on_every_file_count_as_one_vote():
+    # Real case (David Eddings, The Shining Ones): 13 files all tagged title 'no Title'. One tagger
+    # stamping one value on every file is one opinion, not thirteen; counted per file it weighed 6.0
+    # and beat the folder and filename agreeing on the real title (5.0).
+    from colophon.core.models import EmbeddedTags
+    b = BookUnit.new(source_folder=Path(
+        "/lib/E/David Eddings/David Eddings.-.Tamuli Bk02.-.The Shining Ones"))
+    b.authors = ["David Eddings"]
+    b.source_files = [
+        SourceFile(path=Path(f"/lib/E/David Eddings/David Eddings - The Shining Ones - {i:02} of 13.opus"),
+                   size=1, duration_seconds=0.0, ext="opus", tags=EmbeddedTags(title="no Title"))
+        for i in range(1, 14)]
+    resolve_title(b)
+    assert b.title == "The Shining Ones"
+
+
+def test_distinct_tags_sharing_a_token_keep_their_boost():
+    # The boost scales with DISTINCT tag values: different per-file titles that all keep one token
+    # corroborate it, so the constant '1984' still outweighs a single folder vote.
+    from colophon.core.models import EmbeddedTags
+    from colophon.core.title_evidence import collect_title_evidence
+    b = BookUnit.new(source_folder=Path("/lib/O/George Orwell/Misc"))
+    b.authors = ["George Orwell"]
+    b.source_files = [
+        SourceFile(path=Path(f"/lib/O/George Orwell/Misc/{i}.opus"), size=1, duration_seconds=0.0,
+                   ext="opus", tags=EmbeddedTags(title=f"1984 - {i}-9")) for i in range(1, 10)]
+    cohort = [e for e in collect_title_evidence(b) if e.source == "cohort"]
+    assert cohort and max(e.weight for e in cohort) > W.W_T_TAG
