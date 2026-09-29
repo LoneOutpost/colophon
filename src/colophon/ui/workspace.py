@@ -460,6 +460,7 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # page; opening a different book starts over at one page.
     _files_view: dict[str, object] = {
         "book_id": None, "shown": _FILES_PAGE, "siblings_shown": _FILES_PAGE,
+        "chapters_shown": _FILES_PAGE,
     }
 
     _VIEW_KEY = "workspace_view"
@@ -1062,7 +1063,8 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     files = book.source_files
                     if _files_view["book_id"] != book.id:
                         _files_view.update(
-                            book_id=book.id, shown=_FILES_PAGE, siblings_shown=_FILES_PAGE)
+                            book_id=book.id, shown=_FILES_PAGE, siblings_shown=_FILES_PAGE,
+                            chapters_shown=_FILES_PAGE)
 
                     def _move(p: Path, idx: int, delta: int) -> None:
                         controller.move_file(book, p, delta)
@@ -1124,11 +1126,12 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
 
                                     ui.button(icon="delete_forever", on_click=_delete_file).props('flat dense round color=negative aria-label="Delete this file from disk"').tooltip("Delete this file from disk (permanent)")
 
-                    def _paged_list(count: int, row, key: str, noun: str) -> None:
+                    def _paged_list(count: int, row, key: str, noun: str,
+                                    props: str = "dense bordered") -> None:
                         """Render `count` rows through `row(i)` a page at a time: the first
                         `_files_view[key]`, then a "Show N more" that appends in place, so the
                         pane is never rebuilt just to see further down."""
-                        rows_el = ui.list().props("dense bordered").classes("w-full")
+                        rows_el = ui.list().props(props).classes("w-full")
                         footer = ui.row().classes("items-center q-gutter-sm")
                         rendered = {"n": 0}
 
@@ -1202,16 +1205,21 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                 "Reset to file boundaries", icon="restart_alt",
                                 on_click=lambda b=book: (controller.reset_chapters(b), show_detail(b.id)),
                             ).props("flat dense no-caps")
-                    with ui.list().props("dense").classes("w-full"):
-                        for n, ch in enumerate(chapters, start=1):
-                            with ui.item():
-                                with ui.item_section():
-                                    ui.item_label(f"{n}. {ch.title}")
-                                with ui.item_section().props("side"):
-                                    _t = ch.start_ms // 1000
-                                    ui.item_label(
-                                        f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
-                                    ).props("caption")
+                    # Without named chapters there is one per file, so this pages like the Files
+                    # list. The rows are display-only; Edit hands the dialog every chapter.
+                    def _chapter_row(i: int) -> None:
+                        ch = chapters[i]
+                        with ui.item().classes("colophon-chapter-row"):
+                            with ui.item_section():
+                                ui.item_label(f"{i + 1}. {ch.title}")
+                            with ui.item_section().props("side"):
+                                _t = ch.start_ms // 1000
+                                ui.item_label(
+                                    f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
+                                ).props("caption")
+
+                    _paged_list(len(chapters), _chapter_row, "chapters_shown", "chapters",
+                                props="dense")
 
             with ui.tabs().props("dense no-caps").classes("w-full") as _tabs:
                 ui.tab("details", label="Details", icon="edit")

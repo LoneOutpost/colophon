@@ -67,8 +67,9 @@ async def test_a_many_file_book_renders_one_page_and_a_show_more(loop_registered
     workspace.click("Show 20 more")
     await workspace.settle()
     assert len(_file_rows(workspace)) == 120
-    assert not any(b.text.startswith("Show ") and b.text.endswith(" more")
-                   for b in workspace._of("Button"))
+    # The Files footer is gone; the fallback chapter list (one per file) pages on its own.
+    assert not any((t or "").endswith(" of 120 files") for t in workspace.labels())
+    assert "Showing 50 of 120 chapters" in workspace.labels()
 
 
 async def test_a_file_action_keeps_the_expanded_window(loop_registered, library):  # noqa: F811
@@ -158,3 +159,32 @@ async def test_a_large_sibling_list_pages_too(loop_registered, shared_folder):  
     workspace.click("Show 50 more")
     await workspace.settle()
     assert len(siblings(workspace)) == 100
+
+
+async def test_a_long_chapter_list_pages_and_edit_still_gets_every_chapter(
+    loop_registered, library, monkeypatch,  # noqa: F811
+):
+    import colophon.ui.workspace as ws
+    from colophon.core.models import Chapter
+
+    controller, ids = library
+    book = controller.get_book(ids["small"])
+    book.chapters = [Chapter(title=f"Ch {i}", start_ms=i * 1000, end_ms=(i + 1) * 1000)
+                     for i in range(120)]
+    controller.ctx.books.upsert(book)
+    edited = {}
+    monkeypatch.setattr(ws, "chapter_edit_dialog",
+                        lambda _c, _b, chs, **_kw: edited.update(n=len(chs)))
+
+    workspace = await _render(controller, open_book_id=ids["small"])
+    rows = [e for e in list(workspace._client.elements.values())
+            if "colophon-chapter-row" in e._classes]
+    assert len(rows) == 50
+    assert "Showing 50 of 120 chapters" in workspace.labels()
+    workspace.click("Show 50 more")
+    await workspace.settle()
+    rows = [e for e in list(workspace._client.elements.values())
+            if "colophon-chapter-row" in e._classes]
+    assert len(rows) == 100
+    workspace.click("Edit")
+    assert edited["n"] == 120
