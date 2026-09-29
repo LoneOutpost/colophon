@@ -124,6 +124,7 @@ def _move_focus(ids: list[str], current: str | None, delta: int) -> str | None:
 # Short state label + Quasar color for the per-row state badge.
 _PAGE = 50  # book rows rendered per chunk; ~a viewport, the rest fill in on scroll
 _NAV_PAGE = 80  # navigator entity rows (author/series/franchise) rendered per chunk
+_FILES_PAGE = 50  # Details-pane file rows rendered per "Show more"; each row is ~25 elements
 # Queue group kind -> (icon, Quasar color) for its header in the Queue scope.
 _QUEUE_ICON: dict[str, tuple[str, str]] = {
     "blocked": ("error", "negative"),
@@ -454,6 +455,13 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
     # books (arrow keys or clicking) stays on the same tab and, on At a Glance, holds the
     # scroll position instead of snapping back to Details at the top.
     _detail_view = {"tab": "details", "scroll": 0.0}
+    # How far the Files list is expanded, and for which book. Every file action rebuilds the pane
+    # through show_detail, so without this an action on row 120 would snap the list back to one
+    # page; opening a different book starts over at one page.
+    _files_view: dict[str, object] = {
+        "book_id": None, "shown": _FILES_PAGE, "siblings_shown": _FILES_PAGE,
+        "chapters_shown": _FILES_PAGE,
+    }
 
     _VIEW_KEY = "workspace_view"
 
@@ -1052,79 +1060,126 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                     ui.label(f"Files ({len(book.source_files)})").classes("text-subtitle2")
 
                     players = []  # one audio container per row; only one preview plays at a time
+                    files = book.source_files
+                    if _files_view["book_id"] != book.id:
+                        _files_view.update(
+                            book_id=book.id, shown=_FILES_PAGE, siblings_shown=_FILES_PAGE,
+                            chapters_shown=_FILES_PAGE)
 
-                    with ui.list().props("dense bordered").classes("w-full"):
-                        for idx, sf in enumerate(book.source_files):
-                            with ui.item():
-                                with ui.item_section():
-                                    ui.item_label(sf.path.name)
-                                    quality = format_file_quality(sf)
-                                    dur = _fmt_duration(sf.duration_seconds)
-                                    caption = f"{dur} · {quality}" if quality else dur
-                                    ui.item_label(caption).props("caption")
-                                    player = ui.element("div").classes("w-full")
-                                    players.append(player)
+                    def _move(p: Path, idx: int, delta: int) -> None:
+                        controller.move_file(book, p, delta)
+                        # A file moved past the last shown row would vanish from view; keep it.
+                        _files_view["shown"] = max(_files_view["shown"], idx + delta + 1)
+                        show_detail(book.id)
 
-                                    def _toggle_player(slot=player, bid=book.id, i=idx):
-                                        # Lazy + single-active: the <audio> element (and its
-                                        # request) only exists while a player is open. Clear
-                                        # every player first — removing an <audio> stops its
-                                        # playback — then open this one unless it was already
-                                        # open (so a second click on the same row toggles off).
-                                        was_open = bool(slot.default_slot.children)
-                                        for other in players:
-                                            other.clear()
-                                        if not was_open:
-                                            with slot:
-                                                ui.html(
-                                                    f'<audio controls autoplay preload="none" '
-                                                    f'style="width:100%;margin-top:8px" '
-                                                    f'src="/audio/{bid}/{i}"></audio>'
-                                                )
+                    def _file_row(idx: int, sf) -> None:
+                        with ui.item().classes("colophon-file-row"):
+                            with ui.item_section():
+                                ui.item_label(sf.path.name)
+                                quality = format_file_quality(sf)
+                                dur = _fmt_duration(sf.duration_seconds)
+                                caption = f"{dur} · {quality}" if quality else dur
+                                ui.item_label(caption).props("caption")
+                                player = ui.element("div").classes("w-full")
+                                players.append(player)
 
-                                with ui.item_section().props("side"):
-                                    with ui.row().classes("q-gutter-xs no-wrap"):
-                                        ui.button(icon="play_arrow", on_click=_toggle_player).props('flat dense round aria-label="Play the start of this file"').tooltip("Play the start of this file")
-                                        ui.button(icon="arrow_upward", on_click=lambda p=sf.path: (controller.move_file(book, p, -1), show_detail(book.id))).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
-                                        ui.button(icon="arrow_downward", on_click=lambda p=sf.path: (controller.move_file(book, p, 1), show_detail(book.id))).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(book.source_files) - 1)
-                                        ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
-                                        ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
-                                        def _delete_file(p=sf.path, b=book) -> None:
-                                            from colophon.ui.dialogs import confirm_delete_dialog
-                                            last = len(b.source_files) == 1
+                                def _toggle_player(slot=player, bid=book.id, i=idx):
+                                    # Lazy + single-active: the <audio> element (and its
+                                    # request) only exists while a player is open. Clear
+                                    # every player first — removing an <audio> stops its
+                                    # playback — then open this one unless it was already
+                                    # open (so a second click on the same row toggles off).
+                                    was_open = bool(slot.default_slot.children)
+                                    for other in players:
+                                        other.clear()
+                                    if not was_open:
+                                        with slot:
+                                            ui.html(
+                                                f'<audio controls autoplay preload="none" '
+                                                f'style="width:100%;margin-top:8px" '
+                                                f'src="/audio/{bid}/{i}"></audio>'
+                                            )
 
-                                            async def _run() -> None:
-                                                result = await asyncio.to_thread(controller.delete_file, b, p)
-                                                if result.errors:
-                                                    ui.notify("; ".join(result.errors), type="warning")
-                                                else:
-                                                    ui.notify("Deleted from disk")
-                                                if result.book_removed:
-                                                    _clear_selection()
-                                                else:
-                                                    show_detail(b.id)
+                            with ui.item_section().props("side"):
+                                with ui.row().classes("q-gutter-xs no-wrap"):
+                                    ui.button(icon="play_arrow", on_click=_toggle_player).props('flat dense round aria-label="Play the start of this file"').tooltip("Play the start of this file")
+                                    ui.button(icon="arrow_upward", on_click=lambda p=sf.path, i=idx: _move(p, i, -1)).props('flat dense round aria-label="Move file up"').tooltip("Move file up").set_enabled(idx > 0)
+                                    ui.button(icon="arrow_downward", on_click=lambda p=sf.path, i=idx: _move(p, i, 1)).props('flat dense round aria-label="Move file down"').tooltip("Move file down").set_enabled(idx < len(files) - 1)
+                                    ui.button(icon="edit", on_click=lambda p=sf.path: move_rename_dialog(controller, book, p, show_detail=show_detail, clear_selection=_clear_selection)).props('flat dense round aria-label="Move or rename file"').tooltip("Move or rename this file")
+                                    ui.button(icon="remove_circle_outline", on_click=lambda p=sf.path: (controller.exclude_file(book, p), ui.notify("Excluded"), show_detail(book.id))).props('flat dense round color=negative aria-label="Exclude file"').tooltip("Exclude this file from the book")
+                                    def _delete_file(p=sf.path, b=book) -> None:
+                                        from colophon.ui.dialogs import confirm_delete_dialog
+                                        last = len(b.source_files) == 1
 
-                                            confirm_delete_dialog([p], book_removed=last, on_confirm=_run)
+                                        async def _run() -> None:
+                                            result = await asyncio.to_thread(controller.delete_file, b, p)
+                                            if result.errors:
+                                                ui.notify("; ".join(result.errors), type="warning")
+                                            else:
+                                                ui.notify("Deleted from disk")
+                                            if result.book_removed:
+                                                _clear_selection()
+                                            else:
+                                                show_detail(b.id)
 
-                                        ui.button(icon="delete_forever", on_click=_delete_file).props('flat dense round color=negative aria-label="Delete this file from disk"').tooltip("Delete this file from disk (permanent)")
+                                        confirm_delete_dialog([p], book_removed=last, on_confirm=_run)
 
+                                    ui.button(icon="delete_forever", on_click=_delete_file).props('flat dense round color=negative aria-label="Delete this file from disk"').tooltip("Delete this file from disk (permanent)")
+
+                    def _paged_list(count: int, row, key: str, noun: str,
+                                    props: str = "dense bordered") -> None:
+                        """Render `count` rows through `row(i)` a page at a time: the first
+                        `_files_view[key]`, then a "Show N more" that appends in place, so the
+                        pane is never rebuilt just to see further down."""
+                        rows_el = ui.list().props(props).classes("w-full")
+                        footer = ui.row().classes("items-center q-gutter-sm")
+                        rendered = {"n": 0}
+
+                        def _render(upto: int) -> None:
+                            end = min(upto, count)
+                            with rows_el:
+                                for i in range(rendered["n"], end):
+                                    row(i)
+                            rendered["n"] = end
+                            _files_view[key] = max(_files_view[key], end)
+                            footer.clear()
+                            remaining = count - end
+                            if remaining:
+                                with footer:
+                                    ui.label(f"Showing {end} of {count} {noun}").classes(
+                                        "colophon-muted text-caption")
+                                    ui.button(
+                                        f"Show {min(_FILES_PAGE, remaining)} more",
+                                        on_click=lambda: _render(rendered["n"] + _FILES_PAGE),
+                                    ).props("flat dense no-caps")
+
+                        _render(_files_view[key])
+
+                    # Paged: a file row carries ~25 elements, so a 1,000-file book built eagerly
+                    # blocks the event loop long enough for NiceGUI to drop the page.
+                    _paged_list(len(files), lambda i: _file_row(i, files[i]), "shown", "files")
+
+                    # A multi-book folder lists every sibling book's files here, so it pages too.
                     siblings = controller.folder_sibling_files(book)
+
+                    def _sibling_row(i: int) -> None:
+                        sib_path, owner = siblings[i]
+                        with ui.item().classes("colophon-sibling-row"):
+                            with ui.item_section():
+                                ui.item_label(sib_path.name)
+                                ui.item_label(f"in {owner.title or owner.source_folder.name}").props("caption")
+                            with ui.item_section().props("side"):
+                                async def _reassign(p=sib_path) -> None:
+                                    target = await asyncio.to_thread(controller.reassign_file, book, p)
+                                    ui.notify("Added to this book")
+                                    show_detail(target.id)
+                                ui.button(
+                                    icon="playlist_add", on_click=_reassign,
+                                ).props('flat dense round color=primary aria-label="Add to this book"').tooltip("Add this file to this book")
+
                     if siblings:
                         ui.label("Other files in this folder").classes("text-subtitle2 q-mt-sm")
-                        with ui.list().props("dense bordered").classes("w-full"):
-                            for sib_path, owner in siblings:
-                                with ui.item():
-                                    with ui.item_section():
-                                        ui.item_label(sib_path.name)
-                                        ui.item_label(f"in {owner.title or owner.source_folder.name}").props("caption")
-                                    with ui.item_section().props("side"):
-                                        async def _reassign(p=sib_path) -> None:
-                                            target = await asyncio.to_thread(controller.reassign_file, book, p)
-                                            ui.notify("Added to this book")
-                                            show_detail(target.id)
-                                        ui.button(
-                                            icon="playlist_add", on_click=_reassign,
-                                        ).props('flat dense round color=primary aria-label="Add to this book"').tooltip("Add this file to this book")
+                        _paged_list(len(siblings), _sibling_row, "siblings_shown", "files")
 
                     # chapters: applied named chapters (book.chapters) or file-boundary default
                     applied = bool(book.chapters)
@@ -1150,16 +1205,21 @@ def render_workspace(controller: AppController, dark: ui.dark_mode, initial_filt
                                 "Reset to file boundaries", icon="restart_alt",
                                 on_click=lambda b=book: (controller.reset_chapters(b), show_detail(b.id)),
                             ).props("flat dense no-caps")
-                    with ui.list().props("dense").classes("w-full"):
-                        for n, ch in enumerate(chapters, start=1):
-                            with ui.item():
-                                with ui.item_section():
-                                    ui.item_label(f"{n}. {ch.title}")
-                                with ui.item_section().props("side"):
-                                    _t = ch.start_ms // 1000
-                                    ui.item_label(
-                                        f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
-                                    ).props("caption")
+                    # Without named chapters there is one per file, so this pages like the Files
+                    # list. The rows are display-only; Edit hands the dialog every chapter.
+                    def _chapter_row(i: int) -> None:
+                        ch = chapters[i]
+                        with ui.item().classes("colophon-chapter-row"):
+                            with ui.item_section():
+                                ui.item_label(f"{i + 1}. {ch.title}")
+                            with ui.item_section().props("side"):
+                                _t = ch.start_ms // 1000
+                                ui.item_label(
+                                    f"{_t // 3600}:{(_t % 3600) // 60:02d}:{_t % 60:02d}"
+                                ).props("caption")
+
+                    _paged_list(len(chapters), _chapter_row, "chapters_shown", "chapters",
+                                props="dense")
 
             with ui.tabs().props("dense no-caps").classes("w-full") as _tabs:
                 ui.tab("details", label="Details", icon="edit")
