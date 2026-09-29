@@ -72,7 +72,8 @@ def main() -> None:
     if validity.missing_dirs or validity.missing_files:
         logger.warning(
             f"graph: {len(validity.missing_dirs)} directory and "
-            f"{len(validity.missing_files)} file references missing on disk"
+            f"{len(validity.missing_files)} file references missing on disk; "
+            f"pruning the vanished ones after reconcile"
         )
     else:
         logger.info(f"graph: {len(ctx.library_graph.nodes)} nodes, file references present")
@@ -87,6 +88,14 @@ def main() -> None:
             logger.info(f"graph: reconciled away {purged} stale/orphan node(s) at startup")
     except Exception:
         logger.exception("graph reconcile failed; starting with the graph as loaded")
+    # Prune file/directory nodes whose paths are gone (books organized out of a scan root and
+    # removed), reusing the validity check above. Non-fatal; an absent root is never pruned.
+    try:
+        pruned = controller.prune_vanished_graph(validity)
+        if pruned:
+            logger.info(f"graph: pruned {pruned} vanished file/directory node(s) at startup")
+    except Exception:
+        logger.exception("graph prune failed; starting with the graph as loaded")
     # The self-heal is an optimization, never a boot dependency: the navigator tolerates
     # books absent from the graph (an authorless one reads Unsure and lands in the Queue). So a failure
     # here (e.g. a graph write conflict from an unusual scan-path config) must degrade to

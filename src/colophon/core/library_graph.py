@@ -119,6 +119,84 @@ def reconcile(
     )
 
 
+def prune_missing(
+    graph: LibraryGraph, *, missing_node_ids: set[str], live_book_ids: set[str],
+    root_present: Callable[[str], bool],
+) -> ReconcileResult:
+    """Drop, in place, file/directory nodes whose paths are gone from disk (`missing_node_ids`, as
+    `check_file_references` reports them), plus every edge touching a dropped node. Cures the
+    skeleton left behind when books are organized out of a scan root and removed from the library.
+
+    - A missing file a live book still `owns` is kept, so missing-file detection keeps working.
+    - A missing directory goes only once nothing surviving hangs under it (deepest first, so an
+      emptied chain collapses) and it holds no live book node.
+    - Nothing on a root with `root_present(root)` False is touched: an unmounted mount makes every
+      path look missing, and that must never read as "the library is gone".
+
+    Returns what was removed, grouped by affected root, for the caller to persist."""
+    presence: dict[str, bool] = {}
+
+    def on_present_root(nid: str) -> bool:
+        root = graph.nodes[nid].root
+        if root not in presence:
+            presence[root] = root_present(root)
+        return presence[root]
+
+    candidates = {nid for nid in missing_node_ids if nid in graph.nodes and on_present_root(nid)}
+    if not candidates:
+        return ReconcileResult()
+
+    def is_live_book(nid: str) -> bool:
+        n = graph.nodes.get(nid)
+        return n is not None and n.semantic == "book" and n.attrs.get("book_id") in live_book_ids
+
+    live_owned = {e.dst for e in graph.edges if e.kind == "owns" and is_live_book(e.src)}
+    removed = {
+        nid for nid in candidates
+        if graph.nodes[nid].physical == "file" and nid not in live_owned
+    }
+
+    children: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "contains" and e.src in candidates:
+            children.setdefault(e.src, []).append(e.dst)
+
+    def blocks(child: str) -> bool:
+        """A child that keeps its missing parent directory alive: any surviving node except an
+        orphan book node (a dead book is reconcile's to prune, not a reason to keep its folder)."""
+        n = graph.nodes.get(child)
+        if n is None or child in removed:
+            return False
+        return n.semantic != "book" or is_live_book(child)
+
+    dirs = [nid for nid in candidates if graph.nodes[nid].physical == "directory"]
+    dirs.sort(key=lambda nid: len(Path(str(graph.nodes[nid].attrs.get("path", ""))).parts),
+              reverse=True)
+    for nid in dirs:
+        if not any(blocks(c) for c in children.get(nid, ())):
+            removed.add(nid)
+
+    if not removed:
+        return ReconcileResult()
+
+    affected = {graph.nodes[nid].root for nid in removed}
+    kept_edges: list[EdgeRecord] = []
+    removed_edges = 0
+    for e in graph.edges:
+        if e.src in removed or e.dst in removed:
+            removed_edges += 1
+            affected.add(e.root)
+        else:
+            kept_edges.append(e)
+    for nid in removed:
+        del graph.nodes[nid]
+    graph.edges = kept_edges
+    graph._generation += 1
+    return ReconcileResult(
+        removed_node_ids=removed, removed_edges=removed_edges, affected_roots=affected
+    )
+
+
 @dataclass
 class GraphValidity:
     """File/directory nodes whose paths no longer exist on disk."""

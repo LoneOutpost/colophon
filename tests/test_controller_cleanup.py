@@ -170,3 +170,61 @@ def test_cleanup_remove_spares_clustered_sibling(tmp_path):
     assert book_node_id(a.id) not in ctx.library_graph.nodes
     assert book_node_id(b.id) in ctx.library_graph.nodes         # sibling node survives
     ctx.close()
+
+
+def _skeleton_ids(graph, under):
+    return {nid for nid, n in graph.nodes.items()
+            if n.physical in ("file", "directory") and str(n.attrs["path"]).startswith(str(under))}
+
+
+def test_remove_from_library_prunes_moved_books_file_and_dir_nodes(tmp_path):
+    # Organize-then-remove: the book's folder has left the scan root on disk. Its file/directory
+    # nodes must go from memory AND the store; the other book's skeleton is untouched.
+    import shutil
+
+    scan = tmp_path / "scan"
+    for title in ["Dune", "Hyperion"]:
+        (scan / "Author" / title).mkdir(parents=True)
+        for i in (1, 2):
+            (scan / "Author" / title / f"0{i}.mp3").write_bytes(b"")
+    ctx = _ctx(tmp_path, [scan])
+    ctrl = AppController(ctx)
+    ctrl.scan([scan])
+    by_folder = {b.source_folder.name: b for b in ctx.books.list_all()}
+    moved, kept = by_folder["Dune"], by_folder["Hyperion"]
+    moved_dir = scan / "Author" / "Dune"
+    kept_before = _skeleton_ids(ctx.library_graph, scan / "Author" / "Hyperion")
+    assert _skeleton_ids(ctx.library_graph, moved_dir)
+    assert kept_before
+
+    shutil.move(moved_dir, tmp_path / "organized-Dune")
+    ctrl.remove_from_library([moved.id])
+
+    assert _skeleton_ids(ctx.library_graph, moved_dir) == set()
+    assert _skeleton_ids(ctx.library_graph, scan / "Author" / "Hyperion") == kept_before
+    ctx.close()
+
+    fresh = _ctx(tmp_path, [scan])
+    assert _skeleton_ids(fresh.library_graph, moved_dir) == set()
+    assert _skeleton_ids(fresh.library_graph, scan / "Author" / "Hyperion") == kept_before
+    assert fresh.books.get(kept.id) is not None
+    fresh.close()
+
+
+def test_prune_vanished_graph_leaves_an_absent_scan_root_alone(tmp_path):
+    # An unmounted scan root makes every path look missing; the prune must remove nothing.
+    import shutil
+
+    scan = tmp_path / "scan"
+    (scan / "Author" / "Dune").mkdir(parents=True)
+    (scan / "Author" / "Dune" / "01.mp3").write_bytes(b"")
+    ctx = _ctx(tmp_path, [scan])
+    ctrl = AppController(ctx)
+    ctrl.scan([scan])
+    before = set(ctx.library_graph.nodes)
+
+    shutil.move(scan, tmp_path / "unmounted")
+
+    assert ctrl.prune_vanished_graph() == 0
+    assert set(ctx.library_graph.nodes) == before
+    ctx.close()
